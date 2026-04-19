@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
+import { query } from "../lib/db";
 
 const router = Router();
 
@@ -52,7 +53,7 @@ router.post("/send", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/verify", (req: Request, res: Response) => {
+router.post("/verify", async (req: Request, res: Response) => {
   const { phone, otp } = req.body as { phone?: string; otp?: string };
 
   if (!phone || !otp) {
@@ -80,7 +81,35 @@ router.post("/verify", (req: Request, res: Response) => {
 
   // OTP verified — remove it
   otpStore.delete(phone);
-  res.json({ success: true, message: "OTP verified" });
+
+  // Upsert user in DB
+  try {
+    const fullPhone = phone.startsWith("+") ? phone : `+91${phone}`;
+    const existing = await query("SELECT id, name, about, avatar_url FROM users WHERE phone = $1", [fullPhone]);
+    let dbUser: { id: number; name?: string; about?: string; avatar_url?: string; is_new?: boolean };
+    if (existing.rows.length > 0) {
+      await query("UPDATE users SET is_online = TRUE, last_seen = NOW() WHERE id = $1", [existing.rows[0].id]);
+      dbUser = existing.rows[0];
+    } else {
+      const result = await query(
+        "INSERT INTO users (phone, is_online, last_seen) VALUES ($1, TRUE, NOW()) RETURNING id",
+        [fullPhone]
+      );
+      dbUser = { ...result.rows[0], is_new: true };
+    }
+    res.json({
+      success: true,
+      message: "OTP verified",
+      dbId: dbUser.id,
+      isNew: !existing.rows.length,
+      name: dbUser.name ?? null,
+      about: dbUser.about ?? null,
+      avatarUrl: dbUser.avatar_url ?? null,
+    });
+  } catch (_err) {
+    // DB unavailable – still let user in
+    res.json({ success: true, message: "OTP verified" });
+  }
 });
 
 export default router;

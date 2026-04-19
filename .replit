@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-24", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -38,3 +38,6 @@ EXPO_PUBLIC_APP_NAME = "Videh"
 FAST2SMS_SENDER_ID = "VIDEHE"
 DLT_TEMPLATE_ID = "1007181628875366114"
 FAST2SMS_MESSAGE_ID = "209634"
+
+[nix]
+channel = "stable-25_05"

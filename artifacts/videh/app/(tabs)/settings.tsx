@@ -29,10 +29,20 @@ export default function SettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, setUser, logout } = useApp();
+  const { user, setUser, logout, updateAvatar } = useApp();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const initials = (user?.name ?? "?").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
+
+  const handlePickedAsset = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (!asset || !user) return;
+    if (asset.base64) {
+      await updateAvatar(asset.base64, "image/jpeg");
+    } else {
+      await setUser({ ...user, avatar: asset.uri });
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
 
   const changeAvatar = () => {
     Alert.alert("Profile Photo", "Choose how to update your profile photo", [
@@ -40,22 +50,16 @@ export default function SettingsScreen() {
         text: "Take Photo", onPress: async () => {
           const { status } = await ImagePicker.requestCameraPermissionsAsync();
           if (status !== "granted") { Alert.alert("Permission Denied", "Please allow camera access."); return; }
-          const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.8 });
-          if (!result.canceled && result.assets[0] && user) {
-            await setUser({ ...user, avatar: result.assets[0].uri });
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          }
+          const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.6, base64: true });
+          if (!result.canceled && result.assets[0]) handlePickedAsset(result.assets[0]);
         }
       },
       {
         text: "Choose from Library", onPress: async () => {
           const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
           if (status !== "granted") { Alert.alert("Permission Denied", "Please allow photo library access."); return; }
-          const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: 0.8 });
-          if (!result.canceled && result.assets[0] && user) {
-            await setUser({ ...user, avatar: result.assets[0].uri });
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          }
+          const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: 0.6, base64: true });
+          if (!result.canceled && result.assets[0]) handlePickedAsset(result.assets[0]);
         }
       },
       { text: "Cancel", style: "cancel" },

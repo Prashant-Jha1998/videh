@@ -68,17 +68,25 @@ export default function OtpScreen() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone, otp: enteredOtp }),
       });
-      const data = await res.json() as { success: boolean; message?: string };
+      const data = await res.json() as {
+        success: boolean; message?: string;
+        dbId?: number; isNew?: boolean;
+        name?: string | null; about?: string | null; avatarUrl?: string | null;
+      };
 
       if (data.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        const isReturning = !data.isNew && data.name;
         await setUser({
           id: Date.now().toString(),
-          name: "",
+          dbId: data.dbId,
+          name: data.name ?? "",
           phone: phone ?? "",
-          about: "Hey there! I am using Videh.",
+          about: data.about ?? "Hey there! I am using Videh.",
+          avatar: data.avatarUrl ?? undefined,
         });
-        router.replace("/auth/profile");
+        // Returning user with a name → go straight to main app
+        router.replace(isReturning ? "/(tabs)/chats" : "/auth/profile");
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         setError(data.message ?? "Incorrect OTP. Please try again.");

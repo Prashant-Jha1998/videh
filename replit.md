@@ -52,5 +52,17 @@ Phone number → OTP verification (Fast2SMS) → Profile setup → Main app
 - `DLT_TEMPLATE_ID` = 1007181628875366114
 - `FAST2SMS_MESSAGE_ID` = 209634
 
+### Database Integration
+- OTP `/verify` endpoint now **upserts user in PostgreSQL** and returns `dbId`, `name`, `about`, `avatarUrl`
+- Returning users (name already set) skip the profile screen and go straight to main app
+- Profile name/about saved to DB via `PUT /api/users/:id` on every profile save
+- Avatar uploaded as base64 and stored as data URL in `users.avatar_url` column
+- `AppContext` syncs messages, statuses, chats to the DB via API; falls back to local state if API is unreachable
+
+### Image Upload Flow
+- Both profile setup screen and settings screen use `base64: true` in `ImagePicker` options
+- `updateAvatar(base64, mimeType)` in AppContext calls `POST /api/users/:id/avatar`
+- DB stores the full `data:image/jpeg;base64,...` data URL in `users.avatar_url`
+
 ### OTP Demo
 Use "123456" as the OTP to bypass verification in demo mode.

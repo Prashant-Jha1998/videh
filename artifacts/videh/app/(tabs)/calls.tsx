@@ -11,25 +11,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-
-interface CallLog {
-  id: string;
-  name: string;
-  type: "audio" | "video";
-  direction: "incoming" | "outgoing" | "missed";
-  timestamp: number;
-  duration?: string;
-}
-
-const SAMPLE_CALLS: CallLog[] = [
-  { id: "1", name: "Priya Sharma", type: "video", direction: "incoming", timestamp: Date.now() - 30 * 60000, duration: "5:23" },
-  { id: "2", name: "Rahul Verma", type: "audio", direction: "missed", timestamp: Date.now() - 2 * 3600000 },
-  { id: "3", name: "Anita Singh", type: "audio", direction: "outgoing", timestamp: Date.now() - 5 * 3600000, duration: "12:07" },
-  { id: "4", name: "Family Group", type: "video", direction: "incoming", timestamp: Date.now() - 24 * 3600000, duration: "1:04:32" },
-  { id: "5", name: "Deepak Kumar", type: "audio", direction: "missed", timestamp: Date.now() - 2 * 24 * 3600000 },
-  { id: "6", name: "Priya Sharma", type: "audio", direction: "outgoing", timestamp: Date.now() - 3 * 24 * 3600000, duration: "8:15" },
-  { id: "7", name: "Vikas Gupta", type: "video", direction: "incoming", timestamp: Date.now() - 5 * 24 * 3600000, duration: "2:40" },
-];
+import { useApp, type CallLog } from "@/context/AppContext";
 
 function formatCallTime(ts: number): string {
   const now = Date.now();
@@ -47,10 +29,11 @@ export default function CallsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { callLogs } = useApp();
   const [tab, setTab] = useState<"all" | "missed">("all");
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const filtered = tab === "missed" ? SAMPLE_CALLS.filter((c) => c.direction === "missed") : SAMPLE_CALLS;
+  const filtered = tab === "missed" ? callLogs.filter((c) => c.status === "missed") : callLogs;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -84,7 +67,8 @@ export default function CallsScreen() {
           const initials = item.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
           const hue = item.name.charCodeAt(0) * 37 % 360;
           const avatarBg = `hsl(${hue},50%,45%)`;
-          const isMissed = item.direction === "missed";
+          const isMissed = item.status === "missed";
+          const durationStr = item.duration ? ` · ${Math.floor(item.duration / 60)}:${String(item.duration % 60).padStart(2, "0")}` : "";
           return (
             <View style={[styles.row, { borderBottomColor: colors.border }]}>
               <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
@@ -94,13 +78,13 @@ export default function CallsScreen() {
                 <Text style={[styles.name, { color: isMissed ? colors.destructive : colors.foreground }]}>{item.name}</Text>
                 <View style={styles.meta}>
                   <Ionicons
-                    name={item.direction === "incoming" ? "call-outline" : item.direction === "outgoing" ? "arrow-up-outline" : "arrow-down-outline"}
+                    name={item.direction === "incoming" ? "arrow-down-outline" : "arrow-up-outline"}
                     size={14}
                     color={isMissed ? colors.destructive : colors.primary}
                   />
                   <Ionicons name={item.type === "video" ? "videocam-outline" : "call-outline"} size={14} color={colors.mutedForeground} />
                   <Text style={[styles.metaText, { color: colors.mutedForeground }]}>
-                    {formatCallTime(item.timestamp)}{item.duration ? ` · ${item.duration}` : ""}
+                    {formatCallTime(item.timestamp)}{durationStr}
                   </Text>
                 </View>
               </View>
