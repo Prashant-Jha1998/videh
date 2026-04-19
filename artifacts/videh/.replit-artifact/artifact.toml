@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "Videh"
+version = "1.0.0"
+id = "artifacts/videh"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 19539
+
+[services.development]
+run = "pnpm --filter @workspace/videh run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/videh", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/videh", "run", "serve" ]
+
+[services.env]
+PORT = "19539"
+BASE_PATH = "/"

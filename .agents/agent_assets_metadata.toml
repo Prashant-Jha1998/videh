@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "92aiitEqMQ1pF43wNG9W0"
+uri = "file://artifacts/videh/assets/images/icon.png"
+type = "image"
+title = "generated_image"
