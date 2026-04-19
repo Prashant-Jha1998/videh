@@ -175,7 +175,7 @@ export default function VidehWeb() {
       <div style={{ minHeight: "100vh", backgroundColor: "#f0f2f5", display: "flex", flexDirection: "column" }}>
         {/* Top bar */}
         <div style={{ backgroundColor: "#00a884", padding: "12px 24px", display: "flex", alignItems: "center", gap: 10 }}>
-          <img src={`${import.meta.env.BASE_URL}videh-logo.png`} alt="Videh" style={{ width: 32, height: 32, objectFit: "contain" }} />
+          <img src={`${import.meta.env.BASE_URL}videh-logo.png`} alt="Videh" style={{ width: 32, height: 32, objectFit: "contain", filter: "brightness(0) invert(1)" }} />
           <span style={{ color: "white", fontWeight: 700, fontSize: 18 }}>Videh Web</span>
         </div>
 
