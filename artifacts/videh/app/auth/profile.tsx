@@ -1,9 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -26,18 +28,70 @@ export default function ProfileSetupScreen() {
 
   const [name, setName] = useState(user?.name ?? "");
   const [about, setAbout] = useState(user?.about ?? "Hey there! I am using Videh.");
+  const [avatar, setAvatar] = useState<string | undefined>(user?.avatar);
   const [loading, setLoading] = useState(false);
 
   const isValid = name.trim().length >= 2;
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Please allow access to your photo library to set a profile photo.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setAvatar(result.assets[0].uri);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  };
+
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Please allow camera access to take a profile photo.");
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setAvatar(result.assets[0].uri);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  };
+
+  const showImageOptions = () => {
+    Alert.alert("Profile Photo", "Choose how to set your profile photo", [
+      { text: "Take Photo", onPress: takePhoto },
+      { text: "Choose from Library", onPress: pickImage },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
 
   const save = async () => {
     if (!isValid || !user) return;
     setLoading(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await setUser({ ...user, name: name.trim(), about: about.trim() });
+    await setUser({ ...user, name: name.trim(), about: about.trim(), avatar });
     setLoading(false);
     router.replace("/(tabs)/chats");
   };
+
+  const initials = name.trim()
+    ? name.trim().split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
+    : "?";
 
   return (
     <KeyboardAvoidingView
@@ -56,18 +110,33 @@ export default function ProfileSetupScreen() {
           Please provide your name and an optional profile photo
         </Text>
 
-        <TouchableOpacity style={[styles.avatar, { backgroundColor: colors.muted }]} activeOpacity={0.8}>
-          <Ionicons name="person" size={48} color={colors.mutedForeground} />
+        {/* Avatar with name overlay — like WhatsApp */}
+        <TouchableOpacity style={styles.avatarWrapper} onPress={showImageOptions} activeOpacity={0.85}>
+          {avatar ? (
+            <Image source={{ uri: avatar }} style={styles.avatarImage} />
+          ) : (
+            <View style={[styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
+              <Text style={styles.avatarInitials}>{initials}</Text>
+            </View>
+          )}
+          {/* Name overlay at bottom of avatar */}
+          {name.trim().length > 0 && (
+            <View style={styles.nameOverlay}>
+              <Text style={styles.nameOverlayText} numberOfLines={1}>{name.trim()}</Text>
+            </View>
+          )}
+          {/* Camera icon */}
           <View style={[styles.cameraBtn, { backgroundColor: colors.primary }]}>
-            <Ionicons name="camera" size={16} color="#fff" />
+            <Ionicons name="camera" size={18} color="#fff" />
           </View>
         </TouchableOpacity>
 
-        <View style={{ width: "100%", gap: 20 }}>
-          <View>
-            <Text style={[styles.label, { color: colors.primary }]}>Your Name</Text>
+        <View style={{ width: "100%", gap: 0, marginTop: 8 }}>
+          {/* Name field */}
+          <View style={[styles.inputGroup, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+            <Text style={[styles.fieldLabel, { color: colors.primary }]}>Your name</Text>
             <TextInput
-              style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
+              style={[styles.fieldInput, { color: colors.foreground }]}
               placeholder="Enter your name"
               placeholderTextColor={colors.mutedForeground}
               value={name}
@@ -77,11 +146,12 @@ export default function ProfileSetupScreen() {
             />
           </View>
 
-          <View>
-            <Text style={[styles.label, { color: colors.primary }]}>About</Text>
+          {/* About field */}
+          <View style={[styles.inputGroup, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+            <Text style={[styles.fieldLabel, { color: colors.primary }]}>About</Text>
             <TextInput
-              style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
-              placeholder="About (optional)"
+              style={[styles.fieldInput, { color: colors.foreground }]}
+              placeholder="Hey there! I am using Videh."
               placeholderTextColor={colors.mutedForeground}
               value={about}
               onChangeText={setAbout}
@@ -108,10 +178,48 @@ const styles = StyleSheet.create({
   scroll: { alignItems: "center", paddingHorizontal: 24 },
   title: { fontSize: 26, fontFamily: "Inter_700Bold", marginBottom: 8 },
   sub: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", marginBottom: 32 },
-  avatar: { width: 110, height: 110, borderRadius: 55, alignItems: "center", justifyContent: "center", marginBottom: 32 },
-  cameraBtn: { position: "absolute", bottom: 4, right: 4, width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
-  label: { fontSize: 12, fontFamily: "Inter_600SemiBold", marginBottom: 6 },
-  input: { width: "100%", borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, fontFamily: "Inter_400Regular" },
+  avatarWrapper: {
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    marginBottom: 28,
+    overflow: "hidden",
+    position: "relative",
+  },
+  avatarImage: { width: 130, height: 130, borderRadius: 65 },
+  avatarPlaceholder: { width: 130, height: 130, borderRadius: 65, alignItems: "center", justifyContent: "center" },
+  avatarInitials: { color: "#fff", fontSize: 44, fontFamily: "Inter_700Bold" },
+  nameOverlay: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingVertical: 6,
+    alignItems: "center",
+  },
+  nameOverlayText: { color: "#fff", fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  cameraBtn: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2.5,
+    borderColor: "#fff",
+  },
+  inputGroup: {
+    width: "100%",
+    borderBottomWidth: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    marginBottom: 4,
+  },
+  fieldLabel: { fontSize: 12, fontFamily: "Inter_600SemiBold", marginBottom: 4 },
+  fieldInput: { fontSize: 16, fontFamily: "Inter_400Regular", paddingVertical: 2 },
   btn: { marginTop: 40, width: "100%", paddingVertical: 16, borderRadius: 50, alignItems: "center" },
   btnText: { color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold" },
 });

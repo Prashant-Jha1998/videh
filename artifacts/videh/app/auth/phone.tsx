@@ -19,12 +19,6 @@ import { useColors } from "@/hooks/useColors";
 
 const COUNTRY_CODE = "+91";
 
-function generateOtp(): string {
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  (global as any).__videhOtp = otp;
-  return otp;
-}
-
 export default function PhoneScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -39,8 +33,6 @@ export default function PhoneScreen() {
     setLoading(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    const otp = generateOtp();
-
     try {
       const domain = process.env.EXPO_PUBLIC_DOMAIN;
       const baseUrl = domain ? `https://${domain}` : "";
@@ -50,15 +42,18 @@ export default function PhoneScreen() {
         body: JSON.stringify({ phone }),
       });
       const data = await res.json() as { success: boolean; message?: string };
+
       if (data.success) {
-        Alert.alert("OTP Sent", `A 6-digit OTP has been sent to +91 ${phone}`);
+        setLoading(false);
+        router.push({ pathname: "/auth/otp", params: { phone } });
+      } else {
+        setLoading(false);
+        Alert.alert("Error", data.message ?? "Failed to send OTP. Please try again.");
       }
     } catch {
-      // Proceed anyway — OTP stored locally for demo
+      setLoading(false);
+      Alert.alert("Error", "Could not connect to server. Please check your internet connection.");
     }
-
-    setLoading(false);
-    router.push({ pathname: "/auth/otp", params: { phone, otp } });
   };
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 20);

@@ -20,7 +20,7 @@ export default function OtpScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { phone, otp: expectedOtp } = useLocalSearchParams<{ phone: string; otp: string }>();
+  const { phone } = useLocalSearchParams<{ phone: string }>();
   const { setUser } = useApp();
 
   const [digits, setDigits] = useState<string[]>(["", "", "", "", "", ""]);
@@ -60,33 +60,55 @@ export default function OtpScreen() {
     if (enteredOtp.length !== 6) return;
     setLoading(true);
 
-    const storedOtp = (global as any).__videhOtp ?? expectedOtp;
-
-    await new Promise((r) => setTimeout(r, 800));
-
-    if (enteredOtp === storedOtp || enteredOtp === "123456") {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      await setUser({
-        id: Date.now().toString(),
-        name: "",
-        phone: phone ?? "",
-        about: "Hey there! I am using Videh.",
+    try {
+      const domain = process.env.EXPO_PUBLIC_DOMAIN;
+      const baseUrl = domain ? `https://${domain}` : "";
+      const res = await fetch(`${baseUrl}/api/otp/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, otp: enteredOtp }),
       });
-      router.replace("/auth/profile");
-    } else {
+      const data = await res.json() as { success: boolean; message?: string };
+
+      if (data.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        await setUser({
+          id: Date.now().toString(),
+          name: "",
+          phone: phone ?? "",
+          about: "Hey there! I am using Videh.",
+        });
+        router.replace("/auth/profile");
+      } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setError(data.message ?? "Incorrect OTP. Please try again.");
+        setDigits(["", "", "", "", "", ""]);
+        inputs.current[0]?.focus();
+      }
+    } catch {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError("Incorrect OTP. Please try again.");
+      setError("Could not verify OTP. Check your connection.");
       setDigits(["", "", "", "", "", ""]);
       inputs.current[0]?.focus();
     }
-    setLoading(false);
-  }, [digits, phone, expectedOtp]);
 
-  const resend = () => {
+    setLoading(false);
+  }, [digits, phone]);
+
+  const resend = async () => {
     setResendTimer(30);
     setDigits(["", "", "", "", "", ""]);
     setError("");
     inputs.current[0]?.focus();
+    try {
+      const domain = process.env.EXPO_PUBLIC_DOMAIN;
+      const baseUrl = domain ? `https://${domain}` : "";
+      await fetch(`${baseUrl}/api/otp/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+    } catch {}
     Alert.alert("OTP Resent", `A new OTP has been sent to +91 ${phone}`);
   };
 
@@ -151,10 +173,6 @@ export default function OtpScreen() {
             {resendTimer > 0 ? `Resend OTP in ${resendTimer}s` : "Resend OTP"}
           </Text>
         </TouchableOpacity>
-
-        <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-          Demo: Use OTP "123456" to verify
-        </Text>
       </View>
     </View>
   );
@@ -170,9 +188,8 @@ const styles = StyleSheet.create({
   phone: { fontFamily: "Inter_600SemiBold" },
   otpRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
   otpBox: { width: 48, height: 56, borderRadius: 12, fontSize: 22, fontFamily: "Inter_700Bold", textAlign: "center" },
-  error: { fontSize: 13, fontFamily: "Inter_400Regular", marginBottom: 16 },
+  error: { fontSize: 13, fontFamily: "Inter_400Regular", marginBottom: 16, textAlign: "center" },
   verifyBtn: { width: "100%", paddingVertical: 16, borderRadius: 50, alignItems: "center", marginTop: 8 },
   verifyText: { color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold" },
   resend: { fontSize: 14, fontFamily: "Inter_500Medium" },
-  hint: { fontSize: 11, fontFamily: "Inter_400Regular", marginTop: 16 },
 });
