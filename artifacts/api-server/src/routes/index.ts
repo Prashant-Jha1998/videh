@@ -6,6 +6,7 @@ import chatsRouter from "./chats";
 import statusesRouter from "./statuses";
 import callsRouter from "./calls";
 import agoraRouter from "./agora";
+import webSessionRouter from "./web-session";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use("/chats", chatsRouter);
 router.use("/statuses", statusesRouter);
 router.use("/calls", callsRouter);
 router.use("/agora", agoraRouter);
+router.use("/web-session", webSessionRouter);
 
 export default router;

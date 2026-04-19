@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/videh-web/"
+title = "Videh Web"
+version = "1.0.0"
+id = "artifacts/videh-web"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/videh-web/" ]
+localPort = 19478
+
+[services.development]
+run = "pnpm --filter @workspace/videh-web run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/videh-web", "run", "build" ]
+publicDir = "artifacts/videh-web/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19478"
+BASE_PATH = "/videh-web/"

@@ -99,3 +99,34 @@ Phone number → OTP verification (Fast2SMS) → Profile setup → Main app
 
 ### OTP Demo
 Use "123456" as the OTP to bypass verification in demo mode.
+
+## Videh Web (WhatsApp Web equivalent)
+
+A browser-based companion app at `/videh-web/` that mirrors the mobile Videh experience.
+
+### Architecture
+- **Artifact**: `artifacts/videh-web` — React + Vite web app
+- **API Routes**: `artifacts/api-server/src/routes/web-session.ts` registered at `/api/web-session`
+- **DB table**: `web_sessions` — stores token (64-char hex), status (pending/linked/expired), user_id, created_at, expires_at
+
+### QR Linking Flow
+1. Web app loads → POSTs `/api/web-session` → gets a 64-char random token
+2. Token encoded as `videh://scan?token=TOKEN&host=ORIGIN` into QR code (with Videh logo overlay)
+3. Web app polls `/api/web-session/:token/status` every 2 seconds
+4. Mobile user opens Chats → ⋮ menu → "Linked devices" → scans QR
+5. Mobile calls `POST /api/web-session/:token/link` with userId
+6. Web detects `status: "linked"` → loads full chat interface
+7. Sessions expire after 5 minutes if not linked
+
+### Web UI
+- Landing page: WhatsApp Web-style layout with numbered steps + live QR panel
+- Chat interface: sidebar with chat list + search + avatars + unread badges
+- Message view: WhatsApp bubble design, auto-scrolls, auto-refreshes every 5s
+- Send messages via Enter key or send button
+- Videh green theme (#00a884) throughout
+
+### Mobile QR Scanner
+- Screen: `artifacts/videh/app/linked-devices.tsx`
+- Uses `expo-camera` with barcode scanning (QR type)
+- "Linked devices" menu item in Chats screen navigates to this screen
+- Parses `videh://scan?token=...` QR data, posts to API, shows success animation
