@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { VideoView, useVideoPlayer } from "expo-video";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -17,6 +18,21 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
+function VideoPreview({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.play();
+  });
+  return (
+    <VideoView
+      player={player}
+      style={{ width: "100%", height: "100%" }}
+      contentFit="contain"
+      nativeControls={false}
+    />
+  );
+}
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
 
@@ -44,7 +60,6 @@ export default function StatusCreateScreen() {
   const [textColor, setTextColor] = useState(TEXT_COLORS[0]);
   const [fontIdx, setFontIdx] = useState(0);
   const [mediaUri, setMediaUri] = useState<string | null>(null);
-  const [mediaBase64, setMediaBase64] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<"image" | "video">("image");
   const [caption, setCaption] = useState("");
   const [posting, setPosting] = useState(false);
@@ -68,13 +83,12 @@ export default function StatusCreateScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images", "videos"],
       allowsEditing: false,
-      quality: 0.7,
-      base64: true,
+      quality: 0.8,
+      base64: false,
     });
     if (result.canceled || !result.assets[0]) { setMode("text"); return; }
     const asset = result.assets[0];
     setMediaUri(asset.uri);
-    if (asset.base64) setMediaBase64(asset.base64);
     setMediaType(asset.type === "video" ? "video" : "image");
   };
 
@@ -88,10 +102,8 @@ export default function StatusCreateScreen() {
       if (mode === "text") {
         await addStatus(text.trim(), "text", bgColor);
       } else if (mediaUri) {
-        const mimeType = mediaType === "video" ? "video/mp4" : "image/jpeg";
         const content = caption.trim() || (mediaType === "video" ? "📹 Video" : "📷 Photo");
-        const mediaUrl = mediaBase64 ? `data:${mimeType};base64,${mediaBase64}` : mediaUri;
-        await addStatus(content, "image", bgColor, mediaUrl);
+        await addStatus(content, mediaType, bgColor, mediaUri);
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
@@ -107,13 +119,12 @@ export default function StatusCreateScreen() {
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ["images", "videos"],
       allowsEditing: false,
-      quality: 0.7,
-      base64: true,
+      quality: 0.8,
+      base64: false,
     });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
       setMediaUri(asset.uri);
-      if (asset.base64) setMediaBase64(asset.base64);
       setMediaType(asset.type === "video" ? "video" : "image");
       setMode("media");
     }
@@ -139,7 +150,13 @@ export default function StatusCreateScreen() {
 
         {/* Media preview */}
         {mediaUri ? (
-          <Image source={{ uri: mediaUri }} style={styles.mediaPreview} resizeMode="contain" />
+          <View style={styles.mediaPreview}>
+            {mediaType === "video" ? (
+              <VideoPreview uri={mediaUri} />
+            ) : (
+              <Image source={{ uri: mediaUri }} style={{ width: "100%", height: "100%" }} resizeMode="contain" />
+            )}
+          </View>
         ) : (
           <View style={[styles.mediaPreview, { alignItems: "center", justifyContent: "center" }]}>
             <TouchableOpacity onPress={pickMedia} style={styles.pickMediaBtn}>

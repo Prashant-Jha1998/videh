@@ -179,25 +179,41 @@ export default function LinkedDevicesScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
-        {/* Illustration + description */}
-        <View style={[styles.topCard, { backgroundColor: colors.card }]}>
+        {/* WhatsApp-style guide */}
+        <View style={styles.guideWrap}>
+          {/* Laptop illustration */}
           <View style={[styles.illustrationCircle, { backgroundColor: colors.primary + "18" }]}>
             <Ionicons name="laptop-outline" size={52} color={colors.primary} />
           </View>
-          <Text style={[styles.topCardText, { color: colors.textSecondary }]}>
-            You can link other devices to this account.{" "}
-            <Text style={{ color: colors.primary }}>Learn more</Text>
+
+          <Text style={[styles.guideTitle, { color: colors.text }]}>Use Videh on your computer</Text>
+          <Text style={[styles.guideSubtitle, { color: colors.textSecondary }]}>
+            Open <Text style={{ color: colors.primary }}>videh.app</Text> in your browser, then tap the button below to scan the QR code shown on screen.
           </Text>
+
+          {/* 3 steps */}
+          {[
+            { icon: "globe-outline" as const, text: "Go to videh.app in any browser" },
+            { icon: "qr-code-outline" as const, text: "A QR code will appear on screen" },
+            { icon: "phone-portrait-outline" as const, text: "Tap the button below to scan it" },
+          ].map((step, i) => (
+            <View key={i} style={styles.stepRow}>
+              <View style={[styles.stepIconBg, { backgroundColor: colors.primary + "15" }]}>
+                <Ionicons name={step.icon} size={20} color={colors.primary} />
+              </View>
+              <Text style={[styles.stepText, { color: colors.textSecondary }]}>{step.text}</Text>
+            </View>
+          ))}
         </View>
 
-        {/* Link a device button */}
+        {/* Scan QR code button */}
         <TouchableOpacity
           style={[styles.linkBtn, { backgroundColor: colors.primary }]}
           onPress={openScan}
           activeOpacity={0.85}
         >
           <Ionicons name="qr-code-outline" size={20} color="#fff" />
-          <Text style={styles.linkBtnText}>Link a device</Text>
+          <Text style={styles.linkBtnText}>Scan QR code</Text>
         </TouchableOpacity>
 
         {/* Device list */}
@@ -259,10 +275,14 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", paddingBottom: 14, paddingHorizontal: 16, gap: 12 },
   backBtn: { padding: 4 },
   headerTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
-  topCard: { margin: 16, borderRadius: 14, padding: 20, alignItems: "center", gap: 14 },
+  guideWrap: { margin: 24, marginBottom: 12, alignItems: "center", gap: 16 },
   illustrationCircle: { width: 100, height: 100, borderRadius: 50, alignItems: "center", justifyContent: "center" },
-  topCardText: { fontSize: 14, textAlign: "center", lineHeight: 20 },
-  linkBtn: { marginHorizontal: 16, marginBottom: 8, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 16, borderRadius: 28 },
+  guideTitle: { fontSize: 20, fontWeight: "700", textAlign: "center" },
+  guideSubtitle: { fontSize: 14, textAlign: "center", lineHeight: 20, paddingHorizontal: 8 },
+  stepRow: { flexDirection: "row", alignItems: "center", gap: 14, width: "100%", paddingHorizontal: 4 },
+  stepIconBg: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  stepText: { fontSize: 14, flex: 1, lineHeight: 19 },
+  linkBtn: { marginHorizontal: 24, marginBottom: 8, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 16, borderRadius: 28 },
   linkBtnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
   loadingRow: { padding: 24, alignItems: "center" },
   sectionLabel: { fontSize: 12, fontWeight: "700", letterSpacing: 0.5, marginTop: 20, marginBottom: 4, marginHorizontal: 16 },

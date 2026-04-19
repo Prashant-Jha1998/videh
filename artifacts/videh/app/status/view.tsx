@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { VideoView, useVideoPlayer } from "expo-video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -19,6 +20,25 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
 
 const { width: W, height: H } = Dimensions.get("window");
+
+function VideoStatusPlayer({ uri, paused }: { uri: string; paused: boolean }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = false;
+    if (!paused) p.play();
+  });
+  useEffect(() => {
+    if (paused) player.pause();
+    else player.play();
+  }, [paused]);
+  return (
+    <VideoView
+      player={player}
+      style={{ width: W, height: H * 0.75 }}
+      contentFit="contain"
+      nativeControls={false}
+    />
+  );
+}
 
 const BASE_URL = (() => {
   const d = process.env.EXPO_PUBLIC_DOMAIN;
@@ -212,7 +232,11 @@ export default function ViewStatusScreen() {
         >
           {isMedia && currentStatus.mediaUrl ? (
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-              <Image source={{ uri: currentStatus.mediaUrl }} style={{ width: W, height: H * 0.75 }} contentFit="contain" />
+              {currentStatus.type === "video" ? (
+                <VideoStatusPlayer uri={currentStatus.mediaUrl} paused={paused} />
+              ) : (
+                <Image source={{ uri: currentStatus.mediaUrl }} style={{ width: W, height: H * 0.75 }} contentFit="contain" />
+              )}
               {currentStatus.content && currentStatus.content !== "📷 Photo" && currentStatus.content !== "📹 Video" && (
                 <View style={styles.captionBar}>
                   <Text style={styles.captionText}>{currentStatus.content}</Text>
