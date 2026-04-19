@@ -81,6 +81,36 @@ router.post("/:id/offline", async (req: Request, res: Response) => {
   }
 });
 
+// Bulk check which phone numbers are registered on Videh
+router.post("/check-phones", async (req: Request, res: Response) => {
+  const { phones } = req.body as { phones?: string[] };
+  if (!phones || !Array.isArray(phones) || phones.length === 0) {
+    res.status(400).json({ success: false, message: "phones array required" });
+    return;
+  }
+  try {
+    const placeholders = phones.map((_: string, i: number) => `$${i + 1}`).join(", ");
+    const result = await query(
+      `SELECT id, phone, name, about, avatar_url FROM users WHERE phone = ANY(ARRAY[${placeholders}]) AND name IS NOT NULL AND name != ''`,
+      phones
+    );
+    const registered: Record<string, any> = {};
+    for (const row of result.rows) {
+      registered[row.phone] = {
+        id: row.id,
+        phone: row.phone,
+        name: row.name,
+        about: row.about,
+        avatarUrl: row.avatar_url,
+      };
+    }
+    res.json({ success: true, registered });
+  } catch (err) {
+    req.log.error({ err }, "check-phones error");
+    res.status(500).json({ success: false });
+  }
+});
+
 // Search users by phone
 router.get("/search/:phone", async (req: Request, res: Response) => {
   try {

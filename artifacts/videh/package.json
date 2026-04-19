@@ -57,6 +57,7 @@
   },
   "dependencies": {
     "agora-rtc-sdk-ng": "^4.24.3",
+    "expo-contacts": "^15.0.11",
     "react-native-agora": "^4.6.2"
   }
 }
