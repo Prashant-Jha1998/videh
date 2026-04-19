@@ -59,7 +59,8 @@ export interface Status {
   userName: string;
   userAvatar?: string;
   content: string;
-  type: "text" | "image";
+  type: "text" | "image" | "video";
+  mediaUrl?: string;
   timestamp: number;
   viewed: boolean;
   backgroundColor?: string;
@@ -98,7 +99,7 @@ interface AppContextType {
   sendMessage: (chatId: string, text: string, replyToId?: string) => void;
   createGroup: (name: string, memberIds: string[]) => void;
   markAsRead: (chatId: string) => void;
-  addStatus: (content: string, type: "text" | "image", bg?: string) => void;
+  addStatus: (content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string) => Promise<void> | undefined;
   deleteMessage: (chatId: string, messageId: string) => void;
   pinChat: (chatId: string) => void;
   muteChat: (chatId: string) => void;
@@ -362,12 +363,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }).catch(() => {});
   }, []);
 
-  const addStatus = useCallback((content: string, type: "text" | "image", bg?: string) => {
+  const addStatus = useCallback((content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string) => {
     const u = userRef.current;
     if (!u) return;
     const newStatus: Status = {
       id: Date.now().toString(), userId: "me", userName: u.name,
-      content, type, timestamp: Date.now(), viewed: false,
+      userAvatar: u.avatar,
+      content, type, mediaUrl, timestamp: Date.now(), viewed: false,
       backgroundColor: bg ?? "#00A884",
     };
     setStatuses((prev) => [newStatus, ...prev]);
@@ -375,9 +377,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (u.dbId) {
       api("/statuses", {
         method: "POST",
-        body: JSON.stringify({ userId: u.dbId, content, type, backgroundColor: bg ?? "#00A884" }),
+        body: JSON.stringify({ userId: u.dbId, content, type, backgroundColor: bg ?? "#00A884", mediaUrl: mediaUrl ?? null }),
       }).catch(() => {});
     }
+    return Promise.resolve();
   }, []);
 
   const deleteMessage = useCallback((chatId: string, messageId: string) => {

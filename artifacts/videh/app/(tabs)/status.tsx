@@ -1,9 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-  Alert,
   FlatList,
   Platform,
   StyleSheet,
@@ -20,35 +20,19 @@ export default function StatusScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { statuses, user, addStatus } = useApp();
+  const { statuses, user } = useApp();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+  const [fabOpen, setFabOpen] = useState(false);
 
-  const myStatus = statuses.find((s) => s.userId === "me");
+  const myStatuses = statuses.filter((s) => s.userId === "me");
   const recentStatuses = statuses.filter((s) => s.userId !== "me" && !s.viewed);
   const viewedStatuses = statuses.filter((s) => s.userId !== "me" && s.viewed);
 
-  const promptAddStatus = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.prompt(
-      "New Status",
-      "What's on your mind?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Post",
-          onPress: (text) => {
-            if (text?.trim()) addStatus(text.trim(), "text");
-          },
-        },
-      ],
-      "plain-text",
-      "",
-      "default"
-    );
-  };
+  const initials = (user?.name ?? "?").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
         <Text style={styles.headerTitle}>Status</Text>
         <View style={styles.headerRight}>
@@ -69,55 +53,76 @@ export default function StatusScreen() {
           <View>
             {/* My Status */}
             <TouchableOpacity
-              style={[styles.myStatus, { borderBottomColor: colors.border }]}
-              onPress={promptAddStatus}
+              style={[styles.myStatus, { borderBottomColor: colors.border, backgroundColor: colors.card }]}
+              onPress={() => {
+                if (myStatuses.length > 0) {
+                  router.push({ pathname: "/status/view", params: { id: myStatuses[0].id } });
+                } else {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  router.push("/status/create");
+                }
+              }}
               activeOpacity={0.7}
             >
               <View style={styles.myStatusLeft}>
-                <View style={[styles.avatarWrap, myStatus ? styles.hasStatus : {}]}>
-                  <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-                    <Text style={styles.avatarText}>{user?.name?.[0]?.toUpperCase() ?? "?"}</Text>
-                  </View>
-                  {!myStatus && (
-                    <View style={[styles.addBtn, { backgroundColor: colors.primary }]}>
-                      <Ionicons name="add" size={14} color="#fff" />
+                {/* Avatar with ring if has status */}
+                <View style={[styles.avatarRingWrap, myStatuses.length > 0 && { borderColor: colors.primary, borderWidth: 2.5 }]}>
+                  {user?.avatar ? (
+                    <Image source={{ uri: user.avatar }} style={styles.myAvatar} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.myAvatarFallback, { backgroundColor: colors.primary }]}>
+                      <Text style={styles.myAvatarText}>{initials}</Text>
+                    </View>
+                  )}
+                  {myStatuses.length === 0 && (
+                    <View style={[styles.addBadge, { backgroundColor: colors.primary }]}>
+                      <Ionicons name="add" size={13} color="#fff" />
                     </View>
                   )}
                 </View>
+
                 <View>
                   <Text style={[styles.myName, { color: colors.foreground }]}>My status</Text>
                   <Text style={[styles.myHint, { color: colors.mutedForeground }]}>
-                    {myStatus ? formatTime(myStatus.timestamp) : "Tap to add status update"}
+                    {myStatuses.length > 0
+                      ? `${myStatuses.length} update${myStatuses.length > 1 ? "s" : ""} · ${formatTime(myStatuses[0].timestamp)}`
+                      : "Tap to add status update"}
                   </Text>
                 </View>
               </View>
-              <TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push("/status/create?mode=camera"); }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
                 <Ionicons name="camera-outline" size={22} color={colors.mutedForeground} />
               </TouchableOpacity>
             </TouchableOpacity>
 
+            {/* Recent updates */}
             {recentStatuses.length > 0 && (
-              <Text style={[styles.sectionLabel, { color: colors.mutedForeground, borderBottomColor: colors.border }]}>
-                RECENT UPDATES
-              </Text>
+              <>
+                <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>RECENT UPDATES</Text>
+                {recentStatuses.map((s) => (
+                  <StatusRow key={s.id} status={s} colors={colors} onPress={() => router.push({ pathname: "/status/view", params: { id: s.id } })} />
+                ))}
+              </>
             )}
-            {recentStatuses.map((s) => (
-              <StatusRow key={s.id} status={s} colors={colors} onPress={() => router.push({ pathname: "/status/view", params: { id: s.id } })} />
-            ))}
+
+            {/* Viewed updates */}
             {viewedStatuses.length > 0 && (
-              <Text style={[styles.sectionLabel, { color: colors.mutedForeground, borderBottomColor: colors.border }]}>
-                VIEWED UPDATES
-              </Text>
+              <>
+                <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>VIEWED UPDATES</Text>
+                {viewedStatuses.map((s) => (
+                  <StatusRow key={s.id} status={s} colors={colors} onPress={() => router.push({ pathname: "/status/view", params: { id: s.id } })} />
+                ))}
+              </>
             )}
-            {viewedStatuses.map((s) => (
-              <StatusRow key={s.id} status={s} colors={colors} onPress={() => router.push({ pathname: "/status/view", params: { id: s.id } })} />
-            ))}
+
+            {/* Empty state */}
             {recentStatuses.length === 0 && viewedStatuses.length === 0 && (
               <View style={styles.empty}>
                 <Ionicons name="radio-button-on-outline" size={60} color={colors.mutedForeground} />
-                <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-                  No status updates yet
-                </Text>
+                <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No status updates yet</Text>
                 <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
                   Tap the pencil icon to create your first status
                 </Text>
@@ -125,35 +130,65 @@ export default function StatusScreen() {
             )}
           </View>
         }
-        contentContainerStyle={{ paddingBottom: 100 }}
+        contentContainerStyle={{ paddingBottom: 120 }}
       />
+
+      {/* FAB with expand */}
+      {fabOpen && (
+        <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setFabOpen(false)} />
+      )}
+      {fabOpen && (
+        <View style={styles.fabMenu}>
+          <TouchableOpacity
+            style={[styles.fabMenuItem, { backgroundColor: colors.card }]}
+            onPress={() => { setFabOpen(false); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push("/status/create?mode=camera"); }}
+          >
+            <View style={[styles.fabMenuIcon, { backgroundColor: "#555" }]}>
+              <Ionicons name="image-outline" size={20} color="#fff" />
+            </View>
+            <Text style={[styles.fabMenuLabel, { color: colors.foreground }]}>Photo or video</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.fabMenuItem, { backgroundColor: colors.card }]}
+            onPress={() => { setFabOpen(false); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push("/status/create"); }}
+          >
+            <View style={[styles.fabMenuIcon, { backgroundColor: colors.primary }]}>
+              <Ionicons name="pencil" size={20} color="#fff" />
+            </View>
+            <Text style={[styles.fabMenuLabel, { color: colors.foreground }]}>Text</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: colors.primary }]}
-        onPress={promptAddStatus}
+        onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setFabOpen((v) => !v); }}
         activeOpacity={0.8}
       >
-        <Ionicons name="pencil" size={24} color="#fff" />
+        <Ionicons name={fabOpen ? "close" : "pencil"} size={24} color="#fff" />
       </TouchableOpacity>
     </View>
   );
 }
 
-function StatusRow({ status, colors, onPress }: { status: Status; colors: any; onPress: () => void }) {
-  const initials = status.userName.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
-  const hue = status.userName.charCodeAt(0) * 37 % 360;
-  const avatarBg = `hsl(${hue},50%,45%)`;
+function StatusRow({ status, colors, onPress }: { status: Status; colors: ReturnType<typeof useColors>; onPress: () => void }) {
+  const initials = (status.userName ?? "?").split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
+  const hue = (status.userName ?? "A").charCodeAt(0) * 37 % 360;
 
   return (
     <TouchableOpacity
-      style={[styles.statusRow, { borderBottomColor: colors.border }]}
+      style={[styles.statusRow, { borderBottomColor: colors.border, backgroundColor: colors.card }]}
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <View style={[styles.statusRing, { borderColor: status.viewed ? colors.mutedForeground : colors.statusRing }]}>
-        <View style={[styles.statusAvatar, { backgroundColor: avatarBg }]}>
-          <Text style={styles.statusAvatarText}>{initials}</Text>
-        </View>
+      <View style={[styles.statusRing, { borderColor: status.viewed ? colors.mutedForeground : colors.primary }]}>
+        {status.userAvatar ? (
+          <Image source={{ uri: status.userAvatar }} style={styles.statusAvatarImg} contentFit="cover" />
+        ) : (
+          <View style={[styles.statusAvatarFallback, { backgroundColor: `hsl(${hue},50%,45%)` }]}>
+            <Text style={styles.statusAvatarText}>{initials}</Text>
+          </View>
+        )}
       </View>
       <View style={styles.statusInfo}>
         <Text style={[styles.statusName, { color: colors.foreground }]}>{status.userName}</Text>
@@ -169,19 +204,20 @@ const styles = StyleSheet.create({
   headerTitle: { color: "#fff", fontSize: 22, fontFamily: "Inter_700Bold" },
   headerRight: { flexDirection: "row" },
   headerBtn: { padding: 6 },
-  myStatus: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
+  myStatus: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: 2 },
   myStatusLeft: { flexDirection: "row", alignItems: "center", gap: 14 },
-  avatarWrap: { position: "relative" },
-  hasStatus: { borderWidth: 2, borderColor: "#25D366", borderRadius: 28 },
-  avatar: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center" },
-  avatarText: { color: "#fff", fontSize: 20, fontFamily: "Inter_700Bold" },
-  addBtn: { position: "absolute", bottom: -2, right: -2, width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  avatarRingWrap: { width: 56, height: 56, borderRadius: 28, borderWidth: 0, padding: 2 },
+  myAvatar: { width: 48, height: 48, borderRadius: 24 },
+  myAvatarFallback: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" },
+  myAvatarText: { color: "#fff", fontSize: 18, fontFamily: "Inter_700Bold" },
+  addBadge: { position: "absolute", bottom: -1, right: -1, width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   myName: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
   myHint: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
-  sectionLabel: { paddingHorizontal: 16, paddingVertical: 8, fontSize: 12, fontFamily: "Inter_600SemiBold", borderBottomWidth: 0.5 },
-  statusRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 0.5, gap: 14 },
-  statusRing: { width: 56, height: 56, borderRadius: 28, borderWidth: 2.5, alignItems: "center", justifyContent: "center", padding: 2 },
-  statusAvatar: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center" },
+  sectionLabel: { paddingHorizontal: 16, paddingVertical: 8, fontSize: 12, fontFamily: "Inter_600SemiBold", letterSpacing: 0.5 },
+  statusRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, gap: 14 },
+  statusRing: { width: 54, height: 54, borderRadius: 27, borderWidth: 2.5, padding: 2, alignItems: "center", justifyContent: "center" },
+  statusAvatarImg: { width: 44, height: 44, borderRadius: 22 },
+  statusAvatarFallback: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   statusAvatarText: { color: "#fff", fontSize: 16, fontFamily: "Inter_700Bold" },
   statusInfo: {},
   statusName: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
@@ -190,4 +226,8 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 16, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   emptyHint: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center" },
   fab: { position: "absolute", bottom: 90, right: 20, width: 60, height: 60, borderRadius: 30, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 5 },
+  fabMenu: { position: "absolute", bottom: 162, right: 20, gap: 10 },
+  fabMenuItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 28, elevation: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 },
+  fabMenuIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  fabMenuLabel: { fontSize: 15, fontFamily: "Inter_500Medium" },
 });

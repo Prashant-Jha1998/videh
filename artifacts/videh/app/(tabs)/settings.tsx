@@ -125,10 +125,8 @@ export default function SettingsScreen() {
                 <Text style={styles.avatarInitials}>{initials || "?"}</Text>
               </View>
             )}
-            <View style={styles.avatarNameOverlay}>
-              <Text style={styles.avatarNameText} numberOfLines={1}>
-                {user?.name || "Set your name"}
-              </Text>
+            <View style={[styles.cameraOverlay, { backgroundColor: "rgba(0,0,0,0.35)" }]}>
+              <Ionicons name="camera" size={18} color="#fff" />
             </View>
           </TouchableOpacity>
 
@@ -235,16 +233,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarInitials: { color: "#fff", fontSize: 38, fontFamily: "Inter_700Bold" },
-  avatarNameOverlay: {
+  cameraOverlay: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: "rgba(0,0,0,0.40)",
-    paddingVertical: 5,
+    height: 36,
     alignItems: "center",
+    justifyContent: "center",
   },
-  avatarNameText: { color: "#fff", fontSize: 12, fontFamily: "Inter_600SemiBold" },
   nameRow: {
     flexDirection: "row",
     alignItems: "center",
