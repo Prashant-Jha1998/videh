@@ -16,6 +16,9 @@ export interface Message {
   senderId: string;
   type: "text" | "image" | "audio" | "deleted";
   status: "sent" | "delivered" | "read";
+  isStarred?: boolean;
+  chatId?: string;
+  chatName?: string;
 }
 
 export interface Chat {
@@ -70,6 +73,9 @@ interface AppContextType {
   pinChat: (chatId: string) => void;
   muteChat: (chatId: string) => void;
   archiveChat: (chatId: string) => void;
+  starMessage: (chatId: string, messageId: string) => void;
+  forwardMessage: (chatId: string, messageId: string, targetChatId: string) => void;
+  starredMessages: Message[];
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -303,11 +309,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setChats((prev) => prev.filter((c) => c.id !== chatId));
   }, []);
 
+  const starMessage = useCallback((chatId: string, messageId: string) => {
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === chatId
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === messageId
+                  ? { ...m, isStarred: !m.isStarred, chatId, chatName: c.name }
+                  : m
+              ),
+            }
+          : c
+      )
+    );
+  }, []);
+
+  const forwardMessage = useCallback((chatId: string, messageId: string, targetChatId: string) => {
+    const sourceChat = chats.find((c) => c.id === chatId);
+    const msg = sourceChat?.messages.find((m) => m.id === messageId);
+    if (msg && targetChatId) {
+      sendMessage(targetChatId, `↗ Forwarded: ${msg.text}`);
+    }
+  }, [chats, sendMessage]);
+
+  const starredMessages = chats.flatMap((c) =>
+    c.messages.filter((m) => m.isStarred)
+  );
+
   return (
     <AppContext.Provider value={{
       user, isAuthenticated, chats, statuses, contacts,
       setUser, logout, sendMessage, createGroup, markAsRead,
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
+      starMessage, forwardMessage, starredMessages,
     }}>
       {children}
     </AppContext.Provider>

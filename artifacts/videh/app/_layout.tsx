@@ -20,7 +20,15 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
-  const { isAuthenticated } = useApp();
+  const { isAuthenticated, user } = useApp();
+  const router = useRouter();
+
+  // Watch auth state — redirect to login on logout
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.replace("/auth/phone");
+    }
+  }, [isAuthenticated]);
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
@@ -34,6 +42,7 @@ function RootLayoutNav() {
       <Stack.Screen name="contacts" options={{ headerShown: false }} />
       <Stack.Screen name="status/view" options={{ headerShown: false, presentation: "fullScreenModal" }} />
       <Stack.Screen name="new-group" options={{ headerShown: false }} />
+      <Stack.Screen name="starred" options={{ headerShown: false }} />
     </Stack>
   );
 }
