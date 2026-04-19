@@ -11,47 +11,61 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useColors } from "@/hooks/useColors";
+import { useAgoraCall } from "@/hooks/useAgoraCall";
+import { useAppContext } from "@/context/AppContext";
+import { AgoraLocalView, AgoraRemoteView } from "@/components/AgoraVideoView";
 
 export default function CallScreen() {
-  const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, name, type } = useLocalSearchParams<{ id: string; name: string; type: string }>();
+  const { user } = useAppContext();
   const isVideo = type === "video";
 
-  const [callState, setCallState] = useState<"ringing" | "connected" | "ended">("ringing");
+  const channelName = `videh_${id ?? "default"}`;
+  const numericUid = Math.abs((user?.dbId ?? 0) % 999999) || Math.floor(Math.random() * 99999) + 1;
+
+  const {
+    joined,
+    error,
+    muted,
+    cameraOff,
+    speakerOn,
+    remoteCount,
+    localVideoId,
+    remoteVideoId,
+    hasRemoteVideo,
+    toggleMute,
+    toggleCamera,
+    toggleSpeaker,
+    leave,
+    ...rest
+  } = useAgoraCall(channelName, numericUid, isVideo);
+
+  const remoteUid: number | null = (rest as any).remoteUid ?? null;
+
   const [duration, setDuration] = useState(0);
-  const [muted, setMuted] = useState(false);
-  const [speakerOn, setSpeakerOn] = useState(false);
-  const [cameraOff, setCameraOff] = useState(false);
   const pulse = useRef(new Animated.Value(1)).current;
+  const isExpoGo = error === "EXPO_GO";
 
   useEffect(() => {
-    // Pulse animation for ringing
     const anim = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1.15, duration: 800, useNativeDriver: true }),
         Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: true }),
       ])
     );
-    anim.start();
-
-    // Auto-connect after 2.5s
-    const t = setTimeout(() => {
-      setCallState("connected");
-      anim.stop();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }, 2500);
-
-    return () => { clearTimeout(t); anim.stop(); };
-  }, []);
+    if (!joined) anim.start();
+    else anim.stop();
+    return () => anim.stop();
+  }, [joined]);
 
   useEffect(() => {
-    if (callState !== "connected") return;
+    if (!joined) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const t = setInterval(() => setDuration((d) => d + 1), 1000);
     return () => clearInterval(t);
-  }, [callState]);
+  }, [joined]);
 
   const formatDuration = (s: number) => {
     const m = Math.floor(s / 60).toString().padStart(2, "0");
@@ -59,8 +73,9 @@ export default function CallScreen() {
     return `${m}:${sec}`;
   };
 
-  const endCall = () => {
+  const endCall = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    await leave();
     router.back();
   };
 
@@ -69,35 +84,110 @@ export default function CallScreen() {
   const avatarBg = `hsl(${hue},50%,45%)`;
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
+  const statusText = isExpoGo
+    ? "Development build required"
+    : error && !isExpoGo
+    ? `Error: ${error}`
+    : joined
+    ? remoteCount > 0
+      ? formatDuration(duration)
+      : "Waiting for other party..."
+    : isVideo ? "Video calling..." : "Ringing...";
+
+  const showVideoUI = isVideo && !isExpoGo && !error;
+
   return (
     <View style={[styles.container, { backgroundColor: isVideo ? "#0B141A" : "#1A1A2E", paddingTop: topPad, paddingBottom: insets.bottom + 30 }]}>
       <TouchableOpacity style={styles.backBtn} onPress={router.back}>
         <Ionicons name="chevron-down" size={28} color="rgba(255,255,255,0.8)" />
       </TouchableOpacity>
-
       <Text style={styles.callTypeLabel}>{isVideo ? "Videh Video Call" : "Videh Voice Call"}</Text>
 
-      <View style={styles.center}>
-        <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: callState === "ringing" ? pulse : 1 }] }]}>
-          <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
-            <Text style={styles.avatarText}>{initials}</Text>
+      {isExpoGo ? (
+        <View style={styles.center}>
+          <View style={styles.expoGoCard}>
+            <Ionicons name="construct-outline" size={48} color="#f59e0b" />
+            <Text style={styles.expoGoTitle}>Development Build Required</Text>
+            <Text style={styles.expoGoText}>
+              Real-time voice and video calls use Agora's native SDK which requires a custom build of the app.
+              Expo Go does not support native calling modules.
+            </Text>
+            <View style={styles.expoGoCommand}>
+              <Ionicons name="terminal-outline" size={14} color="#a3e635" />
+              <Text style={styles.expoGoCode}>eas build --profile development</Text>
+            </View>
           </View>
-        </Animated.View>
-        <Text style={styles.callerName}>{name}</Text>
-        <Text style={styles.callStatus}>
-          {callState === "ringing" ? (isVideo ? "Video calling..." : "Ringing...") : callState === "connected" ? formatDuration(duration) : "Call ended"}
-        </Text>
-      </View>
+        </View>
+      ) : showVideoUI ? (
+        <View style={styles.videoContainer}>
+          {(Platform.OS === "web" ? hasRemoteVideo : remoteUid !== null) ? (
+            Platform.OS === "web"
+              ? <AgoraRemoteView style={styles.remoteVideo} nativeId={remoteVideoId} />
+              : <AgoraRemoteView uid={remoteUid ?? 0} style={styles.remoteVideo} />
+          ) : (
+            <View style={[styles.remoteVideo, styles.videoPlaceholder]}>
+              <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: !joined ? pulse : 1 }] }]}>
+                <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
+                  <Text style={styles.avatarText}>{initials}</Text>
+                </View>
+              </Animated.View>
+              <Text style={styles.callerName}>{name}</Text>
+              <Text style={styles.callStatus}>{statusText}</Text>
+            </View>
+          )}
+          {joined && !cameraOff && (
+            <View style={styles.localVideoWrapper}>
+              {Platform.OS === "web"
+                ? <AgoraLocalView style={styles.localVideoFill} nativeId={localVideoId} />
+                : <AgoraLocalView style={styles.localVideoFill} />
+              }
+            </View>
+          )}
+        </View>
+      ) : (
+        <View style={styles.center}>
+          <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: !joined ? pulse : 1 }] }]}>
+            <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
+              <Text style={styles.avatarText}>{initials}</Text>
+            </View>
+          </Animated.View>
+          <Text style={styles.callerName}>{name}</Text>
+          <Text style={styles.callStatus}>{statusText}</Text>
+          {joined && (
+            <View style={styles.encryptBadge}>
+              <Ionicons name="lock-closed" size={12} color="rgba(255,255,255,0.5)" />
+              <Text style={styles.encryptText}>End-to-end encrypted</Text>
+            </View>
+          )}
+        </View>
+      )}
 
       <View style={styles.controls}>
         <View style={styles.controlsRow}>
-          <ControlBtn icon={muted ? "mic-off" : "mic"} label={muted ? "Unmute" : "Mute"} onPress={() => { setMuted((m) => !m); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} active={muted} />
-          <ControlBtn icon={speakerOn ? "volume-high" : "volume-medium"} label="Speaker" onPress={() => { setSpeakerOn((s) => !s); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} active={speakerOn} />
-          {isVideo && <ControlBtn icon={cameraOff ? "videocam-off" : "videocam"} label="Camera" onPress={() => { setCameraOff((c) => !c); }} active={cameraOff} />}
+          <ControlBtn
+            icon={muted ? "mic-off" : "mic"}
+            label={muted ? "Unmute" : "Mute"}
+            onPress={() => { toggleMute(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+            active={muted}
+          />
+          <ControlBtn
+            icon={speakerOn ? "volume-high" : "volume-medium"}
+            label="Speaker"
+            onPress={() => { toggleSpeaker(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+            active={speakerOn}
+          />
+          {isVideo && (
+            <ControlBtn
+              icon={cameraOff ? "videocam-off" : "videocam"}
+              label="Camera"
+              onPress={() => { toggleCamera(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+              active={cameraOff}
+            />
+          )}
           <ControlBtn icon="chatbubble-outline" label="Message" onPress={router.back} active={false} />
         </View>
 
-        <TouchableOpacity style={styles.endBtn} onPress={endCall}>
+        <TouchableOpacity style={styles.endBtn} onPress={endCall} activeOpacity={0.85}>
           <Ionicons name="call" size={28} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
         </TouchableOpacity>
       </View>
@@ -120,12 +210,19 @@ const styles = StyleSheet.create({
   container: { flex: 1, alignItems: "center" },
   backBtn: { alignSelf: "flex-start", padding: 16 },
   callTypeLabel: { color: "rgba(255,255,255,0.6)", fontSize: 13, fontFamily: "Inter_400Regular", marginTop: -8 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
+  videoContainer: { flex: 1, width: "100%", position: "relative" },
+  remoteVideo: { flex: 1, width: "100%", backgroundColor: "#111" },
+  videoPlaceholder: { alignItems: "center", justifyContent: "center" },
+  localVideoWrapper: { position: "absolute", top: 12, right: 12, width: 90, height: 120, borderRadius: 10, overflow: "hidden", borderWidth: 2, borderColor: "rgba(255,255,255,0.3)" },
+  localVideoFill: { flex: 1, backgroundColor: "#222" },
   avatarRing: { width: 140, height: 140, borderRadius: 70, borderWidth: 3, alignItems: "center", justifyContent: "center", marginBottom: 24 },
   avatar: { width: 120, height: 120, borderRadius: 60, alignItems: "center", justifyContent: "center" },
   avatarText: { color: "#fff", fontSize: 44, fontFamily: "Inter_700Bold" },
   callerName: { color: "#fff", fontSize: 30, fontFamily: "Inter_700Bold", marginBottom: 8 },
   callStatus: { color: "rgba(255,255,255,0.7)", fontSize: 16, fontFamily: "Inter_400Regular" },
+  encryptBadge: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 16, backgroundColor: "rgba(255,255,255,0.08)", paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
+  encryptText: { color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: "Inter_400Regular" },
   controls: { width: "100%", alignItems: "center", paddingHorizontal: 24, gap: 32 },
   controlsRow: { flexDirection: "row", justifyContent: "space-around", width: "100%" },
   ctrlBtn: { alignItems: "center", gap: 8 },
@@ -133,4 +230,9 @@ const styles = StyleSheet.create({
   ctrlActive: { backgroundColor: "rgba(255,255,255,0.9)" },
   ctrlLabel: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Inter_400Regular" },
   endBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: "#ef4444", alignItems: "center", justifyContent: "center" },
+  expoGoCard: { backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 20, padding: 28, alignItems: "center", gap: 14, maxWidth: 340 },
+  expoGoTitle: { color: "#f59e0b", fontSize: 20, fontFamily: "Inter_700Bold", textAlign: "center" },
+  expoGoText: { color: "rgba(255,255,255,0.75)", fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 22 },
+  expoGoCommand: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(0,0,0,0.4)", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, marginTop: 4 },
+  expoGoCode: { color: "#a3e635", fontSize: 13, fontFamily: "Inter_600SemiBold" },
 });

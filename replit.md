@@ -52,6 +52,18 @@ Phone number → OTP verification (Fast2SMS) → Profile setup → Main app
 - `DLT_TEMPLATE_ID` = 1007181628875366114
 - `FAST2SMS_MESSAGE_ID` = 209634
 
+### Agora Voice & Video Calls
+- **App ID**: `45625ba414d24e7b94712f3cdf4241fc` stored as `EXPO_PUBLIC_AGORA_APP_ID` + `AGORA_APP_ID`
+- **Web** (`agora-rtc-sdk-ng`): Real audio/video calls work in browser right now — joins Agora RTC channel, publishes mic/camera tracks, renders remote video via `nativeID` DOM refs
+- **Native** (`react-native-agora`): Full implementation ready — requests mic/camera permissions, joins channel, uses `RtcSurfaceView` for video rendering. Requires a development build (not Expo Go)
+  - Build command: `eas build --profile development`
+  - Expo Go shows a clear "Development Build Required" screen with the build command
+- **Token server**: `GET /api/agora/token?channel=X&uid=Y` — returns null token when no App Certificate set (dev mode), generates real tokens with `agora-token` once `AGORA_APP_CERTIFICATE` secret is added
+- **Permissions** added to `app.json`: `RECORD_AUDIO`, `CAMERA`, `BLUETOOTH_CONNECT`, `MODIFY_AUDIO_SETTINGS` (Android) + `NSMicrophoneUsageDescription`, `NSCameraUsageDescription` (iOS) + `UIBackgroundModes: [audio, voip]`
+- **Platform isolation**: `hooks/useAgoraCall.web.ts` / `hooks/useAgoraCall.native.ts` + `components/AgoraVideoView.web.tsx` / `AgoraVideoView.native.tsx` — Metro picks the right file per platform, web bundle never sees native modules
+- **Channel naming**: `videh_{chatId}` for each call
+- **Call screen features**: Live duration timer, mute/speaker/camera toggle, end call, remote video fullscreen, local video PiP (picture-in-picture), encryption badge
+
 ### Legal Pages
 - `/app/legal/terms.tsx` — Full Terms of Service (11 sections, professionally written)
 - `/app/legal/privacy.tsx` — Full Privacy Policy (12 sections, covers E2E encryption, data rights)
