@@ -4,15 +4,38 @@ import { query } from "../lib/db";
 
 const router = Router();
 
+// Detect browser/platform from user-agent
+function detectPlatform(ua: string): string {
+  if (/windows/i.test(ua)) return "Windows";
+  if (/macintosh|mac os x/i.test(ua)) return "macOS";
+  if (/linux/i.test(ua)) return "Linux";
+  if (/android/i.test(ua)) return "Android";
+  if (/iphone|ipad/i.test(ua)) return "iOS";
+  return "Web";
+}
+
+function detectBrowser(ua: string): string {
+  if (/edg\//i.test(ua)) return "Edge";
+  if (/chrome/i.test(ua)) return "Chrome";
+  if (/firefox/i.test(ua)) return "Firefox";
+  if (/safari/i.test(ua)) return "Safari";
+  if (/opera/i.test(ua)) return "Opera";
+  return "Browser";
+}
+
 // Create a new web session (web app calls this on load)
 router.post("/", async (req: Request, res: Response) => {
   try {
     const token = randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    const ua = req.headers["user-agent"] ?? "";
+    const platform = detectPlatform(ua);
+    const browser = detectBrowser(ua);
+    const deviceName = `${browser} on ${platform}`;
 
     await query(
-      "INSERT INTO web_sessions (token, status, expires_at) VALUES ($1, 'pending', $2)",
-      [token, expiresAt]
+      "INSERT INTO web_sessions (token, status, expires_at, device_name, platform) VALUES ($1, 'pending', $2, $3, $4)",
+      [token, expiresAt, deviceName, platform]
     );
 
     res.json({ success: true, token, expiresAt: expiresAt.toISOString() });
@@ -41,7 +64,7 @@ router.post("/:token/link", async (req: Request, res: Response) => {
     }
 
     await query(
-      "UPDATE web_sessions SET status = 'linked', user_id = $1 WHERE token = $2",
+      "UPDATE web_sessions SET status = 'linked', user_id = $1, linked_at = NOW(), last_active = NOW(), expires_at = NOW() + INTERVAL '30 days' WHERE token = $2",
       [userId, token]
     );
 
@@ -209,6 +232,52 @@ router.get("/:token/chats/:chatId/messages", async (req: Request, res: Response)
   } catch (err) {
     req.log.error({ err }, "web session messages error");
     res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// List all active linked devices for a user (mobile app calls this)
+router.get("/user/:userId/devices", async (req: Request, res: Response) => {
+  const userId = parseInt(req.params.userId, 10);
+  if (isNaN(userId)) { res.status(400).json({ success: false }); return; }
+
+  try {
+    const result = await query(
+      `SELECT token, device_name, platform, linked_at, last_active
+       FROM web_sessions
+       WHERE user_id = $1 AND status = 'linked' AND expires_at > NOW()
+       ORDER BY linked_at DESC`,
+      [userId]
+    );
+    res.json({ success: true, devices: result.rows });
+  } catch (err) {
+    req.log.error({ err }, "list devices error");
+    res.status(500).json({ success: false });
+  }
+});
+
+// Logout / unlink a device
+router.delete("/:token", async (req: Request, res: Response) => {
+  const { token } = req.params;
+  try {
+    await query("UPDATE web_sessions SET status = 'expired' WHERE token = $1", [token]);
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "delete device error");
+    res.status(500).json({ success: false });
+  }
+});
+
+// Rename a linked device
+router.patch("/:token/name", async (req: Request, res: Response) => {
+  const { token } = req.params;
+  const { name } = req.body as { name?: string };
+  if (!name?.trim()) { res.status(400).json({ success: false, message: "name required" }); return; }
+  try {
+    await query("UPDATE web_sessions SET device_name = $1 WHERE token = $2 AND status = 'linked'", [name.trim(), token]);
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "rename device error");
+    res.status(500).json({ success: false });
   }
 });
 
