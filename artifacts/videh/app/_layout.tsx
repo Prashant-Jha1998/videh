@@ -1,10 +1,4 @@
-import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-  useFonts,
-} from "@expo-google-fonts/inter";
+import * as Font from "expo-font";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -20,7 +14,7 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
-  const { isAuthenticated, user } = useApp();
+  const { isAuthenticated } = useApp();
   const router = useRouter();
 
   // Watch auth state — redirect to login on logout
@@ -48,20 +42,25 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
-  });
+  const [fontsReady, setFontsReady] = useState(false);
 
   useEffect(() => {
-    if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
-    }
-  }, [fontsLoaded, fontError]);
+    Font.loadAsync({
+      Inter_400Regular: require("../assets/fonts/Inter_400Regular.ttf"),
+      Inter_500Medium: require("../assets/fonts/Inter_500Medium.ttf"),
+      Inter_600SemiBold: require("../assets/fonts/Inter_600SemiBold.ttf"),
+      Inter_700Bold: require("../assets/fonts/Inter_700Bold.ttf"),
+    })
+      .catch(() => {
+        // Fonts failed to load — proceed with system fonts
+      })
+      .finally(() => {
+        setFontsReady(true);
+        SplashScreen.hideAsync();
+      });
+  }, []);
 
-  if (!fontsLoaded && !fontError) return null;
+  if (!fontsReady) return null;
 
   return (
     <SafeAreaProvider>
