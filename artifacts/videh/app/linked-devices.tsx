@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -73,9 +73,9 @@ export default function LinkedDevicesScreen() {
     setLoadingDevices(false);
   }, [user?.dbId]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     loadDevices();
-  }, [loadDevices]);
+  }, [loadDevices]));
 
   const handleBarcode = async ({ data }: { data: string }) => {
     if (hasScannedRef.current || linking) return;

@@ -25,7 +25,13 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         AND (
           s.user_id = $1::int
           OR s.user_id IN (
-            SELECT contact_user_id FROM contacts WHERE user_id = $1::int AND is_blocked = FALSE
+            SELECT c1.contact_user_id
+            FROM contacts c1
+            JOIN contacts c2
+              ON c2.user_id = c1.contact_user_id
+             AND c2.contact_user_id = $1::int
+             AND c2.is_blocked = FALSE
+            WHERE c1.user_id = $1::int AND c1.is_blocked = FALSE
           )
         )
       ORDER BY s.created_at DESC

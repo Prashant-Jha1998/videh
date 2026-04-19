@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   FlatList,
   Platform,
@@ -16,6 +16,15 @@ import { useColors } from "@/hooks/useColors";
 import { useApp, Status } from "@/context/AppContext";
 import { formatTime } from "@/utils/time";
 
+interface StatusGroup {
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  statuses: Status[];
+  latestTime: number;
+  hasUnviewed: boolean;
+}
+
 export default function StatusScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -24,11 +33,58 @@ export default function StatusScreen() {
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
   const [fabOpen, setFabOpen] = useState(false);
 
-  const myStatuses = statuses.filter((s) => s.userId === "me");
-  const recentStatuses = statuses.filter((s) => s.userId !== "me" && !s.viewed);
-  const viewedStatuses = statuses.filter((s) => s.userId !== "me" && s.viewed);
+  const myStatuses = useMemo(
+    () => statuses.filter((s) => s.userId === "me").sort((a, b) => a.timestamp - b.timestamp),
+    [statuses]
+  );
+
+  // Group others' statuses by userId — each user gets one row
+  const statusGroups = useMemo<StatusGroup[]>(() => {
+    const map: Record<string, Status[]> = {};
+    statuses
+      .filter((s) => s.userId !== "me")
+      .forEach((s) => {
+        if (!map[s.userId]) map[s.userId] = [];
+        map[s.userId].push(s);
+      });
+    return Object.values(map)
+      .map((group) => {
+        const sorted = [...group].sort((a, b) => a.timestamp - b.timestamp);
+        return {
+          userId: group[0].userId,
+          userName: group[0].userName,
+          userAvatar: group[0].userAvatar,
+          statuses: sorted,
+          latestTime: Math.max(...group.map((s) => s.timestamp)),
+          hasUnviewed: group.some((s) => !s.viewed),
+        };
+      })
+      .sort((a, b) => {
+        // Unviewed first, then by latest time
+        if (a.hasUnviewed && !b.hasUnviewed) return -1;
+        if (!a.hasUnviewed && b.hasUnviewed) return 1;
+        return b.latestTime - a.latestTime;
+      });
+  }, [statuses]);
+
+  const recentGroups = statusGroups.filter((g) => g.hasUnviewed);
+  const viewedGroups = statusGroups.filter((g) => !g.hasUnviewed);
 
   const initials = (user?.name ?? "?").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
+
+  const openMyStatus = () => {
+    if (myStatuses.length > 0) {
+      router.push({ pathname: "/status/view", params: { ids: myStatuses.map((s) => s.id).join(",") } });
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      router.push("/status/create");
+    }
+  };
+
+  const openGroup = (group: StatusGroup) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push({ pathname: "/status/view", params: { ids: group.statuses.map((s) => s.id).join(",") } });
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -54,19 +110,14 @@ export default function StatusScreen() {
             {/* My Status */}
             <TouchableOpacity
               style={[styles.myStatus, { borderBottomColor: colors.border, backgroundColor: colors.card }]}
-              onPress={() => {
-                if (myStatuses.length > 0) {
-                  router.push({ pathname: "/status/view", params: { id: myStatuses[0].id } });
-                } else {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  router.push("/status/create");
-                }
-              }}
+              onPress={openMyStatus}
               activeOpacity={0.7}
             >
               <View style={styles.myStatusLeft}>
-                {/* Avatar with ring if has status */}
-                <View style={[styles.avatarRingWrap, myStatuses.length > 0 && { borderColor: colors.primary, borderWidth: 2.5 }]}>
+                <View style={[
+                  styles.avatarRingWrap,
+                  myStatuses.length > 0 && { borderColor: colors.primary, borderWidth: 2.5 }
+                ]}>
                   {user?.avatar ? (
                     <Image source={{ uri: user.avatar }} style={styles.myAvatar} contentFit="cover" />
                   ) : (
@@ -80,13 +131,12 @@ export default function StatusScreen() {
                     </View>
                   )}
                 </View>
-
                 <View>
                   <Text style={[styles.myName, { color: colors.foreground }]}>My status</Text>
                   <Text style={[styles.myHint, { color: colors.mutedForeground }]}>
                     {myStatuses.length > 0
-                      ? `${myStatuses.length} update${myStatuses.length > 1 ? "s" : ""} · ${formatTime(myStatuses[0].timestamp)}`
-                      : "Tap to add status update"}
+                      ? `${myStatuses.length} update${myStatuses.length > 1 ? "s" : ""} · ${formatTime(myStatuses[myStatuses.length - 1].timestamp)}`
+                      : "Disappears after 24 hours"}
                   </Text>
                 </View>
               </View>
@@ -99,32 +149,32 @@ export default function StatusScreen() {
             </TouchableOpacity>
 
             {/* Recent updates */}
-            {recentStatuses.length > 0 && (
+            {recentGroups.length > 0 && (
               <>
                 <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>RECENT UPDATES</Text>
-                {recentStatuses.map((s) => (
-                  <StatusRow key={s.id} status={s} colors={colors} onPress={() => router.push({ pathname: "/status/view", params: { id: s.id } })} />
+                {recentGroups.map((g) => (
+                  <StatusGroupRow key={g.userId} group={g} colors={colors} onPress={() => openGroup(g)} />
                 ))}
               </>
             )}
 
             {/* Viewed updates */}
-            {viewedStatuses.length > 0 && (
+            {viewedGroups.length > 0 && (
               <>
                 <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>VIEWED UPDATES</Text>
-                {viewedStatuses.map((s) => (
-                  <StatusRow key={s.id} status={s} colors={colors} onPress={() => router.push({ pathname: "/status/view", params: { id: s.id } })} />
+                {viewedGroups.map((g) => (
+                  <StatusGroupRow key={g.userId} group={g} colors={colors} onPress={() => openGroup(g)} />
                 ))}
               </>
             )}
 
             {/* Empty state */}
-            {recentStatuses.length === 0 && viewedStatuses.length === 0 && (
+            {statusGroups.length === 0 && (
               <View style={styles.empty}>
                 <Ionicons name="radio-button-on-outline" size={60} color={colors.mutedForeground} />
                 <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No status updates yet</Text>
                 <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
-                  Tap the pencil icon to create your first status
+                  Status updates from your contacts will appear here
                 </Text>
               </View>
             )}
@@ -133,10 +183,8 @@ export default function StatusScreen() {
         contentContainerStyle={{ paddingBottom: 120 }}
       />
 
-      {/* FAB with expand */}
-      {fabOpen && (
-        <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setFabOpen(false)} />
-      )}
+      {/* FAB */}
+      {fabOpen && <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setFabOpen(false)} />}
       {fabOpen && (
         <View style={styles.fabMenu}>
           <TouchableOpacity
@@ -159,7 +207,6 @@ export default function StatusScreen() {
           </TouchableOpacity>
         </View>
       )}
-
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: colors.primary }]}
         onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setFabOpen((v) => !v); }}
@@ -171,9 +218,11 @@ export default function StatusScreen() {
   );
 }
 
-function StatusRow({ status, colors, onPress }: { status: Status; colors: ReturnType<typeof useColors>; onPress: () => void }) {
-  const initials = (status.userName ?? "?").split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
-  const hue = (status.userName ?? "A").charCodeAt(0) * 37 % 360;
+function StatusGroupRow({ group, colors, onPress }: { group: StatusGroup; colors: ReturnType<typeof useColors>; onPress: () => void }) {
+  const initials = (group.userName ?? "?").split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
+  const hue = (group.userName ?? "A").charCodeAt(0) * 37 % 360;
+  const count = group.statuses.length;
+  const ringColor = group.hasUnviewed ? colors.primary : colors.mutedForeground;
 
   return (
     <TouchableOpacity
@@ -181,18 +230,27 @@ function StatusRow({ status, colors, onPress }: { status: Status; colors: Return
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <View style={[styles.statusRing, { borderColor: status.viewed ? colors.mutedForeground : colors.primary }]}>
-        {status.userAvatar ? (
-          <Image source={{ uri: status.userAvatar }} style={styles.statusAvatarImg} contentFit="cover" />
+      {/* Ring with segments for multiple statuses */}
+      <View style={[styles.statusRing, { borderColor: ringColor }]}>
+        {group.userAvatar ? (
+          <Image source={{ uri: group.userAvatar }} style={styles.statusAvatarImg} contentFit="cover" />
         ) : (
           <View style={[styles.statusAvatarFallback, { backgroundColor: `hsl(${hue},50%,45%)` }]}>
             <Text style={styles.statusAvatarText}>{initials}</Text>
           </View>
         )}
+        {count > 1 && (
+          <View style={[styles.countBadge, { backgroundColor: colors.primary }]}>
+            <Text style={styles.countBadgeText}>{count}</Text>
+          </View>
+        )}
       </View>
       <View style={styles.statusInfo}>
-        <Text style={[styles.statusName, { color: colors.foreground }]}>{status.userName}</Text>
-        <Text style={[styles.statusTime, { color: colors.mutedForeground }]}>{formatTime(status.timestamp)}</Text>
+        <Text style={[styles.statusName, { color: colors.foreground }]}>{group.userName}</Text>
+        <Text style={[styles.statusTime, { color: colors.mutedForeground }]}>
+          {formatTime(group.latestTime)}
+          {count > 1 ? ` · ${count} updates` : ""}
+        </Text>
       </View>
     </TouchableOpacity>
   );
@@ -219,7 +277,9 @@ const styles = StyleSheet.create({
   statusAvatarImg: { width: 44, height: 44, borderRadius: 22 },
   statusAvatarFallback: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   statusAvatarText: { color: "#fff", fontSize: 16, fontFamily: "Inter_700Bold" },
-  statusInfo: {},
+  countBadge: { position: "absolute", bottom: -2, right: -4, width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  countBadgeText: { color: "#fff", fontSize: 10, fontFamily: "Inter_700Bold" },
+  statusInfo: { flex: 1 },
   statusName: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
   statusTime: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
   empty: { alignItems: "center", marginTop: 60, paddingHorizontal: 40, gap: 12 },

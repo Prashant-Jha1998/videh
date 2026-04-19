@@ -76,11 +76,12 @@ export default function VidehWeb() {
       const res = await fetch(getApiUrl(`/web-session/${tok}/status`));
       const data = await res.json();
       if (!data.success) return;
-      if (data.status === "expired") { setStatus("expired"); stopPoll(); return; }
+      if (data.status === "expired") { setStatus("expired"); stopPoll(); localStorage.removeItem("videh_web_token"); return; }
       if (data.status === "linked" && data.user) {
         setUser(data.user);
         setStatus("linked");
         stopPoll();
+        localStorage.setItem("videh_web_token", tok);
         loadChats(tok);
       }
     } catch {}
@@ -123,11 +124,31 @@ export default function VidehWeb() {
   }, [token, activeChatId, msgText, loadMessages, loadChats]);
 
   useEffect(() => {
-    createSession().then((tok) => {
-      if (tok) {
-        pollRef.current = setInterval(() => pollStatus(tok), 2000);
-      }
-    });
+    const startNewSession = () => {
+      createSession().then((tok) => {
+        if (tok) pollRef.current = setInterval(() => pollStatus(tok), 2000);
+      });
+    };
+
+    const savedToken = localStorage.getItem("videh_web_token");
+    if (savedToken) {
+      fetch(getApiUrl(`/web-session/${savedToken}/status`))
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success && data.status === "linked" && data.user) {
+            setToken(savedToken);
+            setUser(data.user);
+            setStatus("linked");
+            loadChats(savedToken);
+          } else {
+            localStorage.removeItem("videh_web_token");
+            startNewSession();
+          }
+        })
+        .catch(() => { localStorage.removeItem("videh_web_token"); startNewSession(); });
+    } else {
+      startNewSession();
+    }
     return () => stopPoll();
   }, []);
 
