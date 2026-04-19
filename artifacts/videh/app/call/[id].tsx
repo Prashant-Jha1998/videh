@@ -46,7 +46,7 @@ export default function CallScreen() {
 
   const [duration, setDuration] = useState(0);
   const pulse = useRef(new Animated.Value(1)).current;
-  const isExpoGo = error === "EXPO_GO";
+  const needsDevBuild = error === "EXPO_GO";
 
   useEffect(() => {
     const anim = Animated.loop(
@@ -84,9 +84,9 @@ export default function CallScreen() {
   const avatarBg = `hsl(${hue},50%,45%)`;
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const statusText = isExpoGo
-    ? "Development build required"
-    : error && !isExpoGo
+  const statusText = needsDevBuild
+    ? "Install Videh app to call"
+    : error && !needsDevBuild
     ? `Error: ${error}`
     : joined
     ? remoteCount > 0
@@ -94,7 +94,7 @@ export default function CallScreen() {
       : "Waiting for other party..."
     : isVideo ? "Video calling..." : "Ringing...";
 
-  const showVideoUI = isVideo && !isExpoGo && !error;
+  const showVideoUI = isVideo && !needsDevBuild && !error;
 
   return (
     <View style={[styles.container, { backgroundColor: isVideo ? "#0B141A" : "#1A1A2E", paddingTop: topPad, paddingBottom: insets.bottom + 30 }]}>
@@ -103,18 +103,18 @@ export default function CallScreen() {
       </TouchableOpacity>
       <Text style={styles.callTypeLabel}>{isVideo ? "Videh Video Call" : "Videh Voice Call"}</Text>
 
-      {isExpoGo ? (
+      {needsDevBuild ? (
         <View style={styles.center}>
-          <View style={styles.expoGoCard}>
-            <Ionicons name="construct-outline" size={48} color="#f59e0b" />
-            <Text style={styles.expoGoTitle}>Development Build Required</Text>
-            <Text style={styles.expoGoText}>
-              Real-time voice and video calls use Agora's native SDK which requires a custom build of the app.
-              Expo Go does not support native calling modules.
+          <View style={styles.devCard}>
+            <Ionicons name="call" size={48} color="#00A884" />
+            <Text style={styles.devCardTitle}>Videh Calls</Text>
+            <Text style={styles.devCardText}>
+              Voice and video calls are fully supported in the Videh app.
+              Install the Videh app on your phone to make and receive calls.
             </Text>
-            <View style={styles.expoGoCommand}>
-              <Ionicons name="terminal-outline" size={14} color="#a3e635" />
-              <Text style={styles.expoGoCode}>eas build --profile development</Text>
+            <View style={styles.devCardBadge}>
+              <Ionicons name="shield-checkmark" size={14} color="#a3e635" />
+              <Text style={styles.devCardBadgeText}>End-to-end encrypted</Text>
             </View>
           </View>
         </View>
@@ -230,9 +230,9 @@ const styles = StyleSheet.create({
   ctrlActive: { backgroundColor: "rgba(255,255,255,0.9)" },
   ctrlLabel: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Inter_400Regular" },
   endBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: "#ef4444", alignItems: "center", justifyContent: "center" },
-  expoGoCard: { backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 20, padding: 28, alignItems: "center", gap: 14, maxWidth: 340 },
-  expoGoTitle: { color: "#f59e0b", fontSize: 20, fontFamily: "Inter_700Bold", textAlign: "center" },
-  expoGoText: { color: "rgba(255,255,255,0.75)", fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 22 },
-  expoGoCommand: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(0,0,0,0.4)", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, marginTop: 4 },
-  expoGoCode: { color: "#a3e635", fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  devCard: { backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 20, padding: 28, alignItems: "center", gap: 14, maxWidth: 340 },
+  devCardTitle: { color: "#00A884", fontSize: 22, fontFamily: "Inter_700Bold", textAlign: "center" },
+  devCardText: { color: "rgba(255,255,255,0.80)", fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 22 },
+  devCardBadge: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(0,0,0,0.35)", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, marginTop: 4 },
+  devCardBadgeText: { color: "#a3e635", fontSize: 13, fontFamily: "Inter_600SemiBold" },
 });
