@@ -28,7 +28,7 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
-  const { chats, sendMessage, markAsRead, deleteMessage, starMessage, forwardMessage } = useApp();
+  const { chats, sendMessage, markAsRead, deleteMessage, starMessage, forwardMessage, muteChat } = useApp();
 
   const chat = chats.find((c) => c.id === id);
   const messages = chat?.messages ?? [];
@@ -44,25 +44,10 @@ export default function ChatScreen() {
   const handleSend = useCallback(() => {
     if (!text.trim() || !id) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const msgText = replyTo ? `↩ ${replyTo.text.slice(0, 30)}\n${text.trim()}` : text.trim();
-    sendMessage(id, msgText);
+    sendMessage(id, text.trim(), replyTo?.id);
     setText("");
     setReplyTo(null);
-
-    // Simulate reply after 1-3 seconds for non-group chats
-    if (chat && !chat.isGroup) {
-      const delay = 1200 + Math.random() * 2000;
-      const replies = [
-        "Got it! 👍", "Sure!", "Ok!", "😊", "Thanks!", "Will do!",
-        "Sounds good", "Noted", "Perfect!", "👌", "Hmm, let me think...",
-        "That's great!", "Okay okay", "On it!", "Let's do it 🔥"
-      ];
-      setTimeout(() => {
-        const replyText = replies[Math.floor(Math.random() * replies.length)];
-        sendMessage(id, replyText);
-      }, delay);
-    }
-  }, [text, id, sendMessage, chat, replyTo]);
+  }, [text, id, sendMessage, replyTo]);
 
   const sendImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -225,10 +210,14 @@ export default function ChatScreen() {
             <Text style={styles.headerAvatarText}>{initials}</Text>
           </View>
         )}
-        <TouchableOpacity style={styles.headerInfo} activeOpacity={0.7}>
+        <TouchableOpacity
+          style={styles.headerInfo}
+          activeOpacity={0.7}
+          onPress={() => router.push({ pathname: "/chat-info/[id]", params: { id: id!, name: name! } })}
+        >
           <Text style={styles.headerName} numberOfLines={1}>{name ?? chat?.name}</Text>
           <Text style={styles.headerStatus}>
-            {chat?.isGroup ? `${chat.members?.length ?? 0} members` : chat?.isOnline ? "online" : "last seen recently"}
+            {chat?.isGroup ? `${chat.members?.length ?? 0} members` : chat?.isOnline ? "online" : "tap for info"}
           </Text>
         </TouchableOpacity>
         <View style={styles.headerActions}>
@@ -240,10 +229,12 @@ export default function ChatScreen() {
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerBtn} onPress={() => {
             Alert.alert(chat?.name ?? "Chat", "", [
+              { text: "ℹ️ Chat info", onPress: () => router.push({ pathname: "/chat-info/[id]", params: { id: id!, name: name! } }) },
               { text: "⭐ Starred Messages", onPress: () => router.push("/starred") },
-              { text: "🔇 Mute Notifications" },
-              { text: "📎 Media, Links, Docs" },
-              { text: "🔍 Search" },
+              { text: "🔇 Mute Notifications", onPress: () => id && muteChat(id) },
+              { text: "📎 Media, Links, Docs", onPress: () => Alert.alert("Media", "No media shared yet in this chat.") },
+              { text: "🔍 Search in chat", onPress: () => Alert.alert("Search", "In-chat search coming soon.") },
+              { text: "📤 Export chat", onPress: () => Alert.alert("Export", "Chat export coming soon.") },
               { text: "Cancel", style: "cancel" },
             ]);
           }}>

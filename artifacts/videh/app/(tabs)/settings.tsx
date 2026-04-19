@@ -86,17 +86,17 @@ export default function SettingsScreen() {
   };
 
   const rows: SettingRow[] = [
-    { icon: "key-outline", iconBg: "#2196F3", label: "Account", value: "Security notifications, change number", onPress: () => Alert.alert("Account", "Manage your account settings") },
-    { icon: "lock-closed-outline", iconBg: "#9C27B0", label: "Privacy", value: "Blocked contacts, disappearing messages", onPress: () => Alert.alert("Privacy", "Manage your privacy settings") },
-    { icon: "chatbubble-outline", iconBg: "#00BCD4", label: "Chats", value: "Theme, wallpapers, chat history", onPress: () => Alert.alert("Chats", "Manage chat settings") },
-    { icon: "radio-outline", iconBg: "#E91E63", label: "Broadcasts", value: "Manage lists and send broadcasts", onPress: () => Alert.alert("Broadcasts", "Manage broadcast lists") },
-    { icon: "notifications-outline", iconBg: "#FF5722", label: "Notifications", value: "Message, group & call tones", onPress: () => Alert.alert("Notifications", "Manage notification settings") },
-    { icon: "server-outline", iconBg: "#607D8B", label: "Storage and data", value: "Network usage, auto-download", onPress: () => Alert.alert("Storage", "Manage storage and data usage") },
-    { icon: "accessibility-outline", iconBg: "#795548", label: "Accessibility", value: "Increase contrast, animation", onPress: () => Alert.alert("Accessibility", "Accessibility options") },
-    { icon: "language-outline", iconBg: "#009688", label: "App language", value: "English (device's language)", onPress: () => Alert.alert("Language", "App language settings") },
-    { icon: "help-circle-outline", iconBg: "#3F51B5", label: "Help and feedback", value: "Help centre, contact us, privacy policy", onPress: () => Alert.alert("Help", "Visit help.videh.app for support") },
-    { icon: "person-add-outline", iconBg: "#8BC34A", label: "Invite a friend", onPress: () => Alert.alert("Invite", "Share Videh with your friends!") },
-    { icon: "phone-portrait-outline", iconBg: "#00A884", label: "App updates", onPress: () => Alert.alert("App Updates", "You are using the latest version of Videh.") },
+    { icon: "key-outline", iconBg: "#2196F3", label: "Account", value: "Security notifications, change number", onPress: () => router.push("/settings/account") },
+    { icon: "lock-closed-outline", iconBg: "#9C27B0", label: "Privacy", value: "Blocked contacts, disappearing messages", onPress: () => router.push("/settings/privacy") },
+    { icon: "chatbubble-outline", iconBg: "#00BCD4", label: "Chats", value: "Theme, wallpapers, chat history", onPress: () => router.push("/settings/chats") },
+    { icon: "radio-outline", iconBg: "#E91E63", label: "Broadcasts", value: "Manage lists and send broadcasts", onPress: () => Alert.alert("Broadcasts", "Broadcast lists coming soon. You'll be able to send messages to multiple contacts at once.") },
+    { icon: "notifications-outline", iconBg: "#FF5722", label: "Notifications", value: "Message, group & call tones", onPress: () => router.push("/settings/notifications") },
+    { icon: "server-outline", iconBg: "#607D8B", label: "Storage and data", value: "Network usage, auto-download", onPress: () => Alert.alert("Storage & Data", "Storage management coming soon.") },
+    { icon: "accessibility-outline", iconBg: "#795548", label: "Accessibility", value: "Increase contrast, animation", onPress: () => Alert.alert("Accessibility", "Accessibility options coming soon.") },
+    { icon: "language-outline", iconBg: "#009688", label: "App language", value: "English", onPress: () => Alert.alert("Language", "Currently only English is supported.") },
+    { icon: "help-circle-outline", iconBg: "#3F51B5", label: "Help and feedback", value: "Help centre, contact us, privacy policy", onPress: () => router.push("/settings/help") },
+    { icon: "person-add-outline", iconBg: "#8BC34A", label: "Invite a friend", onPress: () => Alert.alert("Invite", "Share Videh with your friends!\n\nDownload Videh – India's fastest messaging app.") },
+    { icon: "phone-portrait-outline", iconBg: "#00A884", label: "App updates", onPress: () => Alert.alert("App Updates", "You are using the latest version of Videh (v1.0.0).") },
   ];
 
   return (

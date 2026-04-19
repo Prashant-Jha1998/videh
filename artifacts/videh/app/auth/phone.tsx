@@ -120,9 +120,13 @@ export default function PhoneScreen() {
 
         <Text style={[styles.terms, { color: colors.mutedForeground }]}>
           By continuing, you agree to our{" "}
-          <Text style={{ color: colors.primary }}>Terms of Service</Text>
+          <Text style={{ color: colors.primary }} onPress={() => router.push("/legal/terms")}>
+            Terms of Service
+          </Text>
           {" "}and{" "}
-          <Text style={{ color: colors.primary }}>Privacy Policy</Text>
+          <Text style={{ color: colors.primary }} onPress={() => router.push("/legal/privacy")}>
+            Privacy Policy
+          </Text>
         </Text>
       </View>
     </KeyboardAvoidingView>

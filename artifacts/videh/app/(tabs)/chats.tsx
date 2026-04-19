@@ -58,13 +58,19 @@ export default function ChatsScreen() {
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
         <Text style={styles.headerTitle}>Videh</Text>
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/camera")}>
-            <Ionicons name="camera-outline" size={22} color="#fff" />
-          </TouchableOpacity>
           <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/contacts")}>
             <Ionicons name="person-add-outline" size={22} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerBtn}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => {
+            Alert.alert("Videh", "", [
+              { text: "New group", onPress: () => router.push("/new-group") },
+              { text: "New broadcast", onPress: () => Alert.alert("Broadcast", "Create a broadcast list to send messages to multiple contacts at once. Coming soon.") },
+              { text: "Linked devices", onPress: () => Alert.alert("Linked Devices", "Use Videh on your computer and other devices. Coming soon.") },
+              { text: "Starred messages", onPress: () => router.push("/starred") },
+              { text: "Settings", onPress: () => router.push("/(tabs)/settings") },
+              { text: "Cancel", style: "cancel" },
+            ]);
+          }}>
             <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
           </TouchableOpacity>
         </View>
@@ -111,12 +117,30 @@ export default function ChatsScreen() {
           />
         )}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="chatbubbles-outline" size={60} color={colors.mutedForeground} />
-            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-              {search ? "No chats found" : "No chats yet. Start a conversation!"}
-            </Text>
-          </View>
+          search ? (
+            <View style={styles.empty}>
+              <Ionicons name="search-outline" size={60} color={colors.mutedForeground} />
+              <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No results for "{search}"</Text>
+            </View>
+          ) : (
+            <View style={styles.emptyFull}>
+              <View style={[styles.emptyIconCircle, { backgroundColor: colors.primary + "18" }]}>
+                <Ionicons name="chatbubbles-outline" size={56} color={colors.primary} />
+              </View>
+              <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No chats yet</Text>
+              <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
+                Start a conversation with your contacts.{"\n"}Your messages are end-to-end encrypted.
+              </Text>
+              <TouchableOpacity
+                style={[styles.emptyBtn, { backgroundColor: colors.primary }]}
+                onPress={() => router.push("/contacts")}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
+                <Text style={styles.emptyBtnText}>Start a chat</Text>
+              </TouchableOpacity>
+            </View>
+          )
         }
         contentContainerStyle={{ paddingBottom: 100 }}
         scrollEnabled
@@ -219,7 +243,13 @@ const styles = StyleSheet.create({
   lastMsg: { fontSize: 14, fontFamily: "Inter_400Regular", flex: 1, marginRight: 8 },
   badge: { minWidth: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
   badgeText: { color: "#fff", fontSize: 11, fontFamily: "Inter_700Bold" },
-  empty: { alignItems: "center", marginTop: 80, gap: 12 },
+  empty: { alignItems: "center", marginTop: 80, gap: 12, paddingHorizontal: 32 },
   emptyText: { fontSize: 15, fontFamily: "Inter_400Regular", textAlign: "center" },
+  emptyFull: { alignItems: "center", marginTop: 80, gap: 16, paddingHorizontal: 40 },
+  emptyIconCircle: { width: 100, height: 100, borderRadius: 50, alignItems: "center", justifyContent: "center" },
+  emptyTitle: { fontSize: 20, fontFamily: "Inter_700Bold", textAlign: "center" },
+  emptyHint: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 21 },
+  emptyBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 14, paddingHorizontal: 28, borderRadius: 50, marginTop: 4 },
+  emptyBtnText: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   fab: { position: "absolute", bottom: 90, right: 20, width: 60, height: 60, borderRadius: 30, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 5 },
 });

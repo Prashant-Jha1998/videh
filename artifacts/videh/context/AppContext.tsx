@@ -110,81 +110,14 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | null>(null);
 
-const SAMPLE_CONTACTS: Contact[] = [
-  { id: "c1", name: "Priya Sharma", phone: "+919876543210", isOnVideh: true },
-  { id: "c2", name: "Rahul Verma", phone: "+919123456789", isOnVideh: true },
-  { id: "c3", name: "Anita Singh", phone: "+918765432109", isOnVideh: true },
-  { id: "c4", name: "Deepak Kumar", phone: "+917654321098", isOnVideh: true },
-  { id: "c5", name: "Sneha Patel", phone: "+916543210987", isOnVideh: false },
-  { id: "c6", name: "Vikas Gupta", phone: "+915432109876", isOnVideh: true },
-];
-
-const SAMPLE_CHATS: Chat[] = [
-  {
-    id: "ch1", name: "Priya Sharma",
-    lastMessage: "Hey! Are you free today? 😊", lastMessageTime: Date.now() - 5 * 60 * 1000,
-    unreadCount: 2, isGroup: false, isOnline: true, isPinned: true, isMuted: false,
-    messages: [
-      { id: "m1", text: "Hi there!", timestamp: Date.now() - 30 * 60 * 1000, senderId: "c1", type: "text", status: "read" },
-      { id: "m2", text: "Hey! Are you free today? 😊", timestamp: Date.now() - 5 * 60 * 1000, senderId: "c1", type: "text", status: "delivered" },
-    ],
-  },
-  {
-    id: "ch2", name: "Family Group",
-    lastMessage: "Rahul: Dinner at 8?", lastMessageTime: Date.now() - 20 * 60 * 1000,
-    unreadCount: 5, isGroup: true, members: ["c1", "c2", "c3"], isPinned: false, isMuted: false,
-    messages: [
-      { id: "m3", text: "Good morning family!", timestamp: Date.now() - 2 * 60 * 60 * 1000, senderId: "c1", type: "text", status: "read" },
-      { id: "m4", text: "Dinner at 8?", timestamp: Date.now() - 20 * 60 * 1000, senderId: "c2", type: "text", status: "delivered" },
-    ],
-  },
-  {
-    id: "ch3", name: "Rahul Verma",
-    lastMessage: "Ok bro 👍", lastMessageTime: Date.now() - 2 * 60 * 60 * 1000,
-    unreadCount: 0, isGroup: false, isOnline: false, isPinned: false, isMuted: true,
-    messages: [
-      { id: "m5", text: "Meeting at 3pm?", timestamp: Date.now() - 3 * 60 * 60 * 1000, senderId: "me", type: "text", status: "read" },
-      { id: "m6", text: "Ok bro 👍", timestamp: Date.now() - 2 * 60 * 60 * 1000, senderId: "c2", type: "text", status: "read" },
-    ],
-  },
-  {
-    id: "ch4", name: "Work Team",
-    lastMessage: "Anita: Please review the docs", lastMessageTime: Date.now() - 5 * 60 * 60 * 1000,
-    unreadCount: 0, isGroup: true, members: ["c3", "c4", "c6"], isPinned: false, isMuted: false,
-    messages: [
-      { id: "m7", text: "Please review the docs", timestamp: Date.now() - 5 * 60 * 60 * 1000, senderId: "c3", type: "text", status: "read" },
-    ],
-  },
-  {
-    id: "ch5", name: "Deepak Kumar",
-    lastMessage: "Call me when free", lastMessageTime: Date.now() - 24 * 60 * 60 * 1000,
-    unreadCount: 0, isGroup: false, isOnline: true, isPinned: false, isMuted: false,
-    messages: [
-      { id: "m8", text: "Call me when free", timestamp: Date.now() - 24 * 60 * 60 * 1000, senderId: "c4", type: "text", status: "read" },
-    ],
-  },
-];
-
-const SAMPLE_STATUSES: Status[] = [
-  { id: "s1", userId: "c1", userName: "Priya Sharma", content: "Beautiful morning! ☀️", type: "text", timestamp: Date.now() - 30 * 60 * 1000, viewed: false, backgroundColor: "#005C4B" },
-  { id: "s2", userId: "c2", userName: "Rahul Verma", content: "At the gym 💪", type: "text", timestamp: Date.now() - 1 * 60 * 60 * 1000, viewed: false, backgroundColor: "#00A884" },
-  { id: "s3", userId: "c4", userName: "Deepak Kumar", content: "Working from home today", type: "text", timestamp: Date.now() - 2 * 60 * 60 * 1000, viewed: true, backgroundColor: "#1A1A2E" },
-];
-
-const SAMPLE_CALLS: CallLog[] = [
-  { id: "cl1", name: "Priya Sharma", type: "audio", direction: "incoming", status: "answered", timestamp: Date.now() - 2 * 60 * 60 * 1000, duration: 185 },
-  { id: "cl2", name: "Rahul Verma", type: "video", direction: "outgoing", status: "missed", timestamp: Date.now() - 5 * 60 * 60 * 1000 },
-  { id: "cl3", name: "Deepak Kumar", type: "audio", direction: "outgoing", status: "answered", timestamp: Date.now() - 24 * 60 * 60 * 1000, duration: 62 },
-  { id: "cl4", name: "Anita Singh", type: "audio", direction: "incoming", status: "missed", timestamp: Date.now() - 2 * 24 * 60 * 60 * 1000 },
-];
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<UserProfile | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [chats, setChats] = useState<Chat[]>(SAMPLE_CHATS);
-  const [statuses, setStatuses] = useState<Status[]>(SAMPLE_STATUSES);
-  const [contacts] = useState<Contact[]>(SAMPLE_CONTACTS);
-  const [callLogs] = useState<CallLog[]>(SAMPLE_CALLS);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [statuses, setStatuses] = useState<Status[]>([]);
+  const [contacts] = useState<Contact[]>([]);
+  const [callLogs] = useState<CallLog[]>([]);
 
   useEffect(() => {
     const loadUser = async () => {

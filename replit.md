@@ -52,6 +52,27 @@ Phone number → OTP verification (Fast2SMS) → Profile setup → Main app
 - `DLT_TEMPLATE_ID` = 1007181628875366114
 - `FAST2SMS_MESSAGE_ID` = 209634
 
+### Legal Pages
+- `/app/legal/terms.tsx` — Full Terms of Service (11 sections, professionally written)
+- `/app/legal/privacy.tsx` — Full Privacy Policy (12 sections, covers E2E encryption, data rights)
+- Links in phone screen are now clickable and navigate to these pages
+
+### Settings Sub-screens
+- `/app/settings/account.tsx` — Change number, two-step verification, linked devices, delete account
+- `/app/settings/privacy.tsx` — Last seen, profile photo, about, read receipts, disappearing messages, blocked contacts
+- `/app/settings/notifications.tsx` — Per-type notification toggles, tones, vibration, popup preview
+- `/app/settings/chats.tsx` — Theme, wallpaper, font size, enter-to-send, backup, export, clear history
+- `/app/settings/help.tsx` — Help centre, contact, rate, invite, Terms and Privacy links
+
+### Additional Screens
+- `/app/chat-info/[id].tsx` — Contact/Group info with quick call buttons, media section, disappearing messages, block/report
+- Tapping contact name in chat header navigates to chat info
+- Chat "more" menu includes: Chat info, Starred messages, Mute, Media, Search in chat, Export
+
+### Removed
+- All sample/demo data (Priya Sharma, Rahul Verma, etc.) — starts clean and real
+- Auto-reply simulation in chat screen
+
 ### Database Integration
 - OTP `/verify` endpoint now **upserts user in PostgreSQL** and returns `dbId`, `name`, `about`, `avatarUrl`
 - Returning users (name already set) skip the profile screen and go straight to main app
