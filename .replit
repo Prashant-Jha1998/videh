@@ -18,3 +18,19 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 80
+
+[userenv]
+
+[userenv.shared]
+EXPO_PUBLIC_APP_NAME = "Videh"
+FAST2SMS_SENDER_ID = "VIDEHE"
+DLT_TEMPLATE_ID = "1007181628875366114"
+FAST2SMS_MESSAGE_ID = "209634"
