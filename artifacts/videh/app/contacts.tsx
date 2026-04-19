@@ -120,11 +120,22 @@ export default function ContactsScreen() {
   useEffect(() => { loadContacts(); }, []);
 
   const openChat = (contact: VidehContact) => {
-    const existing = chats.find((ch) => !ch.isGroup && ch.name === contact.videhName);
+    // Check if chat already exists by otherUserId or by name
+    const existing = chats.find(
+      (ch) => !ch.isGroup && (ch.otherUserId === contact.videhId || ch.name === contact.videhName)
+    );
     if (existing) {
       router.replace({ pathname: "/chat/[id]", params: { id: existing.id, name: contact.videhName } });
     } else {
-      router.replace({ pathname: "/chat/[id]", params: { id: `new_${contact.videhId}`, name: contact.videhName, phone: contact.normalizedPhone } });
+      router.replace({
+        pathname: "/chat/[id]",
+        params: {
+          id: `new_${contact.videhId}`,
+          name: contact.videhName,
+          otherUserId: String(contact.videhId),
+          otherAvatar: contact.avatarUrl ?? "",
+        },
+      });
     }
   };
 

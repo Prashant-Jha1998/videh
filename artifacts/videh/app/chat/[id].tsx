@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
@@ -8,7 +9,6 @@ import {
   Alert,
   Clipboard,
   FlatList,
-  Image,
   Platform,
   StyleSheet,
   Text,
@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, Message } from "@/context/AppContext";
 import { formatFullTime } from "@/utils/time";
+import { DropdownMenu } from "@/components/DropdownMenu";
 
 type ReplyData = { id: string; text: string; senderId: string } | null;
 
@@ -27,57 +28,79 @@ export default function ChatScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
-  const { chats, sendMessage, markAsRead, deleteMessage, starMessage, forwardMessage, muteChat } = useApp();
+  const { id: rawId, name, otherUserId: otherUserIdParam, otherAvatar } = useLocalSearchParams<{
+    id: string;
+    name: string;
+    otherUserId?: string;
+    otherAvatar?: string;
+  }>();
 
-  const chat = chats.find((c) => c.id === id);
+  const { chats, sendMessage, markAsRead, deleteMessage, starMessage, muteChat, createDirectChat, loadMessages } = useApp();
+
+  // For "new_" chats we resolve the real DB ID first
+  const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
+  const [initializing, setInitializing] = useState(rawId?.startsWith("new_") ?? false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Resolve "new_" chat → real DB chat
+  useEffect(() => {
+    if (!rawId?.startsWith("new_")) return;
+    const otherUId = otherUserIdParam ? Number(otherUserIdParam) : Number(rawId.replace("new_", ""));
+    if (!otherUId) { setInitializing(false); return; }
+    createDirectChat(otherUId, name ?? "Chat", otherAvatar ?? undefined)
+      .then((realId) => { setChatId(realId); setInitializing(false); })
+      .catch(() => setInitializing(false));
+  }, [rawId]);
+
+  // Load messages from DB when chatId is resolved
+  useEffect(() => {
+    if (!chatId) return;
+    markAsRead(chatId);
+    loadMessages(chatId);
+  }, [chatId]);
+
+  const chat = chats.find((c) => c.id === chatId);
   const messages = chat?.messages ?? [];
   const [text, setText] = useState("");
   const [replyTo, setReplyTo] = useState<ReplyData>(null);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
-  useEffect(() => {
-    if (id) markAsRead(id);
-  }, [id]);
-
   const handleSend = useCallback(() => {
-    if (!text.trim() || !id) return;
+    if (!text.trim() || !chatId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    sendMessage(id, text.trim(), replyTo?.id);
+    sendMessage(chatId, text.trim(), replyTo?.id);
     setText("");
     setReplyTo(null);
-  }, [text, id, sendMessage, replyTo]);
+  }, [text, chatId, sendMessage, replyTo]);
 
-  const sendImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Please allow photo library access to send images.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.7,
-    });
-    if (!result.canceled && result.assets[0] && id) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      sendMessage(id, `📷 Photo`);
+  const sendMediaMessage = async (type: "camera" | "gallery" | "document" | "location" | "contact") => {
+    if (!chatId) return;
+    if (type === "camera") {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") { Alert.alert("Permission needed"); return; }
+      const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+      if (!result.canceled) sendMessage(chatId, "📷 Photo");
+    } else if (type === "gallery") {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") { Alert.alert("Permission needed"); return; }
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7 });
+      if (!result.canceled) sendMessage(chatId, "🖼 Photo");
+    } else if (type === "document") {
+      sendMessage(chatId, "📄 Document");
+    } else if (type === "location") {
+      sendMessage(chatId, "📍 Location shared");
+    } else if (type === "contact") {
+      sendMessage(chatId, "👤 Contact shared");
     }
   };
 
   const showAttachMenu = () => {
     Alert.alert("Attach", "", [
-      { text: "📷 Camera", onPress: async () => {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== "granted") { Alert.alert("Permission needed"); return; }
-        const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
-        if (!result.canceled && id) sendMessage(id, "📷 Photo");
-      }},
-      { text: "🖼 Gallery", onPress: sendImage },
-      { text: "📄 Document", onPress: () => id && sendMessage(id, "📄 Document") },
-      { text: "📍 Location", onPress: () => id && sendMessage(id, "📍 Location shared") },
-      { text: "👤 Contact", onPress: () => id && sendMessage(id, "👤 Contact shared") },
+      { text: "📷 Camera", onPress: () => sendMediaMessage("camera") },
+      { text: "🖼 Gallery", onPress: () => sendMediaMessage("gallery") },
+      { text: "📄 Document", onPress: () => sendMediaMessage("document") },
+      { text: "📍 Location", onPress: () => sendMediaMessage("location") },
+      { text: "👤 Contact", onPress: () => sendMediaMessage("contact") },
       { text: "Cancel", style: "cancel" },
     ]);
   };
@@ -103,17 +126,8 @@ export default function ChatScreen() {
       },
       {
         text: "⭐ Star", onPress: () => {
-          starMessage?.(id!, msg.id);
+          if (chatId) starMessage(chatId, msg.id);
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          Alert.alert("Starred", "Message added to starred messages.");
-        }
-      },
-      {
-        text: "↗ Forward", onPress: () => {
-          Alert.alert("Forward", "Forward this message to another chat?", [
-            { text: "Cancel", style: "cancel" },
-            { text: "Forward", onPress: () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) },
-          ]);
         }
       },
     ];
@@ -125,7 +139,7 @@ export default function ChatScreen() {
         onPress: () => {
           Alert.alert("Delete Message", "Delete this message?", [
             { text: "Cancel", style: "cancel" },
-            { text: "Delete for me", onPress: () => deleteMessage(id!, msg.id) },
+            { text: "Delete for me", onPress: () => { if (chatId) deleteMessage(chatId, msg.id); } },
           ]);
         }
       });
@@ -138,15 +152,6 @@ export default function ChatScreen() {
   const renderMsg = ({ item }: { item: Message }) => {
     const isMe = item.senderId === "me";
     const isDeleted = item.type === "deleted";
-    const isReply = item.text.startsWith("↩ ");
-
-    let replyPart = "";
-    let mainPart = item.text;
-    if (isReply && !isDeleted) {
-      const lines = item.text.split("\n");
-      replyPart = lines[0].replace("↩ ", "");
-      mainPart = lines.slice(1).join("\n");
-    }
 
     return (
       <TouchableOpacity
@@ -161,9 +166,9 @@ export default function ChatScreen() {
             isDeleted && { opacity: 0.55 },
           ]}
         >
-          {isReply && !isDeleted && (
+          {item.replyToId && item.replyText && (
             <View style={[styles.replyStrip, { borderLeftColor: colors.primary, backgroundColor: isMe ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.07)" }]}>
-              <Text style={[styles.replyText, { color: colors.primary }]} numberOfLines={1}>{replyPart}</Text>
+              <Text style={[styles.replyText, { color: colors.primary }]} numberOfLines={1}>{item.replyText}</Text>
             </View>
           )}
           {isDeleted ? (
@@ -172,7 +177,7 @@ export default function ChatScreen() {
               <Text style={[styles.deletedText, { color: colors.mutedForeground }]}> This message was deleted</Text>
             </View>
           ) : (
-            <Text style={[styles.msgText, { color: colors.foreground }]}>{mainPart}</Text>
+            <Text style={[styles.msgText, { color: colors.foreground }]}>{item.text}</Text>
           )}
           <View style={styles.msgMeta}>
             <Text style={[styles.msgTime, { color: colors.mutedForeground }]}>
@@ -191,10 +196,20 @@ export default function ChatScreen() {
     );
   };
 
-  const initials = (name ?? "?").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
-  const hue = ((name ?? "?").charCodeAt(0) * 37) % 360;
+  const displayName = name ?? chat?.name ?? "Chat";
+  const initials = displayName.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
+  const hue = (displayName.charCodeAt(0) * 37) % 360;
   const avatarBg = `hsl(${hue},50%,40%)`;
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+
+  const chatMenuItems = [
+    { label: "Chat info", icon: "information-circle-outline", onPress: () => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } }) },
+    { label: "Starred messages", icon: "star-outline", onPress: () => router.push("/starred") },
+    { label: "Mute notifications", icon: "notifications-off-outline", onPress: () => chatId && muteChat(chatId) },
+    { label: "Media, links, docs", icon: "image-outline", onPress: () => Alert.alert("Media", "No media shared yet in this chat.") },
+    { label: "Search", icon: "search-outline", onPress: () => Alert.alert("Search", "In-chat search coming soon.") },
+    { label: "Export chat", icon: "share-outline", onPress: () => Alert.alert("Export", "Chat export coming soon.") },
+  ];
 
   return (
     <View style={[styles.container, { backgroundColor: colors.chatBackground }]}>
@@ -203,45 +218,61 @@ export default function ChatScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
-        {chat?.avatar ? (
-          <Image source={{ uri: chat.avatar }} style={styles.headerAvatarImg} />
-        ) : (
-          <View style={[styles.headerAvatar, { backgroundColor: avatarBg }]}>
+
+        <View style={[styles.headerAvatarWrap, { backgroundColor: avatarBg }]}>
+          {chat?.avatar ? (
+            <Image source={{ uri: chat.avatar }} style={styles.headerAvatarImg} contentFit="cover" />
+          ) : (
             <Text style={styles.headerAvatarText}>{initials}</Text>
-          </View>
-        )}
+          )}
+        </View>
+
         <TouchableOpacity
           style={styles.headerInfo}
           activeOpacity={0.7}
-          onPress={() => router.push({ pathname: "/chat-info/[id]", params: { id: id!, name: name! } })}
+          onPress={() => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } })}
         >
-          <Text style={styles.headerName} numberOfLines={1}>{name ?? chat?.name}</Text>
+          <Text style={styles.headerName} numberOfLines={1}>{displayName}</Text>
           <Text style={styles.headerStatus}>
-            {chat?.isGroup ? `${chat.members?.length ?? 0} members` : chat?.isOnline ? "online" : "tap for info"}
+            {chat?.isGroup
+              ? `${chat.members?.length ?? 0} members`
+              : initializing
+                ? "connecting..."
+                : chat?.isOnline
+                  ? "online"
+                  : "tap for info"}
           </Text>
         </TouchableOpacity>
+
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => router.push({ pathname: "/call/[id]", params: { id: id!, name: name!, type: "video" } })}>
+          <TouchableOpacity
+            style={styles.headerBtn}
+            onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, name: displayName, type: "video" } })}
+          >
             <Ionicons name="videocam-outline" size={22} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => router.push({ pathname: "/call/[id]", params: { id: id!, name: name!, type: "audio" } })}>
+          <TouchableOpacity
+            style={styles.headerBtn}
+            onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, name: displayName, type: "audio" } })}
+          >
             <Ionicons name="call-outline" size={22} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => {
-            Alert.alert(chat?.name ?? "Chat", "", [
-              { text: "ℹ️ Chat info", onPress: () => router.push({ pathname: "/chat-info/[id]", params: { id: id!, name: name! } }) },
-              { text: "⭐ Starred Messages", onPress: () => router.push("/starred") },
-              { text: "🔇 Mute Notifications", onPress: () => id && muteChat(id) },
-              { text: "📎 Media, Links, Docs", onPress: () => Alert.alert("Media", "No media shared yet in this chat.") },
-              { text: "🔍 Search in chat", onPress: () => Alert.alert("Search", "In-chat search coming soon.") },
-              { text: "📤 Export chat", onPress: () => Alert.alert("Export", "Chat export coming soon.") },
-              { text: "Cancel", style: "cancel" },
-            ]);
-          }}>
+          <TouchableOpacity
+            style={styles.headerBtn}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMenuOpen(true); }}
+          >
             <Ionicons name="ellipsis-vertical" size={20} color="#fff" />
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Chat three-dot dropdown */}
+      <DropdownMenu
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        items={chatMenuItems}
+        topOffset={topPad + 50}
+      />
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>
         <FlatList
@@ -253,6 +284,13 @@ export default function ChatScreen() {
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            initializing ? (
+              <View style={styles.initWrap}>
+                <Text style={[styles.initText, { color: colors.mutedForeground }]}>Starting chat...</Text>
+              </View>
+            ) : null
+          }
         />
 
         {/* Reply preview */}
@@ -260,7 +298,7 @@ export default function ChatScreen() {
           <View style={[styles.replyPreview, { backgroundColor: colors.card, borderLeftColor: colors.primary }]}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.replyPreviewLabel, { color: colors.primary }]}>
-                {replyTo.senderId === "me" ? "You" : (name ?? "Them")}
+                {replyTo.senderId === "me" ? "You" : displayName}
               </Text>
               <Text style={[styles.replyPreviewText, { color: colors.mutedForeground }]} numberOfLines={1}>
                 {replyTo.text}
@@ -274,7 +312,7 @@ export default function ChatScreen() {
 
         {/* Input bar */}
         <View style={[styles.inputBar, { backgroundColor: colors.background, paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 8) }]}>
-          <TouchableOpacity style={styles.inputIcon} onPress={() => setShowEmojiPicker(!showEmojiPicker)}>
+          <TouchableOpacity style={styles.inputIcon}>
             <Ionicons name="happy-outline" size={24} color={colors.mutedForeground} />
           </TouchableOpacity>
           <TextInput
@@ -286,6 +324,7 @@ export default function ChatScreen() {
             onChangeText={setText}
             multiline
             maxLength={2000}
+            editable={!initializing}
           />
           {!text.trim() && (
             <TouchableOpacity style={styles.inputIcon} onPress={showAttachMenu}>
@@ -293,17 +332,13 @@ export default function ChatScreen() {
             </TouchableOpacity>
           )}
           {!text.trim() && (
-            <TouchableOpacity style={styles.inputIcon} onPress={async () => {
-              const { status } = await ImagePicker.requestCameraPermissionsAsync();
-              if (status !== "granted") { Alert.alert("Permission needed"); return; }
-              const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
-              if (!result.canceled && id) sendMessage(id, "📷 Photo");
-            }}>
+            <TouchableOpacity style={styles.inputIcon} onPress={() => sendMediaMessage("camera")}>
               <Ionicons name="camera-outline" size={24} color={colors.mutedForeground} />
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            style={[styles.sendBtn, { backgroundColor: colors.primary }]}
+            style={[styles.sendBtn, { backgroundColor: colors.primary }, initializing && { opacity: 0.5 }]}
+            disabled={initializing}
             onPress={text.trim() ? handleSend : () => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               Alert.alert("Voice Message", "Hold to record a voice message");
@@ -321,14 +356,16 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 8, paddingBottom: 10, gap: 6 },
   backBtn: { padding: 6 },
-  headerAvatar: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
-  headerAvatarImg: { width: 38, height: 38, borderRadius: 19 },
+  headerAvatarWrap: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  headerAvatarImg: { width: 38, height: 38 },
   headerAvatarText: { color: "#fff", fontSize: 14, fontFamily: "Inter_700Bold" },
   headerInfo: { flex: 1 },
   headerName: { color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold" },
   headerStatus: { color: "rgba(255,255,255,0.75)", fontSize: 12, fontFamily: "Inter_400Regular" },
   headerActions: { flexDirection: "row" },
   headerBtn: { padding: 6 },
+  initWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 40 },
+  initText: { fontSize: 14, fontFamily: "Inter_400Regular" },
   msgWrap: { marginVertical: 2 },
   msgLeft: { alignItems: "flex-start" },
   msgRight: { alignItems: "flex-end" },

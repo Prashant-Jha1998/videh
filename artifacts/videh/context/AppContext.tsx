@@ -50,6 +50,7 @@ export interface Chat {
   messages: Message[];
   isPinned?: boolean;
   isMuted?: boolean;
+  otherUserId?: number;
 }
 
 export interface Status {
@@ -106,6 +107,9 @@ interface AppContextType {
   forwardMessage: (chatId: string, messageId: string, targetChatId: string) => void;
   starredMessages: Message[];
   updateAvatar: (base64: string, mimeType?: string) => Promise<void>;
+  createDirectChat: (otherUserId: number, otherName: string, otherAvatar?: string) => Promise<string>;
+  loadMessages: (chatId: string) => Promise<void>;
+  refreshChats: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -118,6 +122,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [statuses, setStatuses] = useState<Status[]>([]);
   const [contacts] = useState<Contact[]>([]);
   const [callLogs] = useState<CallLog[]>([]);
+  const userRef = useRef<UserProfile | null>(null);
+  userRef.current = user;
+
+  const mapDbChats = (rows: any[]): Chat[] =>
+    rows.map((c: any) => {
+      const otherUser = c.other_members?.[0];
+      const lastMsg = c.last_message;
+      return {
+        id: String(c.id),
+        name: c.is_group ? (c.group_name ?? "Group") : (otherUser?.name ?? "Unknown"),
+        avatar: c.is_group ? c.group_avatar_url : otherUser?.avatar_url,
+        lastMessage: lastMsg
+          ? lastMsg.is_deleted
+            ? "This message was deleted"
+            : lastMsg.content
+          : undefined,
+        lastMessageTime: lastMsg ? new Date(lastMsg.created_at).getTime() : undefined,
+        unreadCount: c.unread_count ?? 0,
+        isGroup: c.is_group,
+        isOnline: otherUser?.is_online ?? false,
+        messages: [],
+        isPinned: c.is_pinned ?? false,
+        isMuted: c.is_muted ?? false,
+        otherUserId: otherUser?.id,
+      };
+    });
+
+  const loadChats = useCallback(async (dbUserId: number) => {
+    try {
+      const data = await api(`/chats/user/${dbUserId}`) as { success: boolean; chats: any[] };
+      if (!data.success || !data.chats) return;
+      setChats(mapDbChats(data.chats));
+    } catch {}
+  }, []);
 
   useEffect(() => {
     const loadUser = async () => {
@@ -127,6 +165,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           const parsed = JSON.parse(stored) as UserProfile;
           setUserState(parsed);
           setIsAuthenticated(true);
+          if (parsed.dbId) {
+            loadChats(parsed.dbId);
+          }
         }
       } catch {}
     };
@@ -138,8 +179,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setIsAuthenticated(true);
     await AsyncStorage.setItem("videh_user", JSON.stringify(u));
 
-    // Sync to DB if we have a dbId
     if (u.dbId) {
+      loadChats(u.dbId);
       try {
         await api(`/users/${u.dbId}`, {
           method: "PUT",
@@ -147,48 +188,119 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
       } catch {}
     }
-  }, []);
+  }, [loadChats]);
+
+  const refreshChats = useCallback(async () => {
+    const u = userRef.current;
+    if (u?.dbId) await loadChats(u.dbId);
+  }, [loadChats]);
 
   const updateAvatar = useCallback(async (base64: string, mimeType = "image/jpeg") => {
-    if (!user?.dbId) {
-      // Just store locally
-      const updated = { ...user!, avatar: `data:${mimeType};base64,${base64}` };
+    const u = userRef.current;
+    if (!u?.dbId) {
+      const updated = { ...u!, avatar: `data:${mimeType};base64,${base64}` };
       setUserState(updated);
       await AsyncStorage.setItem("videh_user", JSON.stringify(updated));
       return;
     }
     try {
-      const data = await api(`/users/${user.dbId}/avatar`, {
+      const data = await api(`/users/${u.dbId}/avatar`, {
         method: "POST",
         body: JSON.stringify({ base64, mimeType }),
       }) as { success: boolean; avatarUrl?: string };
 
       if (data.success && data.avatarUrl) {
-        const updated = { ...user, avatar: data.avatarUrl };
+        const updated = { ...u, avatar: data.avatarUrl };
         setUserState(updated);
         await AsyncStorage.setItem("videh_user", JSON.stringify(updated));
       }
     } catch {
-      // Fallback: store locally
-      const updated = { ...user, avatar: `data:${mimeType};base64,${base64}` };
+      const updated = { ...u, avatar: `data:${mimeType};base64,${base64}` };
       setUserState(updated);
       await AsyncStorage.setItem("videh_user", JSON.stringify(updated));
     }
-  }, [user]);
+  }, []);
 
   const logout = useCallback(async () => {
-    if (user?.dbId) {
-      try { await api(`/users/${user.dbId}/offline`, { method: "POST" }); } catch {}
+    const u = userRef.current;
+    if (u?.dbId) {
+      try { await api(`/users/${u.dbId}/offline`, { method: "POST" }); } catch {}
     }
     setUserState(null);
     setIsAuthenticated(false);
+    setChats([]);
     await AsyncStorage.removeItem("videh_user");
-  }, [user]);
+  }, []);
+
+  // Create or get a direct chat in DB and return its ID
+  const createDirectChat = useCallback(async (otherUserId: number, otherName: string, otherAvatar?: string): Promise<string> => {
+    const u = userRef.current;
+    if (!u?.dbId) throw new Error("Not authenticated");
+
+    // Check if we already have this chat locally
+    const existing = chats.find((c) => !c.isGroup && c.otherUserId === otherUserId);
+    if (existing) return existing.id;
+
+    const data = await api("/chats/direct", {
+      method: "POST",
+      body: JSON.stringify({ userId: u.dbId, otherUserId }),
+    }) as { success: boolean; chatId?: number };
+
+    if (!data.success || !data.chatId) throw new Error("Failed to create chat");
+
+    const realId = String(data.chatId);
+
+    // Add or update in local state
+    setChats((prev) => {
+      const idx = prev.findIndex((c) => c.id === realId);
+      if (idx !== -1) return prev;
+      return [{
+        id: realId,
+        name: otherName,
+        avatar: otherAvatar,
+        unreadCount: 0,
+        isGroup: false,
+        messages: [],
+        isPinned: false,
+        isMuted: false,
+        otherUserId,
+      }, ...prev];
+    });
+
+    return realId;
+  }, [chats]);
+
+  // Load messages for a chat from DB
+  const loadMessages = useCallback(async (chatId: string) => {
+    try {
+      const data = await api(`/chats/${chatId}/messages?limit=60`) as { success: boolean; messages: any[] };
+      if (!data.success || !data.messages) return;
+
+      const u = userRef.current;
+      const msgs: Message[] = data.messages.map((m: any) => ({
+        id: String(m.id),
+        text: m.is_deleted ? "This message was deleted" : (m.content ?? ""),
+        timestamp: new Date(m.created_at).getTime(),
+        senderId: String(m.sender_id) === String(u?.dbId) ? "me" : String(m.sender_id),
+        type: m.is_deleted ? "deleted" : (m.type ?? "text"),
+        status: "delivered",
+        isStarred: m.is_starred,
+        replyToId: m.reply_to_id ? String(m.reply_to_id) : undefined,
+        replyText: m.reply_content ?? undefined,
+      }));
+
+      setChats((prev) =>
+        prev.map((c) => c.id === chatId ? { ...c, messages: msgs } : c)
+      );
+    } catch {}
+  }, []);
 
   const sendMessage = useCallback((chatId: string, text: string, replyToId?: string) => {
     if (!text.trim()) return;
+    const u = userRef.current;
+    const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
     const newMsg: Message = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      id: tempId,
       text,
       timestamp: Date.now(),
       senderId: "me",
@@ -204,49 +316,69 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       )
     );
 
-    // Try to persist to DB
-    if (user?.dbId) {
+    if (u?.dbId) {
       api(`/chats/${chatId}/messages`, {
         method: "POST",
-        body: JSON.stringify({ senderId: user.dbId, content: text, type: "text", replyToId }),
+        body: JSON.stringify({ senderId: u.dbId, content: text, type: "text", replyToId: replyToId ? Number(replyToId) : undefined }),
+      }).then((data: any) => {
+        if (data?.success && data.message) {
+          // Replace temp message with DB message
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === chatId
+                ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(data.message.id), status: "delivered" } : m) }
+                : c
+            )
+          );
+        }
       }).catch(() => {});
     }
-  }, [user]);
+  }, []);
 
   const markAsRead = useCallback((chatId: string) => {
     setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, unreadCount: 0 } : c));
-    if (user?.dbId) {
+    const u = userRef.current;
+    if (u?.dbId) {
       api(`/chats/${chatId}/read`, {
         method: "POST",
-        body: JSON.stringify({ userId: user.dbId }),
+        body: JSON.stringify({ userId: u.dbId }),
       }).catch(() => {});
     }
-  }, [user]);
+  }, []);
 
   const createGroup = useCallback((name: string, memberIds: string[]) => {
-    const newGroup: Chat = {
-      id: Date.now().toString(), name, unreadCount: 0, isGroup: true,
-      members: memberIds, messages: [], isPinned: false, isMuted: false,
-    };
-    setChats((prev) => [newGroup, ...prev]);
+    const u = userRef.current;
+    if (!u?.dbId) return;
+    api("/chats/group", {
+      method: "POST",
+      body: JSON.stringify({ creatorId: u.dbId, name, memberIds: memberIds.map(Number) }),
+    }).then((data: any) => {
+      if (data?.success && data.chatId) {
+        setChats((prev) => [{
+          id: String(data.chatId), name, unreadCount: 0, isGroup: true,
+          members: memberIds, messages: [], isPinned: false, isMuted: false,
+        }, ...prev]);
+      }
+    }).catch(() => {});
   }, []);
 
   const addStatus = useCallback((content: string, type: "text" | "image", bg?: string) => {
-    if (!user) return;
+    const u = userRef.current;
+    if (!u) return;
     const newStatus: Status = {
-      id: Date.now().toString(), userId: "me", userName: user.name,
+      id: Date.now().toString(), userId: "me", userName: u.name,
       content, type, timestamp: Date.now(), viewed: false,
       backgroundColor: bg ?? "#00A884",
     };
     setStatuses((prev) => [newStatus, ...prev]);
 
-    if (user.dbId) {
+    if (u.dbId) {
       api("/statuses", {
         method: "POST",
-        body: JSON.stringify({ userId: user.dbId, content, type, backgroundColor: bg ?? "#00A884" }),
+        body: JSON.stringify({ userId: u.dbId, content, type, backgroundColor: bg ?? "#00A884" }),
       }).catch(() => {});
     }
-  }, [user]);
+  }, []);
 
   const deleteMessage = useCallback((chatId: string, messageId: string) => {
     setChats((prev) =>
@@ -256,13 +388,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           : c
       )
     );
-    if (user?.dbId) {
+    const u = userRef.current;
+    if (u?.dbId) {
       api(`/chats/${chatId}/messages/${messageId}`, {
         method: "DELETE",
-        body: JSON.stringify({ userId: user.dbId }),
+        body: JSON.stringify({ userId: u.dbId }),
       }).catch(() => {});
     }
-  }, [user]);
+  }, []);
 
   const pinChat = useCallback((chatId: string) => {
     setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, isPinned: !c.isPinned } : c));
@@ -310,6 +443,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setUser, logout, sendMessage, createGroup, markAsRead,
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, forwardMessage, starredMessages, updateAvatar,
+      createDirectChat, loadMessages, refreshChats,
     }}>
       {children}
     </AppContext.Provider>

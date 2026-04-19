@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -16,14 +17,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, Chat } from "@/context/AppContext";
 import { formatTime } from "@/utils/time";
+import { DropdownMenu } from "@/components/DropdownMenu";
 
 export default function ChatsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { chats, pinChat, muteChat, archiveChat } = useApp();
+  const { chats, pinChat, muteChat, archiveChat, refreshChats } = useApp();
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"all" | "unread" | "groups">("all");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const filtered = chats.filter((c) => {
     const matchSearch = c.name.toLowerCase().includes(search.toLowerCase());
@@ -52,6 +55,15 @@ export default function ChatsScreen() {
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
+  const menuItems = [
+    { label: "New group", icon: "people-outline", onPress: () => router.push("/new-group") },
+    { label: "New broadcast", icon: "radio-outline", onPress: () => Alert.alert("Broadcast", "Broadcast lists coming soon.") },
+    { label: "Linked devices", icon: "phone-portrait-outline", onPress: () => Alert.alert("Linked Devices", "Use Videh on your computer. Coming soon.") },
+    { label: "Starred messages", icon: "star-outline", onPress: () => router.push("/starred") },
+    { label: "Read all", icon: "checkmark-done-outline", onPress: () => refreshChats() },
+    { label: "Settings", icon: "settings-outline", onPress: () => router.push("/(tabs)/settings") },
+  ];
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
@@ -61,20 +73,22 @@ export default function ChatsScreen() {
           <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/contacts")}>
             <Ionicons name="person-add-outline" size={22} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => {
-            Alert.alert("Videh", "", [
-              { text: "New group", onPress: () => router.push("/new-group") },
-              { text: "New broadcast", onPress: () => Alert.alert("Broadcast", "Create a broadcast list to send messages to multiple contacts at once. Coming soon.") },
-              { text: "Linked devices", onPress: () => Alert.alert("Linked Devices", "Use Videh on your computer and other devices. Coming soon.") },
-              { text: "Starred messages", onPress: () => router.push("/starred") },
-              { text: "Settings", onPress: () => router.push("/(tabs)/settings") },
-              { text: "Cancel", style: "cancel" },
-            ]);
-          }}>
+          <TouchableOpacity
+            style={styles.headerBtn}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMenuOpen(true); }}
+          >
             <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* WhatsApp-style dropdown */}
+      <DropdownMenu
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        items={menuItems}
+        topOffset={topPad + 46}
+      />
 
       {/* Search */}
       <View style={[styles.searchBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -180,8 +194,12 @@ function ChatRow({
       onLongPress={onLongPress}
       activeOpacity={0.7}
     >
-      <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
-        <Text style={styles.avatarText}>{initials}</Text>
+      <View style={[styles.avatarWrap, { backgroundColor: avatarBg }]}>
+        {chat.avatar ? (
+          <Image source={{ uri: chat.avatar }} style={styles.avatarImg} contentFit="cover" />
+        ) : (
+          <Text style={styles.avatarText}>{initials}</Text>
+        )}
         {!chat.isGroup && chat.isOnline && (
           <View style={[styles.onlineDot, { backgroundColor: colors.onlineGreen }]} />
         )}
@@ -231,7 +249,8 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   tabLine: { position: "absolute", bottom: 0, height: 2, width: "80%", borderRadius: 1 },
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 0.5 },
-  avatar: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", marginRight: 12, position: "relative" },
+  avatarWrap: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", marginRight: 12, position: "relative", overflow: "hidden" },
+  avatarImg: { width: 52, height: 52 },
   avatarText: { color: "#fff", fontSize: 18, fontFamily: "Inter_700Bold" },
   onlineDot: { width: 14, height: 14, borderRadius: 7, position: "absolute", bottom: 1, right: 1, borderWidth: 2, borderColor: "#fff" },
   rowContent: { flex: 1 },

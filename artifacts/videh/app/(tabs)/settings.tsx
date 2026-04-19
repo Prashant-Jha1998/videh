@@ -1,11 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React from "react";
 import {
   Alert,
-  Image,
   Platform,
   ScrollView,
   StyleSheet,
@@ -119,7 +119,7 @@ export default function SettingsScreen() {
         <View style={[styles.profileBlock, { backgroundColor: colors.card }]}>
           <TouchableOpacity style={styles.avatarContainer} onPress={changeAvatar} activeOpacity={0.85}>
             {user?.avatar ? (
-              <Image source={{ uri: user.avatar }} style={styles.avatar} />
+              <Image source={{ uri: user.avatar }} style={styles.avatar} contentFit="cover" />
             ) : (
               <View style={[styles.avatarFallback, { backgroundColor: colors.primary }]}>
                 <Text style={styles.avatarInitials}>{initials || "?"}</Text>
