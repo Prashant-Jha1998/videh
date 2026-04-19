@@ -25,6 +25,7 @@ export default function PhoneScreen() {
   const router = useRouter();
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   const isValid = phone.length === 10 && /^\d+$/.test(phone);
 
@@ -100,11 +101,11 @@ export default function PhoneScreen() {
         <TouchableOpacity
           style={[
             styles.button,
-            { backgroundColor: isValid ? colors.primary : colors.muted },
-            !isValid && { opacity: 0.5 },
+            { backgroundColor: isValid && termsAccepted ? colors.primary : colors.muted },
+            (!isValid || !termsAccepted) && { opacity: 0.5 },
           ]}
           onPress={sendOtp}
-          disabled={!isValid || loading}
+          disabled={!isValid || !termsAccepted || loading}
           activeOpacity={0.8}
           testID="send-otp-btn"
         >
@@ -112,22 +113,45 @@ export default function PhoneScreen() {
             <ActivityIndicator color="#fff" />
           ) : (
             <>
-              <Text style={[styles.buttonText, { color: isValid ? "#fff" : colors.mutedForeground }]}>Send OTP</Text>
-              <Ionicons name="arrow-forward" size={20} color={isValid ? "#fff" : colors.mutedForeground} />
+              <Text style={[styles.buttonText, { color: isValid && termsAccepted ? "#fff" : colors.mutedForeground }]}>Send OTP</Text>
+              <Ionicons name="arrow-forward" size={20} color={isValid && termsAccepted ? "#fff" : colors.mutedForeground} />
             </>
           )}
         </TouchableOpacity>
 
-        <Text style={[styles.terms, { color: colors.mutedForeground }]}>
-          By continuing, you agree to our{" "}
-          <Text style={{ color: colors.primary }} onPress={() => router.push("/legal/terms")}>
-            Terms of Service
+        {/* Mandatory Terms checkbox */}
+        <TouchableOpacity
+          style={styles.termsRow}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setTermsAccepted(!termsAccepted); }}
+          activeOpacity={0.7}
+        >
+          <View style={[
+            styles.checkbox,
+            {
+              borderColor: termsAccepted ? colors.primary : colors.mutedForeground,
+              backgroundColor: termsAccepted ? colors.primary : "transparent",
+            },
+          ]}>
+            {termsAccepted && <Ionicons name="checkmark" size={13} color="#fff" />}
+          </View>
+          <Text style={[styles.terms, { color: colors.mutedForeground, flex: 1 }]}>
+            I agree to the{" "}
+            <Text
+              style={{ color: colors.primary }}
+              onPress={(e) => { e.stopPropagation(); router.push("/legal/terms"); }}
+            >
+              Terms of Service
+            </Text>
+            {" "}and{" "}
+            <Text
+              style={{ color: colors.primary }}
+              onPress={(e) => { e.stopPropagation(); router.push("/legal/privacy"); }}
+            >
+              Privacy Policy
+            </Text>
+            <Text style={{ color: "#e53e3e" }}> *</Text>
           </Text>
-          {" "}and{" "}
-          <Text style={{ color: colors.primary }} onPress={() => router.push("/legal/privacy")}>
-            Privacy Policy
-          </Text>
-        </Text>
+        </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
@@ -146,7 +170,9 @@ const styles = StyleSheet.create({
   countryText: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
   input: { flex: 1, fontSize: 17, fontFamily: "Inter_400Regular", paddingVertical: 14, paddingHorizontal: 14 },
   hint: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 12, textAlign: "center" },
-  button: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, paddingHorizontal: 40, borderRadius: 50, width: "100%", marginBottom: 24 },
+  button: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, paddingHorizontal: 40, borderRadius: 50, width: "100%", marginBottom: 16 },
   buttonText: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
-  terms: { fontSize: 12, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 18 },
+  termsRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, width: "100%", paddingHorizontal: 4 },
+  checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 2, alignItems: "center", justifyContent: "center", marginTop: 1, flexShrink: 0 },
+  terms: { fontSize: 12, fontFamily: "Inter_400Regular", textAlign: "left", lineHeight: 18 },
 });
