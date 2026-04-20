@@ -90,6 +90,7 @@ export interface CallLog {
 interface AppContextType {
   user: UserProfile | null;
   isAuthenticated: boolean;
+  isInitialized: boolean;
   chats: Chat[];
   statuses: Status[];
   contacts: Contact[];
@@ -119,6 +120,7 @@ const AppContext = createContext<AppContextType | null>(null);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<UserProfile | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
   const [chats, setChats] = useState<Chat[]>([]);
   const [statuses, setStatuses] = useState<Status[]>([]);
   const [contacts] = useState<Contact[]>([]);
@@ -171,6 +173,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } catch {}
+      finally {
+        setIsInitialized(true);
+      }
     };
     loadUser();
   }, []);
@@ -442,7 +447,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      user, isAuthenticated, chats, statuses, contacts, callLogs,
+      user, isAuthenticated, isInitialized, chats, statuses, contacts, callLogs,
       setUser, logout, sendMessage, createGroup, markAsRead,
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, forwardMessage, starredMessages, updateAvatar,

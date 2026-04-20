@@ -14,15 +14,16 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
-  const { isAuthenticated } = useApp();
+  const { isAuthenticated, isInitialized } = useApp();
   const router = useRouter();
 
-  // Watch auth state — redirect to login on logout
+  // Wait for AsyncStorage to load before deciding where to route
   useEffect(() => {
+    if (!isInitialized) return;
     if (!isAuthenticated) {
       router.replace("/auth/phone");
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isInitialized]);
 
   return (
     <Stack screenOptions={{ headerShown: false }}>

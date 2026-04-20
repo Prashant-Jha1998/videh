@@ -6,7 +6,7 @@ import { useApp } from "@/context/AppContext";
 
 export default function Index() {
   const router = useRouter();
-  const { isAuthenticated, user } = useApp();
+  const { isAuthenticated, isInitialized, user } = useApp();
   const [splashDone, setSplashDone] = useState(false);
 
   const handleSplashDone = () => {
@@ -14,7 +14,7 @@ export default function Index() {
   };
 
   useEffect(() => {
-    if (!splashDone) return;
+    if (!splashDone || !isInitialized) return;
     if (isAuthenticated && user?.name) {
       router.replace("/(tabs)/chats");
     } else if (isAuthenticated && !user?.name) {
@@ -22,7 +22,7 @@ export default function Index() {
     } else {
       router.replace("/auth/phone");
     }
-  }, [splashDone, isAuthenticated, user?.name]);
+  }, [splashDone, isAuthenticated, isInitialized, user?.name]);
 
   return (
     <View style={styles.container}>
