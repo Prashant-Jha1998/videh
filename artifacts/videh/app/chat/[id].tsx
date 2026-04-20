@@ -286,6 +286,7 @@ export default function ChatScreen() {
       { text: "⭐ Star", onPress: () => { if (chatId) starMessage(chatId, msg.id); } },
     ];
     if (isMe) {
+      opts.push({ text: "ℹ️ Info", onPress: () => router.push({ pathname: "/chat/message-info", params: { chatId: chatId!, messageId: msg.id } }) });
       opts.push({ text: "✏️ Edit", onPress: () => { setEditTarget(msg); setEditText(msg.text); inputRef.current?.focus(); } });
       opts.push({
         text: "🗑 Delete for me",

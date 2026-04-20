@@ -329,4 +329,110 @@ router.post("/:chatId/read", async (req: Request, res: Response) => {
   }
 });
 
+// Get chat details (for chat-info screen)
+router.get("/:chatId/details", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  try {
+    const result = await query(`
+      SELECT id, is_group, group_name, group_avatar_url, group_description, disappear_after_seconds
+      FROM chats WHERE id = $1
+    `, [chatId]);
+    if (result.rows.length === 0) { res.status(404).json({ success: false }); return; }
+    res.json({ success: true, chat: result.rows[0] });
+  } catch { res.status(500).json({ success: false }); }
+});
+
+// Get group members (with real data)
+router.get("/:chatId/members", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  try {
+    const result = await query(`
+      SELECT u.id, u.name, u.phone, u.avatar_url, u.about, u.is_online, u.last_seen,
+             cm.is_admin, cm.joined_at
+      FROM chat_members cm JOIN users u ON u.id = cm.user_id
+      WHERE cm.chat_id = $1
+      ORDER BY cm.is_admin DESC, u.name ASC
+    `, [chatId]);
+    res.json({ success: true, members: result.rows });
+  } catch { res.status(500).json({ success: false }); }
+});
+
+// Add member to group
+router.post("/:chatId/members", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { userId, requesterId } = req.body as { userId?: number; requesterId?: number };
+  if (!userId) { res.status(400).json({ success: false }); return; }
+  try {
+    // Check requester is admin
+    const adminCheck = await query("SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2", [chatId, requesterId]);
+    if (!adminCheck.rows[0]?.is_admin) { res.status(403).json({ success: false, message: "Not admin" }); return; }
+    await query(
+      "INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+      [chatId, userId]
+    );
+    res.json({ success: true });
+  } catch { res.status(500).json({ success: false }); }
+});
+
+// Remove member from group
+router.delete("/:chatId/members/:memberId", async (req: Request, res: Response) => {
+  const { chatId, memberId } = req.params;
+  const { requesterId } = req.body as { requesterId?: number };
+  try {
+    // Admin or self-leave
+    const adminCheck = await query("SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2", [chatId, requesterId]);
+    if (!adminCheck.rows[0]?.is_admin && String(requesterId) !== memberId) {
+      res.status(403).json({ success: false, message: "Not admin" }); return;
+    }
+    await query("DELETE FROM chat_members WHERE chat_id = $1 AND user_id = $2", [chatId, memberId]);
+    res.json({ success: true });
+  } catch { res.status(500).json({ success: false }); }
+});
+
+// Toggle admin
+router.put("/:chatId/members/:memberId/admin", async (req: Request, res: Response) => {
+  const { chatId, memberId } = req.params;
+  const { requesterId, isAdmin } = req.body as { requesterId?: number; isAdmin?: boolean };
+  try {
+    const adminCheck = await query("SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2", [chatId, requesterId]);
+    if (!adminCheck.rows[0]?.is_admin) { res.status(403).json({ success: false }); return; }
+    await query("UPDATE chat_members SET is_admin = $1 WHERE chat_id = $2 AND user_id = $3", [isAdmin ?? true, chatId, memberId]);
+    res.json({ success: true });
+  } catch { res.status(500).json({ success: false }); }
+});
+
+// Update group description
+router.put("/:chatId/description", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { description, requesterId } = req.body as { description?: string; requesterId?: number };
+  try {
+    await query("UPDATE chats SET group_description = $1 WHERE id = $2", [description ?? null, chatId]);
+    res.json({ success: true });
+  } catch { res.status(500).json({ success: false }); }
+});
+
+// Set disappearing messages
+router.put("/:chatId/disappear", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { seconds } = req.body as { seconds?: number | null };
+  try {
+    await query("UPDATE chats SET disappear_after_seconds = $1 WHERE id = $2", [seconds ?? null, chatId]);
+    res.json({ success: true });
+  } catch { res.status(500).json({ success: false }); }
+});
+
+// Message info (delivery/read status for each recipient)
+router.get("/:chatId/messages/:messageId/info", async (req: Request, res: Response) => {
+  const { messageId } = req.params;
+  try {
+    const result = await query(`
+      SELECT ms.user_id, ms.status, ms.updated_at, u.name, u.avatar_url
+      FROM message_status ms JOIN users u ON u.id = ms.user_id
+      WHERE ms.message_id = $1
+      ORDER BY CASE ms.status WHEN 'read' THEN 0 WHEN 'delivered' THEN 1 ELSE 2 END, u.name
+    `, [messageId]);
+    res.json({ success: true, receipts: result.rows });
+  } catch { res.status(500).json({ success: false }); }
+});
+
 export default router;

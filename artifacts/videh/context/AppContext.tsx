@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 
 const BASE_URL = (() => {
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
@@ -133,6 +134,9 @@ interface AppContextType {
   deleteForEveryone: (chatId: string, messageId: string) => void;
   editMessage: (chatId: string, messageId: string, newText: string) => void;
   reactToMessage: (chatId: string, messageId: string, emoji: string) => void;
+  blockUser: (otherUserId: number) => Promise<void>;
+  unblockUser: (otherUserId: number) => Promise<void>;
+  setChatDisappear: (chatId: string, seconds: number | null) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -241,6 +245,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (uid) loadCallLogs(uid);
     }, 30000);
     return () => { clearInterval(chatTimer); clearInterval(callTimer); };
+  }, [isAuthenticated]);
+
+  // Online presence tracking via AppState
+  useEffect(() => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      const uid = userRef.current?.dbId;
+      if (!uid) return;
+      if (nextState === "active") {
+        api(`/users/${uid}/online`, { method: "POST" }).catch(() => {});
+      } else if (nextState === "background" || nextState === "inactive") {
+        api(`/users/${uid}/offline`, { method: "POST" }).catch(() => {});
+      }
+    };
+    const sub = AppState.addEventListener("change", handleAppStateChange);
+    return () => sub.remove();
   }, [isAuthenticated]);
 
   const setUser = useCallback(async (u: UserProfile) => {
@@ -716,6 +735,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const starredMessages = chats.flatMap((c) => c.messages.filter((m) => m.isStarred));
 
+  const blockUser = useCallback(async (otherUserId: number) => {
+    const uid = userRef.current?.dbId;
+    if (!uid) return;
+    await api(`/users/${otherUserId}/block`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ blockerId: uid }),
+    }).catch(() => {});
+  }, []);
+
+  const unblockUser = useCallback(async (otherUserId: number) => {
+    const uid = userRef.current?.dbId;
+    if (!uid) return;
+    await api(`/users/${otherUserId}/block`, {
+      method: "DELETE", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ blockerId: uid }),
+    }).catch(() => {});
+  }, []);
+
+  const setChatDisappear = useCallback(async (chatId: string, seconds: number | null) => {
+    await api(`/chats/${chatId}/disappear`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ seconds }),
+    }).catch(() => {});
+  }, []);
+
   return (
     <AppContext.Provider value={{
       user, isAuthenticated, isInitialized, chats, statuses, contacts, callLogs,
@@ -725,6 +769,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       createDirectChat, loadMessages, refreshChats,
       sendImageMessage, sendAudioMessage, setTyping, clearTyping,
       deleteForEveryone, editMessage, reactToMessage,
+      blockUser, unblockUser, setChatDisappear,
     }}>
       {children}
     </AppContext.Provider>

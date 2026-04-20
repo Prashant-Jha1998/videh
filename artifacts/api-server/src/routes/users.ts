@@ -71,6 +71,14 @@ router.post("/:id/avatar", async (req: Request, res: Response) => {
   }
 });
 
+// Set online
+router.post("/:id/online", async (req: Request, res: Response) => {
+  try {
+    await query("UPDATE users SET is_online = TRUE WHERE id = $1", [req.params.id]);
+    res.json({ success: true });
+  } catch { res.status(500).json({ success: false }); }
+});
+
 // Set offline
 router.post("/:id/offline", async (req: Request, res: Response) => {
   try {
@@ -79,6 +87,39 @@ router.post("/:id/offline", async (req: Request, res: Response) => {
   } catch (err) {
     res.status(500).json({ success: false });
   }
+});
+
+// Block user
+router.post("/:id/block", async (req: Request, res: Response) => {
+  const { blockerId } = req.body as { blockerId?: number };
+  if (!blockerId) { res.status(400).json({ success: false }); return; }
+  try {
+    await query(
+      "INSERT INTO blocked_users (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+      [blockerId, req.params.id]
+    );
+    res.json({ success: true });
+  } catch { res.status(500).json({ success: false }); }
+});
+
+// Unblock user
+router.delete("/:id/block", async (req: Request, res: Response) => {
+  const { blockerId } = req.body as { blockerId?: number };
+  try {
+    await query("DELETE FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2", [blockerId, req.params.id]);
+    res.json({ success: true });
+  } catch { res.status(500).json({ success: false }); }
+});
+
+// Get blocked users
+router.get("/:id/blocked", async (req: Request, res: Response) => {
+  try {
+    const result = await query(`
+      SELECT u.id, u.name, u.phone, u.avatar_url FROM blocked_users b
+      JOIN users u ON u.id = b.blocked_id WHERE b.blocker_id = $1
+    `, [req.params.id]);
+    res.json({ success: true, blocked: result.rows });
+  } catch { res.status(500).json({ success: false }); }
 });
 
 // Bulk check which phone numbers are registered on Videh

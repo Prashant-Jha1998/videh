@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { VideoView, useVideoPlayer } from "expo-video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   Dimensions,
   Modal,
@@ -61,7 +62,7 @@ export default function ViewStatusScreen() {
   const params = useLocalSearchParams<{ ids?: string; id?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { statuses, user } = useApp();
+  const { statuses, user, createDirectChat, sendMessage } = useApp();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const ids = params.ids
@@ -149,6 +150,26 @@ export default function ViewStatusScreen() {
       const listener = progress.addListener(({ value }) => { pausedProgressRef.current = value; });
       progress.removeAllListeners();
       setPaused(true);
+    }
+  };
+
+  const sendReply = async () => {
+    if (!currentStatus || !user?.dbId || !reply.trim()) return;
+    try {
+      const otherUserId = currentStatus.userId === "me"
+        ? (user.dbId as number)
+        : parseInt(currentStatus.userId, 10);
+      const chatId = await createDirectChat(
+        otherUserId,
+        currentStatus.userName ?? "Contact",
+        currentStatus.userAvatar
+      );
+      sendMessage(chatId, reply.trim());
+      setReply("");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert("Sent!", `Your reply was sent to ${currentStatus.userName ?? "Contact"}.`);
+    } catch {
+      Alert.alert("Error", "Could not send reply.");
     }
   };
 
@@ -296,7 +317,6 @@ export default function ViewStatusScreen() {
           /* Others' status: reply + reaction */
           <View style={styles.replyRow}>
             <View style={[styles.replyBar, { flex: 1 }]}>
-              <Ionicons name="happy-outline" size={20} color="rgba(255,255,255,0.7)" />
               <TextInput
                 style={styles.replyInput}
                 value={reply}
@@ -305,12 +325,14 @@ export default function ViewStatusScreen() {
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 onFocus={() => { animRef.current?.stop(); setPaused(true); }}
                 onBlur={() => { if (paused) { startAnim(currentIdx, pausedProgressRef.current); setPaused(false); } }}
+                returnKeyType="send"
+                onSubmitEditing={sendReply}
               />
-              {reply.length > 0 && (
-                <TouchableOpacity onPress={() => setReply("")}>
-                  <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.5)" />
+              {reply.length > 0 ? (
+                <TouchableOpacity onPress={sendReply} style={styles.sendBtn}>
+                  <Ionicons name="send" size={18} color="#fff" />
                 </TouchableOpacity>
-              )}
+              ) : null}
             </View>
             <TouchableOpacity
               style={[styles.reactionToggle, myReaction ? styles.reactionToggleActive : {}]}
@@ -379,6 +401,7 @@ const styles = StyleSheet.create({
   replyRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   replyBar: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.3)", borderRadius: 50, paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
   replyInput: { flex: 1, color: "#fff", fontSize: 14 },
+  sendBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#25D366", alignItems: "center", justifyContent: "center" },
   reactionToggle: { width: 50, height: 50, borderRadius: 25, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.3)", alignItems: "center", justifyContent: "center" },
   reactionToggleActive: { borderColor: "#fff", backgroundColor: "rgba(255,255,255,0.15)" },
   reactionToggleText: { fontSize: 24 },
