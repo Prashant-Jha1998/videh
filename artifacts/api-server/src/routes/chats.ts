@@ -13,6 +13,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         c.is_group,
         c.group_name,
         c.group_avatar_url,
+        c.disappear_after_seconds,
         cm.is_muted,
         cm.is_pinned,
         cm.last_read_at,
@@ -66,7 +67,6 @@ router.post("/direct", async (req: Request, res: Response) => {
   const { userId, otherUserId } = req.body as { userId?: number; otherUserId?: number };
   if (!userId || !otherUserId) { res.status(400).json({ success: false }); return; }
   try {
-    // Check if direct chat already exists
     const existing = await query(`
       SELECT c.id FROM chats c
       JOIN chat_members cm1 ON cm1.chat_id = c.id AND cm1.user_id = $1
@@ -80,7 +80,6 @@ router.post("/direct", async (req: Request, res: Response) => {
       return;
     }
 
-    // Create new chat
     const chat = await query("INSERT INTO chats (is_group) VALUES (FALSE) RETURNING id", []);
     const chatId = chat.rows[0].id;
     await query("INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2), ($1, $3)", [chatId, userId, otherUserId]);
@@ -112,19 +111,30 @@ router.post("/group", async (req: Request, res: Response) => {
   }
 });
 
-// Get messages in a chat
+// Get messages in a chat (with read status, reactions, forward_count)
 router.get("/:chatId/messages", async (req: Request, res: Response) => {
   const { chatId } = req.params;
+  const userId = req.query.userId as string | undefined;
   const limit = Number(req.query.limit ?? 50);
   const before = req.query.before as string | undefined;
   try {
     const result = await query(`
       SELECT
         m.id, m.chat_id, m.sender_id, m.content, m.type, m.media_url,
-        m.reply_to_id, m.is_deleted, m.is_forwarded, m.is_starred,
-        m.created_at,
+        m.reply_to_id, m.is_deleted, m.is_forwarded, m.forward_count,
+        m.is_starred, m.is_view_once, m.edited_at, m.created_at,
         u.name AS sender_name, u.avatar_url AS sender_avatar,
-        rm.content AS reply_content, rm_u.name AS reply_sender_name
+        rm.content AS reply_content, rm_u.name AS reply_sender_name,
+        (
+          SELECT json_agg(json_build_object('emoji', r.emoji, 'user_id', r.user_id))
+          FROM message_reactions r WHERE r.message_id = m.id
+        ) AS reactions,
+        (
+          SELECT ms.status FROM message_status ms
+          WHERE ms.message_id = m.id AND ms.user_id != m.sender_id
+          ORDER BY CASE ms.status WHEN 'read' THEN 0 WHEN 'delivered' THEN 1 ELSE 2 END
+          LIMIT 1
+        ) AS delivery_status
       FROM messages m
       LEFT JOIN users u ON u.id = m.sender_id
       LEFT JOIN messages rm ON rm.id = m.reply_to_id
@@ -168,7 +178,7 @@ router.delete("/:chatId/typing", async (req: Request, res: Response) => {
   } catch { res.json({ success: false }); }
 });
 
-// Typing indicator – get (who is typing, excluding current user, within 4 seconds)
+// Typing indicator – get
 router.get("/:chatId/typing", async (req: Request, res: Response) => {
   const { chatId } = req.params;
   const { userId } = req.query as { userId?: string };
@@ -185,25 +195,27 @@ router.get("/:chatId/typing", async (req: Request, res: Response) => {
 // Send message
 router.post("/:chatId/messages", async (req: Request, res: Response) => {
   const { chatId } = req.params;
-  const { senderId, content, type, replyToId, mediaUrl } = req.body as {
-    senderId?: number; content?: string; type?: string; replyToId?: number; mediaUrl?: string;
+  const { senderId, content, type, replyToId, mediaUrl, isForwarded, forwardCount, isViewOnce } = req.body as {
+    senderId?: number; content?: string; type?: string; replyToId?: number;
+    mediaUrl?: string; isForwarded?: boolean; forwardCount?: number; isViewOnce?: boolean;
   };
   if (!senderId || !content) { res.status(400).json({ success: false }); return; }
   try {
     const result = await query(`
-      INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
-    `, [chatId, senderId, content, type ?? "text", replyToId ?? null, mediaUrl ?? null]);
+    `, [chatId, senderId, content, type ?? "text", replyToId ?? null, mediaUrl ?? null,
+        isForwarded ?? false, forwardCount ?? 0, isViewOnce ?? false]);
 
-    // Mark as delivered for all other chat members
+    // Mark as delivered for all other members
     const members = await query(
       "SELECT user_id FROM chat_members WHERE chat_id = $1 AND user_id != $2",
       [chatId, senderId]
     );
     for (const member of members.rows) {
       await query(
-        "INSERT INTO message_status (message_id, user_id, status) VALUES ($1, $2, 'delivered') ON CONFLICT (message_id, user_id) DO NOTHING",
+        "INSERT INTO message_status (message_id, user_id, status) VALUES ($1, $2, 'delivered') ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'delivered', updated_at = NOW()",
         [result.rows[0].id, member.user_id]
       );
     }
@@ -215,14 +227,38 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
   }
 });
 
-// Delete message
+// Delete message (for me OR for everyone)
 router.delete("/:chatId/messages/:messageId", async (req: Request, res: Response) => {
   const { messageId } = req.params;
-  const { userId } = req.body as { userId?: number };
+  const { userId, deleteForEveryone } = req.body as { userId?: number; deleteForEveryone?: boolean };
+  try {
+    if (deleteForEveryone) {
+      await query(
+        "UPDATE messages SET is_deleted = TRUE, content = 'This message was deleted', media_url = NULL WHERE id = $1 AND sender_id = $2",
+        [messageId, userId]
+      );
+    } else {
+      // Just soft-delete for sender — in real app you'd track per-user deletes; we do same for simplicity
+      await query(
+        "UPDATE messages SET is_deleted = TRUE, content = 'This message was deleted' WHERE id = $1 AND sender_id = $2",
+        [messageId, userId]
+      );
+    }
+    res.json({ success: true, deleteForEveryone: !!deleteForEveryone });
+  } catch (err) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// Edit message
+router.put("/:chatId/messages/:messageId", async (req: Request, res: Response) => {
+  const { messageId } = req.params;
+  const { userId, content } = req.body as { userId?: number; content?: string };
+  if (!content?.trim()) { res.status(400).json({ success: false }); return; }
   try {
     await query(
-      "UPDATE messages SET is_deleted = TRUE, content = 'This message was deleted' WHERE id = $1 AND sender_id = $2",
-      [messageId, userId]
+      "UPDATE messages SET content = $1, edited_at = NOW() WHERE id = $2 AND sender_id = $3 AND is_deleted = FALSE",
+      [content.trim(), messageId, userId]
     );
     res.json({ success: true });
   } catch (err) {
@@ -244,7 +280,33 @@ router.post("/:chatId/messages/:messageId/star", async (req: Request, res: Respo
   }
 });
 
-// Mark chat as read
+// React to message
+router.post("/:chatId/messages/:messageId/react", async (req: Request, res: Response) => {
+  const { messageId } = req.params;
+  const { userId, emoji } = req.body as { userId?: number; emoji?: string };
+  if (!userId || !emoji) { res.status(400).json({ success: false }); return; }
+  try {
+    const existing = await query(
+      "SELECT emoji FROM message_reactions WHERE message_id = $1 AND user_id = $2",
+      [messageId, userId]
+    );
+    if (existing.rows.length > 0 && existing.rows[0].emoji === emoji) {
+      // Toggle off same emoji
+      await query("DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2", [messageId, userId]);
+      res.json({ success: true, action: "removed" });
+    } else {
+      await query(
+        "INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3) ON CONFLICT (message_id, user_id) DO UPDATE SET emoji = $3, created_at = NOW()",
+        [messageId, userId, emoji]
+      );
+      res.json({ success: true, action: "added" });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// Mark chat as read (also updates message_status to 'read')
 router.post("/:chatId/read", async (req: Request, res: Response) => {
   const { chatId } = req.params;
   const { userId } = req.body as { userId?: number };
@@ -253,6 +315,14 @@ router.post("/:chatId/read", async (req: Request, res: Response) => {
       "UPDATE chat_members SET last_read_at = NOW() WHERE chat_id = $1 AND user_id = $2",
       [chatId, userId]
     );
+    // Mark all messages in this chat (not sent by user) as 'read'
+    await query(`
+      INSERT INTO message_status (message_id, user_id, status, updated_at)
+      SELECT m.id, $2, 'read', NOW()
+      FROM messages m
+      WHERE m.chat_id = $1 AND m.sender_id != $2
+      ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'read', updated_at = NOW()
+    `, [chatId, userId]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false });

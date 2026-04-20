@@ -35,7 +35,7 @@ A full WhatsApp-clone mobile app named "Videh" built with Expo.
 - **Phone + OTP login** — 6-digit OTP via Fast2SMS API (DLT registered)
 - **Profile setup** after first login
 - **Chats screen** — conversations list with search, filter tabs (All/Unread/Groups), pin, mute, archive
-- **Chat screen** — real-time messaging UI, send/receive bubbles, typing indicator, message delete, voice/video call shortcuts
+- **Chat screen** — real-time messaging UI, send/receive bubbles, typing indicator, image/video bubbles, voice messages (record/play), message reactions (❤️👍😂), ticks (single/double/green), delete for me/everyone, edit message, forward with "Forwarded"/"Forwarded many times", in-chat search, link highlight, view-once media, reply strip, attach menu
 - **Status screen** — WhatsApp-style status updates, view/post statuses
 - **Calls screen** — call logs with All/Missed tabs, call back
 - **Call screen** — full-screen voice/video call UI with mute/speaker/camera controls

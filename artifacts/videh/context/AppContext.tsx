@@ -23,19 +23,32 @@ export interface UserProfile {
   avatar?: string;
 }
 
+export interface MessageReaction {
+  emoji: string;
+  userId: number;
+}
+
 export interface Message {
   id: string;
   text: string;
   timestamp: number;
   senderId: string;
-  type: "text" | "image" | "audio" | "deleted";
+  senderName?: string;
+  type: "text" | "image" | "video" | "audio" | "deleted";
   status: "sent" | "delivered" | "read";
   mediaUrl?: string;
   isStarred?: boolean;
+  isForwarded?: boolean;
+  forwardCount?: number;
+  isViewOnce?: boolean;
+  isEdited?: boolean;
+  editedAt?: number;
+  reactions?: MessageReaction[];
   chatId?: string;
   chatName?: string;
   replyToId?: string;
   replyText?: string;
+  replySenderName?: string;
 }
 
 export interface Chat {
@@ -113,9 +126,13 @@ interface AppContextType {
   createDirectChat: (otherUserId: number, otherName: string, otherAvatar?: string) => Promise<string>;
   loadMessages: (chatId: string) => Promise<void>;
   refreshChats: () => Promise<void>;
-  sendImageMessage: (chatId: string, mediaUri: string, caption?: string) => void;
+  sendImageMessage: (chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean) => void;
+  sendAudioMessage: (chatId: string, audioUri: string, durationSecs: number) => void;
   setTyping: (chatId: string) => void;
   clearTyping: (chatId: string) => void;
+  deleteForEveryone: (chatId: string, messageId: string) => void;
+  editMessage: (chatId: string, messageId: string, newText: string) => void;
+  reactToMessage: (chatId: string, messageId: string, emoji: string) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -326,22 +343,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Load messages for a chat from DB
   const loadMessages = useCallback(async (chatId: string) => {
     try {
-      const data = await api(`/chats/${chatId}/messages?limit=60`) as { success: boolean; messages: any[] };
+      const u = userRef.current;
+      const data = await api(`/chats/${chatId}/messages?limit=80&userId=${u?.dbId ?? 0}`) as { success: boolean; messages: any[] };
       if (!data.success || !data.messages) return;
 
-      const u = userRef.current;
-      const msgs: Message[] = data.messages.map((m: any) => ({
-        id: String(m.id),
-        text: m.is_deleted ? "This message was deleted" : (m.content ?? ""),
-        timestamp: new Date(m.created_at).getTime(),
-        senderId: String(m.sender_id) === String(u?.dbId) ? "me" : String(m.sender_id),
-        type: m.is_deleted ? "deleted" : (m.type ?? "text"),
-        status: "delivered",
-        mediaUrl: m.media_url ?? undefined,
-        isStarred: m.is_starred,
-        replyToId: m.reply_to_id ? String(m.reply_to_id) : undefined,
-        replyText: m.reply_content ?? undefined,
-      }));
+      const msgs: Message[] = data.messages.map((m: any) => {
+        const isMe = String(m.sender_id) === String(u?.dbId);
+        // Determine tick status: sent by me → check delivery_status from DB
+        let status: "sent" | "delivered" | "read" = "sent";
+        if (isMe) {
+          if (m.delivery_status === "read") status = "read";
+          else if (m.delivery_status === "delivered") status = "delivered";
+          else status = "sent";
+        }
+        return {
+          id: String(m.id),
+          text: m.is_deleted ? "This message was deleted" : (m.content ?? ""),
+          timestamp: new Date(m.created_at).getTime(),
+          senderId: isMe ? "me" : String(m.sender_id),
+          senderName: m.sender_name ?? undefined,
+          type: m.is_deleted ? "deleted" : (m.type ?? "text"),
+          status,
+          mediaUrl: m.media_url ?? undefined,
+          isStarred: m.is_starred,
+          isForwarded: m.is_forwarded,
+          forwardCount: m.forward_count ?? 0,
+          isViewOnce: m.is_view_once,
+          isEdited: !!m.edited_at,
+          editedAt: m.edited_at ? new Date(m.edited_at).getTime() : undefined,
+          reactions: m.reactions ?? [],
+          replyToId: m.reply_to_id ? String(m.reply_to_id) : undefined,
+          replyText: m.reply_content ?? undefined,
+          replySenderName: m.reply_sender_name ?? undefined,
+        };
+      });
 
       setChats((prev) =>
         prev.map((c) => c.id === chatId ? { ...c, messages: msgs } : c)
@@ -401,14 +436,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Send image/video message in chat
-  const sendImageMessage = useCallback((chatId: string, mediaUri: string, caption?: string) => {
+  const sendImageMessage = useCallback((chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean) => {
     const u = userRef.current;
     const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    const text = caption?.trim() || "📷 Photo";
     const isVideo = mediaUri.match(/\.(mp4|mov|avi|mkv|webm)$/i) !== null;
+    const text = caption?.trim() || (isViewOnce ? "🔁 View once" : isVideo ? "🎥 Video" : "📷 Photo");
+    const msgType: Message["type"] = isVideo ? "video" : "image";
     const newMsg: Message = {
       id: tempId, text, timestamp: Date.now(), senderId: "me",
-      type: "image", status: "sent", mediaUrl: mediaUri,
+      type: msgType, status: "sent", mediaUrl: mediaUri, isViewOnce,
     };
     setChats((prev) =>
       prev.map((c) =>
@@ -420,7 +456,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (u?.dbId) {
       api(`/chats/${chatId}/messages`, {
         method: "POST",
-        body: JSON.stringify({ senderId: u.dbId, content: text, type: isVideo ? "video" : "image", mediaUrl: mediaUri }),
+        body: JSON.stringify({ senderId: u.dbId, content: text, type: msgType, mediaUrl: mediaUri, isViewOnce: isViewOnce ?? false }),
       }).then((data: any) => {
         if (data?.success && data.message) {
           setChats((prev) =>
@@ -433,6 +469,109 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       }).catch(() => {});
     }
+  }, []);
+
+  // Send audio/voice message
+  const sendAudioMessage = useCallback((chatId: string, audioUri: string, durationSecs: number) => {
+    const u = userRef.current;
+    const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    const text = `🎤 Voice message (${Math.round(durationSecs)}s)`;
+    const newMsg: Message = {
+      id: tempId, text, timestamp: Date.now(), senderId: "me",
+      type: "audio", status: "sent", mediaUrl: audioUri,
+    };
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === chatId
+          ? { ...c, messages: [...c.messages, newMsg], lastMessage: text, lastMessageTime: Date.now() }
+          : c
+      )
+    );
+    if (u?.dbId) {
+      api(`/chats/${chatId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ senderId: u.dbId, content: text, type: "audio", mediaUrl: audioUri }),
+      }).then((data: any) => {
+        if (data?.success && data.message) {
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === chatId
+                ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(data.message.id), status: "delivered" } : m) }
+                : c
+            )
+          );
+        }
+      }).catch(() => {});
+    }
+  }, []);
+
+  // Delete for everyone
+  const deleteForEveryone = useCallback((chatId: string, messageId: string) => {
+    const u = userRef.current;
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === chatId
+          ? { ...c, messages: c.messages.map((m) =>
+              m.id === messageId ? { ...m, type: "deleted" as const, text: "This message was deleted", mediaUrl: undefined } : m
+            )}
+          : c
+      )
+    );
+    if (u?.dbId) {
+      api(`/chats/${chatId}/messages/${messageId}`, {
+        method: "DELETE",
+        body: JSON.stringify({ userId: u.dbId, deleteForEveryone: true }),
+      }).catch(() => {});
+    }
+  }, []);
+
+  // Edit message
+  const editMessage = useCallback((chatId: string, messageId: string, newText: string) => {
+    const u = userRef.current;
+    if (!newText.trim()) return;
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === chatId
+          ? { ...c, messages: c.messages.map((m) =>
+              m.id === messageId ? { ...m, text: newText.trim(), isEdited: true, editedAt: Date.now() } : m
+            )}
+          : c
+      )
+    );
+    if (u?.dbId) {
+      api(`/chats/${chatId}/messages/${messageId}`, {
+        method: "PUT",
+        body: JSON.stringify({ userId: u.dbId, content: newText.trim() }),
+      }).catch(() => {});
+    }
+  }, []);
+
+  // React to message
+  const reactToMessage = useCallback((chatId: string, messageId: string, emoji: string) => {
+    const u = userRef.current;
+    if (!u?.dbId) return;
+    setChats((prev) =>
+      prev.map((c) => {
+        if (c.id !== chatId) return c;
+        return {
+          ...c, messages: c.messages.map((m) => {
+            if (m.id !== messageId) return m;
+            const existing = m.reactions?.find((r) => r.userId === u.dbId);
+            let newReactions: typeof m.reactions;
+            if (existing?.emoji === emoji) {
+              newReactions = (m.reactions ?? []).filter((r) => r.userId !== u.dbId);
+            } else {
+              newReactions = [...(m.reactions ?? []).filter((r) => r.userId !== u.dbId), { emoji, userId: u.dbId! }];
+            }
+            return { ...m, reactions: newReactions };
+          }),
+        };
+      })
+    );
+    api(`/chats/${chatId}/messages/${messageId}/react`, {
+      method: "POST",
+      body: JSON.stringify({ userId: u.dbId, emoji }),
+    }).catch(() => {});
   }, []);
 
   // Typing indicator
@@ -538,12 +677,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const forwardMessage = useCallback((chatId: string, messageId: string, targetChatId: string) => {
+    const u = userRef.current;
     const sourceChat = chats.find((c) => c.id === chatId);
     const msg = sourceChat?.messages.find((m) => m.id === messageId);
-    if (msg && targetChatId) {
-      sendMessage(targetChatId, `↗ Forwarded: ${msg.text}`);
-    }
-  }, [chats, sendMessage]);
+    if (!msg || !targetChatId || !u?.dbId) return;
+    const newForwardCount = (msg.forwardCount ?? 0) + 1;
+    const tempId = "tmp_fwd_" + Date.now().toString();
+    const fwdMsg: Message = {
+      id: tempId, text: msg.text, timestamp: Date.now(), senderId: "me",
+      type: msg.type, status: "sent", mediaUrl: msg.mediaUrl,
+      isForwarded: true, forwardCount: newForwardCount,
+    };
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === targetChatId
+          ? { ...c, messages: [...c.messages, fwdMsg], lastMessage: msg.text, lastMessageTime: Date.now() }
+          : c
+      )
+    );
+    api(`/chats/${targetChatId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({
+        senderId: u.dbId, content: msg.text, type: msg.type,
+        mediaUrl: msg.mediaUrl ?? null, isForwarded: true, forwardCount: newForwardCount,
+      }),
+    }).then((data: any) => {
+      if (data?.success && data.message) {
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === targetChatId
+              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(data.message.id), status: "delivered" } : m) }
+              : c
+          )
+        );
+      }
+    }).catch(() => {});
+  }, [chats]);
 
   const starredMessages = chats.flatMap((c) => c.messages.filter((m) => m.isStarred));
 
@@ -554,7 +723,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, forwardMessage, starredMessages, updateAvatar,
       createDirectChat, loadMessages, refreshChats,
-      sendImageMessage, setTyping, clearTyping,
+      sendImageMessage, sendAudioMessage, setTyping, clearTyping,
+      deleteForEveryone, editMessage, reactToMessage,
     }}>
       {children}
     </AppContext.Provider>
