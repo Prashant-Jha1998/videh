@@ -53,7 +53,8 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_MEDIA_DOCUMENTS"
+        "android.permission.READ_MEDIA_DOCUMENTS",
+        "android.permission.WRITE_CONTACTS"
       ]
     },
     "web": {
@@ -74,6 +75,11 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "kumarprasun1998"
+    "owner": "kumarprasun1998",
+    "extra": {
+      "eas": {
+        "projectId": "d2a8e42c-8864-4a8f-8d0e-cbd95c97cf8c"
+      }
+    }
   }
 }
