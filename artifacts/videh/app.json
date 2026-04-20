@@ -21,7 +21,12 @@
         "NSCameraUsageDescription": "Videh needs camera access for video calls.",
         "NSContactsUsageDescription": "Videh uses your contacts to find friends who are already on Videh.",
         "NSBluetoothAlwaysUsageDescription": "Videh uses Bluetooth for audio routing during calls.",
-        "UIBackgroundModes": ["audio", "voip", "fetch", "remote-notification"]
+        "UIBackgroundModes": [
+          "audio",
+          "voip",
+          "fetch",
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -68,6 +73,7 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "owner": "kumarprasun1998"
   }
 }

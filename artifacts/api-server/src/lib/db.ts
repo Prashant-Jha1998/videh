@@ -1,9 +1,26 @@
 import { Pool } from "pg";
 import { logger } from "./logger";
 
+const databaseUrl = process.env["DATABASE_URL"];
+
+if (!databaseUrl) {
+  throw new Error("DATABASE_URL is required to connect to PostgreSQL.");
+}
+
+const shouldUseSsl = (() => {
+  const forceSsl = process.env["PGSSLMODE"]?.toLowerCase() === "require";
+  const isProduction = process.env["NODE_ENV"] === "production";
+  const isNeonHost = databaseUrl.includes(".neon.tech");
+  const connectionStringRequiresSsl = databaseUrl
+    .toLowerCase()
+    .includes("sslmode=require");
+
+  return forceSsl || isProduction || isNeonHost || connectionStringRequiresSsl;
+})();
+
 const pool = new Pool({
-  connectionString: process.env["DATABASE_URL"],
-  ssl: process.env["NODE_ENV"] === "production" ? { rejectUnauthorized: false } : false,
+  connectionString: databaseUrl,
+  ssl: shouldUseSsl ? { rejectUnauthorized: false } : false,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
