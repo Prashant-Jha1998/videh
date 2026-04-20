@@ -45,12 +45,9 @@ if (fs.existsSync(videhWebIndexPath)) {
     "/videh-web",
     express.static(videhWebDistDir, {
       index: false,
+      redirect: false,
     }),
   );
-
-  app.get("/videh-web", (_req, res) => {
-    res.redirect("/videh-web/");
-  });
 
   app.get(/^\/videh-web(?:\/.*)?$/, (_req, res) => {
     res.sendFile(videhWebIndexPath);
