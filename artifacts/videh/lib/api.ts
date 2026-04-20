@@ -1,6 +1,15 @@
+const DEFAULT_DOMAIN = "videh.onrender.com";
+
+function toBaseUrl(domain: string): string {
+  return /^https?:\/\//.test(domain) ? domain : `https://${domain}`;
+}
+
 export const BASE_URL = (() => {
-  const domain = process.env.EXPO_PUBLIC_DOMAIN;
-  return domain ? `https://${domain}` : "";
+  const configuredDomain = process.env.EXPO_PUBLIC_DOMAIN?.trim();
+  const domain = configuredDomain && configuredDomain.length > 0
+    ? configuredDomain
+    : DEFAULT_DOMAIN;
+  return toBaseUrl(domain);
 })();
 
 export function getApiUrl(): string {

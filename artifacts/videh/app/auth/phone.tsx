@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
+import { getApiUrl } from "@/lib/api";
 
 const COUNTRY_CODE = "+91";
 
@@ -35,8 +36,7 @@ export default function PhoneScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      const domain = process.env.EXPO_PUBLIC_DOMAIN;
-      const baseUrl = domain ? `https://${domain}` : "";
+      const baseUrl = getApiUrl();
       const res = await fetch(`${baseUrl}/api/otp/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

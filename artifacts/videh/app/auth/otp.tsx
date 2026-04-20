@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { getApiUrl } from "@/lib/api";
 
 export default function OtpScreen() {
   const colors = useColors();
@@ -61,8 +62,7 @@ export default function OtpScreen() {
     setLoading(true);
 
     try {
-      const domain = process.env.EXPO_PUBLIC_DOMAIN;
-      const baseUrl = domain ? `https://${domain}` : "";
+      const baseUrl = getApiUrl();
       const res = await fetch(`${baseUrl}/api/otp/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -109,8 +109,7 @@ export default function OtpScreen() {
     setError("");
     inputs.current[0]?.focus();
     try {
-      const domain = process.env.EXPO_PUBLIC_DOMAIN;
-      const baseUrl = domain ? `https://${domain}` : "";
+      const baseUrl = getApiUrl();
       await fetch(`${baseUrl}/api/otp/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
