@@ -90,6 +90,7 @@ export default function SettingsScreen() {
     { icon: "lock-closed-outline", iconBg: "#9C27B0", label: "Privacy", value: "Blocked contacts, disappearing messages", onPress: () => router.push("/settings/privacy") },
     { icon: "chatbubble-outline", iconBg: "#00BCD4", label: "Chats", value: "Theme, wallpapers, chat history", onPress: () => router.push("/settings/chats") },
     { icon: "radio-outline", iconBg: "#E91E63", label: "Broadcasts", value: "Manage lists and send broadcasts", onPress: () => Alert.alert("Broadcasts", "Broadcast lists coming soon. You'll be able to send messages to multiple contacts at once.") },
+    { icon: "warning-outline", iconBg: "#E74C3C", label: "SOS Safety 🚨", value: "Emergency contacts, safety alert", onPress: () => router.push("/settings/sos") },
     { icon: "notifications-outline", iconBg: "#FF5722", label: "Notifications", value: "Message, group & call tones", onPress: () => router.push("/settings/notifications") },
     { icon: "server-outline", iconBg: "#607D8B", label: "Storage and data", value: "Network usage, auto-download", onPress: () => Alert.alert("Storage & Data", "Storage management coming soon.") },
     { icon: "accessibility-outline", iconBg: "#795548", label: "Accessibility", value: "Increase contrast, animation", onPress: () => Alert.alert("Accessibility", "Accessibility options coming soon.") },

@@ -142,6 +142,9 @@ export default function ChatScreen() {
   // Reaction picker
   const [reactionTarget, setReactionTarget] = useState<Message | null>(null);
 
+  // Translation
+  const [translatedMsgs, setTranslatedMsgs] = useState<Record<string, string>>({});
+
   // Forward modal
   const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
 
@@ -347,6 +350,15 @@ export default function ChatScreen() {
       { text: "😊 React", onPress: () => setReactionTarget(msg) },
       { text: "↗ Forward", onPress: () => setForwardMsg(msg) },
       { text: "⭐ Star", onPress: () => { if (chatId) starMessage(chatId, msg.id); } },
+      { text: "🌐 Translate", onPress: () => Alert.alert("Translate to:", "", [
+          { text: "हिंदी (Hindi)", onPress: () => translateMsg(msg, "hi") },
+          { text: "English", onPress: () => translateMsg(msg, "en") },
+          { text: "বাংলা (Bengali)", onPress: () => translateMsg(msg, "bn") },
+          { text: "தமிழ் (Tamil)", onPress: () => translateMsg(msg, "ta") },
+          { text: "తెలుగు (Telugu)", onPress: () => translateMsg(msg, "te") },
+          { text: "मराठी (Marathi)", onPress: () => translateMsg(msg, "mr") },
+          { text: "Cancel", style: "cancel" },
+        ]) },
     ];
     if (isMe) {
       opts.push({ text: "ℹ️ Info", onPress: () => router.push({ pathname: "/chat/message-info", params: { chatId: chatId!, messageId: msg.id } }) });
@@ -370,6 +382,25 @@ export default function ChatScreen() {
     opts.push({ text: "Cancel", style: "cancel" });
     Alert.alert("Message", "", opts);
   };
+
+  const translateMsg = useCallback(async (msg: Message, toLang: string) => {
+    if (!msg.text?.trim()) return;
+    try {
+      const r = await fetch(`${BASE_URL}/api/translate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: msg.text, to: toLang }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        setTranslatedMsgs(prev => ({ ...prev, [msg.id]: d.translated }));
+      } else {
+        Alert.alert("Translation failed", "Translate nahi ho saka. Dobara try karo.");
+      }
+    } catch {
+      Alert.alert("Error", "Network error");
+    }
+  }, []);
 
   const renderMsg = ({ item }: { item: Message }) => {
     const isMe = item.senderId === "me";
@@ -452,6 +483,12 @@ export default function ChatScreen() {
                   <Text style={[styles.linkText, { color: colors.primary }]} numberOfLines={1}>{urls[0]}</Text>
                 </TouchableOpacity>
               )}
+              {translatedMsgs[item.id] && (
+                <View style={styles.translatedBox}>
+                  <Text style={styles.translatedLabel}>🌐 Translated</Text>
+                  <Text style={[styles.msgText, { color: colors.foreground }]}>{translatedMsgs[item.id]}</Text>
+                </View>
+              )}
             </>
           )}
 
@@ -530,6 +567,8 @@ export default function ChatScreen() {
         wallpaper ? { text: "Remove wallpaper", style: "destructive" as const, onPress: removeWallpaper } : null!,
         { text: "Cancel", style: "cancel" },
       ].filter(Boolean)) },
+    { label: "Schedule Message ⏰", icon: "time-outline", onPress: () => chatId && router.push({ pathname: "/scheduled/[chatId]", params: { chatId, name: displayName } }) },
+    { label: "Khata / Udhar 💰", icon: "cash-outline", onPress: () => chatId && router.push({ pathname: "/khata/[chatId]", params: { chatId, name: displayName } }) },
     { label: "Mute notifications", icon: "notifications-off-outline", onPress: () => chatId && muteChat(chatId) },
     { label: "Search", icon: "search-outline", onPress: () => { setSearching(true); setSearchQuery(""); } },
   ];
@@ -860,6 +899,8 @@ const styles = StyleSheet.create({
   msgImage: { width: W * 0.62, height: W * 0.62, borderRadius: 10 },
   viewOnceOverlay: { position: "absolute", top: 8, left: 8, flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   viewOnceText: { color: "#fff", fontSize: 11, fontFamily: "Inter_500Medium" },
+  translatedBox: { marginTop: 6, paddingTop: 6, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.15)" },
+  translatedLabel: { fontSize: 10, color: "#00A884", fontFamily: "Inter_600SemiBold", marginBottom: 3 },
   linkPreview: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, paddingTop: 4, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },
   linkText: { flex: 1, fontSize: 12, fontFamily: "Inter_400Regular" },
   msgMeta: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 3 },

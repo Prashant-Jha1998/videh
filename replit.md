@@ -94,6 +94,12 @@ Phone number → OTP verification (Fast2SMS) → Profile setup → Main app
 - **Push notifications** — `expo-notifications@~0.32.16`; `users.push_token` column; token registered on login; `PUT /api/users/:id/push-token`; message send endpoint calls Expo push API with sender name + preview; foreground alerts enabled; tapping notification navigates to correct chat
 - **Notification tap routing** — `addNotificationResponseReceivedListener` in _layout.tsx routes to the relevant chat on notification tap
 
+### India-Specific Unique Features (WhatsApp mein nahi hain)
+- **Scheduled Messages** — `/scheduled/[chatId]` screen; POST /api/scheduled to schedule; background cron job every minute checks due messages and sends them as real messages with push notifications; cancel anytime; accessible via chat ⋮ menu
+- **Khata / Udhar Tracker** — `/khata/[chatId]` screen; track money owed/borrowed within any chat or group; "Mark as Paid" sends a celebration message in chat; total pending balance shown at top; accessible via chat ⋮ menu
+- **Real-time Message Translation** — Long-press any message → Translate → choose from Hindi/English/Bengali/Tamil/Telugu/Marathi; uses Google Translate free API proxied via `/api/translate`; translated text shows inline below original with "🌐 Translated" label
+- **SOS Safety Feature** — `/settings/sos` screen; add up to 5 emergency contacts; large red SOS button with 5-second countdown; sends live GPS location to all contacts via Videh chat + push notification; uses expo-location for GPS; accessible via Settings → SOS Safety
+
 ### Removed
 - All sample/demo data (Priya Sharma, Rahul Verma, etc.) — starts clean and real
 - Auto-reply simulation in chat screen

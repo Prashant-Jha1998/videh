@@ -7,6 +7,10 @@ import statusesRouter from "./statuses";
 import callsRouter from "./calls";
 import agoraRouter from "./agora";
 import webSessionRouter from "./web-session";
+import scheduledRouter from "./scheduled";
+import khataRouter from "./khata";
+import translateRouter from "./translate";
+import sosRouter from "./sos";
 
 const router: IRouter = Router();
 
@@ -18,5 +22,9 @@ router.use("/statuses", statusesRouter);
 router.use("/calls", callsRouter);
 router.use("/agora", agoraRouter);
 router.use("/web-session", webSessionRouter);
+router.use("/scheduled", scheduledRouter);
+router.use("/khata", khataRouter);
+router.use("/translate", translateRouter);
+router.use("/sos", sosRouter);
 
 export default router;

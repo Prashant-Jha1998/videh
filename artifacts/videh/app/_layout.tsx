@@ -67,6 +67,9 @@ function RootLayoutNav() {
       <Stack.Screen name="status/viewers" options={{ headerShown: false }} />
       <Stack.Screen name="new-group" options={{ headerShown: false }} />
       <Stack.Screen name="starred" options={{ headerShown: false }} />
+      <Stack.Screen name="scheduled/[chatId]" options={{ headerShown: false }} />
+      <Stack.Screen name="khata/[chatId]" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/sos" options={{ headerShown: false }} />
     </Stack>
   );
 }
