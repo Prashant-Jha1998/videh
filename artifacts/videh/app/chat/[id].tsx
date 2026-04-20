@@ -2,6 +2,10 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system";
+import * as Location from "expo-location";
+import * as Contacts from "expo-contacts";
 import { Audio } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
@@ -317,24 +321,92 @@ export default function ChatScreen() {
   const sendMediaMessage = async (type: "camera" | "gallery" | "document" | "location" | "contact" | "viewonce") => {
     if (!chatId) return;
     const isViewOnce = type === "viewonce";
+
     if (type === "camera") {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== "granted") { Alert.alert("Permission needed"); return; }
+      if (status !== "granted") { Alert.alert("Permission needed", "Camera access chahiye."); return; }
       const result = await ImagePicker.launchCameraAsync({ quality: 0.75, base64: false });
       if (!result.canceled && result.assets[0]) sendImageMessage(chatId, result.assets[0].uri);
+
     } else if (type === "gallery" || type === "viewonce") {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== "granted") { Alert.alert("Permission needed"); return; }
+      if (status !== "granted") { Alert.alert("Permission needed", "Gallery access chahiye."); return; }
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], quality: 0.75, base64: false });
       if (!result.canceled && result.assets[0]) sendImageMessage(chatId, result.assets[0].uri, undefined, isViewOnce);
+
     } else if (type === "document") {
-      sendMessage(chatId, "📄 Document");
+      if (Platform.OS === "web") { Alert.alert("Web pe nahi", "Document share karne ke liye mobile app use karo."); return; }
+      const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      const fileSizeMB = (asset.size ?? 0) / 1024 / 1024;
+      if (fileSizeMB > 16) { Alert.alert("File too large", "Maximum 16MB file bhej sakte ho."); return; }
+      try {
+        const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+        const mimeType = asset.mimeType ?? "application/octet-stream";
+        const dataUri = `data:${mimeType};base64,${base64}`;
+        const docInfo = JSON.stringify({ name: asset.name, size: asset.size, mimeType, dataUri });
+        sendSpecialMessage(chatId, asset.name, "document", dataUri, docInfo);
+      } catch { Alert.alert("Error", "File read nahi hua. Dobara try karo."); }
+
     } else if (type === "location") {
-      sendMessage(chatId, "📍 Location shared");
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") { Alert.alert("Permission needed", "Location access chahiye."); return; }
+      try {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const { latitude, longitude } = loc.coords;
+        const mapsUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
+        const locInfo = JSON.stringify({ lat: latitude, lng: longitude, url: mapsUrl });
+        sendSpecialMessage(chatId, `📍 Location\n${latitude.toFixed(5)}, ${longitude.toFixed(5)}`, "location", mapsUrl, locInfo);
+      } catch { Alert.alert("Error", "Location nahi mila. GPS on hai?"); }
+
     } else if (type === "contact") {
-      sendMessage(chatId, "👤 Contact shared");
+      if (Platform.OS === "web") { Alert.alert("Web pe nahi", "Contact share karne ke liye mobile app use karo."); return; }
+      const { status } = await Contacts.requestPermissionsAsync();
+      if (status !== "granted") { Alert.alert("Permission needed", "Contacts access chahiye."); return; }
+      const { data } = await Contacts.getContactsAsync({ fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails] });
+      if (!data || data.length === 0) { Alert.alert("No contacts", "Phone mein contacts nahi hain."); return; }
+      // Show simple picker
+      const topContacts = data.filter(c => c.name).slice(0, 20);
+      const options = topContacts.map(c => ({
+        text: `${c.name}${c.phoneNumbers?.[0]?.number ? " — " + c.phoneNumbers[0].number : ""}`,
+        onPress: () => {
+          const phone = c.phoneNumbers?.[0]?.number ?? "";
+          const email = c.emails?.[0]?.email ?? "";
+          const contactInfo = JSON.stringify({ name: c.name, phone, email });
+          sendSpecialMessage(chatId, `👤 ${c.name}\n${phone}`, "contact", undefined, contactInfo);
+        },
+      }));
+      options.push({ text: "Cancel", onPress: () => {} });
+      Alert.alert("Contact choose karo", "", options as any);
     }
   };
+
+  const sendSpecialMessage = useCallback((cid: string, text: string, msgType: string, mediaUrl?: string, metaJson?: string) => {
+    const u = user;
+    const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    const newMsg: any = { id: tempId, text, timestamp: Date.now(), senderId: "me", type: msgType, status: "sent", mediaUrl, meta: metaJson ? JSON.parse(metaJson) : undefined };
+    setChats((prev: any[]) =>
+      prev.map((c: any) =>
+        c.id === cid ? { ...c, messages: [...c.messages, newMsg], lastMessage: text.split("\n")[0], lastMessageTime: Date.now() } : c
+      )
+    );
+    if (u?.dbId) {
+      fetch(`${BASE_URL}/api/chats/${cid}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ senderId: u.dbId, content: text, type: msgType, mediaUrl: mediaUrl ?? null }),
+      }).then(r => r.json()).then((data: any) => {
+        if (data?.success && data.message) {
+          setChats((prev: any[]) =>
+            prev.map((c: any) =>
+              c.id === cid ? { ...c, messages: c.messages.map((m: any) => m.id === tempId ? { ...m, id: String(data.message.id), status: "delivered" } : m) } : c
+            )
+          );
+        }
+      }).catch(() => {});
+    }
+  }, [user]);
 
   const [attachVisible, setAttachVisible] = useState(false);
   const showAttachMenu = () => setAttachVisible(true);
@@ -407,7 +479,11 @@ export default function ChatScreen() {
     const isDeleted = item.type === "deleted";
     const isImage = (item.type === "image" || item.type === "video") && !!item.mediaUrl;
     const isAudio = item.type === "audio" && !!item.mediaUrl;
-    const urls = (!isDeleted && !isImage && !isAudio) ? extractUrls(item.text) : [];
+    const isDocument = item.type === "document";
+    const isLocation = item.type === "location";
+    const isContact = item.type === "contact";
+    const isSpecial = isDocument || isLocation || isContact;
+    const urls = (!isDeleted && !isImage && !isAudio && !isSpecial) ? extractUrls(item.text) : [];
     const isManyForwarded = (item.forwardCount ?? 0) >= 5;
 
     // Group reactions by emoji
@@ -474,6 +550,68 @@ export default function ChatScreen() {
             </>
           ) : isAudio ? (
             <AudioPlayer uri={item.mediaUrl!} colors={colors} />
+          ) : isDocument ? (
+            <TouchableOpacity
+              style={styles.docCard}
+              onPress={() => item.mediaUrl && Linking.openURL(item.mediaUrl).catch(() => {})}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.docIcon, { backgroundColor: isMe ? "rgba(255,255,255,0.2)" : "#00A88420" }]}>
+                <Ionicons name="document-text" size={28} color={isMe ? "#fff" : "#00A884"} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.docName, { color: colors.foreground }]} numberOfLines={2}>{item.text}</Text>
+                <Text style={[styles.docMeta, { color: colors.mutedForeground }]}>Document • Tap to open</Text>
+              </View>
+              <Ionicons name="download-outline" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          ) : isLocation ? (
+            <TouchableOpacity
+              style={styles.locationCard}
+              onPress={() => item.mediaUrl && Linking.openURL(item.mediaUrl).catch(() => {})}
+              activeOpacity={0.8}
+            >
+              <View style={styles.locationMapPreview}>
+                <Ionicons name="map" size={40} color="#00A884" />
+                <View style={styles.locationPin}>
+                  <Ionicons name="location" size={22} color="#E74C3C" />
+                </View>
+              </View>
+              <View style={{ paddingHorizontal: 10, paddingVertical: 8 }}>
+                <Text style={[styles.locationLabel, { color: colors.foreground }]}>📍 Live Location</Text>
+                <Text style={[styles.locationCoords, { color: colors.mutedForeground }]}>
+                  {item.text.replace("📍 Location\n", "")}
+                </Text>
+                <Text style={[styles.locationOpen, { color: colors.primary }]}>Google Maps mein open karo ↗</Text>
+              </View>
+            </TouchableOpacity>
+          ) : isContact ? (
+            <View style={styles.contactCard}>
+              <View style={styles.contactCardAvatar}>
+                <Text style={styles.contactCardAvatarTxt}>
+                  {(item.text.split("\n")[0].replace("👤 ", "") || "?")[0].toUpperCase()}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.contactCardName, { color: colors.foreground }]}>
+                  {item.text.split("\n")[0].replace("👤 ", "")}
+                </Text>
+                {item.text.split("\n")[1] ? (
+                  <Text style={[styles.contactCardPhone, { color: colors.mutedForeground }]}>
+                    {item.text.split("\n")[1]}
+                  </Text>
+                ) : null}
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  const phone = item.text.split("\n")[1];
+                  if (phone) Linking.openURL(`tel:${phone}`).catch(() => {});
+                }}
+                style={styles.contactCallBtn}
+              >
+                <Ionicons name="call" size={18} color="#00A884" />
+              </TouchableOpacity>
+            </View>
           ) : (
             <>
               <MentionText text={item.text} style={[styles.msgText, { color: colors.foreground }]} />
@@ -901,6 +1039,22 @@ const styles = StyleSheet.create({
   viewOnceText: { color: "#fff", fontSize: 11, fontFamily: "Inter_500Medium" },
   translatedBox: { marginTop: 6, paddingTop: 6, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.15)" },
   translatedLabel: { fontSize: 10, color: "#00A884", fontFamily: "Inter_600SemiBold", marginBottom: 3 },
+  docCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, minWidth: 220 },
+  docIcon: { width: 48, height: 48, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  docName: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
+  docMeta: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  locationCard: { overflow: "hidden", minWidth: 220 },
+  locationMapPreview: { height: 120, backgroundColor: "#1a2332", alignItems: "center", justifyContent: "center", position: "relative" },
+  locationPin: { position: "absolute" },
+  locationLabel: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
+  locationCoords: { fontSize: 11, fontFamily: "Inter_400Regular", marginBottom: 4 },
+  locationOpen: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  contactCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, minWidth: 220, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },
+  contactCardAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#00A88440", alignItems: "center", justifyContent: "center" },
+  contactCardAvatarTxt: { color: "#00A884", fontSize: 18, fontWeight: "700" },
+  contactCardName: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  contactCardPhone: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
+  contactCallBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#00A88420", alignItems: "center", justifyContent: "center" },
   linkPreview: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, paddingTop: 4, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },
   linkText: { flex: 1, fontSize: 12, fontFamily: "Inter_400Regular" },
   msgMeta: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 3 },
