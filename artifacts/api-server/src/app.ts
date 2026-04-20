@@ -4,6 +4,7 @@ import pinoHttp from "pino-http";
 import cron from "node-cron";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { query } from "./lib/db";
@@ -33,13 +34,10 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-const videhWebDistDir = path.resolve(
-  process.cwd(),
-  "artifacts",
-  "videh-web",
-  "dist",
-  "public",
-);
+const currentFilePath = fileURLToPath(import.meta.url);
+const currentDir = path.dirname(currentFilePath);
+const apiServerDir = path.resolve(currentDir, "..");
+const videhWebDistDir = path.resolve(apiServerDir, "../videh-web/dist/public");
 const videhWebIndexPath = path.join(videhWebDistDir, "index.html");
 
 if (fs.existsSync(videhWebIndexPath)) {
@@ -57,6 +55,8 @@ if (fs.existsSync(videhWebIndexPath)) {
   app.get(/^\/videh-web(?:\/.*)?$/, (_req, res) => {
     res.sendFile(videhWebIndexPath);
   });
+} else {
+  logger.warn({ videhWebDistDir }, "videh-web build not found; /videh-web route disabled");
 }
 
 app.get("/", (_req, res) => {
