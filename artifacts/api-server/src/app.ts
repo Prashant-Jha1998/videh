@@ -2,6 +2,8 @@ import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import cron from "node-cron";
+import fs from "node:fs";
+import path from "node:path";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { query } from "./lib/db";
@@ -30,6 +32,40 @@ app.use(
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+
+const videhWebDistDir = path.resolve(
+  process.cwd(),
+  "artifacts",
+  "videh-web",
+  "dist",
+  "public",
+);
+const videhWebIndexPath = path.join(videhWebDistDir, "index.html");
+
+if (fs.existsSync(videhWebIndexPath)) {
+  app.use(
+    "/videh-web",
+    express.static(videhWebDistDir, {
+      index: false,
+    }),
+  );
+
+  app.get("/videh-web", (_req, res) => {
+    res.redirect("/videh-web/");
+  });
+
+  app.get(/^\/videh-web(?:\/.*)?$/, (_req, res) => {
+    res.sendFile(videhWebIndexPath);
+  });
+}
+
+app.get("/", (_req, res) => {
+  res.json({
+    status: "ok",
+    apiHealth: "/api/healthz",
+    videhWeb: "/videh-web/",
+  });
+});
 
 app.use("/api", router);
 

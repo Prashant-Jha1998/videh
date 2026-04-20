@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --env-file=.env --env-file=../../.env ./build.mjs && node --env-file=.env --env-file=../../.env --enable-source-maps ./dist/index.mjs",
-    "build": "node ./build.mjs",
+    "build": "node ./build.mjs && pnpm --dir ../videh-web run build",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
