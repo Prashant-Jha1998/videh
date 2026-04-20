@@ -70,6 +70,12 @@ function RootLayoutNav() {
       <Stack.Screen name="scheduled/[chatId]" options={{ headerShown: false }} />
       <Stack.Screen name="khata/[chatId]" options={{ headerShown: false }} />
       <Stack.Screen name="settings/sos" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/two-step" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/change-number" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/storage" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/accessibility" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/language" options={{ headerShown: false }} />
+      <Stack.Screen name="broadcasts/index" options={{ headerShown: false }} />
     </Stack>
   );
 }

@@ -95,6 +95,7 @@ export default function ChatInfoScreen() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [memberMenuVisible, setMemberMenuVisible] = useState(false);
   const [selectedMember, setSelectedMember] = useState<GroupMember | null>(null);
+  const [mediaMessages, setMediaMessages] = useState<Array<{ id: number; type: string; media_url: string; content: string }>>([]);
 
   const chatOtherUserId = useRef<number | null>(null);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
@@ -133,6 +134,20 @@ export default function ChatInfoScreen() {
     setLoadingMembers(false);
   }, [id, isGroup, user?.dbId]);
 
+  const fetchMedia = useCallback(async () => {
+    if (!id) return;
+    try {
+      const res = await fetch(`${BASE_URL}/api/chats/${id}/messages?limit=200&offset=0`);
+      const data = await res.json();
+      if (data.success && data.messages) {
+        const media = data.messages.filter((m: any) =>
+          (m.type === "image" || m.type === "video") && m.media_url && !m.is_deleted
+        );
+        setMediaMessages(media.slice(0, 18));
+      }
+    } catch { }
+  }, [id]);
+
   const fetchChatDetails = useCallback(async () => {
     if (!id) return;
     try {
@@ -150,7 +165,8 @@ export default function ChatInfoScreen() {
     fetchContactInfo();
     fetchMembers();
     fetchChatDetails();
-  }, [fetchContactInfo, fetchMembers, fetchChatDetails]);
+    fetchMedia();
+  }, [fetchContactInfo, fetchMembers, fetchChatDetails, fetchMedia]);
 
   const toggleMute = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -428,17 +444,39 @@ export default function ChatInfoScreen() {
         )}
 
         {/* Media, Links, Docs */}
-        <TouchableOpacity style={[styles.section, { backgroundColor: colors.card }]} activeOpacity={0.7}>
-          <Text style={[styles.sectionLabel, { color: colors.primary }]}>Media, Links, and Docs</Text>
-          <View style={styles.mediaRow}>
-            {[{ icon: "image-outline" }, { icon: "link-outline" }, { icon: "document-outline" }].map((item, i) => (
-              <View key={i} style={[styles.mediaPlaceholder, { backgroundColor: colors.muted }]}>
-                <Ionicons name={item.icon as any} size={28} color={colors.mutedForeground} />
-              </View>
-            ))}
+        <View style={[styles.section, { backgroundColor: colors.card }]}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={[styles.sectionLabel, { color: colors.primary }]}>Media, Links, and Docs</Text>
+            {mediaMessages.length > 0 && (
+              <Text style={[styles.seeAll, { color: colors.primary }]}>{mediaMessages.length} items</Text>
+            )}
           </View>
-          <Text style={[styles.noMedia, { color: colors.mutedForeground }]}>No media shared yet</Text>
-        </TouchableOpacity>
+          {mediaMessages.length > 0 ? (
+            <View style={styles.mediaGrid}>
+              {mediaMessages.slice(0, 9).map((m) => (
+                <View key={m.id} style={[styles.mediaThumbnail, { backgroundColor: colors.muted }]}>
+                  {m.type === "image" && m.media_url ? (
+                    <Image source={{ uri: m.media_url }} style={styles.mediaThumbnailImg} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.mediaThumbnail, { backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }]}>
+                      <Ionicons name="videocam" size={24} color={colors.mutedForeground} />
+                    </View>
+                  )}
+                </View>
+              ))}
+              {mediaMessages.length > 9 && (
+                <View style={[styles.mediaThumbnail, { backgroundColor: colors.muted + "cc", alignItems: "center", justifyContent: "center" }]}>
+                  <Text style={[styles.moreMediaText, { color: colors.foreground }]}>+{mediaMessages.length - 9}</Text>
+                </View>
+              )}
+            </View>
+          ) : (
+            <View style={styles.noMediaRow}>
+              <Ionicons name="image-outline" size={32} color={colors.mutedForeground} />
+              <Text style={[styles.noMedia, { color: colors.mutedForeground }]}>Koi media share nahi hua abhi</Text>
+            </View>
+          )}
+        </View>
 
         {/* Settings */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
@@ -698,6 +736,13 @@ const styles = StyleSheet.create({
   mediaRow: { flexDirection: "row", gap: 8, marginBottom: 8 },
   mediaPlaceholder: { width: 72, height: 72, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   noMedia: { fontSize: 13 },
+  sectionHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  seeAll: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  mediaGrid: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginBottom: 4 },
+  mediaThumbnail: { width: 80, height: 80, borderRadius: 6, overflow: "hidden" },
+  mediaThumbnailImg: { width: "100%", height: "100%" },
+  noMediaRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 },
+  moreMediaText: { fontSize: 18, fontFamily: "Inter_700Bold" },
 
   infoRow: { flexDirection: "row", alignItems: "center", paddingVertical: 12, gap: 12 },
   infoIcon: { width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center" },

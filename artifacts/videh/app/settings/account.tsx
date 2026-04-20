@@ -1,12 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React from "react";
 import {
   Alert,
   Platform,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -20,17 +19,16 @@ export default function AccountSettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, logout } = useApp();
-  const [twoStep, setTwoStep] = useState(false);
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const changeNumber = () => {
     Alert.alert(
       "Change Number",
-      "You will be signed out and asked to verify a new phone number. Your chat history will be migrated.",
+      "Naye number pe OTP bheja jaayega verify karne ke liye. Aapki chat history migrate ho jaayegi.",
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Continue", onPress: () => Alert.alert("Coming Soon", "Number change will be available in a future update.") },
+        { text: "Continue", onPress: () => router.push("/settings/change-number") },
       ]
     );
   };
@@ -102,9 +100,9 @@ export default function AccountSettingsScreen() {
             icon="lock-closed-outline"
             iconBg="#9C27B0"
             label="Two-step verification"
-            value={twoStep ? "Enabled" : "Disabled"}
+            value={twoStep ? "Enabled" : "Add extra security layer"}
             colors={colors}
-            right={<Switch value={twoStep} onValueChange={setTwoStep} thumbColor={twoStep ? colors.primary : "#f4f3f4"} trackColor={{ true: colors.primary + "80" }} />}
+            onPress={() => router.push("/settings/two-step")}
           />
           <SettingRow
             icon="key-outline"
@@ -120,7 +118,7 @@ export default function AccountSettingsScreen() {
             label="Linked devices"
             value="Use Videh on other devices"
             colors={colors}
-            onPress={() => Alert.alert("Linked Devices", "Web/Desktop linking coming soon.")}
+            onPress={() => router.push("/linked-devices")}
             last
           />
         </View>

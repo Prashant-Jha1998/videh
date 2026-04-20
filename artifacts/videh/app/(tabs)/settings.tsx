@@ -85,19 +85,27 @@ export default function SettingsScreen() {
     );
   };
 
+  const inviteFriend = async () => {
+    const message = "Videh use karo — India ka fastest messaging app!\n\nFeatures: Broadcasts, Khata tracker, SOS safety, real-time translation, scheduled messages aur bahut kuch!\n\nDownload karo: https://videh.app";
+    try {
+      const { Share } = await import("react-native");
+      await Share.share({ message, title: "Videh — India's Best Messaging App" });
+    } catch {}
+  };
+
   const rows: SettingRow[] = [
     { icon: "key-outline", iconBg: "#2196F3", label: "Account", value: "Security notifications, change number", onPress: () => router.push("/settings/account") },
     { icon: "lock-closed-outline", iconBg: "#9C27B0", label: "Privacy", value: "Blocked contacts, disappearing messages", onPress: () => router.push("/settings/privacy") },
     { icon: "chatbubble-outline", iconBg: "#00BCD4", label: "Chats", value: "Theme, wallpapers, chat history", onPress: () => router.push("/settings/chats") },
-    { icon: "radio-outline", iconBg: "#E91E63", label: "Broadcasts", value: "Manage lists and send broadcasts", onPress: () => Alert.alert("Broadcasts", "Broadcast lists coming soon. You'll be able to send messages to multiple contacts at once.") },
+    { icon: "radio-outline", iconBg: "#E91E63", label: "Broadcasts", value: "Ek saath kai logon ko message bhejo", onPress: () => router.push("/broadcasts") },
     { icon: "warning-outline", iconBg: "#E74C3C", label: "SOS Safety 🚨", value: "Emergency contacts, safety alert", onPress: () => router.push("/settings/sos") },
     { icon: "notifications-outline", iconBg: "#FF5722", label: "Notifications", value: "Message, group & call tones", onPress: () => router.push("/settings/notifications") },
-    { icon: "server-outline", iconBg: "#607D8B", label: "Storage and data", value: "Network usage, auto-download", onPress: () => Alert.alert("Storage & Data", "Storage management coming soon.") },
-    { icon: "accessibility-outline", iconBg: "#795548", label: "Accessibility", value: "Increase contrast, animation", onPress: () => Alert.alert("Accessibility", "Accessibility options coming soon.") },
-    { icon: "language-outline", iconBg: "#009688", label: "App language", value: "English", onPress: () => Alert.alert("Language", "Currently only English is supported.") },
+    { icon: "server-outline", iconBg: "#607D8B", label: "Storage and data", value: "Network usage, auto-download", onPress: () => router.push("/settings/storage") },
+    { icon: "accessibility-outline", iconBg: "#795548", label: "Accessibility", value: "Font size, contrast, motion", onPress: () => router.push("/settings/accessibility") },
+    { icon: "language-outline", iconBg: "#009688", label: "App language", value: "Hindi, English, Telugu +7 more", onPress: () => router.push("/settings/language") },
     { icon: "help-circle-outline", iconBg: "#3F51B5", label: "Help and feedback", value: "Help centre, contact us, privacy policy", onPress: () => router.push("/settings/help") },
-    { icon: "person-add-outline", iconBg: "#8BC34A", label: "Invite a friend", onPress: () => Alert.alert("Invite", "Share Videh with your friends!\n\nDownload Videh – India's fastest messaging app.") },
-    { icon: "phone-portrait-outline", iconBg: "#00A884", label: "App updates", onPress: () => Alert.alert("App Updates", "You are using the latest version of Videh (v1.0.0).") },
+    { icon: "person-add-outline", iconBg: "#8BC34A", label: "Invite a friend", onPress: inviteFriend },
+    { icon: "phone-portrait-outline", iconBg: "#00A884", label: "App updates", value: "v1.0.0 — Latest version", onPress: () => Alert.alert("Videh v1.0.0", "Aap latest version use kar rahe hain.\n\nNaye features:\n• Broadcast Lists\n• Two-step verification\n• Accessibility settings\n• 9 languages support\n• Real document/location/contact sharing") },
   ];
 
   return (

@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-import { API_URL } from "@/constants/api";
+const API_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
 
 type Step = "phone" | "otp";
 
@@ -34,7 +34,7 @@ export default function ChangeNumberScreen() {
     const cleaned = newPhone.replace(/\D/g, "");
     if (cleaned.length !== 10) { Alert.alert("Error", "10 digit ka valid mobile number daalo."); return; }
     if (cleaned === user?.phone) { Alert.alert("Error", "Yeh pehle se aapka number hai!"); return; }
-    const existingCheck = await fetch(`${API_URL}/auth/check-phone?phone=${cleaned}`);
+    const existingCheck = await fetch(`${API_URL}/users/check-phone?phone=${cleaned}`);
     const ec = await existingCheck.json();
     if (ec.exists) { Alert.alert("Error", "Yeh number pehle se kisi aur account se linked hai."); return; }
     setLoading(true);

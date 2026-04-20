@@ -57,7 +57,7 @@ export default function ChatsScreen() {
 
   const menuItems = [
     { label: "New group", icon: "people-outline", onPress: () => router.push("/new-group") },
-    { label: "New broadcast", icon: "radio-outline", onPress: () => Alert.alert("Broadcast", "Broadcast lists coming soon.") },
+    { label: "New broadcast", icon: "radio-outline", onPress: () => router.push("/broadcasts") },
     { label: "Linked devices", icon: "phone-portrait-outline", onPress: () => router.push("/linked-devices") },
     { label: "Starred messages", icon: "star-outline", onPress: () => router.push("/starred") },
     { label: "Read all", icon: "checkmark-done-outline", onPress: () => refreshChats() },
