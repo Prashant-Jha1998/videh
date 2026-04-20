@@ -44,6 +44,21 @@ function extractUrls(text: string): string[] {
   return text.match(urlRegex) ?? [];
 }
 
+// Mention-aware text renderer
+function MentionText({ text, style }: { text: string; style?: any }) {
+  const parts = text.split(/(@\w[\w\s]*)/g);
+  if (parts.length === 1) return <Text style={style}>{text}</Text>;
+  return (
+    <Text style={style}>
+      {parts.map((part, i) =>
+        /^@\w/.test(part)
+          ? <Text key={i} style={{ color: "#00A884", fontFamily: "Inter_600SemiBold" }}>{part}</Text>
+          : part
+      )}
+    </Text>
+  );
+}
+
 // Tick icons
 function TickIcon({ status, color }: { status: Message["status"]; color: string }) {
   if (status === "read") return <Ionicons name="checkmark-done" size={14} color="#53BDEB" />;
@@ -188,6 +203,31 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // @mentions state
+  const [groupMembers, setGroupMembers] = useState<{ id: number; name: string }[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null = not in mention mode
+
+  // Wallpaper
+  const [wallpaper, setWallpaper] = useState<string | null>(null);
+
+  // Fetch group members for @mentions
+  useEffect(() => {
+    if (!chatId || !chat?.isGroup) return;
+    fetch(`${BASE_URL}/api/chats/${chatId}/members`)
+      .then((r) => r.json())
+      .then((d) => { if (d.success) setGroupMembers(d.members.map((m: any) => ({ id: m.id, name: m.name || m.phone }))); })
+      .catch(() => {});
+  }, [chatId, chat?.isGroup]);
+
+  // Fetch wallpaper for this chat
+  useEffect(() => {
+    if (!chatId || !user?.dbId) return;
+    fetch(`${BASE_URL}/api/chats/${chatId}/wallpaper?userId=${user.dbId}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.success && d.wallpaper) setWallpaper(d.wallpaper); })
+      .catch(() => {});
+  }, [chatId, user?.dbId]);
+
   const handleTextChange = useCallback((val: string) => {
     if (editTarget) { setEditText(val); return; }
     setText(val);
@@ -199,7 +239,30 @@ export default function ChatScreen() {
     } else {
       clearTyping(chatId);
     }
-  }, [chatId, setTyping, clearTyping, editTarget]);
+    // Detect @mention typing
+    if (chat?.isGroup) {
+      const atIdx = val.lastIndexOf("@");
+      if (atIdx !== -1) {
+        const afterAt = val.slice(atIdx + 1);
+        // Only show if no space after @ (i.e. still typing the name)
+        if (!afterAt.includes(" ")) {
+          setMentionQuery(afterAt);
+          return;
+        }
+      }
+      setMentionQuery(null);
+    }
+  }, [chatId, setTyping, clearTyping, editTarget, chat?.isGroup]);
+
+  const insertMention = useCallback((memberName: string) => {
+    const currentText = editTarget ? editText : text;
+    const atIdx = currentText.lastIndexOf("@");
+    const newText = currentText.slice(0, atIdx) + `@${memberName} `;
+    if (editTarget) setEditText(newText);
+    else setText(newText);
+    setMentionQuery(null);
+    inputRef.current?.focus();
+  }, [text, editText, editTarget]);
 
   const handleSend = useCallback(() => {
     if (!chatId) return;
@@ -382,7 +445,7 @@ export default function ChatScreen() {
             <AudioPlayer uri={item.mediaUrl!} colors={colors} />
           ) : (
             <>
-              <Text style={[styles.msgText, { color: colors.foreground }]}>{item.text}</Text>
+              <MentionText text={item.text} style={[styles.msgText, { color: colors.foreground }]} />
               {urls.length > 0 && (
                 <TouchableOpacity onPress={() => Linking.openURL(urls[0])} style={styles.linkPreview}>
                   <Ionicons name="link-outline" size={13} color={colors.primary} />
@@ -429,17 +492,66 @@ export default function ChatScreen() {
   const avatarBg = `hsl(${hue},50%,40%)`;
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
+  const pickWallpaper = useCallback(async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.6,
+      base64: true,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    const asset = result.assets[0];
+    const dataUri = `data:${asset.mimeType ?? "image/jpeg"};base64,${asset.base64}`;
+    setWallpaper(dataUri);
+    if (chatId && user?.dbId) {
+      fetch(`${BASE_URL}/api/chats/${chatId}/wallpaper`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.dbId, wallpaper: dataUri }),
+      }).catch(() => {});
+    }
+  }, [chatId, user?.dbId]);
+
+  const removeWallpaper = useCallback(() => {
+    setWallpaper(null);
+    if (chatId && user?.dbId) {
+      fetch(`${BASE_URL}/api/chats/${chatId}/wallpaper`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.dbId, wallpaper: null }),
+      }).catch(() => {});
+    }
+  }, [chatId, user?.dbId]);
+
   const chatMenuItems = [
     { label: "Chat info", icon: "information-circle-outline", onPress: () => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } }) },
     { label: "Starred messages", icon: "star-outline", onPress: () => router.push("/starred") },
+    { label: "Wallpaper", icon: "image-outline", onPress: () => Alert.alert("Chat wallpaper", "", [
+        { text: "Choose photo", onPress: pickWallpaper },
+        wallpaper ? { text: "Remove wallpaper", style: "destructive" as const, onPress: removeWallpaper } : null!,
+        { text: "Cancel", style: "cancel" },
+      ].filter(Boolean)) },
     { label: "Mute notifications", icon: "notifications-off-outline", onPress: () => chatId && muteChat(chatId) },
     { label: "Search", icon: "search-outline", onPress: () => { setSearching(true); setSearchQuery(""); } },
   ];
 
   const inputVal = editTarget ? editText : text;
 
+  // Filter members for mention autocomplete
+  const mentionResults = mentionQuery !== null
+    ? groupMembers.filter((m) => m.name.toLowerCase().startsWith(mentionQuery.toLowerCase()) && m.id !== user?.dbId)
+    : [];
+
   return (
-    <View style={[styles.container, { backgroundColor: colors.chatBackground }]}>
+    <View style={[styles.container, { backgroundColor: wallpaper ? "transparent" : colors.chatBackground }]}>
+      {/* Wallpaper background */}
+      {wallpaper && (
+        <Image
+          source={{ uri: wallpaper }}
+          style={StyleSheet.absoluteFillObject}
+          contentFit="cover"
+          blurRadius={wallpaper.startsWith("data:") ? 0 : 0}
+        />
+      )}
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
@@ -535,6 +647,28 @@ export default function ChatScreen() {
             ) : null
           }
         />
+
+        {/* @Mention autocomplete */}
+        {mentionResults.length > 0 && mentionQuery !== null && (
+          <View style={[styles.mentionList, { backgroundColor: colors.card }]}>
+            {mentionResults.slice(0, 6).map((m) => {
+              const mInitials = m.name.slice(0, 2).toUpperCase();
+              const mHue = (m.name.charCodeAt(0) * 37) % 360;
+              return (
+                <TouchableOpacity
+                  key={m.id}
+                  style={[styles.mentionRow, { borderBottomColor: colors.border }]}
+                  onPress={() => insertMention(m.name)}
+                >
+                  <View style={[styles.mentionAvatar, { backgroundColor: `hsl(${mHue},50%,40%)` }]}>
+                    <Text style={styles.mentionAvatarText}>{mInitials}</Text>
+                  </View>
+                  <Text style={[styles.mentionName, { color: colors.foreground }]}>@{m.name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
 
         {/* Edit mode banner */}
         {editTarget && (
@@ -689,6 +823,12 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  // @mention autocomplete
+  mentionList: { borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)", maxHeight: 220, elevation: 4, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4 },
+  mentionRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, gap: 12, borderBottomWidth: 0.5 },
+  mentionAvatar: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  mentionAvatarText: { color: "#fff", fontSize: 12, fontFamily: "Inter_700Bold" },
+  mentionName: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   header: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 8, paddingBottom: 10, gap: 6 },
   backBtn: { padding: 6 },
   headerAvatarWrap: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", overflow: "hidden" },

@@ -81,6 +81,19 @@ Phone number → OTP verification (Fast2SMS) → Profile setup → Main app
 - Tapping contact name in chat header navigates to chat info
 - Chat "more" menu includes: Chat info, Starred messages, Mute, Media, Search in chat, Export
 
+### Advanced Chat Features
+- **Online status** — tracks AppState foreground/background; real-time "online" indicator in chat header via GET /api/users/:id/online; PUT /api/users/:id/online updates DB
+- **Group management** — real members list with admin badges, add/remove members, promote to admin, leave/delete group; all from chat-info screen
+- **Disappearing messages** — 24h/7d/90d options; chat-info → Disappearing messages → sets timer; messages with non-null `disappear_at` auto-deleted on API side
+- **Block/Unblock** — real block stored in `user_blocks` table; blocked indicator in chat screen; block/unblock from chat-info
+- **Profile photo fullscreen** — tapping avatar in chat-info opens fullscreen viewer
+- **Message info** — long-press → "Message info" → shows Read/Delivered/Sent receipts per recipient in `/chat/message-info`
+- **Status reply** — reply button in status viewer sends reply as a private chat message
+- **@mentions** — "@" in group chat opens autocomplete dropdown with member names; selected name inserted as "@name "; mentions highlighted in green (#00A884) in bubbles
+- **Chat wallpaper** — per-user per-chat wallpaper stored in `chat_members.wallpaper`; set via chat menu "Wallpaper" → image picker; rendered as full-bleed background in chat screen
+- **Push notifications** — `expo-notifications@~0.32.16`; `users.push_token` column; token registered on login; `PUT /api/users/:id/push-token`; message send endpoint calls Expo push API with sender name + preview; foreground alerts enabled; tapping notification navigates to correct chat
+- **Notification tap routing** — `addNotificationResponseReceivedListener` in _layout.tsx routes to the relevant chat on notification tap
+
 ### Removed
 - All sample/demo data (Priya Sharma, Rahul Verma, etc.) — starts clean and real
 - Auto-reply simulation in chat screen

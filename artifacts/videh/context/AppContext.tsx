@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Notifications from "expo-notifications";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { AppState, type AppStateStatus } from "react-native";
+import { AppState, Platform, type AppStateStatus } from "react-native";
 
 const BASE_URL = (() => {
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
@@ -276,6 +277,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           body: JSON.stringify({ name: u.name, about: u.about }),
         });
       } catch {}
+
+      // Register push token (native only)
+      if (Platform.OS !== "web") {
+        try {
+          const { status: existing } = await Notifications.getPermissionsAsync();
+          let finalStatus = existing;
+          if (existing !== "granted") {
+            const { status } = await Notifications.requestPermissionsAsync();
+            finalStatus = status;
+          }
+          if (finalStatus === "granted") {
+            const tokenData = await Notifications.getExpoPushTokenAsync();
+            await api(`/users/${u.dbId}/push-token`, {
+              method: "PUT",
+              body: JSON.stringify({ token: tokenData.data }),
+            }).catch(() => {});
+          }
+        } catch {}
+      }
     }
   }, [loadChats]);
 

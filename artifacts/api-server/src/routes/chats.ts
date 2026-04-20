@@ -208,9 +208,9 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     `, [chatId, senderId, content, type ?? "text", replyToId ?? null, mediaUrl ?? null,
         isForwarded ?? false, forwardCount ?? 0, isViewOnce ?? false]);
 
-    // Mark as delivered for all other members
+    // Mark as delivered for all other members + gather push tokens
     const members = await query(
-      "SELECT user_id FROM chat_members WHERE chat_id = $1 AND user_id != $2",
+      "SELECT u.id AS user_id, u.push_token, u.name FROM chat_members cm JOIN users u ON u.id = cm.user_id WHERE cm.chat_id = $1 AND cm.user_id != $2",
       [chatId, senderId]
     );
     for (const member of members.rows) {
@@ -218,6 +218,26 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
         "INSERT INTO message_status (message_id, user_id, status) VALUES ($1, $2, 'delivered') ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'delivered', updated_at = NOW()",
         [result.rows[0].id, member.user_id]
       );
+    }
+
+    // Send push notifications (fire and forget)
+    const senderRow = await query("SELECT name FROM users WHERE id = $1", [senderId]);
+    const senderName = senderRow.rows[0]?.name ?? "Videh";
+    const tokens = members.rows.filter((m: any) => m.push_token && m.push_token.startsWith("ExponentPushToken")).map((m: any) => m.push_token);
+    if (tokens.length > 0) {
+      const preview = (content ?? "").length > 60 ? content!.slice(0, 60) + "..." : (content ?? "");
+      const body = JSON.stringify({
+        to: tokens,
+        title: senderName,
+        body: preview,
+        sound: "default",
+        data: { chatId, type: "message" },
+      });
+      fetch("https://exp.host/--/api/v2/push/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body,
+      }).catch(() => {});
     }
 
     res.json({ success: true, message: result.rows[0] });
@@ -327,6 +347,33 @@ router.post("/:chatId/read", async (req: Request, res: Response) => {
   } catch (err) {
     res.status(500).json({ success: false });
   }
+});
+
+// Get wallpaper for a chat (per user)
+router.get("/:chatId/wallpaper", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { userId } = req.query as { userId?: string };
+  try {
+    const result = await query(
+      "SELECT wallpaper FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, userId]
+    );
+    res.json({ success: true, wallpaper: result.rows[0]?.wallpaper ?? null });
+  } catch { res.status(500).json({ success: false }); }
+});
+
+// Set wallpaper for a chat (per user)
+router.put("/:chatId/wallpaper", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { userId, wallpaper } = req.body as { userId?: number; wallpaper?: string | null };
+  if (!userId) { res.status(400).json({ success: false }); return; }
+  try {
+    await query(
+      "UPDATE chat_members SET wallpaper = $1 WHERE chat_id = $2 AND user_id = $3",
+      [wallpaper ?? null, chatId, userId]
+    );
+    res.json({ success: true });
+  } catch { res.status(500).json({ success: false }); }
 });
 
 // Get chat details (for chat-info screen)

@@ -152,6 +152,16 @@ router.post("/check-phones", async (req: Request, res: Response) => {
   }
 });
 
+// Save push token
+router.put("/:id/push-token", async (req: Request, res: Response) => {
+  const { token } = req.body as { token?: string };
+  if (!token) { res.status(400).json({ success: false }); return; }
+  try {
+    await query("UPDATE users SET push_token = $1 WHERE id = $2", [token, req.params.id]);
+    res.json({ success: true });
+  } catch { res.status(500).json({ success: false }); }
+});
+
 // Search users by phone
 router.get("/search/:phone", async (req: Request, res: Response) => {
   try {
