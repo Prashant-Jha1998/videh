@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
+import * as FileSystem from "expo-file-system";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AppState, Platform, type AppStateStatus } from "react-native";
 import { getApiUrl } from "@/lib/api";
@@ -34,7 +35,7 @@ export interface Message {
   timestamp: number;
   senderId: string;
   senderName?: string;
-  type: "text" | "image" | "video" | "audio" | "deleted";
+  type: "text" | "image" | "video" | "audio" | "document" | "location" | "contact" | "deleted";
   status: "sent" | "delivered" | "read";
   mediaUrl?: string;
   isStarred?: boolean;
@@ -175,6 +176,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         otherUserId: otherUser?.id,
       };
     });
+
+  const getMimeTypeFromUri = (uri: string, fallback: string): string => {
+    const clean = uri.split("?")[0].toLowerCase();
+    if (clean.endsWith(".png")) return "image/png";
+    if (clean.endsWith(".jpg") || clean.endsWith(".jpeg")) return "image/jpeg";
+    if (clean.endsWith(".webp")) return "image/webp";
+    if (clean.endsWith(".mp4")) return "video/mp4";
+    if (clean.endsWith(".mov")) return "video/quicktime";
+    if (clean.endsWith(".m4a")) return "audio/mp4";
+    if (clean.endsWith(".aac")) return "audio/aac";
+    if (clean.endsWith(".mp3")) return "audio/mpeg";
+    if (clean.endsWith(".wav")) return "audio/wav";
+    return fallback;
+  };
+
+  const toShareableMediaUri = useCallback(async (uri: string, fallbackMime: string): Promise<string> => {
+    if (!uri) return uri;
+    if (uri.startsWith("data:") || uri.startsWith("http://") || uri.startsWith("https://")) return uri;
+    try {
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+      const mime = getMimeTypeFromUri(uri, fallbackMime);
+      return `data:${mime};base64,${base64}`;
+    } catch {
+      return uri;
+    }
+  }, []);
 
   const loadChats = useCallback(async (dbUserId: number) => {
     try {
@@ -508,9 +535,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Send image/video message in chat
   const sendImageMessage = useCallback((chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean) => {
+    void (async () => {
     const u = userRef.current;
     const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
     const isVideo = mediaUri.match(/\.(mp4|mov|avi|mkv|webm)$/i) !== null;
+    const shareableMediaUri = await toShareableMediaUri(
+      mediaUri,
+      isVideo ? "video/mp4" : "image/jpeg",
+    );
     const text = caption?.trim() || (isViewOnce ? "🔁 View once" : isVideo ? "🎥 Video" : "📷 Photo");
     const msgType: Message["type"] = isVideo ? "video" : "image";
     const newMsg: Message = {
@@ -527,7 +559,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (u?.dbId) {
       api(`/chats/${chatId}/messages`, {
         method: "POST",
-        body: JSON.stringify({ senderId: u.dbId, content: text, type: msgType, mediaUrl: mediaUri, isViewOnce: isViewOnce ?? false }),
+        body: JSON.stringify({
+          senderId: u.dbId,
+          content: text,
+          type: msgType,
+          mediaUrl: shareableMediaUri,
+          isViewOnce: isViewOnce ?? false,
+        }),
       }).then((data: any) => {
         if (data?.success && data.message) {
           setChats((prev) =>
@@ -540,13 +578,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       }).catch(() => {});
     }
-  }, []);
+    })();
+  }, [toShareableMediaUri]);
 
   // Send audio/voice message
   const sendAudioMessage = useCallback((chatId: string, audioUri: string, durationSecs: number) => {
+    void (async () => {
     const u = userRef.current;
     const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
     const text = `🎤 Voice message (${Math.round(durationSecs)}s)`;
+    const shareableAudioUri = await toShareableMediaUri(audioUri, "audio/mp4");
     const newMsg: Message = {
       id: tempId, text, timestamp: Date.now(), senderId: "me",
       type: "audio", status: "sent", mediaUrl: audioUri,
@@ -561,7 +602,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (u?.dbId) {
       api(`/chats/${chatId}/messages`, {
         method: "POST",
-        body: JSON.stringify({ senderId: u.dbId, content: text, type: "audio", mediaUrl: audioUri }),
+        body: JSON.stringify({ senderId: u.dbId, content: text, type: "audio", mediaUrl: shareableAudioUri }),
       }).then((data: any) => {
         if (data?.success && data.message) {
           setChats((prev) =>
@@ -574,7 +615,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       }).catch(() => {});
     }
-  }, []);
+    })();
+  }, [toShareableMediaUri]);
 
   // Delete for everyone
   const deleteForEveryone = useCallback((chatId: string, messageId: string) => {

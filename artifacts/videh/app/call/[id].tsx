@@ -12,14 +12,14 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAgoraCall } from "@/hooks/useAgoraCall";
-import { useAppContext } from "@/context/AppContext";
+import { useApp } from "@/context/AppContext";
 import { AgoraLocalView, AgoraRemoteView } from "@/components/AgoraVideoView";
 
 export default function CallScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, name, type } = useLocalSearchParams<{ id: string; name: string; type: string }>();
-  const { user } = useAppContext();
+  const { user } = useApp();
   const isVideo = type === "video";
 
   const channelName = `videh_${id ?? "default"}`;
@@ -32,8 +32,6 @@ export default function CallScreen() {
     cameraOff,
     speakerOn,
     remoteCount,
-    localVideoId,
-    remoteVideoId,
     hasRemoteVideo,
     toggleMute,
     toggleCamera,
@@ -121,9 +119,7 @@ export default function CallScreen() {
       ) : showVideoUI ? (
         <View style={styles.videoContainer}>
           {(Platform.OS === "web" ? hasRemoteVideo : remoteUid !== null) ? (
-            Platform.OS === "web"
-              ? <AgoraRemoteView style={styles.remoteVideo} nativeId={remoteVideoId} />
-              : <AgoraRemoteView uid={remoteUid ?? 0} style={styles.remoteVideo} />
+            <AgoraRemoteView uid={remoteUid ?? 0} style={styles.remoteVideo} />
           ) : (
             <View style={[styles.remoteVideo, styles.videoPlaceholder]}>
               <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: !joined ? pulse : 1 }] }]}>
@@ -137,10 +133,7 @@ export default function CallScreen() {
           )}
           {joined && !cameraOff && (
             <View style={styles.localVideoWrapper}>
-              {Platform.OS === "web"
-                ? <AgoraLocalView style={styles.localVideoFill} nativeId={localVideoId} />
-                : <AgoraLocalView style={styles.localVideoFill} />
-              }
+              <AgoraLocalView style={styles.localVideoFill} />
             </View>
           )}
         </View>

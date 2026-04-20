@@ -30,13 +30,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, type Message } from "@/context/AppContext";
+import { getApiUrl } from "@/lib/api";
 import { formatFullTime } from "@/utils/time";
 import { DropdownMenu } from "@/components/DropdownMenu";
 
-const BASE_URL = (() => {
-  const d = process.env.EXPO_PUBLIC_DOMAIN;
-  return d ? `https://${d}` : "";
-})();
+const BASE_URL = getApiUrl();
 const { width: W } = Dimensions.get("window");
 const REACTION_EMOJIS = ["❤️", "👍", "😂", "😮", "😢", "🙏"];
 
@@ -324,48 +322,59 @@ export default function ChatScreen() {
 
     if (type === "camera") {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== "granted") { Alert.alert("Permission needed", "Camera access chahiye."); return; }
+      if (status !== "granted") { Alert.alert("Permission required", "Camera access is required."); return; }
       const result = await ImagePicker.launchCameraAsync({ quality: 0.75, base64: false });
       if (!result.canceled && result.assets[0]) sendImageMessage(chatId, result.assets[0].uri);
 
     } else if (type === "gallery" || type === "viewonce") {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== "granted") { Alert.alert("Permission needed", "Gallery access chahiye."); return; }
+      if (status !== "granted") { Alert.alert("Permission required", "Media library access is required."); return; }
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], quality: 0.75, base64: false });
       if (!result.canceled && result.assets[0]) sendImageMessage(chatId, result.assets[0].uri, undefined, isViewOnce);
 
     } else if (type === "document") {
-      if (Platform.OS === "web") { Alert.alert("Web pe nahi", "Document share karne ke liye mobile app use karo."); return; }
+      if (Platform.OS === "web") { Alert.alert("Not supported on web", "Use the mobile app to share documents."); return; }
       const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
       const fileSizeMB = (asset.size ?? 0) / 1024 / 1024;
-      if (fileSizeMB > 16) { Alert.alert("File too large", "Maximum 16MB file bhej sakte ho."); return; }
+      if (fileSizeMB > 16) { Alert.alert("File too large", "Maximum allowed file size is 16MB."); return; }
       try {
         const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
         const mimeType = asset.mimeType ?? "application/octet-stream";
         const dataUri = `data:${mimeType};base64,${base64}`;
         const docInfo = JSON.stringify({ name: asset.name, size: asset.size, mimeType, dataUri });
         sendSpecialMessage(chatId, asset.name, "document", dataUri, docInfo);
-      } catch { Alert.alert("Error", "File read nahi hua. Dobara try karo."); }
+      } catch { Alert.alert("Error", "Could not read the selected file. Please try again."); }
 
     } else if (type === "location") {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") { Alert.alert("Permission needed", "Location access chahiye."); return; }
+      if (status !== "granted") { Alert.alert("Permission required", "Location access is required to share location."); return; }
       try {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (Platform.OS === "android") {
+          await Location.enableNetworkProviderAsync().catch(() => {});
+        }
+        let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (!loc) {
+          const lastKnown = await Location.getLastKnownPositionAsync();
+          if (lastKnown) loc = lastKnown;
+        }
+        if (!loc) {
+          Alert.alert("Error", "Could not detect your location. Please enable GPS and try again.");
+          return;
+        }
         const { latitude, longitude } = loc.coords;
         const mapsUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
         const locInfo = JSON.stringify({ lat: latitude, lng: longitude, url: mapsUrl });
         sendSpecialMessage(chatId, `📍 Location\n${latitude.toFixed(5)}, ${longitude.toFixed(5)}`, "location", mapsUrl, locInfo);
-      } catch { Alert.alert("Error", "Location nahi mila. GPS on hai?"); }
+      } catch { Alert.alert("Error", "Could not get your location. Please make sure GPS is enabled."); }
 
     } else if (type === "contact") {
-      if (Platform.OS === "web") { Alert.alert("Web pe nahi", "Contact share karne ke liye mobile app use karo."); return; }
+      if (Platform.OS === "web") { Alert.alert("Not supported on web", "Use the mobile app to share contacts."); return; }
       const { status } = await Contacts.requestPermissionsAsync();
-      if (status !== "granted") { Alert.alert("Permission needed", "Contacts access chahiye."); return; }
+      if (status !== "granted") { Alert.alert("Permission required", "Contacts access is required to share contacts."); return; }
       const { data } = await Contacts.getContactsAsync({ fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails] });
-      if (!data || data.length === 0) { Alert.alert("No contacts", "Phone mein contacts nahi hain."); return; }
+      if (!data || data.length === 0) { Alert.alert("No contacts", "No contacts were found on this device."); return; }
       // Show simple picker
       const topContacts = data.filter(c => c.name).slice(0, 20);
       const options = topContacts.map(c => ({
@@ -378,35 +387,24 @@ export default function ChatScreen() {
         },
       }));
       options.push({ text: "Cancel", onPress: () => {} });
-      Alert.alert("Contact choose karo", "", options as any);
+      Alert.alert("Choose a contact", "", options as any);
     }
   };
 
   const sendSpecialMessage = useCallback((cid: string, text: string, msgType: string, mediaUrl?: string, metaJson?: string) => {
     const u = user;
-    const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    const newMsg: any = { id: tempId, text, timestamp: Date.now(), senderId: "me", type: msgType, status: "sent", mediaUrl, meta: metaJson ? JSON.parse(metaJson) : undefined };
-    setChats((prev: any[]) =>
-      prev.map((c: any) =>
-        c.id === cid ? { ...c, messages: [...c.messages, newMsg], lastMessage: text.split("\n")[0], lastMessageTime: Date.now() } : c
-      )
-    );
     if (u?.dbId) {
       fetch(`${BASE_URL}/api/chats/${cid}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ senderId: u.dbId, content: text, type: msgType, mediaUrl: mediaUrl ?? null }),
-      }).then(r => r.json()).then((data: any) => {
-        if (data?.success && data.message) {
-          setChats((prev: any[]) =>
-            prev.map((c: any) =>
-              c.id === cid ? { ...c, messages: c.messages.map((m: any) => m.id === tempId ? { ...m, id: String(data.message.id), status: "delivered" } : m) } : c
-            )
-          );
-        }
-      }).catch(() => {});
+      })
+        .then(() => loadMessages(cid))
+        .catch(() => {
+          Alert.alert("Error", "Failed to send the attachment. Please try again.");
+        });
     }
-  }, [user]);
+  }, [user, loadMessages]);
 
   const [attachVisible, setAttachVisible] = useState(false);
   const showAttachMenu = () => setAttachVisible(true);

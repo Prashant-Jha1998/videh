@@ -25,6 +25,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         AND (
           s.user_id = $1::int
           OR s.user_id IN (
+            -- Contacts table based visibility (when contact sync exists)
             SELECT c1.contact_user_id
             FROM contacts c1
             JOIN contacts c2
@@ -32,6 +33,16 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
              AND c2.contact_user_id = $1::int
              AND c2.is_blocked = FALSE
             WHERE c1.user_id = $1::int AND c1.is_blocked = FALSE
+          )
+          OR s.user_id IN (
+            -- Chat based visibility fallback so active chat contacts can see status
+            SELECT cm_other.user_id
+            FROM chat_members cm_self
+            JOIN chat_members cm_other ON cm_other.chat_id = cm_self.chat_id
+            JOIN chats c ON c.id = cm_self.chat_id
+            WHERE cm_self.user_id = $1::int
+              AND cm_other.user_id != $1::int
+              AND c.is_group = FALSE
           )
         )
       ORDER BY s.created_at DESC
