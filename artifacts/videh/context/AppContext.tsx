@@ -2,11 +2,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AppState, Platform, type AppStateStatus } from "react-native";
+import { getApiUrl } from "@/lib/api";
 
-const BASE_URL = (() => {
-  const domain = process.env.EXPO_PUBLIC_DOMAIN;
-  return domain ? `https://${domain}` : "";
-})();
+const BASE_URL = getApiUrl();
 
 const api = async (path: string, options?: RequestInit) => {
   const res = await fetch(`${BASE_URL}/api${path}`, {
@@ -212,6 +210,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
+  const loadStatuses = useCallback(async (dbUserId: number) => {
+    try {
+      const data = await api(`/statuses/user/${dbUserId}`) as { success: boolean; statuses: any[] };
+      if (!data.success || !data.statuses) return;
+      const me = userRef.current;
+      const mapped: Status[] = data.statuses.map((s: any) => {
+        const isMe = Number(s.user_id) === Number(dbUserId);
+        return {
+          id: String(s.id),
+          userId: isMe ? "me" : String(s.user_id),
+          userName: isMe
+            ? (me?.name ?? s.user_name ?? "You")
+            : (s.user_name ?? "Unknown"),
+          userAvatar: isMe
+            ? (me?.avatar ?? s.user_avatar ?? undefined)
+            : (s.user_avatar ?? undefined),
+          content: s.content ?? "",
+          type: s.type ?? "text",
+          mediaUrl: s.media_url ?? undefined,
+          timestamp: new Date(s.created_at).getTime(),
+          viewed: Boolean(s.viewed),
+          backgroundColor: s.background_color ?? "#00A884",
+        };
+      });
+      setStatuses(mapped);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     const loadUser = async () => {
       try {
@@ -223,6 +249,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (parsed.dbId) {
             loadChats(parsed.dbId);
             loadCallLogs(parsed.dbId);
+            loadStatuses(parsed.dbId);
           }
         }
       } catch {}
@@ -233,7 +260,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     loadUser();
   }, []);
 
-  // Auto-refresh chats every 7s and call logs every 30s
+  // Auto-refresh chats, statuses and call logs
   useEffect(() => {
     const u = userRef.current;
     if (!u?.dbId) return;
@@ -241,11 +268,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const uid = userRef.current?.dbId;
       if (uid) loadChats(uid);
     }, 7000);
+    const statusTimer = setInterval(() => {
+      const uid = userRef.current?.dbId;
+      if (uid) loadStatuses(uid);
+    }, 12000);
     const callTimer = setInterval(() => {
       const uid = userRef.current?.dbId;
       if (uid) loadCallLogs(uid);
     }, 30000);
-    return () => { clearInterval(chatTimer); clearInterval(callTimer); };
+    return () => { clearInterval(chatTimer); clearInterval(statusTimer); clearInterval(callTimer); };
   }, [isAuthenticated]);
 
   // Online presence tracking via AppState
@@ -271,6 +302,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (u.dbId) {
       loadChats(u.dbId);
       loadCallLogs(u.dbId);
+      loadStatuses(u.dbId);
       try {
         await api(`/users/${u.dbId}`, {
           method: "PUT",
@@ -297,7 +329,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         } catch {}
       }
     }
-  }, [loadChats]);
+  }, [loadChats, loadStatuses]);
 
   const refreshChats = useCallback(async () => {
     const u = userRef.current;
@@ -663,10 +695,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       api("/statuses", {
         method: "POST",
         body: JSON.stringify({ userId: u.dbId, content, type, backgroundColor: bg ?? "#00A884", mediaUrl: mediaUrl ?? null }),
-      }).catch(() => {});
+      })
+        .then(() => loadStatuses(u.dbId!))
+        .catch(() => {});
     }
     return Promise.resolve();
-  }, []);
+  }, [loadStatuses]);
 
   const deleteMessage = useCallback((chatId: string, messageId: string) => {
     setChats((prev) =>

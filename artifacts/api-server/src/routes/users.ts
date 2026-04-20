@@ -142,7 +142,7 @@ router.post("/check-phones", async (req: Request, res: Response) => {
   try {
     const placeholders = phones.map((_: string, i: number) => `$${i + 1}`).join(", ");
     const result = await query(
-      `SELECT id, phone, name, about, avatar_url FROM users WHERE phone = ANY(ARRAY[${placeholders}]) AND name IS NOT NULL AND name != ''`,
+      `SELECT id, phone, name, about, avatar_url FROM users WHERE phone = ANY(ARRAY[${placeholders}])`,
       phones
     );
     const registered: Record<string, any> = {};
@@ -150,7 +150,7 @@ router.post("/check-phones", async (req: Request, res: Response) => {
       registered[row.phone] = {
         id: row.id,
         phone: row.phone,
-        name: row.name,
+        name: row.name ?? row.phone,
         about: row.about,
         avatarUrl: row.avatar_url,
       };
