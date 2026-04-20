@@ -106,7 +106,11 @@ export default function CallsScreen() {
         contentContainerStyle={{ paddingBottom: 100 }}
       />
 
-      <TouchableOpacity style={[styles.fab, { backgroundColor: colors.primary }]} activeOpacity={0.8}>
+      <TouchableOpacity
+        style={[styles.fab, { backgroundColor: colors.primary }]}
+        activeOpacity={0.8}
+        onPress={() => router.push("/new-chat")}
+      >
         <Ionicons name="call" size={24} color="#fff" />
       </TouchableOpacity>
     </View>

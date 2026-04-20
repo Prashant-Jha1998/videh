@@ -2,12 +2,13 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Clipboard,
+  Dimensions,
   FlatList,
   Platform,
   StyleSheet,
@@ -22,6 +23,12 @@ import { useApp, Message } from "@/context/AppContext";
 import { formatFullTime } from "@/utils/time";
 import { DropdownMenu } from "@/components/DropdownMenu";
 
+const BASE_URL = (() => {
+  const d = process.env.EXPO_PUBLIC_DOMAIN;
+  return d ? `https://${d}` : "";
+})();
+const { width: W } = Dimensions.get("window");
+
 type ReplyData = { id: string; text: string; senderId: string } | null;
 
 export default function ChatScreen() {
@@ -35,12 +42,13 @@ export default function ChatScreen() {
     otherAvatar?: string;
   }>();
 
-  const { chats, sendMessage, markAsRead, deleteMessage, starMessage, muteChat, createDirectChat, loadMessages } = useApp();
+  const { chats, sendMessage, sendImageMessage, setTyping, clearTyping, markAsRead, deleteMessage, starMessage, muteChat, createDirectChat, loadMessages, user } = useApp();
 
   // For "new_" chats we resolve the real DB ID first
   const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
   const [initializing, setInitializing] = useState(rawId?.startsWith("new_") ?? false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [typingNames, setTypingNames] = useState<string[]>([]);
 
   // Resolve "new_" chat → real DB chat
   useEffect(() => {
@@ -59,32 +67,68 @@ export default function ChatScreen() {
     loadMessages(chatId);
   }, [chatId]);
 
+  // Poll for new messages every 4s + typing every 3s while screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      if (!chatId) return;
+      const msgTimer = setInterval(() => loadMessages(chatId), 4000);
+      const typingTimer = setInterval(async () => {
+        if (!user?.dbId) return;
+        try {
+          const res = await fetch(`${BASE_URL}/api/chats/${chatId}/typing?userId=${user.dbId}`);
+          const data = await res.json();
+          setTypingNames(data.typing ?? []);
+        } catch {}
+      }, 3000);
+      return () => { clearInterval(msgTimer); clearInterval(typingTimer); };
+    }, [chatId, user?.dbId])
+  );
+
   const chat = chats.find((c) => c.id === chatId);
   const messages = chat?.messages ?? [];
   const [text, setText] = useState("");
   const [replyTo, setReplyTo] = useState<ReplyData>(null);
   const inputRef = useRef<TextInput>(null);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleTextChange = useCallback((val: string) => {
+    setText(val);
+    if (!chatId) return;
+    if (val.length > 0) {
+      setTyping(chatId);
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = setTimeout(() => { clearTyping(chatId); }, 3000);
+    } else {
+      clearTyping(chatId);
+    }
+  }, [chatId, setTyping, clearTyping]);
 
   const handleSend = useCallback(() => {
     if (!text.trim() || !chatId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    clearTyping(chatId);
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     sendMessage(chatId, text.trim(), replyTo?.id);
     setText("");
     setReplyTo(null);
-  }, [text, chatId, sendMessage, replyTo]);
+  }, [text, chatId, sendMessage, replyTo, clearTyping]);
 
   const sendMediaMessage = async (type: "camera" | "gallery" | "document" | "location" | "contact") => {
     if (!chatId) return;
     if (type === "camera") {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== "granted") { Alert.alert("Permission needed"); return; }
-      const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
-      if (!result.canceled) sendMessage(chatId, "📷 Photo");
+      const result = await ImagePicker.launchCameraAsync({ quality: 0.7, base64: false });
+      if (!result.canceled && result.assets[0]) {
+        sendImageMessage(chatId, result.assets[0].uri);
+      }
     } else if (type === "gallery") {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") { Alert.alert("Permission needed"); return; }
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7 });
-      if (!result.canceled) sendMessage(chatId, "🖼 Photo");
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], quality: 0.7, base64: false });
+      if (!result.canceled && result.assets[0]) {
+        sendImageMessage(chatId, result.assets[0].uri);
+      }
     } else if (type === "document") {
       sendMessage(chatId, "📄 Document");
     } else if (type === "location") {
@@ -176,6 +220,17 @@ export default function ChatScreen() {
               <Ionicons name="ban-outline" size={13} color={colors.mutedForeground} />
               <Text style={[styles.deletedText, { color: colors.mutedForeground }]}> This message was deleted</Text>
             </View>
+          ) : (item.type === "image" || item.type === "video") && item.mediaUrl ? (
+            <>
+              <Image
+                source={{ uri: item.mediaUrl }}
+                style={styles.msgImage}
+                contentFit="cover"
+              />
+              {item.text && item.text !== "📷 Photo" && (
+                <Text style={[styles.msgText, { color: colors.foreground }]}>{item.text}</Text>
+              )}
+            </>
           ) : (
             <Text style={[styles.msgText, { color: colors.foreground }]}>{item.text}</Text>
           )}
@@ -233,14 +288,16 @@ export default function ChatScreen() {
           onPress={() => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } })}
         >
           <Text style={styles.headerName} numberOfLines={1}>{displayName}</Text>
-          <Text style={styles.headerStatus}>
-            {chat?.isGroup
-              ? `${chat.members?.length ?? 0} members`
-              : initializing
-                ? "connecting..."
-                : chat?.isOnline
-                  ? "online"
-                  : "tap for info"}
+          <Text style={[styles.headerStatus, typingNames.length > 0 && { color: "#a7f3d0" }]}>
+            {typingNames.length > 0
+              ? "typing..."
+              : chat?.isGroup
+                ? `${chat.members?.length ?? 0} members`
+                : initializing
+                  ? "connecting..."
+                  : chat?.isOnline
+                    ? "online"
+                    : "tap for info"}
           </Text>
         </TouchableOpacity>
 
@@ -321,7 +378,7 @@ export default function ChatScreen() {
             placeholder="Message"
             placeholderTextColor={colors.mutedForeground}
             value={text}
-            onChangeText={setText}
+            onChangeText={handleTextChange}
             multiline
             maxLength={2000}
             editable={!initializing}
@@ -389,6 +446,7 @@ const styles = StyleSheet.create({
   },
   replyText: { fontSize: 12, fontFamily: "Inter_500Medium" },
   msgText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
+  msgImage: { width: W * 0.6, height: W * 0.6, borderRadius: 8, marginBottom: 4 },
   msgMeta: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 3 },
   msgTime: { fontSize: 11, fontFamily: "Inter_400Regular" },
   deletedRow: { flexDirection: "row", alignItems: "center", gap: 4 },

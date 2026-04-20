@@ -120,7 +120,7 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
   try {
     const result = await query(`
       SELECT
-        m.id, m.chat_id, m.sender_id, m.content, m.type,
+        m.id, m.chat_id, m.sender_id, m.content, m.type, m.media_url,
         m.reply_to_id, m.is_deleted, m.is_forwarded, m.is_starred,
         m.created_at,
         u.name AS sender_name, u.avatar_url AS sender_avatar,
@@ -142,19 +142,59 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
   }
 });
 
+// Typing indicator – set
+router.post("/:chatId/typing", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { userId } = req.body as { userId?: number };
+  if (!userId) { res.status(400).json({ success: false }); return; }
+  try {
+    await query(
+      `INSERT INTO typing_sessions (chat_id, user_id, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (chat_id, user_id) DO UPDATE SET updated_at = NOW()`,
+      [chatId, userId]
+    );
+    res.json({ success: true });
+  } catch { res.json({ success: false }); }
+});
+
+// Typing indicator – clear
+router.delete("/:chatId/typing", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { userId } = req.body as { userId?: number };
+  if (!userId) { res.json({ success: false }); return; }
+  try {
+    await query("DELETE FROM typing_sessions WHERE chat_id = $1 AND user_id = $2", [chatId, userId]);
+    res.json({ success: true });
+  } catch { res.json({ success: false }); }
+});
+
+// Typing indicator – get (who is typing, excluding current user, within 4 seconds)
+router.get("/:chatId/typing", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { userId } = req.query as { userId?: string };
+  try {
+    const result = await query(
+      `SELECT u.name FROM typing_sessions ts JOIN users u ON u.id = ts.user_id
+       WHERE ts.chat_id = $1 AND ts.user_id != $2 AND ts.updated_at > NOW() - INTERVAL '4 seconds'`,
+      [chatId, userId ?? 0]
+    );
+    res.json({ success: true, typing: result.rows.map((r: any) => r.name) });
+  } catch { res.json({ success: true, typing: [] }); }
+});
+
 // Send message
 router.post("/:chatId/messages", async (req: Request, res: Response) => {
   const { chatId } = req.params;
-  const { senderId, content, type, replyToId } = req.body as {
-    senderId?: number; content?: string; type?: string; replyToId?: number
+  const { senderId, content, type, replyToId, mediaUrl } = req.body as {
+    senderId?: number; content?: string; type?: string; replyToId?: number; mediaUrl?: string;
   };
   if (!senderId || !content) { res.status(400).json({ success: false }); return; }
   try {
     const result = await query(`
-      INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *
-    `, [chatId, senderId, content, type ?? "text", replyToId ?? null]);
+    `, [chatId, senderId, content, type ?? "text", replyToId ?? null, mediaUrl ?? null]);
 
     // Mark as delivered for all other chat members
     const members = await query(

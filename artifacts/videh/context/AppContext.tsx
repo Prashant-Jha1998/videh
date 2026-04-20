@@ -30,6 +30,7 @@ export interface Message {
   senderId: string;
   type: "text" | "image" | "audio" | "deleted";
   status: "sent" | "delivered" | "read";
+  mediaUrl?: string;
   isStarred?: boolean;
   chatId?: string;
   chatName?: string;
@@ -112,6 +113,9 @@ interface AppContextType {
   createDirectChat: (otherUserId: number, otherName: string, otherAvatar?: string) => Promise<string>;
   loadMessages: (chatId: string) => Promise<void>;
   refreshChats: () => Promise<void>;
+  sendImageMessage: (chatId: string, mediaUri: string, caption?: string) => void;
+  setTyping: (chatId: string) => void;
+  clearTyping: (chatId: string) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -124,7 +128,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [chats, setChats] = useState<Chat[]>([]);
   const [statuses, setStatuses] = useState<Status[]>([]);
   const [contacts] = useState<Contact[]>([]);
-  const [callLogs] = useState<CallLog[]>([]);
+  const [callLogs, setCallLogs] = useState<CallLog[]>([]);
   const userRef = useRef<UserProfile | null>(null);
   userRef.current = user;
 
@@ -156,7 +160,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const data = await api(`/chats/user/${dbUserId}`) as { success: boolean; chats: any[] };
       if (!data.success || !data.chats) return;
-      setChats(mapDbChats(data.chats));
+      setChats((prev) => {
+        const mapped = mapDbChats(data.chats);
+        // Preserve existing messages — only update metadata
+        return mapped.map((newChat) => {
+          const old = prev.find((c) => c.id === newChat.id);
+          return old ? { ...newChat, messages: old.messages, isPinned: newChat.isPinned ?? old.isPinned, isMuted: newChat.isMuted ?? old.isMuted } : newChat;
+        });
+      });
+    } catch {}
+  }, []);
+
+  const loadCallLogs = useCallback(async (dbUserId: number) => {
+    try {
+      const data = await api(`/calls/user/${dbUserId}`) as { success: boolean; calls: any[] };
+      if (!data.success || !data.calls) return;
+      const logs: CallLog[] = data.calls.map((c: any) => ({
+        id: String(c.id),
+        name: c.other_user_name ?? "Unknown",
+        phone: c.other_user_phone,
+        avatar: c.other_user_avatar ?? undefined,
+        type: c.type === "video" ? "video" : "audio",
+        direction: c.direction === "outgoing" ? "outgoing" : "incoming",
+        status: c.status === "answered" ? "answered" : c.status === "declined" ? "declined" : "missed",
+        timestamp: new Date(c.created_at).getTime(),
+        duration: c.duration_seconds ?? undefined,
+      }));
+      setCallLogs(logs);
     } catch {}
   }, []);
 
@@ -170,6 +200,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setIsAuthenticated(true);
           if (parsed.dbId) {
             loadChats(parsed.dbId);
+            loadCallLogs(parsed.dbId);
           }
         }
       } catch {}
@@ -180,6 +211,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     loadUser();
   }, []);
 
+  // Auto-refresh chats every 7s and call logs every 30s
+  useEffect(() => {
+    const u = userRef.current;
+    if (!u?.dbId) return;
+    const chatTimer = setInterval(() => {
+      const uid = userRef.current?.dbId;
+      if (uid) loadChats(uid);
+    }, 7000);
+    const callTimer = setInterval(() => {
+      const uid = userRef.current?.dbId;
+      if (uid) loadCallLogs(uid);
+    }, 30000);
+    return () => { clearInterval(chatTimer); clearInterval(callTimer); };
+  }, [isAuthenticated]);
+
   const setUser = useCallback(async (u: UserProfile) => {
     setUserState(u);
     setIsAuthenticated(true);
@@ -187,6 +233,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (u.dbId) {
       loadChats(u.dbId);
+      loadCallLogs(u.dbId);
       try {
         await api(`/users/${u.dbId}`, {
           method: "PUT",
@@ -290,6 +337,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         senderId: String(m.sender_id) === String(u?.dbId) ? "me" : String(m.sender_id),
         type: m.is_deleted ? "deleted" : (m.type ?? "text"),
         status: "delivered",
+        mediaUrl: m.media_url ?? undefined,
         isStarred: m.is_starred,
         replyToId: m.reply_to_id ? String(m.reply_to_id) : undefined,
         replyText: m.reply_content ?? undefined,
@@ -350,6 +398,60 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ userId: u.dbId }),
       }).catch(() => {});
     }
+  }, []);
+
+  // Send image/video message in chat
+  const sendImageMessage = useCallback((chatId: string, mediaUri: string, caption?: string) => {
+    const u = userRef.current;
+    const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    const text = caption?.trim() || "📷 Photo";
+    const isVideo = mediaUri.match(/\.(mp4|mov|avi|mkv|webm)$/i) !== null;
+    const newMsg: Message = {
+      id: tempId, text, timestamp: Date.now(), senderId: "me",
+      type: "image", status: "sent", mediaUrl: mediaUri,
+    };
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === chatId
+          ? { ...c, messages: [...c.messages, newMsg], lastMessage: text, lastMessageTime: Date.now() }
+          : c
+      )
+    );
+    if (u?.dbId) {
+      api(`/chats/${chatId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ senderId: u.dbId, content: text, type: isVideo ? "video" : "image", mediaUrl: mediaUri }),
+      }).then((data: any) => {
+        if (data?.success && data.message) {
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === chatId
+                ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(data.message.id), status: "delivered" } : m) }
+                : c
+            )
+          );
+        }
+      }).catch(() => {});
+    }
+  }, []);
+
+  // Typing indicator
+  const setTyping = useCallback((chatId: string) => {
+    const u = userRef.current;
+    if (!u?.dbId) return;
+    api(`/chats/${chatId}/typing`, {
+      method: "POST",
+      body: JSON.stringify({ userId: u.dbId }),
+    }).catch(() => {});
+  }, []);
+
+  const clearTyping = useCallback((chatId: string) => {
+    const u = userRef.current;
+    if (!u?.dbId) return;
+    api(`/chats/${chatId}/typing`, {
+      method: "DELETE",
+      body: JSON.stringify({ userId: u.dbId }),
+    }).catch(() => {});
   }, []);
 
   const createGroup = useCallback((name: string, memberIds: string[]) => {
@@ -452,6 +554,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, forwardMessage, starredMessages, updateAvatar,
       createDirectChat, loadMessages, refreshChats,
+      sendImageMessage, setTyping, clearTyping,
     }}>
       {children}
     </AppContext.Provider>
