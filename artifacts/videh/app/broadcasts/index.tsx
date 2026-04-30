@@ -15,7 +15,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-const API_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
+import { getApiUrl } from "@/lib/api";
+const API_URL = `${getApiUrl()}/api`;
 
 interface BroadcastList {
   id: number;
@@ -32,7 +33,7 @@ interface Recipient {
 }
 
 interface Contact {
-  id: number;
+  id: string | number;
   name: string;
   phone: string;
   avatar_url?: string;
@@ -60,7 +61,7 @@ export default function BroadcastsScreen() {
     if (!user) return;
     setLoading(true);
     try {
-      const r = await fetch(`${API_URL}/broadcasts/user/${user.id}`);
+      const r = await fetch(`${API_URL}/broadcasts/user/${user.dbId}`);
       const d = await r.json();
       if (d.success) setLists(d.lists);
     } catch {}
@@ -75,7 +76,7 @@ export default function BroadcastsScreen() {
       const r = await fetch(`${API_URL}/broadcasts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ creatorId: user.id, name: newName.trim() }),
+        body: JSON.stringify({ creatorId: user.dbId, name: newName.trim() }),
       });
       const d = await r.json();
       if (d.success) {
@@ -108,7 +109,7 @@ export default function BroadcastsScreen() {
     await fetch(`${API_URL}/broadcasts/${selectedList.id}/recipients`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: contact.id }),
+      body: JSON.stringify({ userId: Number(contact.id) }),
     });
     const r = await fetch(`${API_URL}/broadcasts/${selectedList.id}/recipients`);
     const d = await r.json();
@@ -123,7 +124,7 @@ export default function BroadcastsScreen() {
       const r = await fetch(`${API_URL}/broadcasts/${selectedList.id}/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ senderId: user.id, content: sendText.trim() }),
+        body: JSON.stringify({ senderId: user.dbId, content: sendText.trim() }),
       });
       const d = await r.json();
       if (d.success) {
@@ -149,8 +150,8 @@ export default function BroadcastsScreen() {
     ]);
   };
 
-  const availableContacts = (contacts as Contact[]).filter(
-    (c) => c.id && !recipients.find((r) => r.user_id === c.id)
+  const availableContacts = contacts.filter(
+    (c) => c.id && !recipients.find((r) => r.user_id === Number(c.id))
   );
 
   return (

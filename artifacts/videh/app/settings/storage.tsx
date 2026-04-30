@@ -13,7 +13,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-const API_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
+import { getApiUrl } from "@/lib/api";
+const API_URL = `${getApiUrl()}/api`;
 
 interface StorageStats {
   totalMessages: number;
@@ -37,7 +38,7 @@ export default function StorageScreen() {
     const load = async () => {
       if (!user) return;
       try {
-        const r = await fetch(`${API_URL}/users/${user.id}/storage-stats`);
+        const r = await fetch(`${API_URL}/users/${user.dbId}/storage-stats`);
         const d = await r.json();
         if (d.success) setStats(d.stats);
       } catch {}

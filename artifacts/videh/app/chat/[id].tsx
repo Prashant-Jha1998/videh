@@ -74,12 +74,35 @@ function AudioPlayer({ uri, colors }: { uri: string; colors: any }) {
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [position, setPosition] = useState(0);
+  const [preparing, setPreparing] = useState(false);
+  const resolvedUriRef = useRef<string | null>(null);
+
+  const resolvePlayableUri = useCallback(async (): Promise<string> => {
+    if (resolvedUriRef.current) return resolvedUriRef.current;
+    if (!uri.startsWith("data:audio")) {
+      resolvedUriRef.current = uri;
+      return uri;
+    }
+    const cacheDir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? "";
+    if (!cacheDir) throw new Error("No writable cache directory");
+    const ext = uri.includes("audio/mpeg") ? "mp3"
+      : uri.includes("audio/wav") ? "wav"
+      : uri.includes("audio/aac") ? "aac"
+      : "m4a";
+    const target = `${cacheDir}voice_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+    const base64 = uri.replace(/^data:[^;]+;base64,/, "");
+    await FileSystem.writeAsStringAsync(target, base64, { encoding: "base64" as any });
+    resolvedUriRef.current = target;
+    return target;
+  }, [uri]);
 
   const toggle = async () => {
     try {
       if (!sound) {
+        setPreparing(true);
+        const playableUri = await resolvePlayableUri();
         const { sound: s } = await Audio.Sound.createAsync(
-          { uri },
+          { uri: playableUri },
           { shouldPlay: true },
           (status) => {
             if (status.isLoaded) {
@@ -91,6 +114,7 @@ function AudioPlayer({ uri, colors }: { uri: string; colors: any }) {
         );
         setSound(s);
         setPlaying(true);
+        setPreparing(false);
       } else if (playing) {
         await sound.pauseAsync();
         setPlaying(false);
@@ -98,7 +122,9 @@ function AudioPlayer({ uri, colors }: { uri: string; colors: any }) {
         await sound.playAsync();
         setPlaying(true);
       }
-    } catch {}
+    } catch {
+      setPreparing(false);
+    }
   };
 
   useEffect(() => () => { sound?.unloadAsync(); }, [sound]);
@@ -110,7 +136,7 @@ function AudioPlayer({ uri, colors }: { uri: string; colors: any }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minWidth: 180 }}>
       <TouchableOpacity onPress={toggle}>
-        <Ionicons name={playing ? "pause-circle" : "play-circle"} size={36} color={colors.primary} />
+        <Ionicons name={preparing ? "hourglass-outline" : (playing ? "pause-circle" : "play-circle")} size={36} color={colors.primary} />
       </TouchableOpacity>
       <View style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: "rgba(0,0,0,0.15)" }}>
         <View style={{ width: `${prog * 100}%`, height: 4, borderRadius: 2, backgroundColor: colors.primary }} />
@@ -291,7 +317,11 @@ export default function ChatScreen() {
   // Voice recording
   const startRecording = async () => {
     try {
-      await Audio.requestPermissionsAsync();
+      const perm = await Audio.requestPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Permission required", "Microphone permission is required for voice notes.");
+        return;
+      }
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const { recording: rec } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       setRecording(rec);
@@ -306,6 +336,7 @@ export default function ChatScreen() {
     if (!recording || !chatId) { setIsRecording(false); return; }
     try {
       await recording.stopAndUnloadAsync();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
       const uri = recording.getURI();
       const duration = (Date.now() - recordingStart) / 1000;
       setRecording(null);
@@ -340,11 +371,21 @@ export default function ChatScreen() {
       const fileSizeMB = (asset.size ?? 0) / 1024 / 1024;
       if (fileSizeMB > 16) { Alert.alert("File too large", "Maximum allowed file size is 16MB."); return; }
       try {
-        const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+        const cacheDir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? "";
+        if (!cacheDir) throw new Error("No writable cache directory");
+        let readableUri = asset.uri;
+        try {
+          await FileSystem.getInfoAsync(readableUri);
+        } catch {
+          const ext = asset.name?.split(".").pop() ?? "bin";
+          const fallbackPath = `${cacheDir}doc_${Date.now()}.${ext}`;
+          await FileSystem.copyAsync({ from: asset.uri, to: fallbackPath });
+          readableUri = fallbackPath;
+        }
+        const base64 = await FileSystem.readAsStringAsync(readableUri, { encoding: "base64" as any });
         const mimeType = asset.mimeType ?? "application/octet-stream";
         const dataUri = `data:${mimeType};base64,${base64}`;
-        const docInfo = JSON.stringify({ name: asset.name, size: asset.size, mimeType, dataUri });
-        sendSpecialMessage(chatId, asset.name, "document", dataUri, docInfo);
+        sendSpecialMessage(chatId, asset.name, "document", dataUri);
       } catch { Alert.alert("Error", "Could not read the selected file. Please try again."); }
 
     } else if (type === "location") {
@@ -365,8 +406,7 @@ export default function ChatScreen() {
         }
         const { latitude, longitude } = loc.coords;
         const mapsUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
-        const locInfo = JSON.stringify({ lat: latitude, lng: longitude, url: mapsUrl });
-        sendSpecialMessage(chatId, `📍 Location\n${latitude.toFixed(5)}, ${longitude.toFixed(5)}`, "location", mapsUrl, locInfo);
+        sendSpecialMessage(chatId, `📍 Location\n${latitude.toFixed(5)}, ${longitude.toFixed(5)}`, "location", mapsUrl);
       } catch { Alert.alert("Error", "Could not get your location. Please make sure GPS is enabled."); }
 
     } else if (type === "contact") {
@@ -382,8 +422,7 @@ export default function ChatScreen() {
         onPress: () => {
           const phone = c.phoneNumbers?.[0]?.number ?? "";
           const email = c.emails?.[0]?.email ?? "";
-          const contactInfo = JSON.stringify({ name: c.name, phone, email });
-          sendSpecialMessage(chatId, `👤 ${c.name}\n${phone}`, "contact", undefined, contactInfo);
+          sendSpecialMessage(chatId, `👤 ${c.name}\n${phone}`, "contact");
         },
       }));
       options.push({ text: "Cancel", onPress: () => {} });
@@ -391,7 +430,7 @@ export default function ChatScreen() {
     }
   };
 
-  const sendSpecialMessage = useCallback((cid: string, text: string, msgType: string, mediaUrl?: string, metaJson?: string) => {
+  const sendSpecialMessage = useCallback((cid: string, text: string, msgType: string, mediaUrl?: string) => {
     const u = user;
     if (u?.dbId) {
       fetch(`${BASE_URL}/api/chats/${cid}/messages`, {
@@ -406,7 +445,39 @@ export default function ChatScreen() {
     }
   }, [user, loadMessages]);
 
+  const openDocumentAttachment = useCallback(async (item: Message) => {
+    const uri = item.mediaUrl;
+    if (!uri) return;
+    try {
+      const cacheDir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? "";
+      if (!cacheDir) throw new Error("No writable cache directory");
+      if (uri.startsWith("data:")) {
+        const mimeMatch = uri.match(/^data:([^;]+);base64,/);
+        const base64 = uri.replace(/^data:[^;]+;base64,/, "");
+        const mime = mimeMatch?.[1] ?? "application/octet-stream";
+        const extMap: Record<string, string> = {
+          "application/pdf": "pdf",
+          "application/vnd.ms-excel": "xls",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+          "application/msword": "doc",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+          "text/plain": "txt",
+        };
+        const ext = extMap[mime] ?? "bin";
+        const safeName = (item.text || `document_${Date.now()}`).replace(/[^\w.-]/g, "_");
+        const fileUri = `${cacheDir}${safeName}.${ext}`;
+        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: "base64" as any });
+        await Linking.openURL(fileUri);
+      } else {
+        await Linking.openURL(uri);
+      }
+    } catch {
+      Alert.alert("Error", "Could not open this document on your device.");
+    }
+  }, []);
+
   const [attachVisible, setAttachVisible] = useState(false);
+  const [mediaPreview, setMediaPreview] = useState<{ uri: string; caption?: string; type: "image" | "video" } | null>(null);
   const showAttachMenu = () => setAttachVisible(true);
 
   const longPressMsg = (msg: Message) => {
@@ -535,7 +606,25 @@ export default function ChatScreen() {
             </View>
           ) : isImage ? (
             <>
-              <Image source={{ uri: item.mediaUrl }} style={styles.msgImage} contentFit="cover" />
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => {
+                  if (!item.mediaUrl) return;
+                  if (item.type === "video") {
+                    Linking.openURL(item.mediaUrl).catch(() => {});
+                    return;
+                  }
+                  setMediaPreview({
+                    uri: item.mediaUrl,
+                    type: "image",
+                    caption: item.text && item.text !== "📷 Photo" && item.text !== "🎥 Video" && item.text !== "🔁 View once"
+                      ? item.text
+                      : undefined,
+                  });
+                }}
+              >
+                <Image source={{ uri: item.mediaUrl }} style={styles.msgImage} contentFit="cover" />
+              </TouchableOpacity>
               {item.isViewOnce && (
                 <View style={styles.viewOnceOverlay}>
                   <Ionicons name="eye-outline" size={18} color="#fff" />
@@ -551,7 +640,7 @@ export default function ChatScreen() {
           ) : isDocument ? (
             <TouchableOpacity
               style={styles.docCard}
-              onPress={() => item.mediaUrl && Linking.openURL(item.mediaUrl).catch(() => {})}
+              onPress={() => { void openDocumentAttachment(item); }}
               activeOpacity={0.8}
             >
               <View style={[styles.docIcon, { backgroundColor: isMe ? "rgba(255,255,255,0.2)" : "#00A88420" }]}>
@@ -700,9 +789,9 @@ export default function ChatScreen() {
     { label: "Starred messages", icon: "star-outline", onPress: () => router.push("/starred") },
     { label: "Wallpaper", icon: "image-outline", onPress: () => Alert.alert("Chat wallpaper", "", [
         { text: "Choose photo", onPress: pickWallpaper },
-        wallpaper ? { text: "Remove wallpaper", style: "destructive" as const, onPress: removeWallpaper } : null!,
-        { text: "Cancel", style: "cancel" },
-      ].filter(Boolean)) },
+        ...(wallpaper ? [{ text: "Remove wallpaper", style: "destructive" as const, onPress: removeWallpaper }] : []),
+        { text: "Cancel", style: "cancel" as const },
+      ]) },
     { label: "Schedule Message ⏰", icon: "time-outline", onPress: () => chatId && router.push({ pathname: "/scheduled/[chatId]", params: { chatId, name: displayName } }) },
     { label: "Khata / Udhar 💰", icon: "cash-outline", onPress: () => chatId && router.push({ pathname: "/khata/[chatId]", params: { chatId, name: displayName } }) },
     { label: "Mute notifications", icon: "notifications-off-outline", onPress: () => chatId && muteChat(chatId) },
@@ -767,9 +856,9 @@ export default function ChatScreen() {
               <TouchableOpacity style={styles.headerBtn} onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })}>
                 <Ionicons name="call-outline" size={22} color="#fff" />
               </TouchableOpacity>
-              <DropdownMenu items={chatMenuItems} trigger={
-                <View style={styles.headerBtn}><Ionicons name="ellipsis-vertical" size={22} color="#fff" /></View>
-              } />
+              <TouchableOpacity style={styles.headerBtn} onPress={() => setMenuOpen(true)}>
+                <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+              </TouchableOpacity>
             </>
           )}
           {searching && (
@@ -779,6 +868,12 @@ export default function ChatScreen() {
           )}
         </View>
       </View>
+      <DropdownMenu
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        items={chatMenuItems}
+        topOffset={topPad + 46}
+      />
 
       {/* Search bar */}
       {searching && (
@@ -992,6 +1087,24 @@ export default function ChatScreen() {
           </View>
         </Pressable>
       </Modal>
+
+      <Modal visible={!!mediaPreview} animationType="fade" transparent onRequestClose={() => setMediaPreview(null)}>
+        <View style={styles.mediaPreviewModal}>
+          <View style={styles.mediaPreviewHeader}>
+            <TouchableOpacity style={styles.mediaPreviewBtn} onPress={() => setMediaPreview(null)}>
+              <Ionicons name="close" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+          {mediaPreview?.uri ? (
+            <Image source={{ uri: mediaPreview.uri }} style={styles.mediaPreviewImage} contentFit="contain" />
+          ) : null}
+          {mediaPreview?.caption ? (
+            <View style={styles.mediaPreviewCaptionWrap}>
+              <Text style={styles.mediaPreviewCaption}>{mediaPreview.caption}</Text>
+            </View>
+          ) : null}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1089,4 +1202,10 @@ const styles = StyleSheet.create({
   forwardRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 12 },
   forwardAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   forwardName: { fontSize: 15, fontFamily: "Inter_500Medium", flex: 1 },
+  mediaPreviewModal: { flex: 1, backgroundColor: "rgba(0,0,0,0.98)" },
+  mediaPreviewHeader: { paddingTop: 46, paddingHorizontal: 12, paddingBottom: 8, flexDirection: "row", alignItems: "center" },
+  mediaPreviewBtn: { padding: 8 },
+  mediaPreviewImage: { flex: 1, width: "100%" },
+  mediaPreviewCaptionWrap: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 20, backgroundColor: "rgba(0,0,0,0.55)" },
+  mediaPreviewCaption: { color: "#fff", fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "left" },
 });

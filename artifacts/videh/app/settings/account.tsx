@@ -19,6 +19,7 @@ export default function AccountSettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, logout } = useApp();
+  const twoStep = false;
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 

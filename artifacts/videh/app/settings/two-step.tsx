@@ -14,7 +14,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-const API_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
+import { getApiUrl } from "@/lib/api";
+const API_URL = `${getApiUrl()}/api`;
 
 type Step = "check" | "enter" | "confirm" | "disable";
 
@@ -36,7 +37,7 @@ export default function TwoStepScreen() {
     const checkStatus = async () => {
       if (!user) return;
       try {
-        const r = await fetch(`${API_URL}/users/${user.id}/two-step-status`);
+        const r = await fetch(`${API_URL}/users/${user.dbId}/two-step-status`);
         const d = await r.json();
         if (d.success) { setIsEnabled(d.enabled); setStep(d.enabled ? "disable" : "enter"); }
       } catch {}
@@ -49,7 +50,7 @@ export default function TwoStepScreen() {
     if (pin !== confirmPin) { Alert.alert("Error", "Dono PIN same nahi hain!"); return; }
     setLoading(true);
     try {
-      const r = await fetch(`${API_URL}/users/${user?.id}/two-step-pin`, {
+      const r = await fetch(`${API_URL}/users/${user?.dbId}/two-step-pin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin }),
@@ -66,7 +67,7 @@ export default function TwoStepScreen() {
     if (checkPin.length !== 6) { Alert.alert("Error", "Current PIN daalo."); return; }
     setLoading(true);
     try {
-      const r = await fetch(`${API_URL}/users/${user?.id}/two-step-pin`, {
+      const r = await fetch(`${API_URL}/users/${user?.dbId}/two-step-pin`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: checkPin }),

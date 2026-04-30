@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Contacts from "expo-contacts";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -13,39 +14,40 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useApp } from "@/context/AppContext";
+import { getApiUrl } from "@/lib/api";
+
+const { width: W } = Dimensions.get("window");
+const MAX_STORY_PARTICIPANTS = 100;
+type AudienceMode = "all_contacts" | "selected_contacts";
+type StoryContact = { id: number; name: string; phone: string };
 
 function VideoPreview({ uri }: { uri: string }) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
     p.play();
   });
-  return (
-    <VideoView
-      player={player}
-      style={{ width: "100%", height: "100%" }}
-      contentFit="contain"
-      nativeControls={false}
-    />
-  );
+  return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="contain" nativeControls={false} />;
 }
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useApp } from "@/context/AppContext";
 
-const { width: W, height: H } = Dimensions.get("window");
+function normalizePhone(raw: string): string {
+  let digits = raw.replace(/\D/g, "");
+  if (digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length === 10 && /^[6-9]/.test(digits)) return `+91${digits}`;
+  if (digits.startsWith("91") && digits.length === 12) return `+${digits}`;
+  if (digits.startsWith("91") && digits.length === 13) return `+${digits.slice(1)}`;
+  if (digits.length === 10) return `+91${digits}`;
+  return `+${digits}`;
+}
 
-const TEXT_BG_COLORS = [
-  "#00A884", "#128C7E", "#075E54",
-  "#2563EB", "#7C3AED", "#DB2777",
-  "#DC2626", "#EA580C", "#CA8A04",
-  "#16A34A", "#0891B2", "#374151",
-  "#1F2937", "#6B21A8", "#BE123C",
-];
-
+const TEXT_BG_COLORS = ["#00A884", "#128C7E", "#075E54", "#2563EB", "#7C3AED", "#DB2777", "#DC2626", "#EA580C", "#CA8A04", "#16A34A", "#0891B2", "#374151", "#1F2937", "#6B21A8", "#BE123C"];
 const TEXT_COLORS = ["#FFFFFF", "#000000", "#F3F4F6", "#FEF9C3", "#ECFDF5"];
 
 export default function StatusCreateScreen() {
@@ -53,8 +55,8 @@ export default function StatusCreateScreen() {
   const router = useRouter();
   const { addStatus } = useApp();
   const params = useLocalSearchParams<{ mode?: string }>();
-
   const [mode, setMode] = useState<"text" | "media">(params.mode === "camera" ? "media" : "text");
+  const [stage, setStage] = useState<"compose" | "audience">("compose");
   const [text, setText] = useState("");
   const [bgColor, setBgColor] = useState(TEXT_BG_COLORS[0]);
   const [textColor, setTextColor] = useState(TEXT_COLORS[0]);
@@ -63,8 +65,18 @@ export default function StatusCreateScreen() {
   const [mediaType, setMediaType] = useState<"image" | "video">("image");
   const [caption, setCaption] = useState("");
   const [posting, setPosting] = useState(false);
+  const [storySubject, setStorySubject] = useState("");
+  const [audienceMode, setAudienceMode] = useState<AudienceMode>("all_contacts");
+  const [audienceContacts, setAudienceContacts] = useState<StoryContact[]>([]);
+  const [selectedAudienceIds, setSelectedAudienceIds] = useState<number[]>([]);
+  const [audienceSearch, setAudienceSearch] = useState("");
+  const [audienceLoading, setAudienceLoading] = useState(false);
+  const [inviteLinksEnabled, setInviteLinksEnabled] = useState(false);
+  const [approvalMode, setApprovalMode] = useState(false);
+  const [disappearHours, setDisappearHours] = useState<12 | 24>(24);
+  const [onlyAdminsCanReshare, setOnlyAdminsCanReshare] = useState(false);
+  const [onlyAdminsCanAddParticipants, setOnlyAdminsCanAddParticipants] = useState(false);
   const inputRef = useRef<TextInput>(null);
-
   const fonts = ["Inter_400Regular", "Inter_700Bold", "Inter_300Light", "Inter_600SemiBold"];
   const fontLabels = ["Aa", "𝐁", "𝐿", "𝑺"];
 
@@ -73,31 +85,93 @@ export default function StatusCreateScreen() {
     else setTimeout(() => inputRef.current?.focus(), 200);
   }, []);
 
+  const loadAudienceContacts = async () => {
+    if (Platform.OS === "web") {
+      setAudienceContacts([]);
+      return;
+    }
+    setAudienceLoading(true);
+    try {
+      const perm = await Contacts.requestPermissionsAsync();
+      if (perm.status !== "granted") {
+        setAudienceContacts([]);
+        return;
+      }
+      const contactResp = await Contacts.getContactsAsync({ fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers] });
+      const phones = new Set<string>();
+      for (const c of contactResp.data) {
+        if (!c.phoneNumbers?.length) continue;
+        for (const pn of c.phoneNumbers) {
+          const normalized = normalizePhone(pn.number ?? "");
+          if (normalized.length >= 10) phones.add(normalized);
+        }
+      }
+      if (phones.size === 0) {
+        setAudienceContacts([]);
+        return;
+      }
+      const res = await fetch(`${getApiUrl()}/api/users/check-phones`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phones: Array.from(phones) }),
+      });
+      const data = await res.json() as { registered?: Record<string, any> };
+      const entries = Object.values(data.registered ?? {}).map((u: any) => ({ id: Number(u.id), name: u.name ?? u.phone, phone: u.phone })) as StoryContact[];
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+      setAudienceContacts(entries);
+    } catch {
+      setAudienceContacts([]);
+    } finally {
+      setAudienceLoading(false);
+    }
+  };
+
+  const toggleAudienceContact = (id: number) => {
+    setSelectedAudienceIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= MAX_STORY_PARTICIPANTS) {
+        Alert.alert("Limit reached", `You can select up to ${MAX_STORY_PARTICIPANTS} participants.`);
+        return prev;
+      }
+      return [...prev, id];
+    });
+  };
+
   const pickMedia = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission Denied", "Please allow access to your photos and videos.");
+      Alert.alert("Permission denied", "Please allow access to your photos and videos.");
       setMode("text");
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images", "videos"],
-      allowsEditing: false,
-      quality: 0.8,
-      base64: false,
-    });
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], allowsEditing: false, quality: 0.8, base64: false });
     if (result.canceled || !result.assets[0]) { setMode("text"); return; }
     const asset = result.assets[0];
     setMediaUri(asset.uri);
     setMediaType(asset.type === "video" ? "video" : "image");
   };
 
+  const proceedToAudience = async () => {
+    if (mode === "text" && !text.trim()) {
+      Alert.alert("Empty story", "Write a message or switch to photo/video.");
+      return;
+    }
+    if (mode === "media" && !mediaUri) {
+      Alert.alert("Select media", "Choose a photo or video first.");
+      return;
+    }
+    setStage("audience");
+    if (audienceContacts.length === 0) await loadAudienceContacts();
+  };
+
   const postStatus = async () => {
     if (posting) return;
-    if (mode === "text" && !text.trim()) { Alert.alert("Empty status", "Please write something."); return; }
+    if (audienceMode === "selected_contacts" && selectedAudienceIds.length === 0) {
+      Alert.alert("Select participants", "Choose at least one contact in selected mode.");
+      return;
+    }
     setPosting(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
     try {
       if (mode === "text") {
         await addStatus(text.trim(), "text", bgColor);
@@ -109,19 +183,14 @@ export default function StatusCreateScreen() {
       router.back();
     } catch {
       setPosting(false);
-      Alert.alert("Error", "Could not post status. Please try again.");
+      Alert.alert("Error", "Could not publish story. Please try again.");
     }
   };
 
   const openCamera = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") { Alert.alert("Permission Denied", "Please allow camera access."); return; }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images", "videos"],
-      allowsEditing: false,
-      quality: 0.8,
-      base64: false,
-    });
+    if (status !== "granted") { Alert.alert("Permission denied", "Please allow camera access."); return; }
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images", "videos"], allowsEditing: false, quality: 0.8, base64: false });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
       setMediaUri(asset.uri);
@@ -130,32 +199,114 @@ export default function StatusCreateScreen() {
     }
   };
 
-  // ── MEDIA MODE ────────────────────────────────────────────────────────────
+  const filteredAudience = audienceContacts.filter((c) => {
+    const q = audienceSearch.trim().toLowerCase();
+    if (!q) return true;
+    return c.name.toLowerCase().includes(q) || c.phone.includes(q);
+  });
+
+  if (stage === "audience") {
+    return (
+      <View style={[styles.container, { backgroundColor: "#111B21", paddingTop: insets.top + 8 }]}>
+        <View style={styles.audienceHeader}>
+          <TouchableOpacity onPress={() => setStage("compose")} style={styles.iconBtn}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.audienceTitle}>Story audience setup</Text>
+            <Text style={styles.audienceSub}>Participant step, admin defaults and advanced controls.</Text>
+          </View>
+        </View>
+
+        <View style={styles.audienceCard}>
+          <Text style={styles.settingLabel}>Story subject</Text>
+          <TextInput style={styles.settingInput} value={storySubject} onChangeText={setStorySubject} placeholder="e.g. Family updates" placeholderTextColor="#7f97a3" />
+        </View>
+
+        <View style={styles.audienceCard}>
+          <Text style={styles.settingLabel}>Participants</Text>
+          <View style={styles.modeRow}>
+            <TouchableOpacity style={[styles.modeBtn, audienceMode === "all_contacts" && styles.modeBtnActive]} onPress={() => setAudienceMode("all_contacts")}>
+              <Text style={styles.modeBtnText}>All contacts</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.modeBtn, audienceMode === "selected_contacts" && styles.modeBtnActive]} onPress={() => setAudienceMode("selected_contacts")}>
+              <Text style={styles.modeBtnText}>Selected contacts</Text>
+            </TouchableOpacity>
+          </View>
+          {audienceMode === "selected_contacts" && (
+            <>
+              <View style={styles.searchWrap}>
+                <Ionicons name="search-outline" size={17} color="#8ea2ad" />
+                <TextInput style={styles.searchInput} placeholder="Search members" placeholderTextColor="#7f97a3" value={audienceSearch} onChangeText={setAudienceSearch} />
+              </View>
+              {selectedAudienceIds.length > 0 && (
+                <View style={styles.chipsWrap}>
+                  {selectedAudienceIds.map((id) => {
+                    const c = audienceContacts.find((x) => x.id === id);
+                    if (!c) return null;
+                    return (
+                      <TouchableOpacity key={id} style={styles.chip} onPress={() => toggleAudienceContact(id)}>
+                        <Text style={styles.chipText}>{c.name.split(" ")[0]}</Text>
+                        <Ionicons name="close" size={14} color="#fff" />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+              <Text style={styles.limitHint}>Selected {selectedAudienceIds.length}/{MAX_STORY_PARTICIPANTS}</Text>
+              {audienceLoading ? (
+                <ActivityIndicator color="#00A884" style={{ marginVertical: 16 }} />
+              ) : (
+                <ScrollView style={styles.membersList} contentContainerStyle={{ paddingBottom: 14 }}>
+                  {filteredAudience.map((m) => {
+                    const selected = selectedAudienceIds.includes(m.id);
+                    return (
+                      <TouchableOpacity key={m.id} style={styles.memberRow} onPress={() => toggleAudienceContact(m.id)}>
+                        <Text style={styles.memberName}>{m.name}</Text>
+                        <Ionicons name={selected ? "checkmark-circle" : "ellipse-outline"} size={22} color={selected ? "#00A884" : "#8ea2ad"} />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </>
+          )}
+        </View>
+
+        <View style={styles.audienceCard}>
+          <Text style={styles.settingLabel}>Advanced features</Text>
+          <View style={styles.toggleRow}><Text style={styles.toggleText}>Invite links</Text><Switch value={inviteLinksEnabled} onValueChange={setInviteLinksEnabled} thumbColor="#fff" trackColor={{ false: "#33434d", true: "#00A884" }} /></View>
+          <View style={styles.toggleRow}><Text style={styles.toggleText}>Approval mode</Text><Switch value={approvalMode} onValueChange={setApprovalMode} thumbColor="#fff" trackColor={{ false: "#33434d", true: "#00A884" }} /></View>
+          <View style={styles.toggleRow}><Text style={styles.toggleText}>Only admins can reshare</Text><Switch value={onlyAdminsCanReshare} onValueChange={setOnlyAdminsCanReshare} thumbColor="#fff" trackColor={{ false: "#33434d", true: "#00A884" }} /></View>
+          <View style={styles.toggleRow}><Text style={styles.toggleText}>Only admins can add participants</Text><Switch value={onlyAdminsCanAddParticipants} onValueChange={setOnlyAdminsCanAddParticipants} thumbColor="#fff" trackColor={{ false: "#33434d", true: "#00A884" }} /></View>
+          <Text style={[styles.settingLabel, { marginTop: 8 }]}>Disappearing default</Text>
+          <View style={styles.modeRow}>
+            <TouchableOpacity style={[styles.modeBtn, disappearHours === 12 && styles.modeBtnActive]} onPress={() => setDisappearHours(12)}><Text style={styles.modeBtnText}>12h</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.modeBtn, disappearHours === 24 && styles.modeBtnActive]} onPress={() => setDisappearHours(24)}><Text style={styles.modeBtnText}>24h</Text></TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={{ padding: 16, paddingBottom: insets.bottom + 12 }}>
+          <TouchableOpacity style={styles.postBtn} onPress={postStatus} disabled={posting}>
+            {posting ? <ActivityIndicator color="#fff" /> : <Text style={styles.postBtnText}>Publish Story</Text>}
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   if (mode === "media") {
     return (
       <View style={[styles.container, { backgroundColor: "#000" }]}>
-        {/* Back + pick another */}
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-            <Ionicons name="close" size={26} color="#fff" />
-          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}><Ionicons name="close" size={26} color="#fff" /></TouchableOpacity>
           <View style={{ flex: 1 }} />
-          <TouchableOpacity onPress={openCamera} style={styles.iconBtn}>
-            <Ionicons name="camera-outline" size={24} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={pickMedia} style={styles.iconBtn}>
-            <Ionicons name="images-outline" size={24} color="#fff" />
-          </TouchableOpacity>
+          <TouchableOpacity onPress={openCamera} style={styles.iconBtn}><Ionicons name="camera-outline" size={24} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={pickMedia} style={styles.iconBtn}><Ionicons name="images-outline" size={24} color="#fff" /></TouchableOpacity>
         </View>
-
-        {/* Media preview */}
         {mediaUri ? (
           <View style={styles.mediaPreview}>
-            {mediaType === "video" ? (
-              <VideoPreview uri={mediaUri} />
-            ) : (
-              <Image source={{ uri: mediaUri }} style={{ width: "100%", height: "100%" }} resizeMode="contain" />
-            )}
+            {mediaType === "video" ? <VideoPreview uri={mediaUri} /> : <Image source={{ uri: mediaUri }} style={{ width: "100%", height: "100%" }} resizeMode="contain" />}
           </View>
         ) : (
           <View style={[styles.mediaPreview, { alignItems: "center", justifyContent: "center" }]}>
@@ -165,108 +316,45 @@ export default function StatusCreateScreen() {
             </TouchableOpacity>
           </View>
         )}
-
-        {/* Caption + post */}
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
           <View style={[styles.captionBar, { paddingBottom: insets.bottom + 8 }]}>
             <View style={[styles.captionInput, { backgroundColor: "rgba(0,0,0,0.6)" }]}>
               <Ionicons name="happy-outline" size={22} color="rgba(255,255,255,0.7)" />
-              <TextInput
-                value={caption}
-                onChangeText={setCaption}
-                placeholder="Add a caption..."
-                placeholderTextColor="rgba(255,255,255,0.5)"
-                style={styles.captionText}
-                multiline
-              />
+              <TextInput value={caption} onChangeText={setCaption} placeholder="Add a caption..." placeholderTextColor="rgba(255,255,255,0.5)" style={styles.captionText} multiline />
             </View>
-            <TouchableOpacity
-              style={[styles.sendBtn, { backgroundColor: "#00A884", opacity: posting ? 0.7 : 1 }]}
-              onPress={postStatus}
-              disabled={posting}
-            >
-              {posting ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="send" size={22} color="#fff" />}
-            </TouchableOpacity>
+            <TouchableOpacity style={[styles.sendBtn, { backgroundColor: "#00A884" }]} onPress={proceedToAudience}><Ionicons name="arrow-forward" size={22} color="#fff" /></TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </View>
     );
   }
 
-  // ── TEXT MODE ─────────────────────────────────────────────────────────────
   return (
     <View style={[styles.container, { backgroundColor: bgColor }]}>
-      {/* Top bar */}
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-          <Ionicons name="close" size={26} color="#fff" />
-        </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}><Ionicons name="close" size={26} color="#fff" /></TouchableOpacity>
         <View style={{ flex: 1 }} />
-        {/* Font cycle */}
-        <TouchableOpacity style={styles.iconBtn} onPress={() => setFontIdx((i) => (i + 1) % fonts.length)}>
-          <Text style={{ color: "#fff", fontSize: 20, fontWeight: "700" }}>{fontLabels[fontIdx]}</Text>
-        </TouchableOpacity>
-        {/* Text color cycle */}
-        <TouchableOpacity
-          style={[styles.textColorBtn, { backgroundColor: textColor, borderColor: textColor === "#FFFFFF" ? "rgba(255,255,255,0.4)" : "transparent" }]}
-          onPress={() => setTextColor(tc => { const idx = TEXT_COLORS.indexOf(tc); return TEXT_COLORS[(idx + 1) % TEXT_COLORS.length]; })}
-        />
-        {/* Switch to media */}
-        <TouchableOpacity onPress={() => { setMode("media"); pickMedia(); }} style={styles.iconBtn}>
-          <Ionicons name="image-outline" size={24} color="#fff" />
-        </TouchableOpacity>
+        <TouchableOpacity style={styles.iconBtn} onPress={() => setFontIdx((i) => (i + 1) % fonts.length)}><Text style={{ color: "#fff", fontSize: 20, fontWeight: "700" }}>{fontLabels[fontIdx]}</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.textColorBtn, { backgroundColor: textColor, borderColor: textColor === "#FFFFFF" ? "rgba(255,255,255,0.4)" : "transparent" }]} onPress={() => setTextColor((tc) => TEXT_COLORS[(TEXT_COLORS.indexOf(tc) + 1) % TEXT_COLORS.length])} />
+        <TouchableOpacity onPress={() => { setMode("media"); pickMedia(); }} style={styles.iconBtn}><Ionicons name="image-outline" size={24} color="#fff" /></TouchableOpacity>
       </View>
-
-      {/* Text input area */}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <TouchableOpacity style={styles.textArea} activeOpacity={1} onPress={() => inputRef.current?.focus()}>
-          <TextInput
-            ref={inputRef}
-            value={text}
-            onChangeText={setText}
-            placeholder="Type a status..."
-            placeholderTextColor={`${textColor}80`}
-            style={[styles.textInput, { color: textColor, fontFamily: fonts[fontIdx] }]}
-            multiline
-            textAlignVertical="center"
-            textAlign="center"
-            maxLength={700}
-          />
+          <TextInput ref={inputRef} value={text} onChangeText={setText} placeholder="Type a story..." placeholderTextColor={`${textColor}80`} style={[styles.textInput, { color: textColor, fontFamily: fonts[fontIdx] }]} multiline textAlignVertical="center" textAlign="center" maxLength={700} />
         </TouchableOpacity>
       </KeyboardAvoidingView>
-
-      {/* Bottom: color palette + post button */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 8 }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.colorPalette}>
           {TEXT_BG_COLORS.map((c) => (
-            <TouchableOpacity
-              key={c}
-              style={[styles.colorDot, { backgroundColor: c }, bgColor === c && styles.colorDotSelected]}
-              onPress={() => { setBgColor(c); Haptics.selectionAsync(); }}
-            />
+            <TouchableOpacity key={c} style={[styles.colorDot, { backgroundColor: c }, bgColor === c && styles.colorDotSelected]} onPress={() => { setBgColor(c); Haptics.selectionAsync(); }} />
           ))}
         </ScrollView>
-
-        <TouchableOpacity
-          style={[styles.postBtn, { backgroundColor: text.trim() ? "#00A884" : "rgba(255,255,255,0.3)", opacity: posting ? 0.7 : 1 }]}
-          onPress={postStatus}
-          disabled={posting || !text.trim()}
-        >
-          {posting ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <>
-              <Text style={styles.postBtnText}>Post</Text>
-              <Ionicons name="send" size={18} color="#fff" />
-            </>
-          )}
+        <TouchableOpacity style={[styles.postBtn, { backgroundColor: text.trim() ? "#00A884" : "rgba(255,255,255,0.3)" }]} onPress={proceedToAudience} disabled={!text.trim()}>
+          <Text style={styles.postBtnText}>Next</Text>
+          <Ionicons name="arrow-forward" size={18} color="#fff" />
         </TouchableOpacity>
       </View>
-
-      {/* Char counter */}
-      {text.length > 0 && (
-        <Text style={[styles.charCount, { color: `${textColor}80` }]}>{700 - text.length}</Text>
-      )}
+      {text.length > 0 && <Text style={[styles.charCount, { color: `${textColor}80` }]}>{700 - text.length}</Text>}
     </View>
   );
 }
@@ -285,7 +373,6 @@ const styles = StyleSheet.create({
   postBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 28 },
   postBtnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
   charCount: { position: "absolute", top: 80, right: 18, fontSize: 13 },
-  // Media mode
   mediaPreview: { flex: 1, width: W },
   captionBar: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 12, paddingTop: 8, gap: 10 },
   captionInput: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 24, paddingHorizontal: 14, paddingVertical: 10, minHeight: 48 },
@@ -293,4 +380,25 @@ const styles = StyleSheet.create({
   sendBtn: { width: 50, height: 50, borderRadius: 25, alignItems: "center", justifyContent: "center" },
   pickMediaBtn: { alignItems: "center", gap: 16 },
   pickMediaText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  audienceHeader: { flexDirection: "row", alignItems: "flex-start", gap: 8, paddingHorizontal: 8, paddingBottom: 8 },
+  audienceTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
+  audienceSub: { color: "#9db0b8", fontSize: 12, marginTop: 2 },
+  audienceCard: { backgroundColor: "#1F2C34", borderRadius: 14, marginHorizontal: 14, marginTop: 10, padding: 12 },
+  settingLabel: { color: "#dfe8eb", fontSize: 13, fontWeight: "700", marginBottom: 8 },
+  settingInput: { backgroundColor: "#2A3942", color: "#fff", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, borderWidth: 1, borderColor: "#3f515b" },
+  modeRow: { flexDirection: "row", gap: 8, marginBottom: 6 },
+  modeBtn: { flex: 1, backgroundColor: "#2A3942", borderRadius: 10, paddingVertical: 10, alignItems: "center", borderWidth: 1, borderColor: "#3f515b" },
+  modeBtnActive: { borderColor: "#00A884", backgroundColor: "#00A88422" },
+  modeBtnText: { color: "#fff", fontSize: 13, fontWeight: "600" },
+  searchWrap: { marginTop: 8, backgroundColor: "#2A3942", borderRadius: 10, borderWidth: 1, borderColor: "#3f515b", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10 },
+  searchInput: { color: "#fff", flex: 1, fontSize: 14, paddingVertical: 10 },
+  chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
+  chip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, backgroundColor: "#00A884" },
+  chipText: { color: "#fff", fontSize: 12, fontWeight: "600" },
+  limitHint: { color: "#91a3ab", marginTop: 8, fontSize: 12 },
+  membersList: { marginTop: 8, maxHeight: 150 },
+  memberRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#39515d" },
+  memberName: { color: "#fff", fontSize: 14, fontWeight: "500" },
+  toggleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 6 },
+  toggleText: { color: "#d7e2e6", fontSize: 13 },
 });

@@ -21,11 +21,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { formatTime } from "@/utils/time";
+import { getApiUrl } from "@/lib/api";
 
-const BASE_URL = (() => {
-  const d = process.env.EXPO_PUBLIC_DOMAIN;
-  return d ? `https://${d}` : "";
-})();
+const BASE_URL = getApiUrl();
 
 type GroupMember = {
   id: number;
@@ -326,8 +324,8 @@ export default function ChatInfoScreen() {
     const diffMs = now.getTime() - d.getTime();
     const diffHrs = diffMs / 3600000;
     if (diffHrs < 1) return `last seen ${Math.round(diffMs / 60000)} min ago`;
-    if (diffHrs < 24) return `last seen today at ${formatTime(m.last_seen)}`;
-    if (diffHrs < 48) return `last seen yesterday at ${formatTime(m.last_seen)}`;
+    if (diffHrs < 24) return `last seen today at ${formatTime(new Date(m.last_seen).getTime())}`;
+    if (diffHrs < 48) return `last seen yesterday at ${formatTime(new Date(m.last_seen).getTime())}`;
     return `last seen ${d.toLocaleDateString()}`;
   };
 

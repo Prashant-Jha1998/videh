@@ -14,7 +14,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-const API_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
+import { getApiUrl } from "@/lib/api";
+const API_URL = `${getApiUrl()}/api`;
 
 const LANGUAGES = [
   { code: "en", name: "English", native: "English", flag: "🇬🇧" },
@@ -46,7 +47,7 @@ export default function LanguageScreen() {
     await AsyncStorage.setItem("appLanguage", code);
     if (user) {
       try {
-        await fetch(`${API_URL}/users/${user.id}`, {
+        await fetch(`${API_URL}/users/${user.dbId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ preferredLang: code }),

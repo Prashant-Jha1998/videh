@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
+import { getApiUrl } from "@/lib/api";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -41,10 +42,7 @@ function VideoStatusPlayer({ uri, paused }: { uri: string; paused: boolean }) {
   );
 }
 
-const BASE_URL = (() => {
-  const d = process.env.EXPO_PUBLIC_DOMAIN;
-  return d ? `https://${d}` : "";
-})();
+const BASE_URL = getApiUrl();
 
 const REACTIONS = ["❤️", "👍", "😂", "😮", "😢", "🙏"];
 
@@ -62,7 +60,7 @@ export default function ViewStatusScreen() {
   const params = useLocalSearchParams<{ ids?: string; id?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { statuses, user, createDirectChat, sendMessage } = useApp();
+  const { statuses, user, createDirectChat, sendMessage, markStatusViewedLocally } = useApp();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const ids = params.ids
@@ -86,10 +84,16 @@ export default function ViewStatusScreen() {
   const isMyStatus = currentStatus?.userId === "me";
   const isMedia = currentStatus?.type === "image" || currentStatus?.type === "video";
 
+  useEffect(() => {
+    // Move status group to Viewed instantly when viewer opens.
+    ids.forEach((id) => markStatusViewedLocally(id));
+  }, [ids.join(","), markStatusViewedLocally]);
+
   // Mark viewed + fetch data when status changes
   useEffect(() => {
     if (!currentStatus || !user?.dbId) return;
     if (!isMyStatus) {
+      markStatusViewedLocally(currentStatus.id);
       fetch(`${BASE_URL}/api/statuses/${currentStatus.id}/view`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -105,7 +109,7 @@ export default function ViewStatusScreen() {
         .then((data) => { if (data.success) { setViewCount(data.viewCount ?? 0); setReactionSummary(data.reactions ?? {}); } })
         .catch(() => {});
     }
-  }, [currentStatus?.id]);
+  }, [currentStatus?.id, isMyStatus, user?.dbId, markStatusViewedLocally]);
 
   // Start progress animation
   const startAnim = useCallback((idx: number, fromValue = 0) => {

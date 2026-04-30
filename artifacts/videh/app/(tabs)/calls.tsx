@@ -109,7 +109,7 @@ export default function CallsScreen() {
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: colors.primary }]}
         activeOpacity={0.8}
-        onPress={() => router.push("/new-chat")}
+        onPress={() => router.push("/contacts")}
       >
         <Ionicons name="call" size={24} color="#fff" />
       </TouchableOpacity>

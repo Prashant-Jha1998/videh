@@ -15,11 +15,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { formatTime } from "@/utils/time";
+import { getApiUrl } from "@/lib/api";
 
-const BASE_URL = (() => {
-  const d = process.env.EXPO_PUBLIC_DOMAIN;
-  return d ? `https://${d}` : "";
-})();
+const BASE_URL = getApiUrl();
 
 interface Viewer {
   id: number;

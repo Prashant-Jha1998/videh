@@ -12,11 +12,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
+import { getApiUrl } from "@/lib/api";
 
-const BASE_URL = (() => {
-  const domain = process.env.EXPO_PUBLIC_DOMAIN;
-  return domain ? `https://${domain}` : "";
-})();
+const BASE_URL = getApiUrl();
 
 function platformIcon(platform: string): "logo-windows" | "logo-apple" | "desktop-outline" | "phone-portrait-outline" | "globe-outline" {
   const p = (platform ?? "").toLowerCase();
@@ -132,14 +130,14 @@ export default function DeviceDetailScreen() {
         ) : (
           <Text style={[styles.deviceName, { color: colors.text }]}>{name}</Text>
         )}
-        <Text style={[styles.deviceType, { color: colors.textSecondary }]}>Device name</Text>
+        <Text style={[styles.deviceType, { color: colors.mutedForeground }]}>Device name</Text>
 
         {/* Info rows */}
         <View style={[styles.infoCard, { backgroundColor: colors.card }]}>
           <View style={styles.infoRow}>
-            <Ionicons name="time-outline" size={20} color={colors.textSecondary} />
+            <Ionicons name="time-outline" size={20} color={colors.mutedForeground} />
             <View style={styles.infoText}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Last active</Text>
+              <Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>Last active</Text>
               <Text style={[styles.infoValue, { color: colors.text }]}>{timeAgo(params.lastActive ?? params.linkedAt)}</Text>
             </View>
           </View>
@@ -147,9 +145,9 @@ export default function DeviceDetailScreen() {
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
           <View style={styles.infoRow}>
-            <Ionicons name="globe-outline" size={20} color={colors.textSecondary} />
+            <Ionicons name="globe-outline" size={20} color={colors.mutedForeground} />
             <View style={styles.infoText}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Platform</Text>
+              <Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>Platform</Text>
               <Text style={[styles.infoValue, { color: colors.text }]}>{params.platform ?? "Web"}</Text>
             </View>
           </View>
@@ -157,9 +155,9 @@ export default function DeviceDetailScreen() {
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
           <View style={styles.infoRow}>
-            <Ionicons name="calendar-outline" size={20} color={colors.textSecondary} />
+            <Ionicons name="calendar-outline" size={20} color={colors.mutedForeground} />
             <View style={styles.infoText}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Linked on</Text>
+              <Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>Linked on</Text>
               <Text style={[styles.infoValue, { color: colors.text }]}>{formatDate(params.linkedAt)}</Text>
             </View>
           </View>
@@ -174,7 +172,7 @@ export default function DeviceDetailScreen() {
           <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
 
-        <Text style={[styles.notice, { color: colors.textSecondary }]}>
+        <Text style={[styles.notice, { color: colors.mutedForeground }]}>
           If you don't recognise this device or can't access it any longer you should log out of it.
         </Text>
       </View>

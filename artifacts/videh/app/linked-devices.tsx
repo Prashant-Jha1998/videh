@@ -15,11 +15,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { getApiUrl } from "@/lib/api";
 
-const BASE_URL = (() => {
-  const domain = process.env.EXPO_PUBLIC_DOMAIN;
-  return domain ? `https://${domain}` : "";
-})();
+const BASE_URL = getApiUrl();
 
 interface Device {
   token: string;
@@ -187,7 +185,7 @@ export default function LinkedDevicesScreen() {
           </View>
 
           <Text style={[styles.guideTitle, { color: colors.text }]}>Use Videh on your computer</Text>
-          <Text style={[styles.guideSubtitle, { color: colors.textSecondary }]}>
+          <Text style={[styles.guideSubtitle, { color: colors.mutedForeground }]}>
             Open <Text style={{ color: colors.primary }}>videh.app</Text> in your browser, then tap the button below to scan the QR code shown on screen.
           </Text>
 
@@ -201,7 +199,7 @@ export default function LinkedDevicesScreen() {
               <View style={[styles.stepIconBg, { backgroundColor: colors.primary + "15" }]}>
                 <Ionicons name={step.icon} size={20} color={colors.primary} />
               </View>
-              <Text style={[styles.stepText, { color: colors.textSecondary }]}>{step.text}</Text>
+              <Text style={[styles.stepText, { color: colors.mutedForeground }]}>{step.text}</Text>
             </View>
           ))}
         </View>
@@ -223,8 +221,8 @@ export default function LinkedDevicesScreen() {
           </View>
         ) : devices.length > 0 ? (
           <View style={{ marginTop: 8 }}>
-            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>DEVICE STATUS</Text>
-            <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>DEVICE STATUS</Text>
+            <Text style={[styles.sectionHint, { color: colors.mutedForeground }]}>
               Tap a device to rename it or log out.
             </Text>
 
@@ -246,7 +244,7 @@ export default function LinkedDevicesScreen() {
                     <Text style={[styles.deviceName, { color: colors.text }]} numberOfLines={1}>{device.device_name}</Text>
                     <Text style={[styles.deviceStatus, { color: colors.primary }]}>{timeAgo(device.last_active ?? device.linked_at)}</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                  <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
                 </TouchableOpacity>
               ))}
             </View>
@@ -255,8 +253,8 @@ export default function LinkedDevicesScreen() {
 
         {/* Encryption notice */}
         <View style={styles.encryptionRow}>
-          <Ionicons name="lock-closed-outline" size={14} color={colors.textSecondary} />
-          <Text style={[styles.encryptionText, { color: colors.textSecondary }]}>
+          <Ionicons name="lock-closed-outline" size={14} color={colors.mutedForeground} />
+          <Text style={[styles.encryptionText, { color: colors.mutedForeground }]}>
             Your personal messages are{" "}
             <Text style={{ color: "#00a884", fontWeight: "700" }}>end-to-end encrypted</Text>
             {" "}on all your devices.

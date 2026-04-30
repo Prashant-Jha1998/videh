@@ -237,7 +237,8 @@ router.get("/:token/chats/:chatId/messages", async (req: Request, res: Response)
 
 // List all active linked devices for a user (mobile app calls this)
 router.get("/user/:userId/devices", async (req: Request, res: Response) => {
-  const userId = parseInt(req.params.userId, 10);
+  const rawUserId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
+  const userId = parseInt(rawUserId ?? "", 10);
   if (isNaN(userId)) { res.status(400).json({ success: false }); return; }
 
   try {

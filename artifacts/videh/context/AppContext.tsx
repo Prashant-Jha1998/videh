@@ -113,7 +113,7 @@ interface AppContextType {
   setUser: (user: UserProfile) => Promise<void>;
   logout: () => Promise<void>;
   sendMessage: (chatId: string, text: string, replyToId?: string) => void;
-  createGroup: (name: string, memberIds: string[]) => void;
+  createGroup: (name: string, memberIds: number[], groupAvatarUrl?: string) => void;
   markAsRead: (chatId: string) => void;
   addStatus: (content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string) => Promise<void> | undefined;
   deleteMessage: (chatId: string, messageId: string) => void;
@@ -134,6 +134,7 @@ interface AppContextType {
   deleteForEveryone: (chatId: string, messageId: string) => void;
   editMessage: (chatId: string, messageId: string, newText: string) => void;
   reactToMessage: (chatId: string, messageId: string, emoji: string) => void;
+  markStatusViewedLocally: (statusId: string) => void;
   blockUser: (otherUserId: number) => Promise<void>;
   unblockUser: (otherUserId: number) => Promise<void>;
   setChatDisappear: (chatId: string, seconds: number | null) => Promise<void>;
@@ -195,7 +196,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!uri) return uri;
     if (uri.startsWith("data:") || uri.startsWith("http://") || uri.startsWith("https://")) return uri;
     try {
-      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" as any });
       const mime = getMimeTypeFromUri(uri, fallbackMime);
       return `data:${mime};base64,${base64}`;
     } catch {
@@ -706,17 +707,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }).catch(() => {});
   }, []);
 
-  const createGroup = useCallback((name: string, memberIds: string[]) => {
+  const createGroup = useCallback((name: string, memberIds: number[], groupAvatarUrl?: string) => {
     const u = userRef.current;
     if (!u?.dbId) return;
     api("/chats/group", {
       method: "POST",
-      body: JSON.stringify({ creatorId: u.dbId, name, memberIds: memberIds.map(Number) }),
+      body: JSON.stringify({ creatorId: u.dbId, name, memberIds, groupAvatarUrl: groupAvatarUrl ?? null }),
     }).then((data: any) => {
       if (data?.success && data.chatId) {
         setChats((prev) => [{
           id: String(data.chatId), name, unreadCount: 0, isGroup: true,
-          members: memberIds, messages: [], isPinned: false, isMuted: false,
+          members: memberIds.map(String), messages: [], isPinned: false, isMuted: false,
+          avatar: groupAvatarUrl ?? undefined,
         }, ...prev]);
       }
     }).catch(() => {});
@@ -734,15 +736,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setStatuses((prev) => [newStatus, ...prev]);
 
     if (u.dbId) {
-      api("/statuses", {
-        method: "POST",
-        body: JSON.stringify({ userId: u.dbId, content, type, backgroundColor: bg ?? "#00A884", mediaUrl: mediaUrl ?? null }),
-      })
-        .then(() => loadStatuses(u.dbId!))
-        .catch(() => {});
+      void (async () => {
+        const shareableMediaUrl = mediaUrl
+          ? await toShareableMediaUri(mediaUrl, type === "video" ? "video/mp4" : "image/jpeg")
+          : null;
+        api("/statuses", {
+          method: "POST",
+          body: JSON.stringify({
+            userId: u.dbId,
+            content,
+            type,
+            backgroundColor: bg ?? "#00A884",
+            mediaUrl: shareableMediaUrl,
+          }),
+        })
+          .then(() => loadStatuses(u.dbId!))
+          .catch(() => {});
+      })();
     }
     return Promise.resolve();
-  }, [loadStatuses]);
+  }, [loadStatuses, toShareableMediaUri]);
+
+  const markStatusViewedLocally = useCallback((statusId: string) => {
+    setStatuses((prev) =>
+      prev.map((status) =>
+        status.id === statusId && status.userId !== "me"
+          ? { ...status, viewed: true }
+          : status
+      )
+    );
+  }, []);
 
   const deleteMessage = useCallback((chatId: string, messageId: string) => {
     setChats((prev) =>
@@ -864,7 +887,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       starMessage, forwardMessage, starredMessages, updateAvatar,
       createDirectChat, loadMessages, refreshChats,
       sendImageMessage, sendAudioMessage, setTyping, clearTyping,
-      deleteForEveryone, editMessage, reactToMessage,
+      deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally,
       blockUser, unblockUser, setChatDisappear,
     }}>
       {children}

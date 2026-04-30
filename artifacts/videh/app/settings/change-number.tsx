@@ -14,7 +14,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-const API_URL = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
+import { getApiUrl } from "@/lib/api";
+const API_URL = `${getApiUrl()}/api`;
 
 type Step = "phone" | "otp";
 
@@ -22,7 +23,7 @@ export default function ChangeNumberScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, refreshUser } = useApp();
+  const { user, setUser } = useApp();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const [step, setStep] = useState<Step>("phone");
@@ -62,12 +63,14 @@ export default function ChangeNumberScreen() {
       });
       const d = await r.json();
       if (d.success && d.user) {
-        await fetch(`${API_URL}/users/${user?.id}`, {
+        await fetch(`${API_URL}/users/${user?.dbId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ phone: newPhone.replace(/\D/g, "") }),
         });
-        await refreshUser?.();
+        if (user) {
+          await setUser({ ...user, phone: newPhone.replace(/\D/g, "") });
+        }
         Alert.alert("Ho gaya!", "Number successfully change ho gaya.", [{ text: "OK", onPress: () => router.replace("/(tabs)/settings") }]);
       } else Alert.alert("Error", "OTP galat hai ya expire ho gaya.");
     } catch { Alert.alert("Error", "Network error"); }

@@ -92,12 +92,30 @@ router.post("/direct", async (req: Request, res: Response) => {
 
 // Create group chat
 router.post("/group", async (req: Request, res: Response) => {
-  const { creatorId, name, memberIds } = req.body as { creatorId?: number; name?: string; memberIds?: number[] };
-  if (!creatorId || !name || !memberIds?.length) { res.status(400).json({ success: false }); return; }
+  const { creatorId, name, memberIds, groupAvatarUrl, description } = req.body as {
+    creatorId?: number;
+    name?: string;
+    memberIds?: number[];
+    groupAvatarUrl?: string | null;
+    description?: string | null;
+  };
+  if (!creatorId || !name || !memberIds?.length) {
+    res.status(400).json({ success: false, message: "creatorId, name and memberIds are required" });
+    return;
+  }
+  const trimmedName = name.trim();
+  if (trimmedName.length < 3) {
+    res.status(400).json({ success: false, message: "Group name must be at least 3 characters" });
+    return;
+  }
+  if (memberIds.length > 1023) {
+    res.status(400).json({ success: false, message: "Group member limit exceeded" });
+    return;
+  }
   try {
     const chat = await query(
-      "INSERT INTO chats (is_group, group_name, created_by) VALUES (TRUE, $1, $2) RETURNING id",
-      [name, creatorId]
+      "INSERT INTO chats (is_group, group_name, group_avatar_url, group_description, created_by) VALUES (TRUE, $1, $2, $3, $4) RETURNING id",
+      [trimmedName, groupAvatarUrl ?? null, description ?? null, creatorId]
     );
     const chatId = chat.rows[0].id;
     const allMembers = Array.from(new Set([creatorId, ...memberIds]));

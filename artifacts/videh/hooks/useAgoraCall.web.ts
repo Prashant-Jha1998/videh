@@ -104,7 +104,7 @@ export function useAgoraCall(channel: string, uid: number, isVideo: boolean): Ag
     return () => {
       audioRef.current?.close();
       videoRef.current?.close();
-      client.leave().catch(() => {});
+      clientRef.current?.leave().catch(() => {});
     };
   }, [channel]);
 
