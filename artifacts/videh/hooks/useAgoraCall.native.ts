@@ -49,6 +49,13 @@ export function useAgoraCall(channel: string, uid: number, isVideo: boolean): Ag
           setError("Agora App ID not configured");
           return;
         }
+        let rtcToken: string | null = null;
+        try {
+          const baseUrl = getApiUrl();
+          const tokenRes = await fetch(`${baseUrl}/api/agora/token?channel=${encodeURIComponent(channel)}&uid=${uid}`);
+          const tokenData = await tokenRes.json() as { success?: boolean; token?: string | null };
+          if (tokenData.success) rtcToken = tokenData.token ?? null;
+        } catch {}
 
         if (Platform.OS === "android") {
           const perms: string[] = [PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
@@ -95,7 +102,7 @@ export function useAgoraCall(channel: string, uid: number, isVideo: boolean): Ag
         engine.enableAudio();
         if (isVideo) engine.enableVideo();
 
-        engine.joinChannel(null, channel, uid, {
+        engine.joinChannel(rtcToken, channel, uid, {
           clientRoleType: ClientRoleType.ClientRoleBroadcaster,
           publishMicrophoneTrack: true,
           publishCameraTrack: isVideo,
@@ -111,7 +118,11 @@ export function useAgoraCall(channel: string, uid: number, isVideo: boolean): Ag
         ) {
           setError("EXPO_GO");
         } else {
-          setError(msg || "Failed to start call");
+          if (msg.includes("110")) {
+            setError("Error 110: Call authentication failed. Check Agora token/App Certificate setup.");
+          } else {
+            setError(msg || "Failed to start call");
+          }
         }
       }
     };

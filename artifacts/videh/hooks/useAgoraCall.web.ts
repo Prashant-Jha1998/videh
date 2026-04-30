@@ -58,6 +58,12 @@ export function useAgoraCall(channel: string, uid: number, isVideo: boolean): Ag
           setError("Agora App ID not configured");
           return;
         }
+        let rtcToken: string | null = null;
+        try {
+          const tokenRes = await fetch(`${getApiUrl()}/api/agora/token?channel=${encodeURIComponent(channel)}&uid=${uid}`);
+          const tokenData = await tokenRes.json() as { success?: boolean; token?: string | null };
+          if (tokenData.success) rtcToken = tokenData.token ?? null;
+        } catch {}
 
         const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
         clientRef.current = client;
@@ -82,7 +88,7 @@ export function useAgoraCall(channel: string, uid: number, isVideo: boolean): Ag
 
         client.on("user-left", () => setRemoteCount(client.remoteUsers.length));
 
-        await client.join(appId, channel, null, uid);
+        await client.join(appId, channel, rtcToken, uid);
         const audio = await AgoraRTC.createMicrophoneAudioTrack();
         audioRef.current = audio;
         const toPublish: any[] = [audio];
