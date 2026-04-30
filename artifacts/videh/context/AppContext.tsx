@@ -116,6 +116,7 @@ interface AppContextType {
   createGroup: (name: string, memberIds: number[], groupAvatarUrl?: string) => void;
   markAsRead: (chatId: string) => void;
   addStatus: (content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string) => Promise<void> | undefined;
+  deleteStatus: (statusId: string) => Promise<void>;
   deleteMessage: (chatId: string, messageId: string) => void;
   pinChat: (chatId: string) => void;
   muteChat: (chatId: string) => void;
@@ -127,7 +128,7 @@ interface AppContextType {
   createDirectChat: (otherUserId: number, otherName: string, otherAvatar?: string) => Promise<string>;
   loadMessages: (chatId: string) => Promise<void>;
   refreshChats: () => Promise<void>;
-  sendImageMessage: (chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean) => void;
+  sendImageMessage: (chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean, mediaKind?: "image" | "video") => void;
   sendAudioMessage: (chatId: string, audioUri: string, durationSecs: number) => void;
   setTyping: (chatId: string) => void;
   clearTyping: (chatId: string) => void;
@@ -200,7 +201,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const mime = getMimeTypeFromUri(uri, fallbackMime);
       return `data:${mime};base64,${base64}`;
     } catch {
-      return uri;
+      try {
+        const cacheDir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? "";
+        if (!cacheDir) return uri;
+        const ext = fallbackMime.includes("video")
+          ? "mp4"
+          : fallbackMime.includes("audio")
+            ? "m4a"
+            : "jpg";
+        const copiedPath = `${cacheDir}share_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+        await FileSystem.copyAsync({ from: uri, to: copiedPath });
+        const copiedBase64 = await FileSystem.readAsStringAsync(copiedPath, { encoding: "base64" as any });
+        return `data:${fallbackMime};base64,${copiedBase64}`;
+      } catch {
+        return uri;
+      }
     }
   }, []);
 
@@ -535,11 +550,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Send image/video message in chat
-  const sendImageMessage = useCallback((chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean) => {
+  const sendImageMessage = useCallback((chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean, mediaKind?: "image" | "video") => {
     void (async () => {
     const u = userRef.current;
     const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    const isVideo = mediaUri.match(/\.(mp4|mov|avi|mkv|webm)$/i) !== null;
+    const isVideo = mediaKind
+      ? mediaKind === "video"
+      : mediaUri.match(/\.(mp4|mov|avi|mkv|webm)$/i) !== null || mediaUri.startsWith("data:video");
     const shareableMediaUri = await toShareableMediaUri(
       mediaUri,
       isVideo ? "video/mp4" : "image/jpeg",
@@ -767,6 +784,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  const deleteStatus = useCallback(async (statusId: string) => {
+    const uid = userRef.current?.dbId;
+    if (!uid) return;
+    setStatuses((prev) => prev.filter((s) => s.id !== statusId));
+    await api(`/statuses/${statusId}`, {
+      method: "DELETE",
+      body: JSON.stringify({ userId: uid }),
+    }).catch(() => {});
+    await loadStatuses(uid);
+  }, [loadStatuses]);
+
   const deleteMessage = useCallback((chatId: string, messageId: string) => {
     setChats((prev) =>
       prev.map((c) =>
@@ -887,7 +915,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       starMessage, forwardMessage, starredMessages, updateAvatar,
       createDirectChat, loadMessages, refreshChats,
       sendImageMessage, sendAudioMessage, setTyping, clearTyping,
-      deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally,
+      deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, setChatDisappear,
     }}>
       {children}

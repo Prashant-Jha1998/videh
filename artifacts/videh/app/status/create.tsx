@@ -14,7 +14,6 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -71,11 +70,6 @@ export default function StatusCreateScreen() {
   const [selectedAudienceIds, setSelectedAudienceIds] = useState<number[]>([]);
   const [audienceSearch, setAudienceSearch] = useState("");
   const [audienceLoading, setAudienceLoading] = useState(false);
-  const [inviteLinksEnabled, setInviteLinksEnabled] = useState(false);
-  const [approvalMode, setApprovalMode] = useState(false);
-  const [disappearHours, setDisappearHours] = useState<12 | 24>(24);
-  const [onlyAdminsCanReshare, setOnlyAdminsCanReshare] = useState(false);
-  const [onlyAdminsCanAddParticipants, setOnlyAdminsCanAddParticipants] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const fonts = ["Inter_400Regular", "Inter_700Bold", "Inter_300Light", "Inter_600SemiBold"];
   const fontLabels = ["Aa", "𝐁", "𝐿", "𝑺"];
@@ -147,6 +141,10 @@ export default function StatusCreateScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], allowsEditing: false, quality: 0.8, base64: false });
     if (result.canceled || !result.assets[0]) { setMode("text"); return; }
     const asset = result.assets[0];
+    if (asset.type === "video" && typeof asset.duration === "number" && asset.duration > 120000) {
+      Alert.alert("Video too long", "Please select a video up to 2 minutes.");
+      return;
+    }
     setMediaUri(asset.uri);
     setMediaType(asset.type === "video" ? "video" : "image");
   };
@@ -193,6 +191,10 @@ export default function StatusCreateScreen() {
     const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images", "videos"], allowsEditing: false, quality: 0.8, base64: false });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
+      if (asset.type === "video" && typeof asset.duration === "number" && asset.duration > 120000) {
+        Alert.alert("Video too long", "Please record a video up to 2 minutes.");
+        return;
+      }
       setMediaUri(asset.uri);
       setMediaType(asset.type === "video" ? "video" : "image");
       setMode("media");
@@ -214,7 +216,7 @@ export default function StatusCreateScreen() {
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={styles.audienceTitle}>Story audience setup</Text>
-            <Text style={styles.audienceSub}>Participant step, admin defaults and advanced controls.</Text>
+            <Text style={styles.audienceSub}>Choose who can view this story.</Text>
           </View>
         </View>
 
@@ -271,19 +273,6 @@ export default function StatusCreateScreen() {
               )}
             </>
           )}
-        </View>
-
-        <View style={styles.audienceCard}>
-          <Text style={styles.settingLabel}>Advanced features</Text>
-          <View style={styles.toggleRow}><Text style={styles.toggleText}>Invite links</Text><Switch value={inviteLinksEnabled} onValueChange={setInviteLinksEnabled} thumbColor="#fff" trackColor={{ false: "#33434d", true: "#00A884" }} /></View>
-          <View style={styles.toggleRow}><Text style={styles.toggleText}>Approval mode</Text><Switch value={approvalMode} onValueChange={setApprovalMode} thumbColor="#fff" trackColor={{ false: "#33434d", true: "#00A884" }} /></View>
-          <View style={styles.toggleRow}><Text style={styles.toggleText}>Only admins can reshare</Text><Switch value={onlyAdminsCanReshare} onValueChange={setOnlyAdminsCanReshare} thumbColor="#fff" trackColor={{ false: "#33434d", true: "#00A884" }} /></View>
-          <View style={styles.toggleRow}><Text style={styles.toggleText}>Only admins can add participants</Text><Switch value={onlyAdminsCanAddParticipants} onValueChange={setOnlyAdminsCanAddParticipants} thumbColor="#fff" trackColor={{ false: "#33434d", true: "#00A884" }} /></View>
-          <Text style={[styles.settingLabel, { marginTop: 8 }]}>Disappearing default</Text>
-          <View style={styles.modeRow}>
-            <TouchableOpacity style={[styles.modeBtn, disappearHours === 12 && styles.modeBtnActive]} onPress={() => setDisappearHours(12)}><Text style={styles.modeBtnText}>12h</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.modeBtn, disappearHours === 24 && styles.modeBtnActive]} onPress={() => setDisappearHours(24)}><Text style={styles.modeBtnText}>24h</Text></TouchableOpacity>
-          </View>
         </View>
 
         <View style={{ padding: 16, paddingBottom: insets.bottom + 12 }}>
@@ -399,6 +388,4 @@ const styles = StyleSheet.create({
   membersList: { marginTop: 8, maxHeight: 150 },
   memberRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#39515d" },
   memberName: { color: "#fff", fontSize: 14, fontWeight: "500" },
-  toggleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 6 },
-  toggleText: { color: "#d7e2e6", fontSize: 13 },
 });

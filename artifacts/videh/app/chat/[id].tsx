@@ -6,7 +6,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import * as Location from "expo-location";
 import * as Contacts from "expo-contacts";
-import { Audio } from "expo-av";
+import { Audio, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -146,6 +146,64 @@ function AudioPlayer({ uri, colors }: { uri: string; colors: any }) {
   );
 }
 
+function VideoPlayer({ uri }: { uri: string }) {
+  const [playableUri, setPlayableUri] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const prepare = async () => {
+      if (!uri) return;
+      if (!uri.startsWith("data:video")) {
+        if (!cancelled) setPlayableUri(uri);
+        return;
+      }
+      try {
+        const cacheDir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? "";
+        if (!cacheDir) throw new Error("No writable cache directory");
+        const ext = uri.includes("video/quicktime") ? "mov" : "mp4";
+        const target = `${cacheDir}video_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+        const base64 = uri.replace(/^data:[^;]+;base64,/, "");
+        await FileSystem.writeAsStringAsync(target, base64, { encoding: "base64" as any });
+        if (!cancelled) setPlayableUri(target);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    };
+    void prepare();
+    return () => { cancelled = true; };
+  }, [uri]);
+
+  if (failed) {
+    return (
+      <View style={styles.videoErrorWrap}>
+        <Ionicons name="alert-circle-outline" size={20} color="#fff" />
+        <Text style={styles.videoErrorText}>Video could not be loaded</Text>
+      </View>
+    );
+  }
+
+  if (!playableUri) {
+    return (
+      <View style={styles.videoLoadingWrap}>
+        <Ionicons name="hourglass-outline" size={20} color="#fff" />
+        <Text style={styles.videoLoadingText}>Preparing video...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <Video
+      source={{ uri: playableUri }}
+      style={styles.msgVideo}
+      useNativeControls
+      resizeMode={ResizeMode.COVER}
+      shouldPlay={false}
+      isLooping={false}
+    />
+  );
+}
+
 export default function ChatScreen() {
   const { id: rawId, name, otherUserId: otherUserIdParam, otherAvatar } = useLocalSearchParams<{
     id?: string; name?: string; otherUserId?: string; otherAvatar?: string;
@@ -169,6 +227,7 @@ export default function ChatScreen() {
 
   // Reaction picker
   const [reactionTarget, setReactionTarget] = useState<Message | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Message | null>(null);
 
   // Translation
   const [translatedMsgs, setTranslatedMsgs] = useState<Record<string, string>>({});
@@ -355,13 +414,16 @@ export default function ChatScreen() {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== "granted") { Alert.alert("Permission required", "Camera access is required."); return; }
       const result = await ImagePicker.launchCameraAsync({ quality: 0.75, base64: false });
-      if (!result.canceled && result.assets[0]) sendImageMessage(chatId, result.assets[0].uri);
+      if (!result.canceled && result.assets[0]) sendImageMessage(chatId, result.assets[0].uri, undefined, false, "image");
 
     } else if (type === "gallery" || type === "viewonce") {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") { Alert.alert("Permission required", "Media library access is required."); return; }
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], quality: 0.75, base64: false });
-      if (!result.canceled && result.assets[0]) sendImageMessage(chatId, result.assets[0].uri, undefined, isViewOnce);
+      if (!result.canceled && result.assets[0]) {
+        const kind = result.assets[0].type === "video" ? "video" : "image";
+        sendImageMessage(chatId, result.assets[0].uri, undefined, isViewOnce, kind);
+      }
 
     } else if (type === "document") {
       if (Platform.OS === "web") { Alert.alert("Not supported on web", "Use the mobile app to share documents."); return; }
@@ -373,17 +435,39 @@ export default function ChatScreen() {
       try {
         const cacheDir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? "";
         if (!cacheDir) throw new Error("No writable cache directory");
-        let readableUri = asset.uri;
-        try {
-          await FileSystem.getInfoAsync(readableUri);
-        } catch {
-          const ext = asset.name?.split(".").pop() ?? "bin";
-          const fallbackPath = `${cacheDir}doc_${Date.now()}.${ext}`;
-          await FileSystem.copyAsync({ from: asset.uri, to: fallbackPath });
-          readableUri = fallbackPath;
-        }
-        const base64 = await FileSystem.readAsStringAsync(readableUri, { encoding: "base64" as any });
         const mimeType = asset.mimeType ?? "application/octet-stream";
+        const ext = asset.name?.split(".").pop() ?? "bin";
+
+        // Some Android providers return content:// URIs that fail on direct read.
+        // Use layered fallbacks so PDF/Excel/Docs can still be sent reliably.
+        let base64 = "";
+        const attemptReadBase64 = async (uri: string) => {
+          return FileSystem.readAsStringAsync(uri, { encoding: "base64" as any });
+        };
+        try {
+          base64 = await attemptReadBase64(asset.uri);
+        } catch {
+          try {
+            const fallbackPath = `${cacheDir}doc_${Date.now()}.${ext}`;
+            await FileSystem.copyAsync({ from: asset.uri, to: fallbackPath });
+            base64 = await attemptReadBase64(fallbackPath);
+          } catch {
+            const resp = await fetch(asset.uri);
+            const blob = await resp.blob();
+            base64 = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const dataUrl = typeof reader.result === "string" ? reader.result : "";
+                const payload = dataUrl.replace(/^data:[^;]+;base64,/, "");
+                if (!payload) reject(new Error("Empty file payload"));
+                else resolve(payload);
+              };
+              reader.onerror = () => reject(new Error("Failed to convert document to base64"));
+              reader.readAsDataURL(blob);
+            });
+          }
+        }
+
         const dataUri = `data:${mimeType};base64,${base64}`;
         sendSpecialMessage(chatId, asset.name, "document", dataUri);
       } catch { Alert.alert("Error", "Could not read the selected file. Please try again."); }
@@ -504,22 +588,12 @@ export default function ChatScreen() {
     if (isMe) {
       opts.push({ text: "ℹ️ Info", onPress: () => router.push({ pathname: "/chat/message-info", params: { chatId: chatId!, messageId: msg.id } }) });
       opts.push({ text: "✏️ Edit", onPress: () => { setEditTarget(msg); setEditText(msg.text); inputRef.current?.focus(); } });
-      opts.push({
-        text: "🗑 Delete for me",
-        onPress: () => Alert.alert("Delete", "Delete for you only?", [
-          { text: "Cancel", style: "cancel" },
-          { text: "Delete for me", onPress: () => { if (chatId) deleteMessage(chatId, msg.id); } },
-        ]),
-      });
-      opts.push({
-        text: "🚫 Delete for everyone",
-        style: "destructive" as const,
-        onPress: () => Alert.alert("Delete for everyone", "Message will be deleted for all. This cannot be undone.", [
-          { text: "Cancel", style: "cancel" },
-          { text: "Delete for everyone", style: "destructive", onPress: () => { if (chatId) deleteForEveryone(chatId, msg.id); } },
-        ]),
-      });
     }
+    opts.push({
+      text: "🗑 Delete",
+      style: "destructive" as const,
+      onPress: () => setDeleteTarget(msg),
+    });
     opts.push({ text: "Cancel", style: "cancel" });
     Alert.alert("Message", "", opts);
   };
@@ -536,7 +610,7 @@ export default function ChatScreen() {
       if (d.success) {
         setTranslatedMsgs(prev => ({ ...prev, [msg.id]: d.translated }));
       } else {
-        Alert.alert("Translation failed", "Translate nahi ho saka. Dobara try karo.");
+        Alert.alert("Translation failed", "Could not translate this message. Please try again.");
       }
     } catch {
       Alert.alert("Error", "Network error");
@@ -546,7 +620,8 @@ export default function ChatScreen() {
   const renderMsg = ({ item }: { item: Message }) => {
     const isMe = item.senderId === "me";
     const isDeleted = item.type === "deleted";
-    const isImage = (item.type === "image" || item.type === "video") && !!item.mediaUrl;
+    const isImage = item.type === "image" && !!item.mediaUrl;
+    const isVideo = item.type === "video" && !!item.mediaUrl;
     const isAudio = item.type === "audio" && !!item.mediaUrl;
     const isDocument = item.type === "document";
     const isLocation = item.type === "location";
@@ -554,6 +629,11 @@ export default function ChatScreen() {
     const isSpecial = isDocument || isLocation || isContact;
     const urls = (!isDeleted && !isImage && !isAudio && !isSpecial) ? extractUrls(item.text) : [];
     const isManyForwarded = (item.forwardCount ?? 0) >= 5;
+    const metaTextColor = isImage
+      ? "rgba(255,255,255,0.92)"
+      : isMe
+        ? "rgba(0,0,0,0.55)"
+        : colors.mutedForeground;
 
     // Group reactions by emoji
     const reactionGroups: Record<string, { count: number; mine: boolean }> = {};
@@ -635,6 +715,8 @@ export default function ChatScreen() {
                 <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4 }]}>{item.text}</Text>
               )}
             </>
+          ) : isVideo ? (
+            <VideoPlayer uri={item.mediaUrl!} />
           ) : isAudio ? (
             <AudioPlayer uri={item.mediaUrl!} colors={colors} />
           ) : isDocument ? (
@@ -669,7 +751,7 @@ export default function ChatScreen() {
                 <Text style={[styles.locationCoords, { color: colors.mutedForeground }]}>
                   {item.text.replace("📍 Location\n", "")}
                 </Text>
-                <Text style={[styles.locationOpen, { color: colors.primary }]}>Google Maps mein open karo ↗</Text>
+                <Text style={[styles.locationOpen, { color: colors.primary }]}>Open in Google Maps ↗</Text>
               </View>
             </TouchableOpacity>
           ) : isContact ? (
@@ -718,13 +800,13 @@ export default function ChatScreen() {
           )}
 
           {/* Meta: time + edited + ticks */}
-          <View style={[styles.msgMeta, isImage && { paddingHorizontal: 8, paddingBottom: 4 }]}>
+          <View style={[styles.msgMeta, (isImage || isVideo) && styles.msgMetaOnMedia]}>
             {item.isEdited && <Text style={[styles.editedLabel, { color: colors.mutedForeground }]}>edited </Text>}
-            <Text style={[styles.msgTime, { color: isImage ? "rgba(255,255,255,0.85)" : colors.mutedForeground }]}>
+            <Text style={[styles.msgTime, { color: metaTextColor }]}>
               {formatFullTime(item.timestamp)}
             </Text>
             {isMe && !isDeleted && (
-              <TickIcon status={item.status} color={isImage ? "rgba(255,255,255,0.85)" : colors.mutedForeground} />
+              <TickIcon status={item.status} color={metaTextColor} />
             )}
           </View>
         </View>
@@ -1050,7 +1132,7 @@ export default function ChatScreen() {
       {/* Reaction picker modal */}
       <Modal visible={!!reactionTarget} transparent animationType="fade" onRequestClose={() => setReactionTarget(null)}>
         <Pressable style={styles.modalOverlay} onPress={() => setReactionTarget(null)}>
-          <View style={[styles.reactionPicker, { backgroundColor: colors.card }]}>
+          <View style={styles.reactionPicker}>
             {REACTION_EMOJIS.map((e) => (
               <TouchableOpacity key={e} style={styles.reactionPickerBtn} onPress={() => {
                 if (chatId && reactionTarget) { reactToMessage(chatId, reactionTarget.id, e); }
@@ -1059,6 +1141,43 @@ export default function ChatScreen() {
                 <Text style={{ fontSize: 28 }}>{e}</Text>
               </TouchableOpacity>
             ))}
+            <TouchableOpacity style={styles.reactionPickerPlus} onPress={() => setReactionTarget(null)}>
+              <Ionicons name="add" size={20} color="#64748b" />
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Delete modal */}
+      <Modal visible={!!deleteTarget} transparent animationType="fade" onRequestClose={() => setDeleteTarget(null)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setDeleteTarget(null)}>
+          <View style={styles.deleteCard}>
+            <Text style={styles.deleteTitle}>Delete message?</Text>
+            {deleteTarget?.senderId === "me" && (
+              <TouchableOpacity
+                style={styles.deleteAction}
+                onPress={() => {
+                  const target = deleteTarget;
+                  setDeleteTarget(null);
+                  if (chatId && target) deleteForEveryone(chatId, target.id);
+                }}
+              >
+                <Text style={styles.deleteActionText}>Delete for everyone</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.deleteAction}
+              onPress={() => {
+                const target = deleteTarget;
+                setDeleteTarget(null);
+                if (chatId && target) deleteMessage(chatId, target.id);
+              }}
+            >
+              <Text style={styles.deleteActionText}>Delete for me</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.deleteAction} onPress={() => setDeleteTarget(null)}>
+              <Text style={styles.deleteCancelText}>Cancel</Text>
+            </TouchableOpacity>
           </View>
         </Pressable>
       </Modal>
@@ -1146,6 +1265,11 @@ const styles = StyleSheet.create({
   replyText: { fontSize: 12, fontFamily: "Inter_400Regular" },
   msgText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
   msgImage: { width: W * 0.62, height: W * 0.62, borderRadius: 10 },
+  msgVideo: { width: W * 0.62, height: W * 0.62, borderRadius: 10, backgroundColor: "#000" },
+  videoLoadingWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 10, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
+  videoLoadingText: { color: "#fff", fontSize: 12, fontFamily: "Inter_500Medium" },
+  videoErrorWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 10, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
+  videoErrorText: { color: "#fff", fontSize: 12, fontFamily: "Inter_500Medium" },
   viewOnceOverlay: { position: "absolute", top: 8, left: 8, flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   viewOnceText: { color: "#fff", fontSize: 11, fontFamily: "Inter_500Medium" },
   translatedBox: { marginTop: 6, paddingTop: 6, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.15)" },
@@ -1169,6 +1293,16 @@ const styles = StyleSheet.create({
   linkPreview: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, paddingTop: 4, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },
   linkText: { flex: 1, fontSize: 12, fontFamily: "Inter_400Regular" },
   msgMeta: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 3 },
+  msgMetaOnMedia: {
+    position: "absolute",
+    right: 6,
+    bottom: 6,
+    marginTop: 0,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
   editedLabel: { fontSize: 10, fontFamily: "Inter_400Regular", fontStyle: "italic" },
   msgTime: { fontSize: 11, fontFamily: "Inter_400Regular" },
   deletedRow: { flexDirection: "row", alignItems: "center", gap: 4 },
@@ -1196,8 +1330,14 @@ const styles = StyleSheet.create({
   attachGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12, justifyContent: "center" },
   attachItem: { alignItems: "center", justifyContent: "center", width: 80, height: 80, borderRadius: 16, gap: 6 },
   attachLabel: { fontSize: 12, fontFamily: "Inter_500Medium" },
-  reactionPicker: { alignSelf: "center", flexDirection: "row", gap: 8, borderRadius: 40, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 200, elevation: 10, shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
-  reactionPickerBtn: { padding: 4 },
+  reactionPicker: { alignSelf: "center", flexDirection: "row", gap: 4, borderRadius: 28, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, marginBottom: 200, elevation: 12, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
+  reactionPickerBtn: { paddingHorizontal: 3, paddingVertical: 2 },
+  reactionPickerPlus: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", marginLeft: 2, backgroundColor: "#f1f5f9" },
+  deleteCard: { alignSelf: "center", width: "84%", maxWidth: 320, borderRadius: 18, backgroundColor: "#fff", paddingVertical: 12, paddingHorizontal: 16, elevation: 8, shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+  deleteTitle: { fontSize: 16, color: "#334155", fontFamily: "Inter_500Medium", marginBottom: 8 },
+  deleteAction: { paddingVertical: 10 },
+  deleteActionText: { fontSize: 17, color: "#0f9d7a", fontFamily: "Inter_500Medium", textAlign: "center" },
+  deleteCancelText: { fontSize: 17, color: "#64748b", fontFamily: "Inter_500Medium", textAlign: "center" },
   forwardSheet: { borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, maxHeight: "60%" },
   forwardRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 12 },
   forwardAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", overflow: "hidden" },

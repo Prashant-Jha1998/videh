@@ -86,7 +86,7 @@ export default function SettingsScreen() {
   };
 
   const inviteFriend = async () => {
-    const message = "Videh use karo — India ka fastest messaging app!\n\nFeatures: Broadcasts, Khata tracker, SOS safety, real-time translation, scheduled messages aur bahut kuch!\n\nDownload karo: https://videh.app";
+    const message = "Use Videh - India's fastest messaging app!\n\nFeatures: Broadcasts, Khata tracker, SOS safety, real-time translation, scheduled messages, and much more.\n\nDownload: https://videh.app";
     try {
       const { Share } = await import("react-native");
       await Share.share({ message, title: "Videh — India's Best Messaging App" });

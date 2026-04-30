@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  View, Text, FlatList, Pressable, TextInput, Modal,
+  View, Text, Pressable, TextInput, Modal,
   StyleSheet, Alert, ActivityIndicator, Platform, KeyboardAvoidingView, Linking
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -207,15 +207,19 @@ export default function SosScreen() {
       });
       const d = await r.json();
       if (d.success) {
+        // Primary path: backend sends SOS + location to Videh-linked contacts automatically.
         const smsFallbackNumbers = Array.isArray(d.smsFallbackNumbers) ? d.smsFallbackNumbers as string[] : [];
-        if (smsFallbackNumbers.length > 0) {
-          const locationPart = latitude && longitude ? ` https://maps.google.com/?q=${latitude},${longitude}` : "";
-          const smsMessage = `SOS ALERT: I need immediate help.${locationPart}`;
-          const smsUrl = `sms:${smsFallbackNumbers.join(",")}?body=${encodeURIComponent(smsMessage)}`;
-          Linking.openURL(smsUrl).catch(() => {});
-        }
+        const locationPart = latitude && longitude ? ` https://maps.google.com/?q=${latitude},${longitude}` : "";
+        const sosMessage = `SOS ALERT: I need immediate help.${locationPart}`;
+        // Secondary path: only non-Videh numbers get manual platform options.
+        openSosFallbackOptions(smsFallbackNumbers, sosMessage);
         startLiveLocationUpdates();
-        Alert.alert("SOS sent", `Emergency alert delivered to ${d.sentTo} contacts.`);
+        Alert.alert(
+          "SOS sent",
+          smsFallbackNumbers.length > 0
+            ? `Emergency alert sent on Videh. You can now send fallback text on other platforms for ${smsFallbackNumbers.length} non-Videh contact(s).`
+            : `Emergency alert delivered to ${d.sentTo} Videh contact(s).`
+        );
       } else {
         Alert.alert("Error", d.message ?? "Failed to send SOS alert.");
       }
@@ -277,6 +281,28 @@ export default function SosScreen() {
     } catch {
       Alert.alert("Verification failed", "Network error while sending verification request.");
     }
+  };
+
+  const openSosFallbackOptions = (numbers: string[], message: string) => {
+    if (!numbers.length) return;
+    const smsUrl = `sms:${numbers.join(",")}?body=${encodeURIComponent(message)}`;
+    const whatsappTarget = numbers[0].replace(/[^\d]/g, "");
+    const whatsappUrl = `whatsapp://send?phone=${whatsappTarget}&text=${encodeURIComponent(message)}`;
+    Alert.alert("Send emergency text", "Choose a platform", [
+      {
+        text: "SMS",
+        onPress: () => {
+          Linking.openURL(smsUrl).catch(() => Alert.alert("Error", "Could not open SMS app."));
+        },
+      },
+      {
+        text: "WhatsApp",
+        onPress: () => {
+          Linking.openURL(whatsappUrl).catch(() => Alert.alert("WhatsApp not found", "Please use SMS option."));
+        },
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
   };
 
   return (
@@ -460,7 +486,7 @@ const styles = StyleSheet.create({
   verifyBtn: { backgroundColor: "#00A88422", borderWidth: 1, borderColor: "#00A884", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginRight: 8 },
   verifyBtnTxt: { color: "#00A884", fontSize: 12, fontWeight: "700" },
   trackingBanner: { backgroundColor: "#1F2C34", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 10, flexDirection: "row", alignItems: "center", gap: 8 },
-  trackingText: { color: "#C5D2D8", fontSize: 12, flex: 1 },
+  trackingText: { color: "#C5D2D8", fontSize: 12, flex: 1, flexShrink: 1, paddingRight: 8 },
   stopTrackingText: { color: "#E74C3C", fontSize: 12, fontWeight: "700" },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
   modal: { backgroundColor: "#1F2C34", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, position: "absolute", bottom: 0, left: 0, right: 0 },

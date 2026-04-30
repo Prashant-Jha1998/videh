@@ -172,7 +172,7 @@ export default function BroadcastsScreen() {
         ListEmptyComponent={() => (
           <View style={styles.empty}>
             <Ionicons name="radio-outline" size={60} color={colors.mutedForeground} />
-            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Koi broadcast list nahi</Text>
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No broadcast lists yet</Text>
             <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
               Broadcast se ek saath kai logon ko message bhejo. Sirf Videh users receive karte hain.
             </Text>
@@ -259,8 +259,8 @@ export default function BroadcastsScreen() {
             )}
             ListEmptyComponent={() => (
               <View style={styles.empty}>
-                <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Koi recipient nahi</Text>
-                <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>+ icon se contacts add karo</Text>
+                <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No recipients selected</Text>
+                <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>Use the + button to add contacts</Text>
               </View>
             )}
             renderItem={({ item }) => (
@@ -325,7 +325,7 @@ export default function BroadcastsScreen() {
           {availableContacts.length === 0 ? (
             <View style={styles.empty}>
               <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
-                Saare contacts already is list mein hain ya Videh use nahi karte.
+                All contacts are already in this list or are not using Videh yet.
               </Text>
             </View>
           ) : (

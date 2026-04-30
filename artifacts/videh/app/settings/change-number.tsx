@@ -47,7 +47,7 @@ export default function ChangeNumberScreen() {
       });
       const d = await r.json();
       if (d.success) { setStep("otp"); }
-      else Alert.alert("Error", d.message ?? "OTP bhejne mein problem hui.");
+      else Alert.alert("Error", d.message ?? "There was a problem sending OTP.");
     } catch { Alert.alert("Error", "Network error"); }
     setLoading(false);
   };

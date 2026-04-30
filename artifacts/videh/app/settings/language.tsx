@@ -57,7 +57,7 @@ export default function LanguageScreen() {
     const lang = LANGUAGES.find((l) => l.code === code);
     Alert.alert(
       "Language Set!",
-      `App language "${lang?.name}" (${lang?.native}) set ho gayi.\n\nIncoming messages automatically is language mein translate honge.`,
+      `App language "${lang?.name}" (${lang?.native}) has been set.\n\nIncoming messages will be auto-translated to this language.`,
       [{ text: "OK", onPress: () => router.back() }]
     );
   };
@@ -76,7 +76,7 @@ export default function LanguageScreen() {
         <View style={[styles.infoBox, { backgroundColor: colors.primary + "15", borderColor: colors.primary + "40" }]}>
           <Ionicons name="information-circle-outline" size={20} color={colors.primary} />
           <Text style={[styles.infoText, { color: colors.foreground }]}>
-            Yeh sirf app ki preferred language set karta hai. Chat mein messages apni original language mein aayenge. Translate karne ke liye chat mein translate option use karo.
+            This only sets your preferred app language. Chat messages arrive in their original language. Use the translate option in chat whenever needed.
           </Text>
         </View>
 

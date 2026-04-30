@@ -80,7 +80,7 @@ export default function KhataScreen() {
   const markPaid = (entry: KhataEntry) => {
     Alert.alert(
       "Mark as Paid?",
-      `${entry.debtor_name} ka ₹${Number(entry.amount).toFixed(2)} paid mark ho jayega aur group mein notification jayegi.`,
+      `${entry.debtor_name}'s ₹${Number(entry.amount).toFixed(2)} entry will be marked as paid and the group will be notified.`,
       [
         { text: "Haan, paid!", onPress: async () => {
           await fetch(`${BASE_URL}/api/khata/${entry.id}/pay`, { method: "PUT" });
@@ -149,9 +149,9 @@ export default function KhataScreen() {
       ) : filtered.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>
-            {filter === "pending" ? "Sab clear hai! 🎉" : "Koi entry nahi."}
+            {filter === "pending" ? "All clear! 🎉" : "No entries found."}
           </Text>
-          <Text style={styles.emptySub}>+ button dabakar entry add karo</Text>
+          <Text style={styles.emptySub}>Use the + button to add an entry</Text>
         </View>
       ) : (
         <FlatList

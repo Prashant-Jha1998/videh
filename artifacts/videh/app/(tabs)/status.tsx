@@ -74,7 +74,7 @@ export default function StatusScreen() {
 
   const openMyStatus = () => {
     if (myStatuses.length > 0) {
-      router.push({ pathname: "/status/view", params: { ids: myStatuses.map((s) => s.id).join(",") } });
+      router.push("/status/my" as any);
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       router.push("/status/create");
@@ -222,7 +222,7 @@ function StatusGroupRow({ group, colors, onPress }: { group: StatusGroup; colors
   const initials = (group.userName ?? "?").split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = (group.userName ?? "A").charCodeAt(0) * 37 % 360;
   const count = group.statuses.length;
-  const ringColor = group.hasUnviewed ? colors.primary : colors.mutedForeground;
+  const ringColor = group.hasUnviewed ? "#25D366" : "#94A3B8";
 
   return (
     <TouchableOpacity

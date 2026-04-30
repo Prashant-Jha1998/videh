@@ -57,7 +57,7 @@ export default function ScheduledScreen() {
     const isoStr = `${schedDate}T${schedTime}:00`;
     const dt = new Date(isoStr);
     if (isNaN(dt.getTime()) || dt <= new Date()) {
-      Alert.alert("Invalid time", "Future ka time choose karo.");
+      Alert.alert("Invalid time", "Please choose a future time.");
       return;
     }
     setSaving(true);
@@ -88,7 +88,7 @@ export default function ScheduledScreen() {
 
   const cancel = (id: number) => {
     Alert.alert("Cancel message?", "Yeh scheduled message delete ho jayega.", [
-      { text: "Haan, delete karo", style: "destructive", onPress: async () => {
+      { text: "Yes, delete", style: "destructive", onPress: async () => {
         await fetch(`${BASE_URL}/api/scheduled/${id}`, { method: "DELETE" });
         load();
       }},
@@ -122,8 +122,8 @@ export default function ScheduledScreen() {
       ) : messages.length === 0 ? (
         <View style={styles.empty}>
           <Ionicons name="time-outline" size={64} color="#555" />
-          <Text style={styles.emptyText}>Koi scheduled message nahi hai</Text>
-          <Text style={styles.emptySub}>+ button dabakar message schedule karo</Text>
+          <Text style={styles.emptyText}>No scheduled messages yet</Text>
+          <Text style={styles.emptySub}>Use the + button to schedule a message</Text>
         </View>
       ) : (
         <FlatList

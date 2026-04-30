@@ -47,7 +47,7 @@ export default function TwoStepScreen() {
 
   const setNewPin = async () => {
     if (pin.length !== 6) { Alert.alert("Error", "6 digit PIN daalo."); return; }
-    if (pin !== confirmPin) { Alert.alert("Error", "Dono PIN same nahi hain!"); return; }
+    if (pin !== confirmPin) { Alert.alert("Error", "Both PIN entries must match."); return; }
     setLoading(true);
     try {
       const r = await fetch(`${API_URL}/users/${user?.dbId}/two-step-pin`, {
@@ -89,7 +89,7 @@ export default function TwoStepScreen() {
           </View>
           <Text style={[styles.title, { color: colors.foreground }]}>Naya PIN Set Karo</Text>
           <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-            6-digit PIN set karo. Jab bhi Videh re-register hoga, yeh PIN maanga jaayega.
+            Set a 6-digit PIN. This PIN will be required whenever Videh is re-registered.
           </Text>
           <TextInput
             style={[styles.pinInput, { backgroundColor: colors.card, color: colors.foreground, borderColor: colors.border }]}

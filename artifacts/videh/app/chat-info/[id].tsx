@@ -10,6 +10,7 @@ import {
   Modal,
   Platform,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -239,6 +240,16 @@ export default function ChatInfoScreen() {
     } catch { setEditingDesc(false); }
   };
 
+  const shareGroupInviteLink = async () => {
+    if (!id) return;
+    const inviteLink = `videh://join-group?id=${id}`;
+    await Share.share({
+      message: `Join our group on Videh: ${inviteLink}`,
+      url: inviteLink,
+      title: "Group invite link",
+    }).catch(() => {});
+  };
+
   const searchUser = async () => {
     if (!searchPhone) return;
     try {
@@ -438,6 +449,12 @@ export default function ChatInfoScreen() {
                 {groupDesc || (isAdmin ? "Add group description" : "No description")}
               </Text>
             )}
+            {isAdmin && (
+              <TouchableOpacity style={styles.inviteLinkRow} onPress={shareGroupInviteLink}>
+                <Ionicons name="link-outline" size={16} color={colors.primary} />
+                <Text style={[styles.inviteLinkText, { color: colors.primary }]}>Invite via link</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -471,7 +488,7 @@ export default function ChatInfoScreen() {
           ) : (
             <View style={styles.noMediaRow}>
               <Ionicons name="image-outline" size={32} color={colors.mutedForeground} />
-              <Text style={[styles.noMedia, { color: colors.mutedForeground }]}>Koi media share nahi hua abhi</Text>
+              <Text style={[styles.noMedia, { color: colors.mutedForeground }]}>No media has been shared yet.</Text>
             </View>
           )}
         </View>
@@ -729,6 +746,8 @@ const styles = StyleSheet.create({
   descHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   descInput: { borderWidth: 1, borderRadius: 8, padding: 10, fontSize: 15, marginTop: 4, minHeight: 64 },
   descBtns: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 8 },
+  inviteLinkRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, alignSelf: "flex-start" },
+  inviteLinkText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   descBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
 
   mediaRow: { flexDirection: "row", gap: 8, marginBottom: 8 },

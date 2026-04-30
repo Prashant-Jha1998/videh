@@ -67,7 +67,8 @@ export default function ViewStatusScreen() {
     ? params.ids.split(",").filter(Boolean)
     : params.id ? [params.id] : [];
 
-  const [currentIdx, setCurrentIdx] = useState(0);
+  const initialIndex = params.id ? Math.max(0, ids.findIndex((x) => x === params.id)) : 0;
+  const [currentIdx, setCurrentIdx] = useState(initialIndex);
   const [paused, setPaused] = useState(false);
   const [myReaction, setMyReaction] = useState<string | null>(null);
   const [showReactions, setShowReactions] = useState(false);

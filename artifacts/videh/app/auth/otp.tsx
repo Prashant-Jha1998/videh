@@ -29,6 +29,7 @@ export default function OtpScreen() {
   const [resendTimer, setResendTimer] = useState(30);
   const [error, setError] = useState("");
   const inputs = useRef<(TextInput | null)[]>([]);
+  const autoSubmittedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (resendTimer <= 0) return;
@@ -36,8 +37,38 @@ export default function OtpScreen() {
     return () => clearTimeout(t);
   }, [resendTimer]);
 
+  const submitIfComplete = (nextDigits: string[]) => {
+    if (!nextDigits.every((d) => d !== "")) return;
+    const otp = nextDigits.join("");
+    if (autoSubmittedRef.current === otp || loading) return;
+    autoSubmittedRef.current = otp;
+    handleVerify(otp);
+  };
+
+  const applyOtpCode = (rawValue: string, startIndex = 0) => {
+    const onlyDigits = rawValue.replace(/[^0-9]/g, "");
+    if (!onlyDigits) return;
+    const newDigits = [...digits];
+    let writeIndex = startIndex;
+    for (const ch of onlyDigits) {
+      if (writeIndex > 5) break;
+      newDigits[writeIndex] = ch;
+      writeIndex += 1;
+    }
+    setDigits(newDigits);
+    setError("");
+    if (writeIndex <= 5) inputs.current[writeIndex]?.focus();
+    else inputs.current[5]?.focus();
+    submitIfComplete(newDigits);
+  };
+
   const handleChange = (text: string, idx: number) => {
-    const digit = text.replace(/[^0-9]/g, "").slice(-1);
+    const onlyDigits = text.replace(/[^0-9]/g, "");
+    if (onlyDigits.length > 1) {
+      applyOtpCode(onlyDigits, idx);
+      return;
+    }
+    const digit = onlyDigits.slice(-1);
     const newDigits = [...digits];
     newDigits[idx] = digit;
     setDigits(newDigits);
@@ -45,9 +76,7 @@ export default function OtpScreen() {
     if (digit && idx < 5) {
       inputs.current[idx + 1]?.focus();
     }
-    if (newDigits.every((d) => d !== "")) {
-      handleVerify(newDigits.join(""));
-    }
+    submitIfComplete(newDigits);
   };
 
   const handleKeyPress = (e: any, idx: number) => {
@@ -90,12 +119,14 @@ export default function OtpScreen() {
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         setError(data.message ?? "Incorrect OTP. Please try again.");
+        autoSubmittedRef.current = null;
         setDigits(["", "", "", "", "", ""]);
         inputs.current[0]?.focus();
       }
     } catch {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setError("Could not verify OTP. Check your connection.");
+      autoSubmittedRef.current = null;
       setDigits(["", "", "", "", "", ""]);
       inputs.current[0]?.focus();
     }
@@ -105,6 +136,7 @@ export default function OtpScreen() {
 
   const resend = async () => {
     setResendTimer(30);
+    autoSubmittedRef.current = null;
     setDigits(["", "", "", "", "", ""]);
     setError("");
     inputs.current[0]?.focus();
@@ -152,6 +184,9 @@ export default function OtpScreen() {
               ]}
               maxLength={1}
               keyboardType="number-pad"
+              autoComplete={Platform.OS === "android" ? "sms-otp" : "one-time-code"}
+              textContentType="oneTimeCode"
+              importantForAutofill="yes"
               value={d}
               onChangeText={(t) => handleChange(t, idx)}
               onKeyPress={(e) => handleKeyPress(e, idx)}

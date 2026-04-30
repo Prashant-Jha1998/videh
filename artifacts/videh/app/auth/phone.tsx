@@ -68,7 +68,7 @@ export default function PhoneScreen() {
         <Image
           source={require("@/assets/images/videh_logo.png")}
           style={styles.logo}
-          resizeMode="contain"
+          resizeMode="cover"
           tintColor={colors.primary}
         />
         <Text style={[styles.title, { color: colors.primary }]}>Videh</Text>
@@ -160,7 +160,7 @@ export default function PhoneScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   inner: { flex: 1, alignItems: "center", paddingHorizontal: 24 },
-  logo: { width: 80, height: 80, marginBottom: 12 },
+  logo: { width: 122, height: 122, marginBottom: 8 },
   title: { fontSize: 32, fontFamily: "Inter_700Bold", letterSpacing: 1 },
   subtitle: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", marginTop: 8, marginBottom: 32 },
   card: { width: "100%", borderRadius: 16, padding: 20, marginBottom: 24 },

@@ -6,6 +6,7 @@ import React, { useState } from "react";
 import {
   Alert,
   FlatList,
+  Modal,
   Platform,
   StyleSheet,
   Text,
@@ -27,6 +28,7 @@ export default function ChatsScreen() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"all" | "unread" | "groups">("all");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [previewChat, setPreviewChat] = useState<Chat | null>(null);
 
   const filtered = chats.filter((c) => {
     const matchSearch = c.name.toLowerCase().includes(search.toLowerCase());
@@ -51,6 +53,9 @@ export default function ChatsScreen() {
       { text: "Archive", style: "destructive", onPress: () => archiveChat(chat.id) },
       { text: "Cancel", style: "cancel" },
     ]);
+  };
+  const openChatInfo = (chat: Chat) => {
+    router.push({ pathname: "/chat-info/[id]", params: { id: chat.id } });
   };
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
@@ -128,6 +133,7 @@ export default function ChatsScreen() {
             colors={colors}
             onPress={() => openChat(item)}
             onLongPress={() => longPressChat(item)}
+            onAvatarPress={() => setPreviewChat(item)}
           />
         )}
         ListEmptyComponent={
@@ -168,6 +174,50 @@ export default function ChatsScreen() {
       >
         <Ionicons name="chatbubble-ellipses" size={26} color="#fff" />
       </TouchableOpacity>
+
+      <Modal visible={!!previewChat} transparent animationType="fade" onRequestClose={() => setPreviewChat(null)}>
+        <View style={styles.previewOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setPreviewChat(null)} />
+          {previewChat ? (
+            <View style={[styles.previewCard, { backgroundColor: colors.card }]}>
+              <Text style={[styles.previewName, { color: colors.foreground }]} numberOfLines={1}>
+                {previewChat.name}
+              </Text>
+              {previewChat.avatar ? (
+                <Image source={{ uri: previewChat.avatar }} style={styles.previewImage} contentFit="cover" />
+              ) : (
+                <View style={[styles.previewFallback, { backgroundColor: colors.primary }]}>
+                  <Text style={styles.previewFallbackText}>
+                    {previewChat.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)}
+                  </Text>
+                </View>
+              )}
+              <View style={[styles.previewActions, { borderTopColor: colors.border }]}>
+                <TouchableOpacity
+                  style={styles.previewActionBtn}
+                  onPress={() => {
+                    const chat = previewChat;
+                    setPreviewChat(null);
+                    openChat(chat);
+                  }}
+                >
+                  <Ionicons name="chatbubble-ellipses-outline" size={22} color={colors.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.previewActionBtn}
+                  onPress={() => {
+                    const chat = previewChat;
+                    setPreviewChat(null);
+                    openChatInfo(chat);
+                  }}
+                >
+                  <Ionicons name="information-circle-outline" size={22} color={colors.primary} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -177,24 +227,21 @@ function ChatRow({
   colors,
   onPress,
   onLongPress,
+  onAvatarPress,
 }: {
   chat: Chat;
   colors: any;
   onPress: () => void;
   onLongPress: () => void;
+  onAvatarPress: () => void;
 }) {
   const initials = chat.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = chat.name.charCodeAt(0) * 37 % 360;
   const avatarBg = `hsl(${hue},50%,45%)`;
 
   return (
-    <TouchableOpacity
-      style={[styles.row, { borderBottomColor: colors.border }]}
-      onPress={onPress}
-      onLongPress={onLongPress}
-      activeOpacity={0.7}
-    >
-      <View style={[styles.avatarWrap, { backgroundColor: avatarBg }]}>
+    <View style={[styles.row, { borderBottomColor: colors.border }]}>
+      <TouchableOpacity style={[styles.avatarWrap, { backgroundColor: avatarBg }]} onPress={onAvatarPress} activeOpacity={0.85}>
         {chat.avatar ? (
           <Image source={{ uri: chat.avatar }} style={styles.avatarImg} contentFit="cover" />
         ) : (
@@ -203,9 +250,9 @@ function ChatRow({
         {!chat.isGroup && chat.isOnline && (
           <View style={[styles.onlineDot, { backgroundColor: colors.onlineGreen }]} />
         )}
-      </View>
+      </TouchableOpacity>
 
-      <View style={styles.rowContent}>
+      <TouchableOpacity style={styles.rowContent} onPress={onPress} onLongPress={onLongPress} activeOpacity={0.7}>
         <View style={styles.rowTop}>
           <View style={styles.nameRow}>
             {chat.isPinned && <Ionicons name="pin" size={12} color={colors.mutedForeground} style={{ marginRight: 4, transform: [{ rotate: "45deg" }] }} />}
@@ -231,8 +278,8 @@ function ChatRow({
             </View>
           )}
         </View>
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -271,4 +318,12 @@ const styles = StyleSheet.create({
   emptyBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 14, paddingHorizontal: 28, borderRadius: 50, marginTop: 4 },
   emptyBtnText: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   fab: { position: "absolute", bottom: 90, right: 20, width: 60, height: 60, borderRadius: 30, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 5 },
+  previewOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", paddingHorizontal: 28 },
+  previewCard: { width: "100%", maxWidth: 280, borderRadius: 2, overflow: "hidden" },
+  previewName: { fontSize: 18, fontFamily: "Inter_600SemiBold", paddingHorizontal: 12, paddingVertical: 10 },
+  previewImage: { width: "100%", height: 300 },
+  previewFallback: { width: "100%", height: 300, alignItems: "center", justifyContent: "center" },
+  previewFallbackText: { color: "#fff", fontSize: 56, fontFamily: "Inter_700Bold" },
+  previewActions: { height: 42, flexDirection: "row", alignItems: "center", justifyContent: "space-evenly", borderTopWidth: 1 },
+  previewActionBtn: { minWidth: 64, alignItems: "center", justifyContent: "center" },
 });
