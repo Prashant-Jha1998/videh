@@ -5,8 +5,9 @@ import AgoraRTC, {
   type IMicrophoneAudioTrack,
   type IRemoteVideoTrack,
 } from "agora-rtc-sdk-ng";
+import { getApiUrl } from "@/lib/api";
 
-const APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID ?? "";
+const ENV_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID ?? "";
 
 export interface AgoraCallState {
   joined: boolean;
@@ -42,34 +43,46 @@ export function useAgoraCall(channel: string, uid: number, isVideo: boolean): Ag
   const remoteVideoId = `agora-remote-${channel}`;
 
   useEffect(() => {
-    if (!APP_ID) { setError("Agora App ID not configured"); return; }
-
-    const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
-    clientRef.current = client;
-
-    client.on("user-published", async (user, mediaType) => {
-      await client.subscribe(user, mediaType);
-      if (mediaType === "video") {
-        remoteVideoRef.current = user.videoTrack ?? null;
-        setHasRemoteVideo(true);
-        setTimeout(() => user.videoTrack?.play(remoteVideoId), 100);
-      }
-      if (mediaType === "audio") {
-        user.audioTrack?.play();
-      }
-      setRemoteCount(client.remoteUsers.length);
-    });
-
-    client.on("user-unpublished", (_user, mediaType) => {
-      if (mediaType === "video") { remoteVideoRef.current = null; setHasRemoteVideo(false); }
-      setRemoteCount(client.remoteUsers.length);
-    });
-
-    client.on("user-left", () => setRemoteCount(client.remoteUsers.length));
-
     const connect = async () => {
       try {
-        await client.join(APP_ID, channel, null, uid);
+        let appId = ENV_APP_ID;
+        if (!appId) {
+          const baseUrl = getApiUrl();
+          const res = await fetch(`${baseUrl}/api/agora/config`);
+          const data = await res.json() as { success?: boolean; appId?: string };
+          if (data.success && data.appId) {
+            appId = data.appId;
+          }
+        }
+        if (!appId) {
+          setError("Agora App ID not configured");
+          return;
+        }
+
+        const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+        clientRef.current = client;
+
+        client.on("user-published", async (user, mediaType) => {
+          await client.subscribe(user, mediaType);
+          if (mediaType === "video") {
+            remoteVideoRef.current = user.videoTrack ?? null;
+            setHasRemoteVideo(true);
+            setTimeout(() => user.videoTrack?.play(remoteVideoId), 100);
+          }
+          if (mediaType === "audio") {
+            user.audioTrack?.play();
+          }
+          setRemoteCount(client.remoteUsers.length);
+        });
+
+        client.on("user-unpublished", (_user, mediaType) => {
+          if (mediaType === "video") { remoteVideoRef.current = null; setHasRemoteVideo(false); }
+          setRemoteCount(client.remoteUsers.length);
+        });
+
+        client.on("user-left", () => setRemoteCount(client.remoteUsers.length));
+
+        await client.join(appId, channel, null, uid);
         const audio = await AgoraRTC.createMicrophoneAudioTrack();
         audioRef.current = audio;
         const toPublish: any[] = [audio];

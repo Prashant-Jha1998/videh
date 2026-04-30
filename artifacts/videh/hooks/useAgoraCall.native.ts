@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { PermissionsAndroid, Platform } from "react-native";
+import { getApiUrl } from "@/lib/api";
 
-const APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID ?? "";
+const ENV_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID ?? "";
 
 export interface AgoraCallState {
   joined: boolean;
@@ -33,10 +34,22 @@ export function useAgoraCall(channel: string, uid: number, isVideo: boolean): Ag
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!APP_ID) { setError("Agora App ID not configured"); return; }
-
     const init = async () => {
       try {
+        let appId = ENV_APP_ID;
+        if (!appId) {
+          const baseUrl = getApiUrl();
+          const res = await fetch(`${baseUrl}/api/agora/config`);
+          const data = await res.json() as { success?: boolean; appId?: string };
+          if (data.success && data.appId) {
+            appId = data.appId;
+          }
+        }
+        if (!appId) {
+          setError("Agora App ID not configured");
+          return;
+        }
+
         if (Platform.OS === "android") {
           const perms: string[] = [PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
           if (isVideo) perms.push(PermissionsAndroid.PERMISSIONS.CAMERA);
@@ -75,7 +88,7 @@ export function useAgoraCall(channel: string, uid: number, isVideo: boolean): Ag
         });
 
         engine.initialize({
-          appId: APP_ID,
+          appId,
           channelProfile: ChannelProfileType.ChannelProfileCommunication,
         });
 
