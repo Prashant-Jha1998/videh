@@ -13,17 +13,26 @@
     },
     "preview": {
       "distribution": "internal",
+      "env": {
+        "VIDEOH_SLIM_ANDROID": "1"
+      },
       "android": {
         "buildType": "apk"
       }
     },
     "apkRelease": {
       "distribution": "internal",
+      "env": {
+        "VIDEOH_SLIM_ANDROID": "1"
+      },
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
+      "env": {
+        "VIDEOH_SLIM_ANDROID": "1"
+      },
       "android": {
         "buildType": "app-bundle"
       }
