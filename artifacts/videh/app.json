@@ -32,7 +32,7 @@
     "android": {
       "package": "com.videh.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/videh_icon_foreground.png",
+        "foregroundImage": "./assets/images/videh_app_icon.png",
         "backgroundColor": "#0B141A"
       },
       "permissions": [

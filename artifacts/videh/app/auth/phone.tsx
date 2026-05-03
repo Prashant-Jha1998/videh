@@ -66,9 +66,10 @@ export default function PhoneScreen() {
     >
       <View style={[styles.inner, { paddingTop: topPad, paddingBottom: insets.bottom + 20 }]}>
         <Image
-          source={require("@/assets/images/videh_icon_foreground.png")}
+          source={require("@/assets/images/videh_logo.png")}
           style={styles.logo}
           resizeMode="contain"
+          tintColor={colors.primary}
         />
         <Text style={[styles.title, { color: colors.primary }]}>Videh</Text>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
