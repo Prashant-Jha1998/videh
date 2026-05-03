@@ -19,10 +19,6 @@ type ScheduledMsg = {
   type: string;
 };
 
-const LANGS = [
-  { label: "हिंदी", val: "2024-01-15T08:00" },
-];
-
 export default function ScheduledScreen() {
   const { chatId, name } = useLocalSearchParams<{ chatId: string; name: string }>();
   const insets = useSafeAreaInsets();
@@ -51,7 +47,7 @@ export default function ScheduledScreen() {
 
   const schedule = async () => {
     if (!newText.trim() || !schedDate || !schedTime) {
-      Alert.alert("Incomplete", "Message text, date aur time dono required hain.");
+      Alert.alert("Incomplete", "Message text, date, and time are all required.");
       return;
     }
     const isoStr = `${schedDate}T${schedTime}:00`;
@@ -87,12 +83,12 @@ export default function ScheduledScreen() {
   };
 
   const cancel = (id: number) => {
-    Alert.alert("Cancel message?", "Yeh scheduled message delete ho jayega.", [
+    Alert.alert("Cancel message?", "This scheduled message will be deleted.", [
       { text: "Yes, delete", style: "destructive", onPress: async () => {
         await fetch(`${BASE_URL}/api/scheduled/${id}`, { method: "DELETE" });
         load();
       }},
-      { text: "Nahi" },
+      { text: "No" },
     ]);
   };
 
@@ -150,12 +146,12 @@ export default function ScheduledScreen() {
       <Modal visible={showAdd} animationType="slide" transparent onRequestClose={() => setShowAdd(false)}>
         <Pressable style={styles.overlay} onPress={() => setShowAdd(false)} />
         <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
-          <Text style={styles.modalTitle}>Message Schedule Karo</Text>
+          <Text style={styles.modalTitle}>Schedule message</Text>
 
           <Text style={styles.label}>Message</Text>
           <TextInput
             style={styles.input}
-            placeholder="Apna message yahan likhو..."
+            placeholder="Type your message..."
             placeholderTextColor="#666"
             value={newText}
             onChangeText={setNewText}
@@ -187,7 +183,7 @@ export default function ScheduledScreen() {
 
           <Pressable style={[styles.schedBtn, saving && { opacity: 0.6 }]} onPress={schedule} disabled={saving}>
             {saving ? <ActivityIndicator color="#fff" /> : (
-              <Text style={styles.schedBtnTxt}>Schedule Karo ⏰</Text>
+              <Text style={styles.schedBtnTxt}>Schedule ⏰</Text>
             )}
           </Pressable>
         </View>

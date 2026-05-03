@@ -14,10 +14,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 
 const FONT_SIZES = [
-  { key: "small", label: "Chhota", size: 13, preview: "Aa" },
+  { key: "small", label: "Small", size: 13, preview: "Aa" },
   { key: "medium", label: "Normal", size: 16, preview: "Aa" },
-  { key: "large", label: "Bada", size: 19, preview: "Aa" },
-  { key: "xlarge", label: "Bahut Bada", size: 22, preview: "Aa" },
+  { key: "large", label: "Large", size: 19, preview: "Aa" },
+  { key: "xlarge", label: "Extra large", size: 22, preview: "Aa" },
 ];
 
 export default function AccessibilityScreen() {
@@ -88,7 +88,7 @@ export default function AccessibilityScreen() {
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>PREVIEW</Text>
           <View style={[styles.previewBubble, { backgroundColor: colors.primary + "20" }]}>
             <Text style={[styles.previewText, { fontSize: previewSize, color: colors.foreground }]}>
-              Namaste! Aaj ka din kaisa hai? 😊
+              Hi! How is your day going? 😊
             </Text>
             <Text style={[styles.previewTime, { color: colors.mutedForeground }]}>10:30 AM ✓✓</Text>
           </View>
@@ -100,7 +100,7 @@ export default function AccessibilityScreen() {
           <ToggleRow
             icon="contrast-outline" iconBg="#1a1a2e"
             label="High Contrast Mode"
-            hint="Text aur background aur alag dikhega"
+            hint="Text and background will look more distinct"
             enabled={highContrast}
             onToggle={() => { setHighContrast(v => !v); save("highContrast", String(!highContrast)); }}
             colors={colors}
@@ -108,7 +108,7 @@ export default function AccessibilityScreen() {
           <ToggleRow
             icon="text-outline" iconBg="#3F51B5"
             label="Bold Text"
-            hint="Saara text bold ho jaayega"
+            hint="All text will appear bold"
             enabled={boldText}
             onToggle={() => { setBoldText(v => !v); save("boldText", String(!boldText)); }}
             colors={colors}
@@ -116,7 +116,7 @@ export default function AccessibilityScreen() {
           <ToggleRow
             icon="speedometer-outline" iconBg="#FF5722"
             label="Reduce Motion"
-            hint="Animations kam kar do"
+            hint="Reduce animated effects in the app"
             enabled={reduceMotion}
             onToggle={() => { setReduceMotion(v => !v); save("reduceMotion", String(!reduceMotion)); }}
             colors={colors}

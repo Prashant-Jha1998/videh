@@ -14,40 +14,59 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { getApiUrl } from "@/lib/api";
 const API_URL = `${getApiUrl()}/api`;
 
-type Step = "check" | "enter" | "confirm" | "disable";
+type Step = "enter" | "confirm" | "disable";
 
 export default function TwoStepScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useApp();
+  const { t } = useUiPreferences();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const [step, setStep] = useState<Step>("check");
+  const [step, setStep] = useState<Step>("enter");
   const [isEnabled, setIsEnabled] = useState(false);
   const [pin, setPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
   const [loading, setLoading] = useState(false);
   const [checkPin, setCheckPin] = useState("");
+  const [statusLoadFailed, setStatusLoadFailed] = useState(false);
 
   useEffect(() => {
     const checkStatus = async () => {
-      if (!user) return;
+      if (!user?.dbId) return;
       try {
         const r = await fetch(`${API_URL}/users/${user.dbId}/two-step-status`);
-        const d = await r.json();
-        if (d.success) { setIsEnabled(d.enabled); setStep(d.enabled ? "disable" : "enter"); }
-      } catch {}
+        const text = await r.text();
+        let d: { success?: boolean; enabled?: boolean };
+        try {
+          d = JSON.parse(text) as { success?: boolean; enabled?: boolean };
+        } catch {
+          throw new Error("invalid json");
+        }
+        if (d.success) {
+          setIsEnabled(!!d.enabled);
+          setStep(d.enabled ? "disable" : "enter");
+          setStatusLoadFailed(false);
+        } else {
+          setStep("enter");
+          setStatusLoadFailed(true);
+        }
+      } catch {
+        setStep("enter");
+        setStatusLoadFailed(true);
+      }
     };
-    checkStatus();
+    void checkStatus();
   }, [user]);
 
   const setNewPin = async () => {
-    if (pin.length !== 6) { Alert.alert("Error", "6 digit PIN daalo."); return; }
-    if (pin !== confirmPin) { Alert.alert("Error", "Both PIN entries must match."); return; }
+    if (pin.length !== 6) { Alert.alert(t("common.error"), t("twoStep.errPin6")); return; }
+    if (pin !== confirmPin) { Alert.alert(t("common.error"), t("twoStep.errMatch")); return; }
     setLoading(true);
     try {
       const r = await fetch(`${API_URL}/users/${user?.dbId}/two-step-pin`, {
@@ -57,14 +76,14 @@ export default function TwoStepScreen() {
       });
       const d = await r.json();
       if (d.success) {
-        Alert.alert("Ho gaya!", "Two-step verification ON ho gaya.", [{ text: "OK", onPress: () => router.back() }]);
-      } else Alert.alert("Error", d.message ?? "Something went wrong");
-    } catch { Alert.alert("Error", "Network error"); }
+        Alert.alert(t("twoStep.done"), t("twoStep.doneBody"), [{ text: t("common.ok"), onPress: () => router.back() }]);
+      } else Alert.alert(t("common.error"), d.message ?? t("twoStep.errGeneric"));
+    } catch { Alert.alert(t("common.error"), t("twoStep.errNetwork")); }
     setLoading(false);
   };
 
   const disablePin = async () => {
-    if (checkPin.length !== 6) { Alert.alert("Error", "Current PIN daalo."); return; }
+    if (checkPin.length !== 6) { Alert.alert(t("common.error"), t("twoStep.errCurrent")); return; }
     setLoading(true);
     try {
       const r = await fetch(`${API_URL}/users/${user?.dbId}/two-step-pin`, {
@@ -74,9 +93,9 @@ export default function TwoStepScreen() {
       });
       const d = await r.json();
       if (d.success) {
-        Alert.alert("Disable ho gaya!", "Two-step verification band ho gaya.", [{ text: "OK", onPress: () => router.back() }]);
-      } else Alert.alert("Error", "PIN galat hai.");
-    } catch { Alert.alert("Error", "Network error"); }
+        Alert.alert(t("twoStep.disabledTitle"), t("twoStep.disabledBody"), [{ text: t("common.ok"), onPress: () => router.back() }]);
+      } else Alert.alert(t("common.error"), t("twoStep.errWrong"));
+    } catch { Alert.alert(t("common.error"), t("twoStep.errNetwork")); }
     setLoading(false);
   };
 
@@ -87,10 +106,8 @@ export default function TwoStepScreen() {
           <View style={[styles.iconCircle, { backgroundColor: colors.primary + "20" }]}>
             <Ionicons name="lock-closed" size={40} color={colors.primary} />
           </View>
-          <Text style={[styles.title, { color: colors.foreground }]}>Naya PIN Set Karo</Text>
-          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-            Set a 6-digit PIN. This PIN will be required whenever Videh is re-registered.
-          </Text>
+          <Text style={[styles.title, { color: colors.foreground }]}>{t("twoStep.setTitle")}</Text>
+          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>{t("twoStep.setHint")}</Text>
           <TextInput
             style={[styles.pinInput, { backgroundColor: colors.card, color: colors.foreground, borderColor: colors.border }]}
             placeholder="● ● ● ● ● ●"
@@ -103,9 +120,9 @@ export default function TwoStepScreen() {
           />
           <TouchableOpacity
             style={[styles.btn, { backgroundColor: colors.primary }]}
-            onPress={() => { if (pin.length === 6) setStep("confirm"); else Alert.alert("Error", "6 digit PIN daalo"); }}
+            onPress={() => { if (pin.length === 6) setStep("confirm"); else Alert.alert(t("common.error"), t("twoStep.errPin6")); }}
           >
-            <Text style={styles.btnText}>Aage Badho</Text>
+            <Text style={styles.btnText}>{t("twoStep.continue")}</Text>
           </TouchableOpacity>
         </>
       ) : step === "confirm" ? (
@@ -113,10 +130,8 @@ export default function TwoStepScreen() {
           <View style={[styles.iconCircle, { backgroundColor: colors.primary + "20" }]}>
             <Ionicons name="shield-checkmark" size={40} color={colors.primary} />
           </View>
-          <Text style={[styles.title, { color: colors.foreground }]}>PIN Confirm Karo</Text>
-          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-            Ek baar aur wahi PIN daalo confirm karne ke liye.
-          </Text>
+          <Text style={[styles.title, { color: colors.foreground }]}>{t("twoStep.confirmTitle")}</Text>
+          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>{t("twoStep.confirmHint")}</Text>
           <TextInput
             style={[styles.pinInput, { backgroundColor: colors.card, color: colors.foreground, borderColor: colors.border }]}
             placeholder="● ● ● ● ● ●"
@@ -133,10 +148,10 @@ export default function TwoStepScreen() {
             onPress={setNewPin}
             disabled={loading}
           >
-            <Text style={styles.btnText}>{loading ? "Set ho raha hai..." : "PIN Set Karo"}</Text>
+            <Text style={styles.btnText}>{loading ? t("twoStep.saving") : t("twoStep.savePin")}</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => { setStep("enter"); setConfirmPin(""); }}>
-            <Text style={[styles.back, { color: colors.primary }]}>PIN badlo</Text>
+            <Text style={[styles.back, { color: colors.primary }]}>{t("twoStep.changePin")}</Text>
           </TouchableOpacity>
         </>
       ) : null}
@@ -148,10 +163,8 @@ export default function TwoStepScreen() {
       <View style={[styles.iconCircle, { backgroundColor: "#4CAF50" + "20" }]}>
         <Ionicons name="shield-checkmark" size={40} color="#4CAF50" />
       </View>
-      <Text style={[styles.title, { color: colors.foreground }]}>Two-Step Verification ON hai</Text>
-      <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-        Aapka account 6-digit PIN se protected hai. Disable karne ke liye current PIN daalo.
-      </Text>
+      <Text style={[styles.title, { color: colors.foreground }]}>{t("twoStep.onTitle")}</Text>
+      <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>{t("twoStep.onHint")}</Text>
       <TextInput
         style={[styles.pinInput, { backgroundColor: colors.card, color: colors.foreground, borderColor: colors.border }]}
         placeholder="Current PIN"
@@ -167,7 +180,7 @@ export default function TwoStepScreen() {
         onPress={disablePin}
         disabled={loading}
       >
-        <Text style={styles.btnText}>{loading ? "Disable ho raha hai..." : "Two-Step Disable Karo"}</Text>
+        <Text style={styles.btnText}>{loading ? t("twoStep.disabling") : t("twoStep.turnOff")}</Text>
       </TouchableOpacity>
     </>
   );
@@ -181,11 +194,20 @@ export default function TwoStepScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Two-Step Verification</Text>
+        <Text style={styles.headerTitle}>{t("twoStep.header")}</Text>
         <View style={{ width: 40 }} />
       </View>
       <View style={styles.body}>
-        {isEnabled ? renderDisableFlow() : renderEnableFlow()}
+        {!user?.dbId ? (
+          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>{t("twoStep.signInRequired")}</Text>
+        ) : (
+          <>
+            {statusLoadFailed && !isEnabled ? (
+              <Text style={[styles.warn, { color: colors.mutedForeground }]}>{t("twoStep.loadFail")}</Text>
+            ) : null}
+            {isEnabled ? renderDisableFlow() : renderEnableFlow()}
+          </>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -204,4 +226,5 @@ const styles = StyleSheet.create({
   btn: { width: "100%", paddingVertical: 16, borderRadius: 14, alignItems: "center" },
   btnText: { color: "#fff", fontSize: 17, fontFamily: "Inter_600SemiBold" },
   back: { fontSize: 14, fontFamily: "Inter_500Medium", marginTop: 4 },
+  warn: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", marginBottom: 8, lineHeight: 18 },
 });

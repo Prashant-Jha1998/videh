@@ -21,6 +21,7 @@
         "NSCameraUsageDescription": "Videh needs camera access for video calls.",
         "NSContactsUsageDescription": "Videh uses your contacts to find friends who are already on Videh.",
         "NSBluetoothAlwaysUsageDescription": "Videh uses Bluetooth for audio routing during calls.",
+        "NSPhotoLibraryAddUsageDescription": "Videh saves videos you download from chat to your photo library.",
         "UIBackgroundModes": [
           "audio",
           "voip",
@@ -54,11 +55,16 @@
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_MEDIA_DOCUMENTS",
-        "android.permission.WRITE_CONTACTS"
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
       "favicon": "./assets/images/videh_app_icon.png"
+    },
+    "notification": {
+      "icon": "./assets/images/videh_logo.png",
+      "color": "#00A884"
     },
     "plugins": [
       [
@@ -79,7 +85,23 @@
       ],
       "expo-font",
       "expo-web-browser",
-      "expo-contacts"
+      "expo-contacts",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Videh to access your photos to save videos from chat.",
+          "savePhotosPermission": "Allow Videh to save videos from chat to your gallery.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/videh_logo.png",
+          "color": "#00A884",
+          "defaultChannel": "messages"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

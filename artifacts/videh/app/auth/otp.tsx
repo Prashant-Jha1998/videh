@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import type { Href } from "expo-router";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -100,11 +101,25 @@ export default function OtpScreen() {
       const data = await res.json() as {
         success: boolean; message?: string;
         dbId?: number; isNew?: boolean;
+        twoStepRequired?: boolean;
         name?: string | null; about?: string | null; avatarUrl?: string | null;
       };
 
       if (data.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        if (data.twoStepRequired && data.dbId != null) {
+          const isReturning = !data.isNew && data.name;
+          router.replace({
+            pathname: "/auth/two-step-login",
+            params: {
+              phone: phone ?? "",
+              dbId: String(data.dbId),
+              ret: isReturning ? "1" : "0",
+            },
+          } as unknown as Href);
+          setLoading(false);
+          return;
+        }
         const isReturning = !data.isNew && data.name;
         await setUser({
           id: Date.now().toString(),
@@ -132,7 +147,7 @@ export default function OtpScreen() {
     }
 
     setLoading(false);
-  }, [digits, phone]);
+  }, [digits, phone, router, setUser]);
 
   const resend = async () => {
     setResendTimer(30);

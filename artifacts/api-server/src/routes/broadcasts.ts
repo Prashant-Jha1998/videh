@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
 import { query } from "../lib/db";
 
 const router = Router();
@@ -115,12 +116,8 @@ router.post("/:listId/send", async (req: Request, res: Response) => {
         "INSERT INTO messages (chat_id, sender_id, content, type, media_url) VALUES ($1,$2,$3,$4,$5)",
         [chatId, senderId, content, type, mediaUrl ?? null]
       );
-      if (r.push_token?.startsWith("ExponentPushToken")) {
-        fetch("https://exp.host/--/api/v2/push/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ to: r.push_token, title: senderName, body: content.slice(0, 100), data: { chatId }, sound: "default" }),
-        }).catch(() => {});
+      if (isExpoPushToken(r.push_token)) {
+        sendExpoChatPush(r.push_token, senderName, content.slice(0, 100), { chatId });
       }
       sentCount++;
     }

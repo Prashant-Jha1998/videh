@@ -1,9 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Notifications from "expo-notifications";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { AppState, Platform, type AppStateStatus } from "react-native";
+import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
+import * as Location from "expo-location";
 import { getApiUrl } from "@/lib/api";
+import { registerExpoPushTokenWithServer } from "@/lib/pushNotifications";
+import { encodeLocationPayload, mapsUrl as buildMapsUrl } from "@/lib/locationMessage";
 
 const BASE_URL = getApiUrl();
 
@@ -139,6 +141,9 @@ interface AppContextType {
   blockUser: (otherUserId: number) => Promise<void>;
   unblockUser: (otherUserId: number) => Promise<void>;
   setChatDisappear: (chatId: string, seconds: number | null) => Promise<void>;
+  updateLocationOnServer: (chatId: string, messageId: string, body: { content?: string; mediaUrl?: string }) => Promise<void>;
+  startLiveLocationSession: (args: { chatId: string; messageId: string; untilMs: number; comment?: string }) => void;
+  stopLiveLocationSession: () => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -197,12 +202,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!uri) return uri;
     if (uri.startsWith("data:") || uri.startsWith("http://") || uri.startsWith("https://")) return uri;
     try {
-      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" as any });
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
       const mime = getMimeTypeFromUri(uri, fallbackMime);
       return `data:${mime};base64,${base64}`;
     } catch {
       try {
-        const cacheDir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? "";
+        const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
         if (!cacheDir) return uri;
         const ext = fallbackMime.includes("video")
           ? "mp4"
@@ -211,7 +216,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             : "jpg";
         const copiedPath = `${cacheDir}share_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
         await FileSystem.copyAsync({ from: uri, to: copiedPath });
-        const copiedBase64 = await FileSystem.readAsStringAsync(copiedPath, { encoding: "base64" as any });
+        const copiedBase64 = await FileSystem.readAsStringAsync(copiedPath, { encoding: FileSystem.EncodingType.Base64 });
         return `data:${fallbackMime};base64,${copiedBase64}`;
       } catch {
         return uri;
@@ -293,6 +298,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             loadChats(parsed.dbId);
             loadCallLogs(parsed.dbId);
             loadStatuses(parsed.dbId);
+            if (Platform.OS !== "web") {
+              registerExpoPushTokenWithServer(parsed.dbId).catch(() => {});
+            }
           }
         }
       } catch {}
@@ -329,6 +337,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!uid) return;
       if (nextState === "active") {
         api(`/users/${uid}/online`, { method: "POST" }).catch(() => {});
+        if (Platform.OS !== "web") {
+          registerExpoPushTokenWithServer(uid).catch(() => {});
+        }
       } else if (nextState === "background" || nextState === "inactive") {
         api(`/users/${uid}/offline`, { method: "POST" }).catch(() => {});
       }
@@ -353,22 +364,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
       } catch {}
 
-      // Register push token (native only)
       if (Platform.OS !== "web") {
         try {
-          const { status: existing } = await Notifications.getPermissionsAsync();
-          let finalStatus = existing;
-          if (existing !== "granted") {
-            const { status } = await Notifications.requestPermissionsAsync();
-            finalStatus = status;
-          }
-          if (finalStatus === "granted") {
-            const tokenData = await Notifications.getExpoPushTokenAsync();
-            await api(`/users/${u.dbId}/push-token`, {
-              method: "PUT",
-              body: JSON.stringify({ token: tokenData.data }),
-            }).catch(() => {});
-          }
+          await registerExpoPushTokenWithServer(u.dbId);
         } catch {}
       }
     }
@@ -520,21 +518,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
 
     if (u?.dbId) {
-      api(`/chats/${chatId}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ senderId: u.dbId, content: text, type: "text", replyToId: replyToId ? Number(replyToId) : undefined }),
-      }).then((data: any) => {
-        if (data?.success && data.message) {
-          // Replace temp message with DB message
+      void (async () => {
+        const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            senderId: u.dbId,
+            content: text,
+            type: "text",
+            replyToId: replyToId ? Number(replyToId) : undefined,
+          }),
+        });
+        const data = (await res.json()) as {
+          success?: boolean;
+          message?: { id: number } | string;
+          code?: string;
+        };
+        if (res.status === 403) {
+          const msg = typeof data.message === "string" ? data.message : "You are not allowed to send messages in this chat.";
+          Alert.alert("Cannot send message", msg);
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c,
+            ),
+          );
+          return;
+        }
+        if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
+          const mid = data.message.id;
           setChats((prev) =>
             prev.map((c) =>
               c.id === chatId
-                ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(data.message.id), status: "delivered" } : m) }
-                : c
-            )
+                ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered" } : m) }
+                : c,
+            ),
           );
         }
-      }).catch(() => {});
+      })().catch(() => {});
     }
   }, []);
 
@@ -575,8 +595,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       )
     );
     if (u?.dbId) {
-      api(`/chats/${chatId}/messages`, {
+      const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           senderId: u.dbId,
           content: text,
@@ -584,17 +605,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           mediaUrl: shareableMediaUri,
           isViewOnce: isViewOnce ?? false,
         }),
-      }).then((data: any) => {
-        if (data?.success && data.message) {
-          setChats((prev) =>
-            prev.map((c) =>
-              c.id === chatId
-                ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(data.message.id), status: "delivered" } : m) }
-                : c
-            )
-          );
-        }
-      }).catch(() => {});
+      });
+      const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
+      if (res.status === 403) {
+        const msg = typeof data.message === "string" ? data.message : "You are not allowed to send messages in this chat.";
+        Alert.alert("Cannot send message", msg);
+        setChats((prev) =>
+          prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
+        );
+        return;
+      }
+      if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
+        const mid = data.message.id;
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered" } : m) }
+              : c,
+          ),
+        );
+      }
     }
     })();
   }, [toShareableMediaUri]);
@@ -618,20 +648,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       )
     );
     if (u?.dbId) {
-      api(`/chats/${chatId}/messages`, {
+      const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ senderId: u.dbId, content: text, type: "audio", mediaUrl: shareableAudioUri }),
-      }).then((data: any) => {
-        if (data?.success && data.message) {
-          setChats((prev) =>
-            prev.map((c) =>
-              c.id === chatId
-                ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(data.message.id), status: "delivered" } : m) }
-                : c
-            )
-          );
-        }
-      }).catch(() => {});
+      });
+      const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
+      if (res.status === 403) {
+        const msg = typeof data.message === "string" ? data.message : "You are not allowed to send messages in this chat.";
+        Alert.alert("Cannot send message", msg);
+        setChats((prev) =>
+          prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
+        );
+        return;
+      }
+      if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
+        const mid = data.message.id;
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered" } : m) }
+              : c,
+          ),
+        );
+      }
     }
     })();
   }, [toShareableMediaUri]);
@@ -861,23 +901,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           : c
       )
     );
-    api(`/chats/${targetChatId}/messages`, {
-      method: "POST",
-      body: JSON.stringify({
-        senderId: u.dbId, content: msg.text, type: msg.type,
-        mediaUrl: msg.mediaUrl ?? null, isForwarded: true, forwardCount: newForwardCount,
-      }),
-    }).then((data: any) => {
-      if (data?.success && data.message) {
+    void (async () => {
+      const res = await fetch(`${BASE_URL}/api/chats/${targetChatId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          senderId: u.dbId,
+          content: msg.text,
+          type: msg.type,
+          mediaUrl: msg.mediaUrl ?? null,
+          isForwarded: true,
+          forwardCount: newForwardCount,
+        }),
+      });
+      const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
+      if (res.status === 403) {
+        const msg403 = typeof data.message === "string" ? data.message : "You are not allowed to send messages in this chat.";
+        Alert.alert("Cannot forward", msg403);
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === targetChatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c,
+          ),
+        );
+        return;
+      }
+      if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
+        const mid = data.message.id;
         setChats((prev) =>
           prev.map((c) =>
             c.id === targetChatId
-              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(data.message.id), status: "delivered" } : m) }
-              : c
-          )
+              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered" } : m) }
+              : c,
+          ),
         );
       }
-    }).catch(() => {});
+    })().catch(() => {});
   }, [chats]);
 
   const starredMessages = chats.flatMap((c) => c.messages.filter((m) => m.isStarred));
@@ -907,6 +965,89 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }).catch(() => {});
   }, []);
 
+  const [liveLocationSession, setLiveLocationSession] = useState<{
+    chatId: string;
+    messageId: string;
+    untilMs: number;
+    comment?: string;
+  } | null>(null);
+  const liveTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopLiveLocationSession = useCallback(() => {
+    setLiveLocationSession(null);
+    if (liveTickRef.current) {
+      clearInterval(liveTickRef.current);
+      liveTickRef.current = null;
+    }
+  }, []);
+
+  const startLiveLocationSession = useCallback((args: { chatId: string; messageId: string; untilMs: number; comment?: string }) => {
+    setLiveLocationSession(args);
+  }, []);
+
+  const updateLocationOnServer = useCallback(async (chatId: string, messageId: string, body: { content?: string; mediaUrl?: string }) => {
+    const u = userRef.current;
+    if (!u?.dbId) return;
+    await fetch(`${BASE_URL}/api/chats/${chatId}/messages/${messageId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: u.dbId, ...body }),
+    }).catch(() => {});
+    await loadMessages(chatId);
+  }, [loadMessages]);
+
+  useEffect(() => {
+    if (!liveLocationSession) return;
+    const sess = { ...liveLocationSession };
+    const tick = async () => {
+      if (Date.now() > sess.untilMs) {
+        if (liveTickRef.current) {
+          clearInterval(liveTickRef.current);
+          liveTickRef.current = null;
+        }
+        setLiveLocationSession(null);
+        return;
+      }
+      const u = userRef.current;
+      if (!u?.dbId) return;
+      try {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const { latitude, longitude } = loc.coords;
+        const content = encodeLocationPayload({
+          v: 1,
+          mode: "live",
+          lat: latitude,
+          lng: longitude,
+          until: sess.untilMs,
+          comment: sess.comment,
+          stopped: false,
+        });
+        await fetch(`${BASE_URL}/api/chats/${sess.chatId}/messages/${sess.messageId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: u.dbId,
+            content,
+            mediaUrl: buildMapsUrl(latitude, longitude),
+          }),
+        }).catch(() => {});
+        await loadMessages(sess.chatId);
+      } catch {
+        /* ignore */
+      }
+    };
+    void tick();
+    liveTickRef.current = setInterval(() => {
+      void tick();
+    }, 12000);
+    return () => {
+      if (liveTickRef.current) {
+        clearInterval(liveTickRef.current);
+        liveTickRef.current = null;
+      }
+    };
+  }, [liveLocationSession, loadMessages]);
+
   return (
     <AppContext.Provider value={{
       user, isAuthenticated, isInitialized, chats, statuses, contacts, callLogs,
@@ -917,6 +1058,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       sendImageMessage, sendAudioMessage, setTyping, clearTyping,
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, setChatDisappear,
+      updateLocationOnServer, startLiveLocationSession, stopLiveLocationSession,
     }}>
       {children}
     </AppContext.Provider>

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Platform,
@@ -13,20 +13,46 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { getApiUrl } from "@/lib/api";
+
+const API_URL = `${getApiUrl()}/api`;
 
 export default function AccountSettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, logout } = useApp();
-  const twoStep = false;
+  const { t } = useUiPreferences();
+  const [twoStepEnabled, setTwoStepEnabled] = useState(false);
+
+  const refreshTwoStep = useCallback(async () => {
+    if (!user?.dbId) return;
+    try {
+      const r = await fetch(`${API_URL}/users/${user.dbId}/two-step-status`);
+      const d = await r.json();
+      if (d.success) setTwoStepEnabled(!!d.enabled);
+    } catch {
+      setTwoStepEnabled(false);
+    }
+  }, [user?.dbId]);
+
+  useEffect(() => {
+    void refreshTwoStep();
+  }, [refreshTwoStep]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshTwoStep();
+    }, [refreshTwoStep]),
+  );
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const changeNumber = () => {
     Alert.alert(
       "Change Number",
-      "Naye number pe OTP bheja jaayega verify karne ke liye. Aapki chat history migrate ho jaayegi.",
+      "We will send an OTP to your new number to verify it. Your chat history will be moved to the new number.",
       [
         { text: "Cancel", style: "cancel" },
         { text: "Continue", onPress: () => router.push("/settings/change-number") },
@@ -82,14 +108,14 @@ export default function AccountSettingsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Account</Text>
+        <Text style={styles.headerTitle}>{t("account.title")}</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 60 }}>
         {/* Phone number */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
-          <Text style={[styles.sectionLabel, { color: colors.primary }]}>Phone number</Text>
+          <Text style={[styles.sectionLabel, { color: colors.primary }]}>{t("account.phoneSection")}</Text>
           <View style={styles.infoRow}>
             <Text style={[styles.infoValue, { color: colors.foreground }]}>+91 {user?.phone}</Text>
           </View>
@@ -100,8 +126,8 @@ export default function AccountSettingsScreen() {
           <SettingRow
             icon="lock-closed-outline"
             iconBg="#9C27B0"
-            label="Two-step verification"
-            value={twoStep ? "Enabled" : "Add extra security layer"}
+            label={t("account.twoStep")}
+            value={twoStepEnabled ? t("account.twoStepOn") : t("account.twoStepOff")}
             colors={colors}
             onPress={() => router.push("/settings/two-step")}
           />

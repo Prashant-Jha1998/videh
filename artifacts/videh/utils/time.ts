@@ -29,3 +29,12 @@ export function formatFullTime(timestamp: number): string {
   const ampm = h >= 12 ? "PM" : "AM";
   return `${h % 12 || 12}:${m} ${ampm}`;
 }
+
+/** Short relative label for full-screen media headers (WhatsApp-style). */
+export function formatRelativeHeader(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  if (diff < 60_000) return "Just now";
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3600_000)}h ago`;
+  return formatFullTime(timestamp);
+}

@@ -33,11 +33,11 @@ export default function ChangeNumberScreen() {
 
   const sendOtp = async () => {
     const cleaned = newPhone.replace(/\D/g, "");
-    if (cleaned.length !== 10) { Alert.alert("Error", "10 digit ka valid mobile number daalo."); return; }
-    if (cleaned === user?.phone) { Alert.alert("Error", "Yeh pehle se aapka number hai!"); return; }
+    if (cleaned.length !== 10) { Alert.alert("Error", "Enter a valid 10-digit mobile number."); return; }
+    if (cleaned === user?.phone) { Alert.alert("Error", "This is already your current number."); return; }
     const existingCheck = await fetch(`${API_URL}/users/check-phone?phone=${cleaned}`);
     const ec = await existingCheck.json();
-    if (ec.exists) { Alert.alert("Error", "Yeh number pehle se kisi aur account se linked hai."); return; }
+    if (ec.exists) { Alert.alert("Error", "This number is already linked to another account."); return; }
     setLoading(true);
     try {
       const r = await fetch(`${API_URL}/auth/send-otp`, {
@@ -53,7 +53,7 @@ export default function ChangeNumberScreen() {
   };
 
   const verifyOtp = async () => {
-    if (otp.length !== 6) { Alert.alert("Error", "6 digit OTP daalo."); return; }
+    if (otp.length !== 6) { Alert.alert("Error", "Enter the 6-digit OTP."); return; }
     setLoading(true);
     try {
       const r = await fetch(`${API_URL}/auth/verify-otp`, {
@@ -71,8 +71,8 @@ export default function ChangeNumberScreen() {
         if (user) {
           await setUser({ ...user, phone: newPhone.replace(/\D/g, "") });
         }
-        Alert.alert("Ho gaya!", "Number successfully change ho gaya.", [{ text: "OK", onPress: () => router.replace("/(tabs)/settings") }]);
-      } else Alert.alert("Error", "OTP galat hai ya expire ho gaya.");
+        Alert.alert("Done", "Your number was updated successfully.", [{ text: "OK", onPress: () => router.replace("/(tabs)/settings") }]);
+      } else Alert.alert("Error", "Invalid or expired OTP.");
     } catch { Alert.alert("Error", "Network error"); }
     setLoading(false);
   };
@@ -86,7 +86,7 @@ export default function ChangeNumberScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Number Change Karo</Text>
+        <Text style={styles.headerTitle}>Change number</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -96,15 +96,15 @@ export default function ChangeNumberScreen() {
             <View style={[styles.iconCircle, { backgroundColor: colors.primary + "20" }]}>
               <Ionicons name="phone-portrait-outline" size={40} color={colors.primary} />
             </View>
-            <Text style={[styles.title, { color: colors.foreground }]}>Naya Number Daalo</Text>
+            <Text style={[styles.title, { color: colors.foreground }]}>Enter new number</Text>
             <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-              Naye number pe OTP bheja jaayega verify karne ke liye.
+              We will send an OTP to this number to verify it.
             </Text>
             <View style={[styles.inputRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Text style={[styles.prefix, { color: colors.foreground }]}>+91</Text>
               <TextInput
                 style={[styles.input, { color: colors.foreground }]}
-                placeholder="Naya mobile number"
+                placeholder="New mobile number"
                 placeholderTextColor={colors.mutedForeground}
                 keyboardType="number-pad"
                 maxLength={10}
@@ -117,7 +117,7 @@ export default function ChangeNumberScreen() {
               onPress={sendOtp}
               disabled={loading}
             >
-              <Text style={styles.btnText}>{loading ? "Bhej raha hai..." : "OTP Bhejo"}</Text>
+              <Text style={styles.btnText}>{loading ? "Sending..." : "Send OTP"}</Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -125,9 +125,9 @@ export default function ChangeNumberScreen() {
             <View style={[styles.iconCircle, { backgroundColor: colors.primary + "20" }]}>
               <Ionicons name="keypad-outline" size={40} color={colors.primary} />
             </View>
-            <Text style={[styles.title, { color: colors.foreground }]}>OTP Verify Karo</Text>
+            <Text style={[styles.title, { color: colors.foreground }]}>Verify OTP</Text>
             <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-              +91 {newPhone} pe 6-digit OTP bheja gaya hai.
+              A 6-digit OTP was sent to +91 {newPhone}.
             </Text>
             <TextInput
               style={[styles.otpInput, { backgroundColor: colors.card, color: colors.foreground, borderColor: colors.border }]}
@@ -143,10 +143,10 @@ export default function ChangeNumberScreen() {
               onPress={verifyOtp}
               disabled={loading}
             >
-              <Text style={styles.btnText}>{loading ? "Verify ho raha hai..." : "Verify Karo"}</Text>
+              <Text style={styles.btnText}>{loading ? "Verifying..." : "Verify"}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => { setStep("phone"); setOtp(""); }}>
-              <Text style={[styles.back, { color: colors.primary }]}>Number wapas badle</Text>
+              <Text style={[styles.back, { color: colors.primary }]}>Change number again</Text>
             </TouchableOpacity>
           </>
         )}

@@ -3,14 +3,15 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
-import * as Location from "expo-location";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Contacts from "expo-contacts";
+import type { ExistingContact } from "expo-contacts";
 import { Audio, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Clipboard,
@@ -21,6 +22,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  SectionList,
   StyleSheet,
   Text,
   TextInput,
@@ -28,15 +30,80 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Swipeable } from "react-native-gesture-handler";
 import { useColors } from "@/hooks/useColors";
 import { useApp, type Message } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
 import { formatFullTime } from "@/utils/time";
 import { DropdownMenu } from "@/components/DropdownMenu";
+import {
+  encodeLocationPayload,
+  formatLiveUntil,
+  mapsUrl,
+  parseLegacyLocation,
+  parseLocationPayload,
+  staticMapImageUrl,
+} from "@/lib/locationMessage";
+import { loadEnterIsSend } from "@/lib/chatSettings";
 
 const BASE_URL = getApiUrl();
 const { width: W } = Dimensions.get("window");
 const REACTION_EMOJIS = ["❤️", "👍", "😂", "😮", "😢", "🙏"];
+const REPLY_SWIPE_ACTION_W = 56;
+
+type ContactShareRow = { id: string; name: string; phone: string };
+
+function buildContactShareRows(data: ExistingContact[]): ContactShareRow[] {
+  const out: ContactShareRow[] = [];
+  for (const c of data) {
+    const nameRaw = (c.name ?? "").trim();
+    const phones = (c.phoneNumbers ?? [])
+      .map((p) => (p.number ?? "").trim())
+      .filter(Boolean);
+    if (!nameRaw && phones.length === 0) continue;
+    const displayName = nameRaw || phones[0]!;
+    const primaryPhone = phones[0] ?? "";
+    out.push({ id: String(c.id), name: displayName, phone: primaryPhone });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  return out;
+}
+
+async function loadAllDeviceContactsForShare(): Promise<ExistingContact[]> {
+  const fields = [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails];
+  const aggregated: ExistingContact[] = [];
+  let pageOffset = 0;
+  const pageSize = 500;
+  for (let guard = 0; guard < 200; guard++) {
+    const res = await Contacts.getContactsAsync({
+      fields,
+      pageSize,
+      pageOffset,
+      sort: Contacts.SortTypes.FirstName,
+    });
+    aggregated.push(...res.data);
+    if (!res.hasNextPage) break;
+    pageOffset += res.data.length;
+  }
+  return aggregated;
+}
+
+/** WhatsApp-style attachment row (coloured circle + label). Order matches common WA layout. */
+const ATTACH_SHEET_ITEMS: {
+  key: string;
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  label: string;
+  color: string;
+  type: "document" | "camera" | "gallery" | "audiofile" | "location" | "contact";
+}[] = [
+  { key: "doc", icon: "document-text", label: "Document", color: "#8B5CF6", type: "document" },
+  { key: "cam", icon: "camera", label: "Camera", color: "#E8558D", type: "camera" },
+  { key: "gal", icon: "images", label: "Gallery", color: "#2F80ED", type: "gallery" },
+  { key: "aud", icon: "musical-notes", label: "Audio", color: "#F2A742", type: "audiofile" },
+  { key: "loc", icon: "location", label: "Location", color: "#25D366", type: "location" },
+  { key: "con", icon: "person", label: "Contact", color: "#1296D4", type: "contact" },
+];
 
 type ReplyData = { id: string; text: string; senderId: string; senderName?: string } | null;
 
@@ -68,14 +135,61 @@ function TickIcon({ status, color }: { status: Message["status"]; color: string 
   return <Ionicons name="checkmark" size={14} color={color} />;
 }
 
-// Voice message player
-function AudioPlayer({ uri, colors }: { uri: string; colors: any }) {
+const VOICE_NOTE_WAVE_BARS = 26;
+
+function parseVoiceDurationSec(text: string): number {
+  const m = text.match(/Voice message\s*\((\d+)s\)/i) ?? text.match(/\((\d+)\s*s\)/i);
+  return m ? Number(m[1]) : 0;
+}
+
+function hashSeed(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+function voiceWaveHeights(seed: string, count: number): number[] {
+  let h = hashSeed(seed || "0");
+  const out: number[] = [];
+  for (let i = 0; i < count; i++) {
+    h = Math.imul(h ^ (h << 13), 1274126177) >>> 0;
+    out.push(0.28 + ((h % 1000) / 1000) * 0.72);
+  }
+  return out;
+}
+
+function formatVoiceClock(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, "0")}`;
+}
+
+/** WhatsApp-style voice note: waveform, scrub, 1x / 1.5x / 2x, optional avatar on sent notes */
+function VoiceNotePlayer({
+  uri,
+  colors,
+  isMe,
+  messageId,
+  durationHintSec,
+  avatarUri,
+}: {
+  uri: string;
+  colors: ReturnType<typeof useColors>;
+  isMe: boolean;
+  messageId: string;
+  durationHintSec: number;
+  avatarUri?: string;
+}) {
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(Math.max(0.1, durationHintSec || 0.1));
   const [position, setPosition] = useState(0);
   const [preparing, setPreparing] = useState(false);
+  const [rate, setRate] = useState(1);
+  const [waveW, setWaveW] = useState(0);
   const resolvedUriRef = useRef<string | null>(null);
+  const bars = useMemo(() => voiceWaveHeights(messageId + uri.slice(-24), VOICE_NOTE_WAVE_BARS), [messageId, uri]);
 
   const resolvePlayableUri = useCallback(async (): Promise<string> => {
     if (resolvedUriRef.current) return resolvedUriRef.current;
@@ -83,7 +197,7 @@ function AudioPlayer({ uri, colors }: { uri: string; colors: any }) {
       resolvedUriRef.current = uri;
       return uri;
     }
-    const cacheDir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? "";
+    const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
     if (!cacheDir) throw new Error("No writable cache directory");
     const ext = uri.includes("audio/mpeg") ? "mp3"
       : uri.includes("audio/wav") ? "wav"
@@ -91,10 +205,16 @@ function AudioPlayer({ uri, colors }: { uri: string; colors: any }) {
       : "m4a";
     const target = `${cacheDir}voice_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
     const base64 = uri.replace(/^data:[^;]+;base64,/, "");
-    await FileSystem.writeAsStringAsync(target, base64, { encoding: "base64" as any });
+    await FileSystem.writeAsStringAsync(target, base64, { encoding: FileSystem.EncodingType.Base64 });
     resolvedUriRef.current = target;
     return target;
   }, [uri]);
+
+  const applyRate = useCallback(async (s: Audio.Sound, next: number) => {
+    try {
+      await s.setRateAsync(next, true);
+    } catch { /* older platforms */ }
+  }, []);
 
   const toggle = async () => {
     try {
@@ -103,15 +223,17 @@ function AudioPlayer({ uri, colors }: { uri: string; colors: any }) {
         const playableUri = await resolvePlayableUri();
         const { sound: s } = await Audio.Sound.createAsync(
           { uri: playableUri },
-          { shouldPlay: true },
+          { shouldPlay: true, rate: 1 },
           (status) => {
             if (status.isLoaded) {
-              setPosition(status.positionMillis / 1000);
-              setDuration((status.durationMillis ?? 0) / 1000);
+              setPosition((status.positionMillis ?? 0) / 1000);
+              const d = (status.durationMillis ?? 0) / 1000;
+              if (d > 0.05) setDuration(d);
               if (status.didJustFinish) { setPlaying(false); setPosition(0); }
             }
           }
         );
+        await applyRate(s, rate);
         setSound(s);
         setPlaying(true);
         setPreparing(false);
@@ -127,52 +249,147 @@ function AudioPlayer({ uri, colors }: { uri: string; colors: any }) {
     }
   };
 
-  useEffect(() => () => { sound?.unloadAsync(); }, [sound]);
+  const cycleRate = async () => {
+    const next = rate === 1 ? 1.5 : rate === 1.5 ? 2 : 1;
+    setRate(next);
+    if (sound) await applyRate(sound, next);
+  };
 
-  const total = duration || 1;
-  const prog = Math.min(position / total, 1);
-  const secs = Math.round(duration - position);
+  const seekFromX = async (x: number) => {
+    if (!sound || waveW <= 0 || duration <= 0) return;
+    const p = Math.max(0, Math.min(1, x / waveW));
+    try {
+      await sound.setPositionAsync(p * duration * 1000);
+      setPosition(p * duration);
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => () => { void sound?.unloadAsync(); }, [sound]);
+
+  useEffect(() => {
+    if (!sound) return;
+    void applyRate(sound, rate);
+  }, [sound, rate, applyRate]);
+
+  const total = Math.max(duration, 0.1);
+  const prog = Math.min(Math.max(position / total, 0), 1);
+  const remaining = Math.max(0, total - position);
+  const inactiveBar = isMe ? "rgba(0,0,0,0.14)" : "rgba(0,0,0,0.18)";
+  const activeBar = isMe ? "rgba(0,0,0,0.45)" : "#5a6a72";
+  const scrubLeft = waveW > 0 ? prog * waveW - 4 : 0;
 
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minWidth: 180 }}>
-      <TouchableOpacity onPress={toggle}>
-        <Ionicons name={preparing ? "hourglass-outline" : (playing ? "pause-circle" : "play-circle")} size={36} color={colors.primary} />
-      </TouchableOpacity>
-      <View style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: "rgba(0,0,0,0.15)" }}>
-        <View style={{ width: `${prog * 100}%`, height: 4, borderRadius: 2, backgroundColor: colors.primary }} />
+    <View style={{ minWidth: 240, maxWidth: W * 0.78, paddingVertical: 4 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        {isMe ? (
+          <View style={{ width: 36, alignItems: "center", justifyContent: "center" }}>
+            <View style={{ position: "relative" }}>
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={{ width: 34, height: 34, borderRadius: 17 }} contentFit="cover" />
+              ) : (
+                <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#00A884", alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="person" size={18} color="#fff" />
+                </View>
+              )}
+              <View style={{
+                position: "absolute",
+                right: -2,
+                bottom: -2,
+                width: 16,
+                height: 16,
+                borderRadius: 8,
+                backgroundColor: "#00A884",
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 1.5,
+                borderColor: isMe ? colors.chatBubbleSent : colors.chatBubbleReceived,
+              }}
+              >
+                <Ionicons name="mic" size={9} color="#fff" />
+              </View>
+            </View>
+          </View>
+        ) : null}
+        <TouchableOpacity
+          onPress={() => { void toggle(); }}
+          style={{
+            width: 42,
+            height: 42,
+            borderRadius: 21,
+            backgroundColor: isMe ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.92)",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {preparing ? (
+            <Ionicons name="hourglass-outline" size={20} color="#333" />
+          ) : (
+            <Ionicons name={playing ? "pause" : "play"} size={22} color="#333" style={{ marginLeft: playing ? 0 : 2 }} />
+          )}
+        </TouchableOpacity>
+        <Pressable
+          style={{ flex: 1, height: 36, justifyContent: "center" }}
+          onLayout={(e) => setWaveW(e.nativeEvent.layout.width)}
+          onPress={(e) => { void seekFromX(e.nativeEvent.locationX); }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "flex-end", height: 32, gap: 2 }}>
+            {bars.map((h, i) => {
+              const filled = i / bars.length <= prog;
+              return (
+                <View
+                  key={i}
+                  style={{
+                    width: 2.5,
+                    height: 6 + h * 22,
+                    borderRadius: 1,
+                    backgroundColor: filled ? activeBar : inactiveBar,
+                  }}
+                />
+              );
+            })}
+          </View>
+          {waveW > 0 ? (
+            <View
+              style={{
+                position: "absolute",
+                left: Math.max(0, Math.min(waveW - 8, scrubLeft)),
+                top: 10,
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor: "#2095F2",
+              }}
+            />
+          ) : null}
+        </Pressable>
+        <TouchableOpacity
+          onPress={() => { void cycleRate(); }}
+          style={{
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            borderRadius: 10,
+            borderWidth: 1,
+            borderColor: isMe ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.15)",
+          }}
+        >
+          <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: isMe ? "rgba(0,0,0,0.65)" : colors.foreground }}>
+            {rate === 1 ? "1x" : rate === 1.5 ? "1.5x" : "2x"}
+          </Text>
+        </TouchableOpacity>
       </View>
-      <Text style={{ fontSize: 11, color: colors.mutedForeground }}>{secs}s</Text>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6, paddingLeft: isMe ? 52 : 4, paddingRight: 4 }}>
+        <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: isMe ? "rgba(0,0,0,0.55)" : colors.mutedForeground }}>
+          {playing ? formatVoiceClock(remaining) : formatVoiceClock(total)}
+        </Text>
+      </View>
     </View>
   );
 }
 
-function VideoPlayer({ uri }: { uri: string }) {
-  const [playableUri, setPlayableUri] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const prepare = async () => {
-      if (!uri) return;
-      if (!uri.startsWith("data:video")) {
-        if (!cancelled) setPlayableUri(uri);
-        return;
-      }
-      try {
-        const cacheDir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? "";
-        if (!cacheDir) throw new Error("No writable cache directory");
-        const ext = uri.includes("video/quicktime") ? "mov" : "mp4";
-        const target = `${cacheDir}video_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
-        const base64 = uri.replace(/^data:[^;]+;base64,/, "");
-        await FileSystem.writeAsStringAsync(target, base64, { encoding: "base64" as any });
-        if (!cancelled) setPlayableUri(target);
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    };
-    void prepare();
-    return () => { cancelled = true; };
-  }, [uri]);
+/** In-bubble preview: tap opens full-screen viewer (WhatsApp-style). */
+function ChatVideoThumbnailBubble({ uri, onOpen }: { uri: string; onOpen: () => void }) {
+  const { playableUri, failed, loading } = usePlayableVideoUri(uri);
+  const [durationSec, setDurationSec] = useState(0);
 
   if (failed) {
     return (
@@ -183,7 +400,7 @@ function VideoPlayer({ uri }: { uri: string }) {
     );
   }
 
-  if (!playableUri) {
+  if (loading || !playableUri) {
     return (
       <View style={styles.videoLoadingWrap}>
         <Ionicons name="hourglass-outline" size={20} color="#fff" />
@@ -192,15 +409,103 @@ function VideoPlayer({ uri }: { uri: string }) {
     );
   }
 
+  const dm = Math.floor(durationSec / 60);
+  const ds = Math.floor(durationSec % 60);
+  const durationLabel = `${dm}:${ds.toString().padStart(2, "0")}`;
+
   return (
-    <Video
-      source={{ uri: playableUri }}
-      style={styles.msgVideo}
-      useNativeControls
-      resizeMode={ResizeMode.COVER}
-      shouldPlay={false}
-      isLooping={false}
-    />
+    <TouchableOpacity activeOpacity={0.88} onPress={onOpen} style={styles.videoThumbWrap}>
+      <Video
+        source={{ uri: playableUri }}
+        style={styles.msgVideo}
+        useNativeControls={false}
+        resizeMode={ResizeMode.COVER}
+        shouldPlay={false}
+        isLooping={false}
+        isMuted
+        onLoad={(status) => {
+          if (status.isLoaded && typeof status.durationMillis === "number") {
+            setDurationSec(status.durationMillis / 1000);
+          }
+        }}
+      />
+      <View style={styles.videoThumbOverlay} pointerEvents="none">
+        <Ionicons name="play-circle" size={56} color="rgba(255,255,255,0.92)" />
+      </View>
+      <View style={styles.videoThumbFooter} pointerEvents="none">
+        <Ionicons name="videocam" size={13} color="#fff" />
+        <Text style={styles.videoThumbDuration}>{durationLabel}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function LocationMessageBubble({
+  item,
+  colors,
+  isMe,
+  chatId,
+  userAvatar,
+  onStopLive,
+}: {
+  item: Message;
+  colors: ReturnType<typeof useColors>;
+  isMe: boolean;
+  chatId: string | null;
+  userAvatar?: string;
+  onStopLive: (msg: Message) => void;
+}) {
+  const parsed = parseLocationPayload(item.text);
+  const legacy = !parsed ? parseLegacyLocation(item.text) : null;
+  const lat = parsed?.lat ?? legacy?.lat ?? 0;
+  const lng = parsed?.lng ?? legacy?.lng ?? 0;
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
+  const mapPreview = hasCoords ? staticMapImageUrl(lat, lng, Math.round(W * 0.62 * 2), 360, 15) : "";
+  const isLiveActive = parsed?.mode === "live" && !parsed?.stopped;
+  const untilMs = parsed?.until;
+  const title = parsed?.mode === "live" ? "Live location" : "Location";
+  const subtitle =
+    parsed?.stopped
+      ? "Sharing ended"
+      : parsed?.label || (legacy ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : item.text.replace(/^📍[^\n]*\n?/, "").slice(0, 80));
+
+  return (
+    <View style={styles.locationBubbleWrap}>
+      <Pressable onPress={() => item.mediaUrl && Linking.openURL(item.mediaUrl).catch(() => {})}>
+        <Image source={{ uri: mapPreview }} style={styles.locationMapImg} contentFit="cover" />
+      </Pressable>
+      {isLiveActive ? (
+        <View style={[styles.locationLiveBar, { borderTopColor: "rgba(0,0,0,0.08)" }]}>
+          <Ionicons name="radio" size={16} color="#111" style={{ marginRight: 4 }} />
+          <Ionicons name="location" size={18} color="#111" />
+          <Ionicons name="radio" size={16} color="#111" style={{ marginLeft: 4 }} />
+          <View style={{ flex: 1, marginLeft: 8 }}>
+            <Text style={[styles.locationLiveSmall, { color: colors.mutedForeground }]}>Live until</Text>
+            <Text style={[styles.locationLiveTime, { color: colors.foreground }]}>
+              {untilMs ? formatLiveUntil(untilMs) : "—"}
+            </Text>
+          </View>
+          {userAvatar ? (
+            <Image source={{ uri: userAvatar }} style={styles.locationAvatarOnMap} contentFit="cover" />
+          ) : null}
+        </View>
+      ) : (
+        <View style={[styles.locationStaticFooter, { paddingHorizontal: 10, paddingVertical: 8 }]}>
+          <Text style={[styles.locationStaticTitle, { color: colors.foreground }]}>{title}</Text>
+          <Text style={[styles.locationCoords, { color: colors.mutedForeground }]} numberOfLines={2}>
+            {subtitle}
+          </Text>
+        </View>
+      )}
+      {isLiveActive && isMe && chatId ? (
+        <TouchableOpacity
+          style={[styles.stopShareRow, { borderTopColor: "rgba(0,0,0,0.08)" }]}
+          onPress={() => onStopLive(item)}
+        >
+          <Text style={styles.stopShareText}>Stop sharing</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
   );
 }
 
@@ -213,7 +518,7 @@ export default function ChatScreen() {
     chats, user, sendMessage, sendImageMessage, sendAudioMessage,
     setTyping, clearTyping, markAsRead, deleteMessage, deleteForEveryone,
     editMessage, reactToMessage, starMessage, muteChat, createDirectChat,
-    loadMessages, forwardMessage,
+    loadMessages, forwardMessage, updateLocationOnServer, stopLiveLocationSession,
   } = useApp();
 
   const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
@@ -228,6 +533,9 @@ export default function ChatScreen() {
   // Reaction picker
   const [reactionTarget, setReactionTarget] = useState<Message | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Message | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const prevSelectedCountRef = useRef(0);
 
   // Translation
   const [translatedMsgs, setTranslatedMsgs] = useState<Record<string, string>>({});
@@ -235,15 +543,24 @@ export default function ChatScreen() {
   // Forward modal
   const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
 
+  // Share contact — full-screen picker (Alert.alert only fits ~3 buttons on Android)
+  const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [contactPickerLoading, setContactPickerLoading] = useState(false);
+  const [contactPickerRows, setContactPickerRows] = useState<ContactShareRow[]>([]);
+  const [contactPickerQuery, setContactPickerQuery] = useState("");
+
   // Edit mode
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [editText, setEditText] = useState("");
 
-  // Voice recording
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingStart, setRecordingStart] = useState(0);
-  const recordPressIn = useRef(false);
+  // Voice recording — WhatsApp-style panel (tap mic → record → pause / delete / send)
+  const voiceRecRef = useRef<Audio.Recording | null>(null);
+  const [voiceRecording, setVoiceRecording] = useState<Audio.Recording | null>(null);
+  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
+  const [voiceRecPaused, setVoiceRecPaused] = useState(false);
+  const [voiceRecMs, setVoiceRecMs] = useState(0);
+  const [voiceRecMeter, setVoiceRecMeter] = useState(0.25);
+  const [enterIsSend, setEnterIsSend] = useState(false);
 
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -267,6 +584,7 @@ export default function ChatScreen() {
   // Poll messages every 4s + typing every 3s
   useFocusEffect(
     useCallback(() => {
+      void loadEnterIsSend().then(setEnterIsSend);
       if (!chatId) return;
       const msgTimer = setInterval(() => loadMessages(chatId), 4000);
       const typingTimer = setInterval(async () => {
@@ -281,14 +599,95 @@ export default function ChatScreen() {
     }, [chatId, user?.dbId])
   );
 
+  const webEnterSend = Platform.OS === "web" && enterIsSend;
+
   const chat = chats.find((c) => c.id === chatId);
   const allMessages = chat?.messages ?? [];
+  const selectionActive = selectedIds.length > 0;
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds([]);
+    setBulkDeleteOpen(false);
+  }, []);
+
   const messages = searching && searchQuery.trim()
     ? allMessages.filter((m) => m.text.toLowerCase().includes(searchQuery.toLowerCase()))
     : allMessages;
 
+  const peerNameForVideo = name ?? chat?.name ?? "Chat";
+
+  const [groupSendPermission, setGroupSendPermission] = useState<{ canSend: boolean; policy: string } | null>(null);
+
+  useEffect(() => {
+    setGroupSendPermission(null);
+  }, [chatId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!chatId || !chat?.isGroup || !user?.dbId) {
+        setGroupSendPermission(null);
+        return;
+      }
+      let cancelled = false;
+      fetch(`${BASE_URL}/api/chats/${chatId}/messaging-permission?userId=${user.dbId}`)
+        .then((r) => r.json())
+        .then((d: { success?: boolean; canSendMessages?: boolean; policy?: string }) => {
+          if (cancelled) return;
+          if (d.success && typeof d.canSendMessages === "boolean" && typeof d.policy === "string") {
+            setGroupSendPermission({ canSend: d.canSendMessages, policy: d.policy });
+          } else {
+            setGroupSendPermission({ canSend: false, policy: "everyone" });
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setGroupSendPermission({ canSend: false, policy: "everyone" });
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [chatId, chat?.isGroup, user?.dbId]),
+  );
+
+  const composerEnabled =
+    !initializing && (editTarget != null || !chat?.isGroup || groupSendPermission?.canSend === true);
+
+  const openChatVideoFullScreen = useCallback(
+    async (mediaUri: string, senderIsMe: boolean, ts: number) => {
+      try {
+        let playUri = mediaUri;
+        if (mediaUri.startsWith("data:video")) {
+          const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
+          if (!cacheDir) throw new Error("No cache");
+          const ext = mediaUri.includes("video/quicktime") ? "mov" : "mp4";
+          playUri = `${cacheDir}viewer_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+          const base64 = mediaUri.replace(/^data:[^;]+;base64,/, "");
+          await FileSystem.writeAsStringAsync(playUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+        }
+        router.push({
+          pathname: "/chat/video-viewer",
+          params: {
+            playUri: encodeURIComponent(playUri),
+            senderLabel: senderIsMe ? "You" : peerNameForVideo,
+            timestamp: String(ts),
+          },
+        } as unknown as Parameters<typeof router.push>[0]);
+      } catch {
+        Alert.alert("Error", "Could not open the video.");
+      }
+    },
+    [router, peerNameForVideo],
+  );
+
   const [text, setText] = useState("");
   const [replyTo, setReplyTo] = useState<ReplyData>(null);
+  useEffect(() => {
+    if (selectedIds.length > 0 && prevSelectedCountRef.current === 0) {
+      setReplyTo(null);
+      setEditTarget(null);
+      setEditText("");
+    }
+    prevSelectedCountRef.current = selectedIds.length;
+  }, [selectedIds.length]);
   const inputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -356,6 +755,15 @@ export default function ChatScreen() {
 
   const handleSend = useCallback(() => {
     if (!chatId) return;
+    if (!composerEnabled) {
+      Alert.alert(
+        "Cannot send message",
+        chat?.isGroup && groupSendPermission?.policy === "admins_only"
+          ? "Only admins can send messages in this group."
+          : "You do not have permission to send messages here.",
+      );
+      return;
+    }
     if (editTarget) {
       if (!editText.trim()) return;
       editMessage(chatId, editTarget.id, editText.trim());
@@ -371,10 +779,46 @@ export default function ChatScreen() {
     setText("");
     setReplyTo(null);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-  }, [text, chatId, sendMessage, replyTo, clearTyping, editTarget, editText, editMessage]);
+  }, [text, chatId, sendMessage, replyTo, clearTyping, editTarget, editText, editMessage, composerEnabled, chat?.isGroup, groupSendPermission?.policy]);
 
-  // Voice recording
-  const startRecording = async () => {
+  const voiceRecOptions = useMemo(
+    () => ({ ...Audio.RecordingOptionsPresets.HIGH_QUALITY, isMeteringEnabled: true as const }),
+    [],
+  );
+
+  const closeVoicePanel = useCallback(async () => {
+    const rec = voiceRecRef.current;
+    if (rec) {
+      try {
+        await rec.stopAndUnloadAsync();
+      } catch { /* ignore */ }
+      voiceRecRef.current = null;
+      setVoiceRecording(null);
+    }
+    setVoicePanelOpen(false);
+    setVoiceRecPaused(false);
+    setVoiceRecMs(0);
+    setVoiceRecMeter(0.25);
+    try {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+    } catch { /* ignore */ }
+  }, []);
+
+  const openVoiceRecorder = useCallback(async () => {
+    if (Platform.OS === "web") {
+      Alert.alert("Not supported on web", "Use the mobile app to send voice messages.");
+      return;
+    }
+    if (!composerEnabled || editTarget) {
+      Alert.alert(
+        "Cannot send message",
+        chat?.isGroup && groupSendPermission?.policy === "admins_only"
+          ? "Only admins can send messages in this group."
+          : "You do not have permission to send voice messages here.",
+      );
+      return;
+    }
+    if (voicePanelOpen) return;
     try {
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) {
@@ -382,32 +826,89 @@ export default function ChatScreen() {
         return;
       }
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording: rec } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      setRecording(rec);
-      setIsRecording(true);
-      setRecordingStart(Date.now());
-      recordPressIn.current = true;
-    } catch {}
-  };
+      const { recording: rec } = await Audio.Recording.createAsync(
+        voiceRecOptions,
+        (st) => {
+          if (st.isRecording && typeof st.durationMillis === "number") {
+            setVoiceRecMs(st.durationMillis);
+          }
+          if (st.isRecording && typeof st.metering === "number") {
+            const n = Math.max(0, Math.min(1, (st.metering + 55) / 60));
+            setVoiceRecMeter(n);
+          }
+        },
+        100,
+      );
+      voiceRecRef.current = rec;
+      setVoiceRecording(rec);
+      setVoiceRecPaused(false);
+      setVoiceRecMs(0);
+      setVoicePanelOpen(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch {
+      Alert.alert("Error", "Could not start recording. Please try again.");
+    }
+  }, [composerEnabled, editTarget, voicePanelOpen, voiceRecOptions, chat?.isGroup, groupSendPermission?.policy]);
 
-  const stopRecording = async () => {
-    recordPressIn.current = false;
-    if (!recording || !chatId) { setIsRecording(false); return; }
+  const cancelVoiceRecording = useCallback(() => {
+    void closeVoicePanel();
+  }, [closeVoicePanel]);
+
+  const toggleVoicePause = useCallback(async () => {
+    if (!voiceRecording) return;
     try {
-      await recording.stopAndUnloadAsync();
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
-      const uri = recording.getURI();
-      const duration = (Date.now() - recordingStart) / 1000;
-      setRecording(null);
-      setIsRecording(false);
-      if (uri && duration > 0.5) {
-        sendAudioMessage(chatId, uri, duration);
+      if (voiceRecPaused) {
+        await voiceRecording.startAsync();
+        setVoiceRecPaused(false);
+      } else {
+        await voiceRecording.pauseAsync();
+        setVoiceRecPaused(true);
       }
-    } catch { setIsRecording(false); }
-  };
+    } catch { /* ignore */ }
+  }, [voiceRecording, voiceRecPaused]);
 
-  const sendMediaMessage = async (type: "camera" | "gallery" | "document" | "location" | "contact" | "viewonce") => {
+  const sendVoiceRecording = useCallback(async () => {
+    const rec = voiceRecRef.current;
+    if (!rec || !chatId) return;
+    try {
+      const st = await rec.getStatusAsync();
+      const durMs =
+        typeof st.durationMillis === "number" && st.durationMillis > 200
+          ? st.durationMillis
+          : voiceRecMs;
+      await rec.stopAndUnloadAsync();
+      const uri = rec.getURI();
+      voiceRecRef.current = null;
+      setVoiceRecording(null);
+      setVoicePanelOpen(false);
+      setVoiceRecPaused(false);
+      setVoiceRecMs(0);
+      const durSec = Math.max(0.4, durMs / 1000);
+      if (uri) {
+        sendAudioMessage(chatId, uri, durSec);
+      }
+    } catch {
+      Alert.alert("Error", "Could not send this voice message.");
+    } finally {
+      try {
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+      } catch { /* ignore */ }
+    }
+  }, [chatId, voiceRecMs, sendAudioMessage]);
+
+  const sendMediaMessage = async (
+    type: "camera" | "gallery" | "document" | "location" | "contact" | "viewonce" | "audiofile",
+  ) => {
     if (!chatId) return;
+    if (!composerEnabled || editTarget) {
+      Alert.alert(
+        "Cannot send message",
+        chat?.isGroup && groupSendPermission?.policy === "admins_only"
+          ? "Only admins can send messages in this group."
+          : "You do not have permission to send messages here.",
+      );
+      return;
+    }
     const isViewOnce = type === "viewonce";
 
     if (type === "camera") {
@@ -425,6 +926,19 @@ export default function ChatScreen() {
         sendImageMessage(chatId, result.assets[0].uri, undefined, isViewOnce, kind);
       }
 
+    } else if (type === "audiofile") {
+      if (Platform.OS === "web") {
+        Alert.alert("Not supported on web", "Use the mobile app to send audio files.");
+        return;
+      }
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["audio/*", "audio/mpeg", "audio/mp4", "audio/mp3", "audio/wav", "audio/x-wav", "audio/aac"],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      sendAudioMessage(chatId, result.assets[0].uri, 1);
+
     } else if (type === "document") {
       if (Platform.OS === "web") { Alert.alert("Not supported on web", "Use the mobile app to share documents."); return; }
       const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
@@ -433,7 +947,7 @@ export default function ChatScreen() {
       const fileSizeMB = (asset.size ?? 0) / 1024 / 1024;
       if (fileSizeMB > 16) { Alert.alert("File too large", "Maximum allowed file size is 16MB."); return; }
       try {
-        const cacheDir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? "";
+        const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
         if (!cacheDir) throw new Error("No writable cache directory");
         const mimeType = asset.mimeType ?? "application/octet-stream";
         const ext = asset.name?.split(".").pop() ?? "bin";
@@ -442,7 +956,7 @@ export default function ChatScreen() {
         // Use layered fallbacks so PDF/Excel/Docs can still be sent reliably.
         let base64 = "";
         const attemptReadBase64 = async (uri: string) => {
-          return FileSystem.readAsStringAsync(uri, { encoding: "base64" as any });
+          return FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
         };
         try {
           base64 = await attemptReadBase64(asset.uri);
@@ -473,67 +987,105 @@ export default function ChatScreen() {
       } catch { Alert.alert("Error", "Could not read the selected file. Please try again."); }
 
     } else if (type === "location") {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") { Alert.alert("Permission required", "Location access is required to share location."); return; }
-      try {
-        if (Platform.OS === "android") {
-          await Location.enableNetworkProviderAsync().catch(() => {});
-        }
-        let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        if (!loc) {
-          const lastKnown = await Location.getLastKnownPositionAsync();
-          if (lastKnown) loc = lastKnown;
-        }
-        if (!loc) {
-          Alert.alert("Error", "Could not detect your location. Please enable GPS and try again.");
-          return;
-        }
-        const { latitude, longitude } = loc.coords;
-        const mapsUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
-        sendSpecialMessage(chatId, `📍 Location\n${latitude.toFixed(5)}, ${longitude.toFixed(5)}`, "location", mapsUrl);
-      } catch { Alert.alert("Error", "Could not get your location. Please make sure GPS is enabled."); }
+      if (!chatId) return;
+      router.push({ pathname: "/chat/send-location" as never, params: { id: chatId } });
 
     } else if (type === "contact") {
       if (Platform.OS === "web") { Alert.alert("Not supported on web", "Use the mobile app to share contacts."); return; }
       const { status } = await Contacts.requestPermissionsAsync();
       if (status !== "granted") { Alert.alert("Permission required", "Contacts access is required to share contacts."); return; }
-      const { data } = await Contacts.getContactsAsync({ fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails] });
-      if (!data || data.length === 0) { Alert.alert("No contacts", "No contacts were found on this device."); return; }
-      // Show simple picker
-      const topContacts = data.filter(c => c.name).slice(0, 20);
-      const options = topContacts.map(c => ({
-        text: `${c.name}${c.phoneNumbers?.[0]?.number ? " — " + c.phoneNumbers[0].number : ""}`,
-        onPress: () => {
-          const phone = c.phoneNumbers?.[0]?.number ?? "";
-          const email = c.emails?.[0]?.email ?? "";
-          sendSpecialMessage(chatId, `👤 ${c.name}\n${phone}`, "contact");
-        },
-      }));
-      options.push({ text: "Cancel", onPress: () => {} });
-      Alert.alert("Choose a contact", "", options as any);
+      setContactPickerQuery("");
+      setContactPickerRows([]);
+      setContactPickerOpen(true);
+      setContactPickerLoading(true);
+      try {
+        const data = await loadAllDeviceContactsForShare();
+        if (!data || data.length === 0) {
+          setContactPickerOpen(false);
+          Alert.alert("No contacts", "No contacts were found on this device.");
+          return;
+        }
+        setContactPickerRows(buildContactShareRows(data));
+      } catch {
+        setContactPickerOpen(false);
+        Alert.alert("Error", "Could not load contacts. Please try again.");
+      } finally {
+        setContactPickerLoading(false);
+      }
     }
   };
 
   const sendSpecialMessage = useCallback((cid: string, text: string, msgType: string, mediaUrl?: string) => {
     const u = user;
     if (u?.dbId) {
-      fetch(`${BASE_URL}/api/chats/${cid}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ senderId: u.dbId, content: text, type: msgType, mediaUrl: mediaUrl ?? null }),
-      })
-        .then(() => loadMessages(cid))
-        .catch(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`${BASE_URL}/api/chats/${cid}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ senderId: u.dbId, content: text, type: msgType, mediaUrl: mediaUrl ?? null }),
+          });
+          const data = (await res.json()) as { success?: boolean; message?: string };
+          if (res.status === 403) {
+            Alert.alert("Cannot send message", typeof data.message === "string" ? data.message : "You are not allowed to send messages here.");
+            return;
+          }
+          if (data.success !== false) await loadMessages(cid);
+        } catch {
           Alert.alert("Error", "Failed to send the attachment. Please try again.");
-        });
+        }
+      })();
     }
   }, [user, loadMessages]);
+
+  const contactPickerSections = useMemo(() => {
+    const qRaw = contactPickerQuery.trim().toLowerCase();
+    const qDigits = qRaw.replace(/\D/g, "");
+    const filtered = contactPickerRows.filter((r) => {
+      if (!qRaw) return true;
+      if (r.name.toLowerCase().includes(qRaw)) return true;
+      if (qDigits.length > 0 && r.phone.replace(/\D/g, "").includes(qDigits)) return true;
+      return false;
+    });
+    const groups = new Map<string, ContactShareRow[]>();
+    for (const r of filtered) {
+      const ch = (r.name.charAt(0) || "#").toUpperCase();
+      const section = /[A-Z]/.test(ch) ? ch : "#";
+      const arr = groups.get(section);
+      if (arr) arr.push(r);
+      else groups.set(section, [r]);
+    }
+    const keys = [...groups.keys()].sort((a, b) => (a === "#" ? 1 : b === "#" ? -1 : a.localeCompare(b)));
+    return keys.map((title) => ({ title, data: groups.get(title)! }));
+  }, [contactPickerRows, contactPickerQuery]);
+
+  const confirmShareContact = useCallback(
+    (row: ContactShareRow) => {
+      if (!chatId) return;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const body = row.phone ? `👤 ${row.name}\n${row.phone}` : `👤 ${row.name}`;
+      sendSpecialMessage(chatId, body, "contact");
+      setContactPickerOpen(false);
+      setContactPickerQuery("");
+      setContactPickerRows([]);
+    },
+    [chatId, sendSpecialMessage],
+  );
+
+  const handleStopLiveLocation = useCallback(async (msg: Message) => {
+    if (!chatId) return;
+    const p = parseLocationPayload(msg.text);
+    if (!p || p.mode !== "live") return;
+    const next = encodeLocationPayload({ ...p, stopped: true });
+    await updateLocationOnServer(chatId, msg.id, { content: next, mediaUrl: mapsUrl(p.lat, p.lng) });
+    stopLiveLocationSession();
+  }, [chatId, updateLocationOnServer, stopLiveLocationSession]);
 
   const openDocumentAttachment = useCallback(async (item: Message) => {
     const uri = item.mediaUrl;
     if (!uri) return;
     try {
-      const cacheDir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? "";
+      const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
       if (!cacheDir) throw new Error("No writable cache directory");
       if (uri.startsWith("data:")) {
         const mimeMatch = uri.match(/^data:([^;]+);base64,/);
@@ -550,7 +1102,7 @@ export default function ChatScreen() {
         const ext = extMap[mime] ?? "bin";
         const safeName = (item.text || `document_${Date.now()}`).replace(/[^\w.-]/g, "_");
         const fileUri = `${cacheDir}${safeName}.${ext}`;
-        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: "base64" as any });
+        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
         await Linking.openURL(fileUri);
       } else {
         await Linking.openURL(uri);
@@ -562,9 +1114,12 @@ export default function ChatScreen() {
 
   const [attachVisible, setAttachVisible] = useState(false);
   const [mediaPreview, setMediaPreview] = useState<{ uri: string; caption?: string; type: "image" | "video" } | null>(null);
-  const showAttachMenu = () => setAttachVisible(true);
+  const showAttachMenu = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setAttachVisible(true);
+  };
 
-  const longPressMsg = (msg: Message) => {
+  const showMessageContextMenu = (msg: Message) => {
     if (msg.type === "deleted") return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const isMe = msg.senderId === "me";
@@ -629,7 +1184,7 @@ export default function ChatScreen() {
     const isSpecial = isDocument || isLocation || isContact;
     const urls = (!isDeleted && !isImage && !isAudio && !isSpecial) ? extractUrls(item.text) : [];
     const isManyForwarded = (item.forwardCount ?? 0) >= 5;
-    const metaTextColor = isImage
+    const metaTextColor = isImage || isLocation
       ? "rgba(255,255,255,0.92)"
       : isMe
         ? "rgba(0,0,0,0.55)"
@@ -644,10 +1199,37 @@ export default function ChatScreen() {
     });
     const hasReactions = Object.keys(reactionGroups).length > 0;
 
-    return (
-      <TouchableOpacity
-        onLongPress={() => longPressMsg(item)}
-        activeOpacity={0.88}
+    const replySwipeBg = colors.isDark ? "rgba(30,42,48,0.96)" : "rgba(232,234,237,0.98)";
+    const renderLeftReply = () => (
+      <View style={[styles.swipeReplyRail, { width: REPLY_SWIPE_ACTION_W, backgroundColor: replySwipeBg }]}>
+        <Ionicons name="return-down-back" size={22} color={colors.primary} />
+      </View>
+    );
+    const renderRightReply = () => (
+      <View style={[styles.swipeReplyRail, { width: REPLY_SWIPE_ACTION_W, backgroundColor: replySwipeBg }]}>
+        <Ionicons name="return-down-forward" size={22} color={colors.primary} />
+      </View>
+    );
+
+    const isSelected = selectedIds.includes(item.id);
+    const msgRow = (
+      <Pressable
+        onPress={() => {
+          if (selectedIds.length > 0 && !isDeleted) {
+            setSelectedIds((prev) =>
+              prev.includes(item.id) ? prev.filter((x) => x !== item.id) : [...prev, item.id],
+            );
+          }
+        }}
+        onLongPress={() => {
+          if (isDeleted) return;
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          setSelectedIds((prev) => {
+            if (prev.length === 0) return [item.id];
+            return prev.includes(item.id) ? prev.filter((x) => x !== item.id) : [...prev, item.id];
+          });
+        }}
+        delayLongPress={450}
         style={[styles.msgWrap, isMe ? styles.msgRight : styles.msgLeft]}
       >
         {/* Forwarded label */}
@@ -665,7 +1247,8 @@ export default function ChatScreen() {
             styles.bubble,
             { backgroundColor: isMe ? colors.chatBubbleSent : colors.chatBubbleReceived },
             isDeleted && { opacity: 0.55 },
-            isImage && styles.bubbleImg,
+            (isImage || isVideo || isLocation) && styles.bubbleImg,
+            isSelected && { borderWidth: 2, borderColor: colors.primary },
           ]}
         >
           {/* Reply strip */}
@@ -716,9 +1299,27 @@ export default function ChatScreen() {
               )}
             </>
           ) : isVideo ? (
-            <VideoPlayer uri={item.mediaUrl!} />
+            <>
+              <ChatVideoThumbnailBubble
+                uri={item.mediaUrl!}
+                onOpen={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  void openChatVideoFullScreen(item.mediaUrl!, isMe, item.timestamp);
+                }}
+              />
+              {item.text && item.text !== "🎥 Video" && item.text !== "🔁 View once" && (
+                <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4 }]}>{item.text}</Text>
+              )}
+            </>
           ) : isAudio ? (
-            <AudioPlayer uri={item.mediaUrl!} colors={colors} />
+            <VoiceNotePlayer
+              uri={item.mediaUrl!}
+              colors={colors}
+              isMe={isMe}
+              messageId={item.id}
+              durationHintSec={parseVoiceDurationSec(item.text)}
+              avatarUri={isMe ? (user?.avatar ?? undefined) : undefined}
+            />
           ) : isDocument ? (
             <TouchableOpacity
               style={styles.docCard}
@@ -735,25 +1336,14 @@ export default function ChatScreen() {
               <Ionicons name="download-outline" size={20} color={colors.mutedForeground} />
             </TouchableOpacity>
           ) : isLocation ? (
-            <TouchableOpacity
-              style={styles.locationCard}
-              onPress={() => item.mediaUrl && Linking.openURL(item.mediaUrl).catch(() => {})}
-              activeOpacity={0.8}
-            >
-              <View style={styles.locationMapPreview}>
-                <Ionicons name="map" size={40} color="#00A884" />
-                <View style={styles.locationPin}>
-                  <Ionicons name="location" size={22} color="#E74C3C" />
-                </View>
-              </View>
-              <View style={{ paddingHorizontal: 10, paddingVertical: 8 }}>
-                <Text style={[styles.locationLabel, { color: colors.foreground }]}>📍 Live Location</Text>
-                <Text style={[styles.locationCoords, { color: colors.mutedForeground }]}>
-                  {item.text.replace("📍 Location\n", "")}
-                </Text>
-                <Text style={[styles.locationOpen, { color: colors.primary }]}>Open in Google Maps ↗</Text>
-              </View>
-            </TouchableOpacity>
+            <LocationMessageBubble
+              item={item}
+              colors={colors}
+              isMe={isMe}
+              chatId={chatId}
+              userAvatar={isMe ? user?.avatar : (chat?.avatar ?? otherAvatar)}
+              onStopLive={(m) => { void handleStopLiveLocation(m); }}
+            />
           ) : isContact ? (
             <View style={styles.contactCard}>
               <View style={styles.contactCardAvatar}>
@@ -800,7 +1390,7 @@ export default function ChatScreen() {
           )}
 
           {/* Meta: time + edited + ticks */}
-          <View style={[styles.msgMeta, (isImage || isVideo) && styles.msgMetaOnMedia]}>
+          <View style={[styles.msgMeta, (isImage || isVideo || isLocation) && styles.msgMetaOnMedia]}>
             {item.isEdited && <Text style={[styles.editedLabel, { color: colors.mutedForeground }]}>edited </Text>}
             <Text style={[styles.msgTime, { color: metaTextColor }]}>
               {formatFullTime(item.timestamp)}
@@ -826,7 +1416,37 @@ export default function ChatScreen() {
             ))}
           </View>
         )}
-      </TouchableOpacity>
+      </Pressable>
+    );
+
+    if (Platform.OS === "web" || isDeleted || selectedIds.length > 0) return msgRow;
+
+    return (
+      <Swipeable
+        containerStyle={[styles.msgSwipeRow, styles.msgSwipeContainer]}
+        renderLeftActions={!isMe ? renderLeftReply : undefined}
+        renderRightActions={isMe ? renderRightReply : undefined}
+        overshootLeft={false}
+        overshootRight={false}
+        friction={2}
+        leftThreshold={40}
+        rightThreshold={40}
+        onSwipeableOpen={(direction, swipeable) => {
+          const ok = (!isMe && direction === "left") || (isMe && direction === "right");
+          if (!ok) return;
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setReplyTo({
+            id: item.id,
+            text: item.text,
+            senderId: item.senderId,
+            senderName: item.senderName,
+          });
+          inputRef.current?.focus();
+          swipeable.close();
+        }}
+      >
+        {msgRow}
+      </Swipeable>
     );
   };
 
@@ -875,10 +1495,19 @@ export default function ChatScreen() {
         { text: "Cancel", style: "cancel" as const },
       ]) },
     { label: "Schedule Message ⏰", icon: "time-outline", onPress: () => chatId && router.push({ pathname: "/scheduled/[chatId]", params: { chatId, name: displayName } }) },
-    { label: "Khata / Udhar 💰", icon: "cash-outline", onPress: () => chatId && router.push({ pathname: "/khata/[chatId]", params: { chatId, name: displayName } }) },
+    { label: "Ledger 💰", icon: "cash-outline", onPress: () => chatId && router.push({ pathname: "/khata/[chatId]", params: { chatId, name: displayName } }) },
     { label: "Mute notifications", icon: "notifications-off-outline", onPress: () => chatId && muteChat(chatId) },
-    { label: "Search", icon: "search-outline", onPress: () => { setSearching(true); setSearchQuery(""); } },
+    { label: "Search", icon: "search-outline", onPress: () => { clearSelection(); setSearching(true); setSearchQuery(""); } },
   ];
+
+  const bulkSelectedMessages = selectedIds
+    .map((id) => allMessages.find((m) => m.id === id))
+    .filter((m): m is Message => !!m);
+  const bulkAllMineDeletable =
+    bulkSelectedMessages.length > 0 &&
+    bulkSelectedMessages.every((m) => m.senderId === "me" && m.type !== "deleted");
+  const bulkHasMine = bulkSelectedMessages.some((m) => m.senderId === "me" && m.type !== "deleted");
+  const bulkOthersCount = bulkSelectedMessages.filter((m) => m.senderId !== "me" && m.type !== "deleted").length;
 
   const inputVal = editTarget ? editText : text;
 
@@ -899,57 +1528,107 @@ export default function ChatScreen() {
         />
       )}
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
-
-        <View style={styles.headerAvatarWrap}>
-          {chat?.avatar || otherAvatar ? (
-            <Image source={{ uri: chat?.avatar || otherAvatar }} style={styles.headerAvatarImg} contentFit="cover" />
-          ) : (
-            <View style={[styles.headerAvatarWrap, { backgroundColor: avatarBg }]}>
-              <Text style={styles.headerAvatarText}>{initials}</Text>
-            </View>
-          )}
-        </View>
-
-        <TouchableOpacity
-          style={styles.headerInfo}
-          activeOpacity={0.7}
-          onPress={() => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } })}
-        >
-          <Text style={styles.headerName} numberOfLines={1}>{displayName}</Text>
-          <Text style={[styles.headerStatus, typingNames.length > 0 && { color: "#a7f3d0" }]}>
-            {typingNames.length > 0
-              ? "typing..."
-              : chat?.isGroup
-                ? `${chat.members?.length ?? ""} members`
-                : initializing ? "connecting..." : chat?.isOnline ? "online" : "tap for info"}
-          </Text>
-        </TouchableOpacity>
-
-        <View style={styles.headerActions}>
-          {!searching && (
-            <>
-              <TouchableOpacity style={styles.headerBtn} onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })}>
-                <Ionicons name="videocam-outline" size={22} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.headerBtn} onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })}>
-                <Ionicons name="call-outline" size={22} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.headerBtn} onPress={() => setMenuOpen(true)}>
-                <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
-              </TouchableOpacity>
-            </>
-          )}
-          {searching && (
-            <TouchableOpacity style={styles.headerBtn} onPress={() => { setSearching(false); setSearchQuery(""); }}>
-              <Ionicons name="close" size={22} color="#fff" />
+      {selectionActive ? (
+        <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
+          <TouchableOpacity style={styles.backBtn} onPress={clearSelection}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 8 }}>
+            <Text style={styles.headerName} numberOfLines={1}>
+              {selectedIds.length} selected
+            </Text>
+          </View>
+          <View style={styles.headerActions}>
+            {selectedIds.length === 1 ? (
+              <>
+                <TouchableOpacity
+                  style={styles.headerBtn}
+                  onPress={() => {
+                    const m = allMessages.find((x) => x.id === selectedIds[0]);
+                    if (!m || m.type === "deleted") return;
+                    setReplyTo({
+                      id: m.id,
+                      text: m.text,
+                      senderId: m.senderId,
+                      senderName: m.senderName,
+                    });
+                    clearSelection();
+                    inputRef.current?.focus();
+                  }}
+                >
+                  <Ionicons name="return-down-back" size={22} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.headerBtn}
+                  onPress={() => {
+                    const m = allMessages.find((x) => x.id === selectedIds[0]);
+                    if (!m) return;
+                    clearSelection();
+                    showMessageContextMenu(m);
+                  }}
+                >
+                  <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+                </TouchableOpacity>
+              </>
+            ) : null}
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setBulkDeleteOpen(true)}>
+              <Ionicons name="trash-outline" size={22} color="#fff" />
             </TouchableOpacity>
-          )}
+          </View>
         </View>
-      </View>
+      ) : (
+        <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+
+          <View style={styles.headerAvatarWrap}>
+            {chat?.avatar || otherAvatar ? (
+              <Image source={{ uri: chat?.avatar || otherAvatar }} style={styles.headerAvatarImg} contentFit="cover" />
+            ) : (
+              <View style={[styles.headerAvatarWrap, { backgroundColor: avatarBg }]}>
+                <Text style={styles.headerAvatarText}>{initials}</Text>
+              </View>
+            )}
+          </View>
+
+          <TouchableOpacity
+            style={styles.headerInfo}
+            activeOpacity={0.7}
+            onPress={() => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } })}
+          >
+            <Text style={styles.headerName} numberOfLines={1}>{displayName}</Text>
+            <Text style={[styles.headerStatus, typingNames.length > 0 && { color: "#a7f3d0" }]}>
+              {typingNames.length > 0
+                ? "typing..."
+                : chat?.isGroup
+                  ? `${chat.members?.length ?? ""} members`
+                  : initializing ? "connecting..." : chat?.isOnline ? "online" : "tap for info"}
+            </Text>
+          </TouchableOpacity>
+
+          <View style={styles.headerActions}>
+            {!searching && (
+              <>
+                <TouchableOpacity style={styles.headerBtn} onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })}>
+                  <Ionicons name="videocam-outline" size={22} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.headerBtn} onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })}>
+                  <Ionicons name="call-outline" size={22} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.headerBtn} onPress={() => setMenuOpen(true)}>
+                  <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+                </TouchableOpacity>
+              </>
+            )}
+            {searching && (
+              <TouchableOpacity style={styles.headerBtn} onPress={() => { setSearching(false); setSearchQuery(""); }}>
+                <Ionicons name="close" size={22} color="#fff" />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      )}
       <DropdownMenu
         visible={menuOpen}
         onClose={() => setMenuOpen(false)}
@@ -980,6 +1659,7 @@ export default function ChatScreen() {
         <FlatList
           ref={listRef}
           data={messages}
+          extraData={selectedIds.join(",")}
           keyExtractor={(item) => item.id}
           renderItem={renderMsg}
           contentContainerStyle={{ paddingVertical: 10, paddingHorizontal: 8 }}
@@ -1001,7 +1681,7 @@ export default function ChatScreen() {
         />
 
         {/* @Mention autocomplete */}
-        {mentionResults.length > 0 && mentionQuery !== null && (
+        {!selectionActive && mentionResults.length > 0 && mentionQuery !== null && (
           <View style={[styles.mentionList, { backgroundColor: colors.card }]}>
             {mentionResults.slice(0, 6).map((m) => {
               const mInitials = m.name.slice(0, 2).toUpperCase();
@@ -1023,7 +1703,7 @@ export default function ChatScreen() {
         )}
 
         {/* Edit mode banner */}
-        {editTarget && (
+        {!selectionActive && editTarget && (
           <View style={[styles.editBanner, { backgroundColor: colors.card, borderLeftColor: colors.primary }]}>
             <Ionicons name="pencil-outline" size={16} color={colors.primary} />
             <View style={{ flex: 1, marginLeft: 8 }}>
@@ -1037,7 +1717,7 @@ export default function ChatScreen() {
         )}
 
         {/* Reply preview */}
-        {replyTo && !editTarget && (
+        {!selectionActive && replyTo && !editTarget && (
           <View style={[styles.replyPreview, { backgroundColor: colors.card, borderLeftColor: colors.primary }]}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.replyPreviewLabel, { color: colors.primary }]}>
@@ -1051,82 +1731,260 @@ export default function ChatScreen() {
           </View>
         )}
 
-        {/* Recording indicator */}
-        {isRecording && (
-          <View style={[styles.recordingBar, { backgroundColor: colors.card }]}>
-            <View style={styles.recordingDot} />
-            <Text style={[styles.recordingText, { color: colors.foreground }]}>Recording voice message... Release to send</Text>
+        {/* Voice record panel — timer, live bars, delete / pause / send */}
+        {!selectionActive && voicePanelOpen && (
+          <View style={[styles.voiceRecordPanel, { backgroundColor: colors.isDark ? "#1a2329" : "#DCF8C6", borderTopColor: colors.border }]}>
+            <Text style={[styles.voiceRecTimer, { color: colors.foreground }]}>
+              {formatVoiceClock(voiceRecMs / 1000)}
+            </Text>
+            <View style={styles.voiceRecWaveRow}>
+              {Array.from({ length: 36 }).map((_, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.voiceRecBar,
+                    {
+                      height: 5 + voiceRecMeter * 16 + ((i * 17) % 9),
+                      backgroundColor: colors.isDark ? "rgba(0,168,132,0.55)" : "rgba(0,168,132,0.45)",
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+            <TouchableOpacity onPress={cancelVoiceRecording} style={styles.voiceRecIconBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityLabel="Delete recording">
+              <Ionicons name="trash-outline" size={24} color="#c62828" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => { void toggleVoicePause(); }} style={styles.voiceRecIconBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityLabel={voiceRecPaused ? "Resume recording" : "Pause recording"}>
+              <Ionicons name={voiceRecPaused ? "play" : "pause"} size={26} color={voiceRecPaused ? colors.primary : "#c62828"} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => { void sendVoiceRecording(); }}
+              style={[styles.voiceRecSendFab, { backgroundColor: colors.primary }]}
+              accessibilityLabel="Send voice message"
+            >
+              <Ionicons name="send" size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {chat?.isGroup && groupSendPermission && !groupSendPermission.canSend && !editTarget && (
+          <View style={[styles.groupLockBanner, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+            <Ionicons name="lock-closed-outline" size={18} color={colors.mutedForeground} />
+            <Text style={[styles.groupLockBannerText, { color: colors.foreground }]}>
+              {groupSendPermission.policy === "admins_only"
+                ? "Only admins can send messages here. Admins can change this in Group info."
+                : "You cannot send messages until a group admin allows you. Admins can change this in Group info."}
+            </Text>
           </View>
         )}
 
         {/* Input bar */}
-        <View style={[styles.inputBar, { backgroundColor: colors.background, paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 8) }]}>
-          <TouchableOpacity style={styles.inputIcon}>
-            <Ionicons name="happy-outline" size={24} color={colors.mutedForeground} />
-          </TouchableOpacity>
-          <TextInput
-            ref={inputRef}
-            style={[styles.inputField, { backgroundColor: colors.card, color: colors.foreground }]}
-            placeholder={editTarget ? "Edit message..." : "Message"}
-            placeholderTextColor={colors.mutedForeground}
-            value={inputVal}
-            onChangeText={handleTextChange}
-            multiline
-            maxLength={2000}
-            editable={!initializing}
-          />
-          {!inputVal.trim() && (
-            <TouchableOpacity style={styles.inputIcon} onPress={showAttachMenu}>
-              <Ionicons name="attach-outline" size={24} color={colors.mutedForeground} />
+        {!selectionActive && (
+          <View style={[styles.inputBar, { backgroundColor: colors.background, paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 8) }]}>
+            <TouchableOpacity style={styles.inputIcon}>
+              <Ionicons name="happy-outline" size={24} color={colors.mutedForeground} />
             </TouchableOpacity>
-          )}
-          {!inputVal.trim() && (
-            <TouchableOpacity style={styles.inputIcon} onPress={() => sendMediaMessage("camera")}>
-              <Ionicons name="camera-outline" size={24} color={colors.mutedForeground} />
-            </TouchableOpacity>
-          )}
-          {inputVal.trim() ? (
-            <TouchableOpacity
-              style={[styles.sendBtn, { backgroundColor: colors.primary }, initializing && { opacity: 0.5 }]}
-              disabled={initializing}
-              onPress={handleSend}
-            >
-              <Ionicons name="send" size={18} color="#fff" />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={[styles.sendBtn, { backgroundColor: isRecording ? "#ef4444" : colors.primary }]}
-              onPressIn={startRecording}
-              onPressOut={stopRecording}
-              delayLongPress={200}
-            >
-              <Ionicons name={isRecording ? "stop" : "mic-outline"} size={18} color="#fff" />
-            </TouchableOpacity>
-          )}
-        </View>
+            <TextInput
+              ref={inputRef}
+              style={[styles.inputField, { backgroundColor: colors.card, color: colors.foreground }]}
+              placeholder={editTarget ? "Edit message..." : "Message"}
+              placeholderTextColor={colors.mutedForeground}
+              value={inputVal}
+              onChangeText={handleTextChange}
+              multiline={!webEnterSend}
+              blurOnSubmit={webEnterSend}
+              onSubmitEditing={webEnterSend ? () => handleSend() : undefined}
+              maxLength={2000}
+              editable={composerEnabled}
+            />
+            {!inputVal.trim() && (
+              <TouchableOpacity
+                style={styles.inputIcon}
+                onPress={showAttachMenu}
+                disabled={!composerEnabled || !!editTarget}
+              >
+                <Ionicons name="attach-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
+              </TouchableOpacity>
+            )}
+            {!inputVal.trim() && (
+              <TouchableOpacity
+                style={styles.inputIcon}
+                onPress={() => sendMediaMessage("camera")}
+                disabled={!composerEnabled || !!editTarget}
+              >
+                <Ionicons name="camera-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
+              </TouchableOpacity>
+            )}
+            {inputVal.trim() ? (
+              <TouchableOpacity
+                style={[styles.sendBtn, { backgroundColor: colors.primary }, (!composerEnabled || initializing) && { opacity: 0.5 }]}
+                disabled={!composerEnabled || initializing}
+                onPress={handleSend}
+              >
+                <Ionicons name="send" size={18} color="#fff" />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.sendBtn, { backgroundColor: colors.primary }, (!composerEnabled || !!editTarget || voicePanelOpen) && { opacity: 0.45 }]}
+                onPress={() => { void openVoiceRecorder(); }}
+                disabled={!composerEnabled || !!editTarget || voicePanelOpen}
+              >
+                <Ionicons name="mic-outline" size={18} color="#fff" />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </KeyboardAvoidingView>
 
-      {/* Attach menu modal */}
-      <Modal visible={attachVisible} transparent animationType="slide" onRequestClose={() => setAttachVisible(false)}>
-        <Pressable style={styles.modalOverlay} onPress={() => setAttachVisible(false)}>
-          <View style={[styles.attachSheet, { backgroundColor: colors.card }]}>
-            <Text style={[styles.attachTitle, { color: colors.foreground }]}>Share</Text>
-            <View style={styles.attachGrid}>
-              {[
-                { icon: "image-outline", label: "Gallery", onPress: () => { setAttachVisible(false); sendMediaMessage("gallery"); } },
-                { icon: "eye-outline", label: "View once", onPress: () => { setAttachVisible(false); sendMediaMessage("viewonce"); } },
-                { icon: "document-outline", label: "Document", onPress: () => { setAttachVisible(false); sendMediaMessage("document"); } },
-                { icon: "location-outline", label: "Location", onPress: () => { setAttachVisible(false); sendMediaMessage("location"); } },
-                { icon: "person-outline", label: "Contact", onPress: () => { setAttachVisible(false); sendMediaMessage("contact"); } },
-              ].map((item) => (
-                <TouchableOpacity key={item.label} style={[styles.attachItem, { backgroundColor: colors.background }]} onPress={item.onPress}>
-                  <Ionicons name={item.icon as any} size={28} color={colors.primary} />
-                  <Text style={[styles.attachLabel, { color: colors.foreground }]}>{item.label}</Text>
+      {/* Attach menu — WhatsApp-style bottom sheet (coloured circles + grid) */}
+      <Modal visible={attachVisible} transparent animationType="fade" onRequestClose={() => setAttachVisible(false)}>
+        <View style={styles.attachModalRoot}>
+          <Pressable style={styles.attachBackdrop} onPress={() => setAttachVisible(false)} />
+          <View
+            style={[
+              styles.attachSheet,
+              { backgroundColor: colors.isDark ? "#1A2329" : "#F0F2F5", paddingBottom: insets.bottom + 12 },
+            ]}
+          >
+            <View style={[styles.attachHandle, { backgroundColor: colors.isDark ? "#3d4a54" : "#c4ccd4" }]} />
+            <View style={styles.attachWaGrid}>
+              {ATTACH_SHEET_ITEMS.map((item) => (
+                <TouchableOpacity
+                  key={item.key}
+                  style={styles.attachWaCell}
+                  activeOpacity={0.75}
+                  onPress={() => {
+                    setAttachVisible(false);
+                    void sendMediaMessage(item.type);
+                  }}
+                >
+                  <View style={[styles.attachWaCircle, { backgroundColor: item.color }]}>
+                    <Ionicons name={item.icon} size={26} color="#fff" />
+                  </View>
+                  <Text style={[styles.attachWaLabel, { color: colors.isDark ? "#E9EDEF" : "#3B4A54" }]} numberOfLines={1}>
+                    {item.label}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
+            <TouchableOpacity
+              style={styles.attachViewOnceRow}
+              onPress={() => {
+                setAttachVisible(false);
+                void sendMediaMessage("viewonce");
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.attachWaCircleSm, { backgroundColor: "#6B7C8A" }]}>
+                <Ionicons name="eye" size={18} color="#fff" />
+              </View>
+              <Text style={[styles.attachViewOnceText, { color: colors.primary }]}>View once photo or video</Text>
+            </TouchableOpacity>
           </View>
-        </Pressable>
+        </View>
+      </Modal>
+
+      {/* Share contact — full list + search (Alert only shows ~3 options on Android) */}
+      <Modal
+        visible={contactPickerOpen}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => {
+          setContactPickerOpen(false);
+          setContactPickerQuery("");
+          setContactPickerRows([]);
+        }}
+      >
+        <View style={[styles.contactPickerRoot, { backgroundColor: colors.background, paddingTop: insets.top }]}>
+          <View style={[styles.contactPickerHeader, { borderBottomColor: colors.border }]}>
+            <TouchableOpacity
+              onPress={() => {
+                setContactPickerOpen(false);
+                setContactPickerQuery("");
+                setContactPickerRows([]);
+              }}
+              style={styles.contactPickerBack}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Ionicons name="arrow-back" size={24} color={colors.foreground} />
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.contactPickerTitle, { color: colors.foreground }]}>Share contact</Text>
+              <Text style={[styles.contactPickerSubtitle, { color: colors.mutedForeground }]}>
+                Select a contact to send
+              </Text>
+            </View>
+            <View style={{ width: 40 }} />
+          </View>
+          <View style={[styles.contactPickerSearch, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Ionicons name="search" size={18} color={colors.mutedForeground} />
+            <TextInput
+              style={[styles.contactPickerSearchInput, { color: colors.foreground }]}
+              placeholder="Search name or number"
+              placeholderTextColor={colors.mutedForeground}
+              value={contactPickerQuery}
+              onChangeText={setContactPickerQuery}
+              autoCorrect={false}
+              autoCapitalize="none"
+              clearButtonMode="while-editing"
+            />
+          </View>
+          {contactPickerLoading ? (
+            <View style={styles.contactPickerLoadingWrap}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={[styles.contactPickerLoadingText, { color: colors.mutedForeground }]}>Loading contacts…</Text>
+            </View>
+          ) : (
+            <SectionList
+              sections={contactPickerSections}
+              keyExtractor={(item) => item.id}
+              stickySectionHeadersEnabled
+              keyboardShouldPersistTaps="handled"
+              renderSectionHeader={({ section: { title } }) => (
+                <View style={[styles.contactPickerSectionHeader, { backgroundColor: colors.isDark ? "#1e2a30" : "#f0f2f5" }]}>
+                  <Text style={[styles.contactPickerSectionTitle, { color: colors.primary }]}>{title}</Text>
+                </View>
+              )}
+              renderItem={({ item }) => {
+                const parts = item.name.trim().split(/\s+/).filter(Boolean);
+                const initials =
+                  parts.length >= 2
+                    ? `${parts[0]![0]!}${parts[parts.length - 1]![0]!}`.toUpperCase()
+                    : (item.name.replace(/\D/g, "").slice(-2) || item.name.charAt(0) || "?").toUpperCase();
+                const hue = ((item.name.charCodeAt(0) || 32) * 37) % 360;
+                return (
+                  <TouchableOpacity
+                    style={[styles.contactPickerRow, { borderBottomColor: colors.border }]}
+                    onPress={() => confirmShareContact(item)}
+                    activeOpacity={0.65}
+                  >
+                    <View style={[styles.contactPickerAvatar, { backgroundColor: `hsl(${hue},42%,42%)` }]}>
+                      <Text style={styles.contactPickerAvatarTxt}>{initials.slice(0, 2)}</Text>
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[styles.contactPickerName, { color: colors.foreground }]} numberOfLines={1}>
+                        {item.name}
+                      </Text>
+                      {item.phone ? (
+                        <Text style={[styles.contactPickerPhone, { color: colors.mutedForeground }]} numberOfLines={1}>
+                          {item.phone}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              }}
+              ListEmptyComponent={
+                <View style={styles.contactPickerEmpty}>
+                  <Text style={[styles.contactPickerEmptyText, { color: colors.mutedForeground }]}>
+                    {contactPickerQuery.trim() ? "No contacts match your search." : "No contacts to show."}
+                  </Text>
+                </View>
+              }
+              contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+            />
+          )}
+        </View>
       </Modal>
 
       {/* Reaction picker modal */}
@@ -1176,6 +2034,63 @@ export default function ChatScreen() {
               <Text style={styles.deleteActionText}>Delete for me</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.deleteAction} onPress={() => setDeleteTarget(null)}>
+              <Text style={styles.deleteCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Bulk delete (multi-select) */}
+      <Modal visible={bulkDeleteOpen} transparent animationType="fade" onRequestClose={() => setBulkDeleteOpen(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setBulkDeleteOpen(false)}>
+          <View style={styles.deleteCard}>
+            <Text style={styles.deleteTitle}>Delete {selectedIds.length} messages?</Text>
+            {bulkOthersCount > 0 ? (
+              <Text style={[styles.bulkDeleteHint, { color: colors.mutedForeground }]}>
+                Only messages you sent can be removed. {bulkOthersCount} from others will stay in the chat.
+              </Text>
+            ) : (
+              <Text style={[styles.bulkDeleteHint, { color: colors.mutedForeground }]}>
+                Removes selected messages you sent from this chat.
+              </Text>
+            )}
+            {bulkHasMine ? (
+              <>
+                {bulkAllMineDeletable ? (
+                  <TouchableOpacity
+                    style={styles.deleteAction}
+                    onPress={() => {
+                      if (!chatId) return;
+                      for (const m of bulkSelectedMessages) {
+                        if (m.senderId === "me" && m.type !== "deleted") deleteForEveryone(chatId, m.id);
+                      }
+                      clearSelection();
+                    }}
+                  >
+                    <Text style={styles.deleteActionText}>Delete for everyone</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  style={styles.deleteAction}
+                  onPress={() => {
+                    if (!chatId) return;
+                    for (const m of bulkSelectedMessages) {
+                      if (m.senderId === "me" && m.type !== "deleted") deleteMessage(chatId, m.id);
+                    }
+                    clearSelection();
+                  }}
+                >
+                  <Text style={styles.deleteActionText}>
+                    {bulkAllMineDeletable ? "Delete for me" : "Delete my messages only"}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <Text style={[styles.bulkDeleteHint, { color: colors.mutedForeground }]}>
+                No messages you sent are selected.
+              </Text>
+            )}
+            <TouchableOpacity style={styles.deleteAction} onPress={() => setBulkDeleteOpen(false)}>
               <Text style={styles.deleteCancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
@@ -1250,6 +2165,9 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 15, fontFamily: "Inter_400Regular" },
   initWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 40, marginTop: 80 },
   initText: { fontSize: 14, fontFamily: "Inter_400Regular" },
+  msgSwipeRow: { width: "100%" },
+  msgSwipeContainer: { overflow: "hidden" },
+  swipeReplyRail: { justifyContent: "center", alignItems: "center" },
   msgWrap: { marginVertical: 2 },
   msgLeft: { alignItems: "flex-start" },
   msgRight: { alignItems: "flex-end" },
@@ -1266,6 +2184,22 @@ const styles = StyleSheet.create({
   msgText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
   msgImage: { width: W * 0.62, height: W * 0.62, borderRadius: 10 },
   msgVideo: { width: W * 0.62, height: W * 0.62, borderRadius: 10, backgroundColor: "#000" },
+  videoThumbWrap: { position: "relative", width: W * 0.62, height: W * 0.62, borderRadius: 10, overflow: "hidden" },
+  videoThumbOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.12)",
+  },
+  videoThumbFooter: {
+    position: "absolute",
+    left: 8,
+    bottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  videoThumbDuration: { color: "#fff", fontSize: 12, fontFamily: "Inter_600SemiBold", textShadowColor: "rgba(0,0,0,0.75)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 },
   videoLoadingWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 10, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
   videoLoadingText: { color: "#fff", fontSize: 12, fontFamily: "Inter_500Medium" },
   videoErrorWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 10, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
@@ -1278,12 +2212,24 @@ const styles = StyleSheet.create({
   docIcon: { width: 48, height: 48, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   docName: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
   docMeta: { fontSize: 11, fontFamily: "Inter_400Regular" },
-  locationCard: { overflow: "hidden", minWidth: 220 },
-  locationMapPreview: { height: 120, backgroundColor: "#1a2332", alignItems: "center", justifyContent: "center", position: "relative" },
-  locationPin: { position: "absolute" },
-  locationLabel: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
-  locationCoords: { fontSize: 11, fontFamily: "Inter_400Regular", marginBottom: 4 },
-  locationOpen: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  locationBubbleWrap: { overflow: "hidden", borderRadius: 10, minWidth: W * 0.62, maxWidth: W * 0.82 },
+  locationMapImg: { width: W * 0.62, height: 200, backgroundColor: "#dfe6e4" },
+  locationLiveBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(255,255,255,0.92)",
+  },
+  locationLiveSmall: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  locationLiveTime: { fontSize: 15, fontFamily: "Inter_700Bold", marginTop: 1 },
+  locationAvatarOnMap: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: "#fff" },
+  locationStaticFooter: { backgroundColor: "rgba(255,255,255,0.96)" },
+  locationStaticTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
+  locationCoords: { fontSize: 12, fontFamily: "Inter_400Regular", marginBottom: 2 },
+  stopShareRow: { paddingVertical: 12, alignItems: "center", borderTopWidth: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.96)" },
+  stopShareText: { color: "#c62828", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   contactCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, minWidth: 220, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },
   contactCardAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#00A88440", alignItems: "center", justifyContent: "center" },
   contactCardAvatarTxt: { color: "#00A884", fontSize: 18, fontWeight: "700" },
@@ -1317,24 +2263,82 @@ const styles = StyleSheet.create({
   replyPreview: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 8, borderLeftWidth: 3, marginHorizontal: 8, marginBottom: 4, borderRadius: 4 },
   replyPreviewLabel: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   replyPreviewText: { fontSize: 12, fontFamily: "Inter_400Regular" },
-  recordingBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, gap: 10, marginHorizontal: 8, borderRadius: 8, marginBottom: 4 },
-  recordingDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#ef4444" },
-  recordingText: { fontSize: 13, fontFamily: "Inter_400Regular" },
+  voiceRecordPanel: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    marginHorizontal: 6,
+    marginBottom: 4,
+    borderRadius: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+  },
+  voiceRecTimer: { fontSize: 15, fontFamily: "Inter_600SemiBold", minWidth: 44 },
+  voiceRecWaveRow: { flex: 1, flexDirection: "row", alignItems: "flex-end", height: 34, gap: 2, overflow: "hidden" },
+  voiceRecBar: { width: 2.5, borderRadius: 1, alignSelf: "flex-end" },
+  voiceRecIconBtn: { padding: 6 },
+  voiceRecSendFab: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" },
+  groupLockBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginHorizontal: 8,
+    borderRadius: 8,
+    marginBottom: 4,
+    gap: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  groupLockBannerText: { flex: 1, fontSize: 13, fontFamily: "Inter_500Medium", lineHeight: 18 },
   inputBar: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 8, paddingTop: 8, gap: 4 },
   inputIcon: { padding: 6 },
   inputField: { flex: 1, borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, fontFamily: "Inter_400Regular", maxHeight: 120 },
   sendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
-  attachSheet: { borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20 },
+  attachModalRoot: { flex: 1, justifyContent: "flex-end" },
+  attachBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.42)" },
+  attachSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 8,
+    paddingHorizontal: 10,
+    elevation: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -4 },
+  },
+  attachHandle: { width: 40, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: 14 },
+  attachWaGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", paddingHorizontal: 6 },
+  attachWaCell: { width: (W - 52) / 3, alignItems: "center", paddingVertical: 10 },
+  attachWaCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  attachWaLabel: { fontSize: 13, fontFamily: "Inter_500Medium", textAlign: "center", maxWidth: (W - 52) / 3 },
+  attachViewOnceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  attachWaCircleSm: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  attachViewOnceText: { fontSize: 14, fontFamily: "Inter_600SemiBold", flex: 1 },
   attachTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", marginBottom: 16, textAlign: "center" },
-  attachGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12, justifyContent: "center" },
-  attachItem: { alignItems: "center", justifyContent: "center", width: 80, height: 80, borderRadius: 16, gap: 6 },
-  attachLabel: { fontSize: 12, fontFamily: "Inter_500Medium" },
   reactionPicker: { alignSelf: "center", flexDirection: "row", gap: 4, borderRadius: 28, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, marginBottom: 200, elevation: 12, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
   reactionPickerBtn: { paddingHorizontal: 3, paddingVertical: 2 },
   reactionPickerPlus: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", marginLeft: 2, backgroundColor: "#f1f5f9" },
   deleteCard: { alignSelf: "center", width: "84%", maxWidth: 320, borderRadius: 18, backgroundColor: "#fff", paddingVertical: 12, paddingHorizontal: 16, elevation: 8, shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   deleteTitle: { fontSize: 16, color: "#334155", fontFamily: "Inter_500Medium", marginBottom: 8 },
+  bulkDeleteHint: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18, marginBottom: 12 },
   deleteAction: { paddingVertical: 10 },
   deleteActionText: { fontSize: 17, color: "#0f9d7a", fontFamily: "Inter_500Medium", textAlign: "center" },
   deleteCancelText: { fontSize: 17, color: "#64748b", fontFamily: "Inter_500Medium", textAlign: "center" },
@@ -1348,4 +2352,50 @@ const styles = StyleSheet.create({
   mediaPreviewImage: { flex: 1, width: "100%" },
   mediaPreviewCaptionWrap: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 20, backgroundColor: "rgba(0,0,0,0.55)" },
   mediaPreviewCaption: { color: "#fff", fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "left" },
+  contactPickerRoot: { flex: 1 },
+  contactPickerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  contactPickerBack: { padding: 8, marginRight: 4 },
+  contactPickerTitle: { fontSize: 18, fontFamily: "Inter_600SemiBold" },
+  contactPickerSubtitle: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
+  contactPickerSearch: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 12,
+    marginVertical: 10,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  contactPickerSearchInput: { flex: 1, fontSize: 16, fontFamily: "Inter_400Regular", paddingVertical: 10 },
+  contactPickerLoadingWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingTop: 48 },
+  contactPickerLoadingText: { fontSize: 14, fontFamily: "Inter_400Regular" },
+  contactPickerSectionHeader: { paddingHorizontal: 16, paddingVertical: 6 },
+  contactPickerSectionTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  contactPickerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  contactPickerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  contactPickerAvatarTxt: { color: "#fff", fontSize: 15, fontFamily: "Inter_700Bold" },
+  contactPickerName: { fontSize: 16, fontFamily: "Inter_500Medium" },
+  contactPickerPhone: { fontSize: 14, fontFamily: "Inter_400Regular", marginTop: 2 },
+  contactPickerEmpty: { padding: 40, alignItems: "center" },
+  contactPickerEmptyText: { fontSize: 15, fontFamily: "Inter_400Regular", textAlign: "center" },
 });

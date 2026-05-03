@@ -7,6 +7,7 @@ import React from "react";
 import { Platform, StyleSheet, View, useColorScheme } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
 
 function Badge({ count }: { count: number }) {
   if (count === 0) return null;
@@ -14,29 +15,31 @@ function Badge({ count }: { count: number }) {
 }
 
 function NativeTabLayout() {
+  const { t } = useUiPreferences();
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="chats">
         <Icon sf={{ default: "bubble.left.and.bubble.right", selected: "bubble.left.and.bubble.right.fill" }} />
-        <Label>Chats</Label>
+        <Label>{t("tab.chats")}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="status">
         <Icon sf={{ default: "circle.dotted", selected: "circle.fill" }} />
-        <Label>Status</Label>
+        <Label>{t("tab.status")}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="calls">
         <Icon sf={{ default: "phone", selected: "phone.fill" }} />
-        <Label>Calls</Label>
+        <Label>{t("tab.calls")}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
         <Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />
-        <Label>Settings</Label>
+        <Label>{t("tab.settings")}</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
 }
 
 function ClassicTabLayout() {
+  const { t } = useUiPreferences();
   const colors = useColors();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
@@ -71,7 +74,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="chats"
         options={{
-          title: "Chats",
+          title: t("tab.chats"),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "chatbubbles" : "chatbubbles-outline"} size={24} color={color} />
           ),
@@ -82,7 +85,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="status"
         options={{
-          title: "Status",
+          title: t("tab.status"),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "radio-button-on" : "radio-button-off"} size={24} color={color} />
           ),
@@ -91,7 +94,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="calls"
         options={{
-          title: "Calls",
+          title: t("tab.calls"),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "call" : "call-outline"} size={24} color={color} />
           ),
@@ -100,7 +103,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="settings"
         options={{
-          title: "Settings",
+          title: t("tab.settings"),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "settings" : "settings-outline"} size={24} color={color} />
           ),

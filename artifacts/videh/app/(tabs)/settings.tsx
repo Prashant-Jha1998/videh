@@ -3,7 +3,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import React from "react";
+import React, { useCallback, useMemo } from "react";
 import {
   Alert,
   Platform,
@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
 
 interface SettingRow {
   icon: string;
@@ -30,6 +31,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, setUser, logout, updateAvatar } = useApp();
+  const { t } = useUiPreferences();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const initials = (user?.name ?? "?").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
@@ -69,12 +71,12 @@ export default function SettingsScreen() {
   const doLogout = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     Alert.alert(
-      "Log Out",
+      t("settings.logout"),
       "Are you sure you want to log out of Videh?",
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "Log Out",
+          text: t("settings.logout"),
           style: "destructive",
           onPress: async () => {
             await logout();
@@ -85,34 +87,47 @@ export default function SettingsScreen() {
     );
   };
 
-  const inviteFriend = async () => {
-    const message = "Use Videh - India's fastest messaging app!\n\nFeatures: Broadcasts, Khata tracker, SOS safety, real-time translation, scheduled messages, and much more.\n\nDownload: https://videh.app";
+  const inviteFriend = useCallback(async () => {
+    const message = "Use Videh - India's fastest messaging app!\n\nFeatures: Broadcasts, group ledger, SOS safety, real-time translation, scheduled messages, and much more.\n\nDownload: https://videh.app";
     try {
       const { Share } = await import("react-native");
       await Share.share({ message, title: "Videh — India's Best Messaging App" });
     } catch {}
-  };
+  }, []);
 
-  const rows: SettingRow[] = [
-    { icon: "key-outline", iconBg: "#2196F3", label: "Account", value: "Security notifications, change number", onPress: () => router.push("/settings/account") },
-    { icon: "lock-closed-outline", iconBg: "#9C27B0", label: "Privacy", value: "Blocked contacts, disappearing messages", onPress: () => router.push("/settings/privacy") },
-    { icon: "chatbubble-outline", iconBg: "#00BCD4", label: "Chats", value: "Theme, wallpapers, chat history", onPress: () => router.push("/settings/chats") },
-    { icon: "radio-outline", iconBg: "#E91E63", label: "Broadcasts", value: "Ek saath kai logon ko message bhejo", onPress: () => router.push("/broadcasts") },
-    { icon: "warning-outline", iconBg: "#E74C3C", label: "SOS Safety 🚨", value: "Emergency contacts, safety alert", onPress: () => router.push("/settings/sos") },
-    { icon: "notifications-outline", iconBg: "#FF5722", label: "Notifications", value: "Message, group & call tones", onPress: () => router.push("/settings/notifications") },
-    { icon: "server-outline", iconBg: "#607D8B", label: "Storage and data", value: "Network usage, auto-download", onPress: () => router.push("/settings/storage") },
-    { icon: "accessibility-outline", iconBg: "#795548", label: "Accessibility", value: "Font size, contrast, motion", onPress: () => router.push("/settings/accessibility") },
-    { icon: "language-outline", iconBg: "#009688", label: "App language", value: "Hindi, English, Telugu +7 more", onPress: () => router.push("/settings/language") },
-    { icon: "help-circle-outline", iconBg: "#3F51B5", label: "Help and feedback", value: "Help centre, contact us, privacy policy", onPress: () => router.push("/settings/help") },
-    { icon: "person-add-outline", iconBg: "#8BC34A", label: "Invite a friend", onPress: inviteFriend },
-    { icon: "phone-portrait-outline", iconBg: "#00A884", label: "App updates", value: "v1.0.0 — Latest version", onPress: () => Alert.alert("Videh v1.0.0", "Aap latest version use kar rahe hain.\n\nNaye features:\n• Broadcast Lists\n• Two-step verification\n• Accessibility settings\n• 9 languages support\n• Real document/location/contact sharing") },
-  ];
+  const rows: SettingRow[] = useMemo(
+    () => [
+      { icon: "key-outline", iconBg: "#2196F3", label: t("settings.row.account"), value: t("settings.row.accountSub"), onPress: () => router.push("/settings/account") },
+      { icon: "lock-closed-outline", iconBg: "#9C27B0", label: t("settings.row.privacy"), value: t("settings.row.privacySub"), onPress: () => router.push("/settings/privacy") },
+      { icon: "chatbubble-outline", iconBg: "#00BCD4", label: t("settings.row.chats"), value: t("settings.row.chatsSub"), onPress: () => router.push("/settings/chats") },
+      { icon: "radio-outline", iconBg: "#E91E63", label: t("settings.row.broadcasts"), value: t("settings.row.broadcastsSub"), onPress: () => router.push("/broadcasts") },
+      { icon: "warning-outline", iconBg: "#E74C3C", label: t("settings.row.sos"), value: t("settings.row.sosSub"), onPress: () => router.push("/settings/sos") },
+      { icon: "notifications-outline", iconBg: "#FF5722", label: t("settings.row.notifications"), value: t("settings.row.notificationsSub"), onPress: () => router.push("/settings/notifications") },
+      { icon: "server-outline", iconBg: "#607D8B", label: t("settings.row.storage"), value: t("settings.row.storageSub"), onPress: () => router.push("/settings/storage") },
+      { icon: "accessibility-outline", iconBg: "#795548", label: t("settings.row.accessibility"), value: t("settings.row.accessibilitySub"), onPress: () => router.push("/settings/accessibility") },
+      { icon: "language-outline", iconBg: "#009688", label: t("settings.row.language"), value: t("settings.row.languageSub"), onPress: () => router.push("/settings/language") },
+      { icon: "help-circle-outline", iconBg: "#3F51B5", label: t("settings.row.help"), value: t("settings.row.helpSub"), onPress: () => router.push("/settings/help") },
+      { icon: "person-add-outline", iconBg: "#8BC34A", label: t("settings.row.invite"), onPress: inviteFriend },
+      {
+        icon: "phone-portrait-outline",
+        iconBg: "#00A884",
+        label: t("settings.row.updates"),
+        value: t("settings.row.updatesSub"),
+        onPress: () =>
+          Alert.alert(
+            "Videh v1.0.0",
+            "You are on the latest version.\n\nHighlights:\n• Broadcast lists\n• Two-step verification\n• Accessibility settings\n• Multi-language support\n• Document, location, and contact sharing",
+          ),
+      },
+    ],
+    [t, router, inviteFriend],
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
-        <Text style={styles.headerTitle}>Videh</Text>
+        <Text style={styles.headerTitle}>{t("settings.header")}</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.headerBtn}>
             <Ionicons name="grid-outline" size={22} color="#fff" />
@@ -160,7 +175,7 @@ export default function SettingsScreen() {
         </View>
 
         {/* Settings label */}
-        <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>Settings</Text>
+        <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>{t("settings.sectionTitle")}</Text>
 
         {/* Settings rows */}
         <View style={[styles.rowsBlock, { backgroundColor: colors.card }]}>
@@ -197,7 +212,7 @@ export default function SettingsScreen() {
           activeOpacity={0.7}
         >
           <Ionicons name="log-out-outline" size={20} color={colors.destructive} />
-          <Text style={[styles.logoutText, { color: colors.destructive }]}>Log Out</Text>
+          <Text style={[styles.logoutText, { color: colors.destructive }]}>{t("settings.logout")}</Text>
         </TouchableOpacity>
 
         <Text style={[styles.version, { color: colors.mutedForeground }]}>Videh v1.0.0</Text>

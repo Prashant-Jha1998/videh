@@ -51,7 +51,7 @@ export default function KhataScreen() {
 
   const addEntry = async () => {
     if (!debtorName.trim() || !amount.trim() || isNaN(parseFloat(amount))) {
-      Alert.alert("Incomplete", "Naam aur amount dono chahiye.");
+      Alert.alert("Incomplete", "Name and amount are required.");
       return;
     }
     setSaving(true);
@@ -82,17 +82,17 @@ export default function KhataScreen() {
       "Mark as Paid?",
       `${entry.debtor_name}'s ₹${Number(entry.amount).toFixed(2)} entry will be marked as paid and the group will be notified.`,
       [
-        { text: "Haan, paid!", onPress: async () => {
+        { text: "Mark paid", onPress: async () => {
           await fetch(`${BASE_URL}/api/khata/${entry.id}/pay`, { method: "PUT" });
           load();
         }},
-        { text: "Nahi" },
+        { text: "Cancel" },
       ]
     );
   };
 
   const deleteEntry = (id: number) => {
-    Alert.alert("Delete?", "Yeh entry delete ho jayegi.", [
+    Alert.alert("Delete?", "This entry will be deleted.", [
       { text: "Delete", style: "destructive", onPress: async () => {
         await fetch(`${BASE_URL}/api/khata/${id}`, { method: "DELETE" });
         load();
@@ -117,7 +117,7 @@ export default function KhataScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>💰 Khata / Udhar</Text>
+          <Text style={styles.headerTitle}>💰 Ledger</Text>
           {name ? <Text style={styles.headerSub}>{name}</Text> : null}
         </View>
         <Pressable onPress={() => setShowAdd(true)} style={styles.addBtn}>
@@ -138,7 +138,7 @@ export default function KhataScreen() {
         {(["pending", "all", "paid"] as const).map((t) => (
           <Pressable key={t} onPress={() => setFilter(t)} style={[styles.tab, filter === t && styles.tabActive]}>
             <Text style={[styles.tabTxt, filter === t && styles.tabTxtActive]}>
-              {t === "pending" ? "Baaki" : t === "paid" ? "Paid" : "Sab"}
+              {t === "pending" ? "Pending" : t === "paid" ? "Paid" : "All"}
             </Text>
           </Pressable>
         ))}
@@ -195,12 +195,12 @@ export default function KhataScreen() {
         <Pressable style={styles.overlay} onPress={() => setShowAdd(false)} />
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
-            <Text style={styles.modalTitle}>💰 Khata Entry Add Karo</Text>
+            <Text style={styles.modalTitle}>💰 Add ledger entry</Text>
 
-            <Text style={styles.label}>Kisne lena hai (naam)</Text>
+            <Text style={styles.label}>Who owes (name)</Text>
             <TextInput
               style={styles.input}
-              placeholder="e.g. Rahul, Priya, Sharma ji..."
+              placeholder="e.g. Rahul, Priya, Alex..."
               placeholderTextColor="#666"
               value={debtorName}
               onChangeText={setDebtorName}
@@ -219,7 +219,7 @@ export default function KhataScreen() {
             <Text style={styles.label}>Note (optional)</Text>
             <TextInput
               style={styles.input}
-              placeholder="e.g. Dhaba ka bill, petrol, etc."
+              placeholder="e.g. dinner bill, petrol, groceries..."
               placeholderTextColor="#666"
               value={note}
               onChangeText={setNote}
@@ -227,7 +227,7 @@ export default function KhataScreen() {
 
             <Pressable style={[styles.saveBtn, saving && { opacity: 0.6 }]} onPress={addEntry} disabled={saving}>
               {saving ? <ActivityIndicator color="#fff" /> : (
-                <Text style={styles.saveBtnTxt}>Save Karo</Text>
+                <Text style={styles.saveBtnTxt}>Save</Text>
               )}
             </Pressable>
           </View>

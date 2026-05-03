@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -14,6 +13,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { interpolate } from "@/lib/i18n";
 import { getApiUrl } from "@/lib/api";
 const API_URL = `${getApiUrl()}/api`;
 
@@ -35,16 +36,17 @@ export default function LanguageScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useApp();
+  const { t, locale, setLocale } = useUiPreferences();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
   const [selectedLang, setSelectedLang] = useState("en");
 
   useEffect(() => {
-    AsyncStorage.getItem("appLanguage").then((v) => { if (v) setSelectedLang(v); });
-  }, []);
+    if (locale) setSelectedLang(locale);
+  }, [locale]);
 
   const selectLanguage = async (code: string) => {
     setSelectedLang(code);
-    await AsyncStorage.setItem("appLanguage", code);
+    await setLocale(code);
     if (user) {
       try {
         await fetch(`${API_URL}/users/${user.dbId}`, {
@@ -55,11 +57,11 @@ export default function LanguageScreen() {
       } catch {}
     }
     const lang = LANGUAGES.find((l) => l.code === code);
-    Alert.alert(
-      "Language Set!",
-      `App language "${lang?.name}" (${lang?.native}) has been set.\n\nIncoming messages will be auto-translated to this language.`,
-      [{ text: "OK", onPress: () => router.back() }]
-    );
+    const body = interpolate(t("language.savedBody"), {
+      name: lang?.name ?? code,
+      native: lang?.native ?? "",
+    });
+    Alert.alert(t("language.savedTitle"), body, [{ text: t("common.ok"), onPress: () => router.back() }]);
   };
 
   return (
@@ -68,16 +70,14 @@ export default function LanguageScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>App Language</Text>
+        <Text style={styles.headerTitle}>{t("language.title")}</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 60 }}>
         <View style={[styles.infoBox, { backgroundColor: colors.primary + "15", borderColor: colors.primary + "40" }]}>
           <Ionicons name="information-circle-outline" size={20} color={colors.primary} />
-          <Text style={[styles.infoText, { color: colors.foreground }]}>
-            This only sets your preferred app language. Chat messages arrive in their original language. Use the translate option in chat whenever needed.
-          </Text>
+          <Text style={[styles.infoText, { color: colors.foreground }]}>{t("language.info")}</Text>
         </View>
 
         <View style={[styles.section, { backgroundColor: colors.card }]}>

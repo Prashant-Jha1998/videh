@@ -85,8 +85,18 @@ router.post("/verify", async (req: Request, res: Response) => {
   // Upsert user in DB
   try {
     const fullPhone = phone.startsWith("+") ? phone : `+91${phone}`;
-    const existing = await query("SELECT id, name, about, avatar_url FROM users WHERE phone = $1", [fullPhone]);
-    let dbUser: { id: number; name?: string; about?: string; avatar_url?: string; is_new?: boolean };
+    const existing = await query(
+      "SELECT id, name, about, avatar_url, two_step_pin FROM users WHERE phone = $1",
+      [fullPhone],
+    );
+    let dbUser: {
+      id: number;
+      name?: string;
+      about?: string;
+      avatar_url?: string;
+      two_step_pin?: string | null;
+      is_new?: boolean;
+    };
     if (existing.rows.length > 0) {
       await query("UPDATE users SET is_online = TRUE, last_seen = NOW() WHERE id = $1", [existing.rows[0].id]);
       dbUser = existing.rows[0];
@@ -97,11 +107,13 @@ router.post("/verify", async (req: Request, res: Response) => {
       );
       dbUser = { ...result.rows[0], is_new: true };
     }
+    const twoStepRequired = existing.rows.length > 0 && !!existing.rows[0].two_step_pin;
     res.json({
       success: true,
       message: "OTP verified",
       dbId: dbUser.id,
       isNew: !existing.rows.length,
+      twoStepRequired,
       name: dbUser.name ?? null,
       about: dbUser.about ?? null,
       avatarUrl: dbUser.avatar_url ?? null,

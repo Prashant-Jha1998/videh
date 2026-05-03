@@ -128,7 +128,7 @@ export default function BroadcastsScreen() {
       });
       const d = await r.json();
       if (d.success) {
-        Alert.alert("Bhej diya!", `Message ${d.sentTo} logon ko bheja gaya.`);
+        Alert.alert("Sent", `Your message was delivered to ${d.sentTo} recipients.`);
         setSendModal(false);
         setSendText("");
         setDetailModal(false);
@@ -139,7 +139,7 @@ export default function BroadcastsScreen() {
   };
 
   const deleteList = (list: BroadcastList) => {
-    Alert.alert("List Delete Karo?", `"${list.name}" permanently delete hogi.`, [
+    Alert.alert("Delete list?", `"${list.name}" will be permanently deleted.`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete", style: "destructive", onPress: async () => {
@@ -174,10 +174,10 @@ export default function BroadcastsScreen() {
             <Ionicons name="radio-outline" size={60} color={colors.mutedForeground} />
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No broadcast lists yet</Text>
             <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
-              Broadcast se ek saath kai logon ko message bhejo. Sirf Videh users receive karte hain.
+              Send one message to many people at once. Only people on Videh receive it.
             </Text>
             <TouchableOpacity style={[styles.emptyBtn, { backgroundColor: colors.primary }]} onPress={() => setCreateModal(true)}>
-              <Text style={styles.emptyBtnText}>Nayi List Banao</Text>
+              <Text style={styles.emptyBtnText}>Create new list</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -206,10 +206,10 @@ export default function BroadcastsScreen() {
       <Modal visible={createModal} transparent animationType="slide" onRequestClose={() => setCreateModal(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setCreateModal(false)}>
           <TouchableOpacity activeOpacity={1} style={[styles.modalCard, { backgroundColor: colors.card }]}>
-            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Nayi Broadcast List</Text>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>New broadcast list</Text>
             <TextInput
               style={[styles.input, { backgroundColor: colors.background, color: colors.foreground, borderColor: colors.border }]}
-              placeholder="List ka naam..."
+              placeholder="List name..."
               placeholderTextColor={colors.mutedForeground}
               value={newName}
               onChangeText={setNewName}
@@ -220,7 +220,7 @@ export default function BroadcastsScreen() {
                 <Text style={[styles.modalBtnText, { color: colors.foreground }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.modalBtn, { backgroundColor: colors.primary }]} onPress={createList}>
-                <Text style={[styles.modalBtnText, { color: "#fff" }]}>Banao</Text>
+                <Text style={[styles.modalBtnText, { color: "#fff" }]}>Create</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
@@ -250,10 +250,10 @@ export default function BroadcastsScreen() {
                   disabled={recipients.length === 0}
                 >
                   <Ionicons name="send" size={18} color="#fff" />
-                  <Text style={styles.sendBtnText}>Message Broadcast Karo</Text>
+                  <Text style={styles.sendBtnText}>Send broadcast</Text>
                 </TouchableOpacity>
                 <Text style={[styles.sendHint, { color: colors.mutedForeground }]}>
-                  {recipients.length} recipients — sirf Videh users hi receive karenge
+                  {recipients.length} recipients — only Videh users receive broadcasts
                 </Text>
               </View>
             )}
@@ -287,11 +287,11 @@ export default function BroadcastsScreen() {
           <TouchableOpacity activeOpacity={1} style={[styles.modalCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.modalTitle, { color: colors.foreground }]}>Broadcast Message</Text>
             <Text style={[styles.modalSub, { color: colors.mutedForeground }]}>
-              Yeh message {recipients.length} logon ko alag-alag bheja jaayega
+              This message will be sent separately to {recipients.length} people
             </Text>
             <TextInput
               style={[styles.input, styles.inputMulti, { backgroundColor: colors.background, color: colors.foreground, borderColor: colors.border }]}
-              placeholder="Message likhо..."
+              placeholder="Type your message..."
               placeholderTextColor={colors.mutedForeground}
               value={sendText}
               onChangeText={setSendText}
@@ -305,7 +305,7 @@ export default function BroadcastsScreen() {
               </TouchableOpacity>
               <TouchableOpacity style={[styles.modalBtn, { backgroundColor: colors.primary }]} onPress={sendBroadcast}>
                 <Ionicons name="send" size={16} color="#fff" />
-                <Text style={[styles.modalBtnText, { color: "#fff" }]}>Bhejo</Text>
+                <Text style={[styles.modalBtnText, { color: "#fff" }]}>Send</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
@@ -319,7 +319,7 @@ export default function BroadcastsScreen() {
             <TouchableOpacity onPress={() => setAddContactModal(false)} style={styles.backBtn}>
               <Ionicons name="close" size={22} color="#fff" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Contact Add Karo</Text>
+            <Text style={styles.headerTitle}>Add contact</Text>
             <View style={{ width: 40 }} />
           </View>
           {availableContacts.length === 0 ? (

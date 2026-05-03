@@ -35,6 +35,7 @@ type GroupMember = {
   is_online: boolean;
   last_seen?: string;
   is_admin: boolean;
+  can_send_messages?: boolean;
 };
 
 type InfoRowProps = {
@@ -95,6 +96,7 @@ export default function ChatInfoScreen() {
   const [memberMenuVisible, setMemberMenuVisible] = useState(false);
   const [selectedMember, setSelectedMember] = useState<GroupMember | null>(null);
   const [mediaMessages, setMediaMessages] = useState<Array<{ id: number; type: string; media_url: string; content: string }>>([]);
+  const [groupMessagingPolicy, setGroupMessagingPolicy] = useState<"everyone" | "admins_only" | "allowlist">("everyone");
 
   const chatOtherUserId = useRef<number | null>(null);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
@@ -156,6 +158,12 @@ export default function ChatInfoScreen() {
         setDisappearing(data.chat.disappear_after_seconds ?? null);
         setGroupDesc(data.chat.group_description ?? "");
         setDescInput(data.chat.group_description ?? "");
+        const p = data.chat.group_messaging_policy;
+        if (p === "admins_only" || p === "allowlist" || p === "everyone") {
+          setGroupMessagingPolicy(p);
+        } else {
+          setGroupMessagingPolicy("everyone");
+        }
       }
     } catch { }
   }, [id]);
@@ -228,6 +236,81 @@ export default function ChatInfoScreen() {
     : disappearing === 604800 ? "7 days"
     : disappearing === 7776000 ? "90 days"
     : "Custom";
+
+  const groupMessagingLabel =
+    groupMessagingPolicy === "everyone"
+      ? "All members"
+      : groupMessagingPolicy === "admins_only"
+        ? "Admins only"
+        : "Selected members";
+
+  const persistGroupMessagingPolicy = async (policy: "everyone" | "admins_only" | "allowlist", resetAllowlist?: boolean) => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/chats/${id}/group-messaging-policy`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requesterId: user?.dbId,
+          policy,
+          resetAllowlist,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGroupMessagingPolicy(policy);
+        void fetchMembers();
+      } else {
+        Alert.alert("Could not update", data.message ?? "Only admins can change this setting.");
+      }
+    } catch {
+      Alert.alert("Error", "Could not update group messaging settings.");
+    }
+  };
+
+  const openGroupMessagingPicker = () => {
+    if (!isAdmin) return;
+    Alert.alert(
+      "Who can send messages",
+      "Choose who is allowed to send messages in this group.",
+      [
+        { text: "All members", onPress: () => { void persistGroupMessagingPolicy("everyone"); } },
+        { text: "Only admins", onPress: () => { void persistGroupMessagingPolicy("admins_only"); } },
+        {
+          text: "Selected members",
+          onPress: () => {
+            Alert.alert(
+              "Selected members mode",
+              "Members who are not admins will not be able to send messages until you allow them individually.",
+              [
+                { text: "Cancel", style: "cancel" },
+                { text: "Continue", onPress: () => { void persistGroupMessagingPolicy("allowlist", true); } },
+              ],
+            );
+          },
+        },
+        { text: "Cancel", style: "cancel" },
+      ],
+    );
+  };
+
+  const toggleMemberSendPermission = async (member: GroupMember, allow: boolean) => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/chats/${id}/members/${member.id}/send-permission`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requesterId: user?.dbId, canSendMessages: allow }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMemberMenuVisible(false);
+        void fetchMembers();
+      } else {
+        Alert.alert("Could not update", data.message ?? "Try again.");
+      }
+    } catch {
+      Alert.alert("Error", "Could not update send permission.");
+    }
+  };
 
   const saveGroupDesc = async () => {
     try {
@@ -510,6 +593,16 @@ export default function ChatInfoScreen() {
             colors={colors}
             onPress={setDisappearTimer}
           />
+          {isGroup && (
+            <InfoRow
+              icon="chatbubbles-outline"
+              iconBg="#00897B"
+              label="Who can send messages"
+              value={groupMessagingLabel}
+              colors={colors}
+              onPress={isAdmin ? openGroupMessagingPicker : undefined}
+            />
+          )}
           <InfoRow
             icon="lock-closed-outline"
             iconBg="#4CAF50"
@@ -710,6 +803,22 @@ export default function ChatInfoScreen() {
                     {selectedMember?.is_admin ? "Remove as admin" : "Make group admin"}
                   </Text>
                 </TouchableOpacity>
+                {groupMessagingPolicy === "allowlist" && selectedMember && !selectedMember.is_admin && (
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={() => {
+                      if (!selectedMember) return;
+                      const next = selectedMember.can_send_messages === false;
+                      setMemberMenuVisible(false);
+                      void toggleMemberSendPermission(selectedMember, next);
+                    }}
+                  >
+                    <Ionicons name={selectedMember?.can_send_messages === false ? "checkmark-circle-outline" : "close-circle-outline"} size={18} color={colors.foreground} />
+                    <Text style={[styles.menuItemText, { color: colors.foreground }]}>
+                      {selectedMember?.can_send_messages === false ? "Allow to send messages" : "Remove send permission"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity style={styles.menuItem} onPress={() => { setMemberMenuVisible(false); if (selectedMember) removeMember(selectedMember); }}>
                   <Ionicons name="person-remove-outline" size={18} color={colors.destructive} />
                   <Text style={[styles.menuItemText, { color: colors.destructive }]}>Remove from group</Text>

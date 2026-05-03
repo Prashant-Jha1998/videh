@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import cron from "node-cron";
+import { EXPO_ANDROID_CHANNEL_ID, isExpoPushToken, sendExpoPush } from "./lib/expoPush";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,21 +94,19 @@ cron.schedule("* * * * *", async () => {
          WHERE cm.chat_id = $1 AND cm.user_id != $2`,
         [sm.chat_id, sm.sender_id]
       );
-      const tokens = members.rows
-        .map((r: any) => r.push_token)
-        .filter((t: any) => typeof t === "string" && t.startsWith("ExponentPushToken"));
+      const tokens = members.rows.map((r: any) => r.push_token).filter(isExpoPushToken);
       if (tokens.length > 0) {
-        fetch("https://exp.host/--/api/v2/push/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(tokens.map((to: string) => ({
+        sendExpoPush(
+          tokens.map((to: string) => ({
             to,
             title: sm.sender_name ?? "Videh",
             body: sm.content.slice(0, 100),
             data: { chatId: sm.chat_id },
             sound: "default",
-          }))),
-        }).catch(() => {});
+            priority: "high",
+            channelId: EXPO_ANDROID_CHANNEL_ID,
+          })),
+        );
       }
       logger.info({ scheduledId: sm.id }, "Scheduled message sent");
     }

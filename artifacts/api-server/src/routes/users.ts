@@ -216,6 +216,56 @@ router.delete("/:id/two-step-pin", async (req: Request, res: Response) => {
   } catch { res.status(500).json({ success: false }); }
 });
 
+/** After OTP: confirm 6-digit account PIN before completing login. */
+router.post("/:id/verify-two-step", async (req: Request, res: Response) => {
+  const { pin } = req.body as { pin?: string };
+  if (!pin || pin.length !== 6 || !/^\d+$/.test(pin)) {
+    res.status(400).json({ success: false, message: "6-digit numeric PIN required" });
+    return;
+  }
+  try {
+    const r = await query(
+      "SELECT id, phone, name, about, avatar_url, two_step_pin FROM users WHERE id = $1",
+      [req.params.id],
+    );
+    if (r.rows.length === 0) {
+      res.status(404).json({ success: false, message: "User not found" });
+      return;
+    }
+    const row = r.rows[0] as {
+      id: number;
+      phone: string;
+      name?: string | null;
+      about?: string | null;
+      avatar_url?: string | null;
+      two_step_pin?: string | null;
+    };
+    if (!row.two_step_pin) {
+      res.json({
+        success: true,
+        noPin: true,
+        name: row.name ?? null,
+        about: row.about ?? null,
+        avatarUrl: row.avatar_url ?? null,
+      });
+      return;
+    }
+    if (row.two_step_pin !== pin) {
+      res.status(403).json({ success: false, message: "Incorrect PIN" });
+      return;
+    }
+    res.json({
+      success: true,
+      name: row.name ?? null,
+      about: row.about ?? null,
+      avatarUrl: row.avatar_url ?? null,
+    });
+  } catch (err) {
+    req.log.error({ err }, "verify-two-step error");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 // Storage stats
 router.get("/:id/storage-stats", async (req: Request, res: Response) => {
   try {

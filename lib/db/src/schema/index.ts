@@ -32,6 +32,8 @@ export const chats = pgTable("chats", {
   groupName: text("group_name"),
   groupAvatarUrl: text("group_avatar_url"),
   groupDescription: text("group_description"),
+  /** everyone | admins_only | allowlist — only applies when is_group is true */
+  groupMessagingPolicy: text("group_messaging_policy").notNull().default("everyone"),
   createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
   disappearAfterSeconds: integer("disappear_after_seconds"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -43,6 +45,8 @@ export const chatMembers = pgTable(
     chatId: integer("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
     userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     isAdmin: boolean("is_admin").notNull().default(false),
+    /** When group_messaging_policy is allowlist, member may send if true or if is_admin */
+    canSendMessages: boolean("can_send_messages").notNull().default(true),
     isMuted: boolean("is_muted").notNull().default(false),
     isPinned: boolean("is_pinned").notNull().default(false),
     lastReadAt: timestamp("last_read_at", { withTimezone: true }).notNull().defaultNow(),

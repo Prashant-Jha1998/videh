@@ -109,12 +109,12 @@ export default function StorageScreen() {
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <TouchableOpacity
             style={styles.dangerRow}
-            onPress={() => Alert.alert("Cache Clear", "App cache clear ho gaya.", [{ text: "OK" }])}
+            onPress={() => Alert.alert("Cache cleared", "App cache was cleared.", [{ text: "OK" }])}
             activeOpacity={0.7}
           >
             <Ionicons name="trash-outline" size={20} color={colors.destructive} />
             <View>
-              <Text style={[styles.dangerLabel, { color: colors.destructive }]}>Cache Clear Karo</Text>
+              <Text style={[styles.dangerLabel, { color: colors.destructive }]}>Clear cache</Text>
               <Text style={[styles.dangerHint, { color: colors.mutedForeground }]}>Temporary files delete honge</Text>
             </View>
           </TouchableOpacity>

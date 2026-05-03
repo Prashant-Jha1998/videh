@@ -1,7 +1,50 @@
 import { Router, type Request, type Response } from "express";
 import { query } from "../lib/db";
+import { isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
 
 const router = Router();
+
+type GroupSendEval = {
+  ok: boolean;
+  code?: "not_member" | "admins_only" | "allowlist";
+  policy: string;
+  isGroup: boolean;
+  isAdmin: boolean;
+};
+
+/** Resolves whether a user may post in this chat (direct chats always allowed). */
+async function evaluateGroupSendPermission(chatId: string | string[], userId: number): Promise<GroupSendEval | null> {
+  const id = Array.isArray(chatId) ? chatId[0] : chatId;
+  const r = await query(
+    `SELECT c.is_group,
+            COALESCE(NULLIF(TRIM(c.group_messaging_policy), ''), 'everyone') AS policy,
+            cm.is_admin,
+            COALESCE(cm.can_send_messages, TRUE) AS can_send_messages
+     FROM chats c
+     INNER JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $2
+     WHERE c.id = $1`,
+    [id, userId],
+  );
+  if (r.rows.length === 0) return null;
+  const row = r.rows[0];
+  const policy = String(row.policy || "everyone");
+  const isGroup = !!row.is_group;
+  const isAdmin = !!row.is_admin;
+  const canSendFlag = !!row.can_send_messages;
+  if (!isGroup) return { ok: true, policy: "everyone", isGroup: false, isAdmin: false };
+  if (policy === "everyone") return { ok: true, policy, isGroup: true, isAdmin };
+  if (policy === "admins_only") {
+    return isAdmin
+      ? { ok: true, policy, isGroup: true, isAdmin }
+      : { ok: false, code: "admins_only", policy, isGroup: true, isAdmin };
+  }
+  if (policy === "allowlist") {
+    return isAdmin || canSendFlag
+      ? { ok: true, policy, isGroup: true, isAdmin }
+      : { ok: false, code: "allowlist", policy, isGroup: true, isAdmin };
+  }
+  return { ok: true, policy, isGroup: true, isAdmin };
+}
 
 // Get all chats for a user
 router.get("/user/:userId", async (req: Request, res: Response) => {
@@ -120,7 +163,10 @@ router.post("/group", async (req: Request, res: Response) => {
     const chatId = chat.rows[0].id;
     const allMembers = Array.from(new Set([creatorId, ...memberIds]));
     for (const memberId of allMembers) {
-      await query("INSERT INTO chat_members (chat_id, user_id, is_admin) VALUES ($1, $2, $3)", [chatId, memberId, memberId === creatorId]);
+      await query(
+        "INSERT INTO chat_members (chat_id, user_id, is_admin, can_send_messages) VALUES ($1, $2, $3, TRUE)",
+        [chatId, memberId, memberId === creatorId],
+      );
     }
     res.json({ success: true, chatId });
   } catch (err) {
@@ -210,6 +256,32 @@ router.get("/:chatId/typing", async (req: Request, res: Response) => {
   } catch { res.json({ success: true, typing: [] }); }
 });
 
+// Who may send messages in this chat (for group policy UI)
+router.get("/:chatId/messaging-permission", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const userId = Number(req.query.userId);
+  if (!userId) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  try {
+    const perm = await evaluateGroupSendPermission(chatId, userId);
+    if (!perm) {
+      res.status(404).json({ success: false });
+      return;
+    }
+    res.json({
+      success: true,
+      policy: perm.policy,
+      canSendMessages: perm.ok,
+      isAdmin: perm.isAdmin,
+    });
+  } catch (err) {
+    req.log.error({ err }, "messaging-permission");
+    res.status(500).json({ success: false });
+  }
+});
+
 // Send message
 router.post("/:chatId/messages", async (req: Request, res: Response) => {
   const { chatId } = req.params;
@@ -219,6 +291,24 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
   };
   if (!senderId || !content) { res.status(400).json({ success: false }); return; }
   try {
+    const perm = await evaluateGroupSendPermission(chatId, senderId);
+    if (!perm) {
+      res.status(403).json({
+        success: false,
+        code: "not_member",
+        message: "You are not a member of this chat.",
+      });
+      return;
+    }
+    if (!perm.ok) {
+      const message =
+        perm.code === "admins_only"
+          ? "Only group admins can send messages in this group."
+          : "You do not have permission to send messages. Ask a group admin to allow you.";
+      res.status(403).json({ success: false, code: perm.code, message });
+      return;
+    }
+
     const result = await query(`
       INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -241,21 +331,10 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     // Send push notifications (fire and forget)
     const senderRow = await query("SELECT name FROM users WHERE id = $1", [senderId]);
     const senderName = senderRow.rows[0]?.name ?? "Videh";
-    const tokens = members.rows.filter((m: any) => m.push_token && m.push_token.startsWith("ExponentPushToken")).map((m: any) => m.push_token);
+    const tokens = members.rows.map((m: any) => m.push_token).filter(isExpoPushToken);
     if (tokens.length > 0) {
       const preview = (content ?? "").length > 60 ? content!.slice(0, 60) + "..." : (content ?? "");
-      const body = JSON.stringify({
-        to: tokens,
-        title: senderName,
-        body: preview,
-        sound: "default",
-        data: { chatId, type: "message" },
-      });
-      fetch("https://exp.host/--/api/v2/push/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body,
-      }).catch(() => {});
+      sendExpoChatPush(tokens, senderName, preview, { chatId, type: "message" });
     }
 
     res.json({ success: true, message: result.rows[0] });
@@ -288,16 +367,42 @@ router.delete("/:chatId/messages/:messageId", async (req: Request, res: Response
   }
 });
 
-// Edit message
+// Edit message (text) and/or update location payload + map link (live location updates)
 router.put("/:chatId/messages/:messageId", async (req: Request, res: Response) => {
   const { messageId } = req.params;
-  const { userId, content } = req.body as { userId?: number; content?: string };
-  if (!content?.trim()) { res.status(400).json({ success: false }); return; }
+  const { userId, content, mediaUrl } = req.body as { userId?: number; content?: string; mediaUrl?: string | null };
+  if (!userId) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  const hasContent = typeof content === "string";
+  const hasMedia = typeof mediaUrl === "string";
+  if (!hasContent && !hasMedia) {
+    res.status(400).json({ success: false });
+    return;
+  }
   try {
-    await query(
-      "UPDATE messages SET content = $1, edited_at = NOW() WHERE id = $2 AND sender_id = $3 AND is_deleted = FALSE",
-      [content.trim(), messageId, userId]
-    );
+    if (hasContent && hasMedia) {
+      await query(
+        "UPDATE messages SET content = $1, media_url = $2, edited_at = NOW() WHERE id = $3 AND sender_id = $4 AND is_deleted = FALSE",
+        [content, mediaUrl, messageId, userId]
+      );
+    } else if (hasContent) {
+      const trimmed = content.trim();
+      if (!trimmed) {
+        res.status(400).json({ success: false });
+        return;
+      }
+      await query(
+        "UPDATE messages SET content = $1, edited_at = NOW() WHERE id = $2 AND sender_id = $3 AND is_deleted = FALSE",
+        [trimmed, messageId, userId]
+      );
+    } else if (hasMedia) {
+      await query(
+        "UPDATE messages SET media_url = $1, edited_at = NOW() WHERE id = $2 AND sender_id = $3 AND is_deleted = FALSE",
+        [mediaUrl, messageId, userId]
+      );
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false });
@@ -399,7 +504,8 @@ router.get("/:chatId/details", async (req: Request, res: Response) => {
   const { chatId } = req.params;
   try {
     const result = await query(`
-      SELECT id, is_group, group_name, group_avatar_url, group_description, disappear_after_seconds
+      SELECT id, is_group, group_name, group_avatar_url, group_description, disappear_after_seconds,
+             COALESCE(NULLIF(TRIM(group_messaging_policy), ''), 'everyone') AS group_messaging_policy
       FROM chats WHERE id = $1
     `, [chatId]);
     if (result.rows.length === 0) { res.status(404).json({ success: false }); return; }
@@ -413,7 +519,7 @@ router.get("/:chatId/members", async (req: Request, res: Response) => {
   try {
     const result = await query(`
       SELECT u.id, u.name, u.phone, u.avatar_url, u.about, u.is_online, u.last_seen,
-             cm.is_admin, cm.joined_at
+             cm.is_admin, cm.joined_at, COALESCE(cm.can_send_messages, TRUE) AS can_send_messages
       FROM chat_members cm JOIN users u ON u.id = cm.user_id
       WHERE cm.chat_id = $1
       ORDER BY cm.is_admin DESC, u.name ASC
@@ -431,9 +537,15 @@ router.post("/:chatId/members", async (req: Request, res: Response) => {
     // Check requester is admin
     const adminCheck = await query("SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2", [chatId, requesterId]);
     if (!adminCheck.rows[0]?.is_admin) { res.status(403).json({ success: false, message: "Not admin" }); return; }
+    const pol = await query(
+      `SELECT COALESCE(NULLIF(TRIM(group_messaging_policy), ''), 'everyone') AS policy FROM chats WHERE id = $1`,
+      [chatId],
+    );
+    const policy = String(pol.rows[0]?.policy || "everyone");
+    const canSendDefault = policy !== "allowlist";
     await query(
-      "INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-      [chatId, userId]
+      "INSERT INTO chat_members (chat_id, user_id, can_send_messages) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+      [chatId, userId, canSendDefault],
     );
     res.json({ success: true });
   } catch { res.status(500).json({ success: false }); }
@@ -464,6 +576,102 @@ router.put("/:chatId/members/:memberId/admin", async (req: Request, res: Respons
     await query("UPDATE chat_members SET is_admin = $1 WHERE chat_id = $2 AND user_id = $3", [isAdmin ?? true, chatId, memberId]);
     res.json({ success: true });
   } catch { res.status(500).json({ success: false }); }
+});
+
+// Set group messaging policy (admin only)
+router.put("/:chatId/group-messaging-policy", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { requesterId, policy, resetAllowlist } = req.body as {
+    requesterId?: number;
+    policy?: string;
+    resetAllowlist?: boolean;
+  };
+  const allowed = new Set(["everyone", "admins_only", "allowlist"]);
+  if (!requesterId || !policy || !allowed.has(policy)) {
+    res.status(400).json({ success: false, message: "Invalid policy" });
+    return;
+  }
+  try {
+    const adminCheck = await query(
+      "SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, requesterId],
+    );
+    if (!adminCheck.rows[0]?.is_admin) {
+      res.status(403).json({ success: false, message: "Only a group admin can change this setting." });
+      return;
+    }
+    const g = await query("SELECT is_group FROM chats WHERE id = $1", [chatId]);
+    if (!g.rows[0]?.is_group) {
+      res.status(400).json({ success: false, message: "Not a group chat" });
+      return;
+    }
+
+    if (policy === "everyone") {
+      await query("UPDATE chat_members SET can_send_messages = TRUE WHERE chat_id = $1", [chatId]);
+    } else if (policy === "allowlist" && resetAllowlist !== false) {
+      await query(
+        "UPDATE chat_members SET can_send_messages = (is_admin = TRUE) WHERE chat_id = $1",
+        [chatId],
+      );
+    }
+
+    await query("UPDATE chats SET group_messaging_policy = $1 WHERE id = $2", [policy, chatId]);
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "group-messaging-policy");
+    res.status(500).json({ success: false });
+  }
+});
+
+// Toggle send permission for a member (admin only; only when policy is allowlist)
+router.put("/:chatId/members/:memberId/send-permission", async (req: Request, res: Response) => {
+  const { chatId, memberId } = req.params;
+  const { requesterId, canSendMessages } = req.body as { requesterId?: number; canSendMessages?: boolean };
+  if (!requesterId || typeof canSendMessages !== "boolean") {
+    res.status(400).json({ success: false });
+    return;
+  }
+  try {
+    const adminCheck = await query(
+      "SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, requesterId],
+    );
+    if (!adminCheck.rows[0]?.is_admin) {
+      res.status(403).json({ success: false, message: "Only a group admin can change this setting." });
+      return;
+    }
+    const pol = await query(
+      `SELECT COALESCE(NULLIF(TRIM(group_messaging_policy), ''), 'everyone') AS policy FROM chats WHERE id = $1`,
+      [chatId],
+    );
+    if (String(pol.rows[0]?.policy || "everyone") !== "allowlist") {
+      res.status(400).json({
+        success: false,
+        message: "Set group messaging to “Selected members” before managing individual send access.",
+      });
+      return;
+    }
+    const target = await query(
+      "SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, memberId],
+    );
+    if (!target.rows[0]) {
+      res.status(404).json({ success: false });
+      return;
+    }
+    if (target.rows[0].is_admin) {
+      res.json({ success: true, message: "Admins always have send access." });
+      return;
+    }
+    await query(
+      "UPDATE chat_members SET can_send_messages = $1 WHERE chat_id = $2 AND user_id = $3",
+      [canSendMessages, chatId, memberId],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "send-permission");
+    res.status(500).json({ success: false });
+  }
 });
 
 // Update group description
