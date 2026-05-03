@@ -4,12 +4,12 @@
     "slug": "videh",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/videh_logo.png",
+    "icon": "./assets/images/videh_app_icon.png",
     "scheme": "videh",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/videh_logo.png",
+      "image": "./assets/images/videh_app_icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#0B141A"
     },
@@ -32,7 +32,7 @@
     "android": {
       "package": "com.videh.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/videh_logo.png",
+        "foregroundImage": "./assets/images/videh_icon_foreground.png",
         "backgroundColor": "#0B141A"
       },
       "permissions": [
@@ -58,7 +58,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/images/videh_logo.png"
+      "favicon": "./assets/images/videh_app_icon.png"
     },
     "plugins": [
       [
