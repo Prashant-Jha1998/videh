@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-type Tab = "overview" | "users" | "chats" | "scheduled" | "broadcasts" | "calls";
+type Tab = "overview" | "users" | "chats" | "group-create" | "suspensions" | "scheduled" | "broadcasts" | "calls";
 
 type Stats = {
   users: number;
@@ -54,7 +54,13 @@ export default function App() {
   const [scheduled, setScheduled] = useState<unknown[]>([]);
   const [broadcasts, setBroadcasts] = useState<unknown[]>([]);
   const [calls, setCalls] = useState<unknown[]>([]);
+  const [suspensions, setSuspensions] = useState<unknown[]>([]);
   const [userSearch, setUserSearch] = useState("");
+  const [groupName, setGroupName] = useState("");
+  const [groupCreatorPhone, setGroupCreatorPhone] = useState("");
+  const [groupMembersRaw, setGroupMembersRaw] = useState("");
+  const [groupAdminsRaw, setGroupAdminsRaw] = useState("");
+  const [groupCreateResult, setGroupCreateResult] = useState<string | null>(null);
 
   const refreshAuth = useCallback(async () => {
     try {
@@ -172,6 +178,21 @@ export default function App() {
     void loadCalls();
   }, [ready, tab, loadCalls]);
 
+  const loadSuspensions = useCallback(async () => {
+    setErr(null);
+    try {
+      const d = await api<{ suspensions: unknown[] }>("/admin/suspensions");
+      setSuspensions(d.suspensions);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to load suspensions");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (ready !== "authed" || tab !== "suspensions") return;
+    void loadSuspensions();
+  }, [ready, tab, loadSuspensions]);
+
   const onLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginErr(null);
@@ -232,6 +253,49 @@ export default function App() {
     }
     setStats(null);
     await refreshAuth();
+  };
+
+  const onCreateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr(null);
+    setGroupCreateResult(null);
+    try {
+      const d = await api<{
+        success: boolean;
+        chatId: number;
+        registeredAddedMembers: number;
+        notOnVidehPhones: string[];
+        adminsSet: number;
+      }>("/admin/groups/create", {
+        method: "POST",
+        body: JSON.stringify({
+          groupName,
+          creatorPhone: groupCreatorPhone,
+          memberPhones: groupMembersRaw,
+          adminPhones: groupAdminsRaw,
+        }),
+      });
+      const missingCount = d.notOnVidehPhones?.length ?? 0;
+      setGroupCreateResult(
+        `Group #${d.chatId} created. Added ${d.registeredAddedMembers} registered users, ${d.adminsSet} admins set. Missing on Videh: ${missingCount}.`,
+      );
+      setGroupName("");
+      setGroupMembersRaw("");
+      setGroupAdminsRaw("");
+      void loadChats();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to create group");
+    }
+  };
+
+  const revokeSuspension = async (userId: number) => {
+    setErr(null);
+    try {
+      await api(`/admin/suspensions/${userId}/revoke`, { method: "POST" });
+      setSuspensions((prev) => prev.filter((x: any) => Number(x.user_id) !== userId));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to revoke suspension");
+    }
   };
 
   if (ready === "loading") {
@@ -332,6 +396,8 @@ export default function App() {
         {nav("overview", "Overview")}
         {nav("users", "Users")}
         {nav("chats", "Chats")}
+        {nav("group-create", "Create Group")}
+        {nav("suspensions", "Suspensions")}
         {nav("scheduled", "Scheduled")}
         {nav("broadcasts", "Broadcasts")}
         {nav("calls", "Calls")}
@@ -527,6 +593,112 @@ export default function App() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </>
+        )}
+
+        {tab === "group-create" && (
+          <>
+            <h2 style={{ marginTop: 0 }}>Create Group (Admin)</h2>
+            <p className="muted">
+              Up to 10,000 phone numbers. Only users already registered on Videh are added. Group will appear in their chat feed.
+            </p>
+            <form className="card group-form" onSubmit={onCreateGroup}>
+              <div className="field">
+                <label htmlFor="grpName">Group name</label>
+                <input
+                  id="grpName"
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  placeholder="e.g. Bihar Volunteers 2026"
+                  required
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="grpCreatorPhone">Creator phone (must be on Videh)</label>
+                <input
+                  id="grpCreatorPhone"
+                  value={groupCreatorPhone}
+                  onChange={(e) => setGroupCreatorPhone(e.target.value)}
+                  placeholder="+91XXXXXXXXXX"
+                  required
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="grpMembers">Member phones (comma/newline separated, up to 10,000)</label>
+                <textarea
+                  id="grpMembers"
+                  value={groupMembersRaw}
+                  onChange={(e) => setGroupMembersRaw(e.target.value)}
+                  placeholder="+919999999999&#10;+918888888888"
+                  required
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="grpAdmins">Admin phones (optional, must also be in members)</label>
+                <textarea
+                  id="grpAdmins"
+                  value={groupAdminsRaw}
+                  onChange={(e) => setGroupAdminsRaw(e.target.value)}
+                  placeholder="+919999999999"
+                />
+              </div>
+              <button type="submit" className="btn btn-primary">
+                Create group
+              </button>
+              {groupCreateResult ? <p className="ok">{groupCreateResult}</p> : null}
+            </form>
+          </>
+        )}
+
+        {tab === "suspensions" && (
+          <>
+            <h2 style={{ marginTop: 0 }}>Suspended Accounts</h2>
+            <p className="muted">Admin can revoke temporary or permanent suspension.</p>
+            <div className="card" style={{ overflowX: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>User ID</th>
+                    <th>Phone</th>
+                    <th>Name</th>
+                    <th>Strikes</th>
+                    <th>Status</th>
+                    <th>Until</th>
+                    <th>Reason</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {suspensions.map((s: any) => {
+                    const isPermanent = Boolean(s.permanently_suspended);
+                    return (
+                      <tr key={s.user_id}>
+                        <td>{s.user_id}</td>
+                        <td>{s.phone ?? "—"}</td>
+                        <td>{s.name ?? "—"}</td>
+                        <td>{s.strike_count ?? 0}</td>
+                        <td>{isPermanent ? "Permanent" : "Temporary"}</td>
+                        <td>{isPermanent ? "—" : (s.suspended_until ? String(s.suspended_until).slice(0, 16) : "—")}</td>
+                        <td style={{ maxWidth: 220 }} className="muted">
+                          {s.last_reason ?? "—"}
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            style={{ width: "auto", padding: "6px 10px" }}
+                            onClick={() => void revokeSuspension(Number(s.user_id))}
+                          >
+                            Revoke
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {suspensions.length === 0 ? <p className="muted" style={{ marginTop: 12 }}>No active suspensions.</p> : null}
             </div>
           </>
         )}

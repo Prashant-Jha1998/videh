@@ -25,6 +25,9 @@ input,
 button {
   font: inherit;
 }
+textarea {
+  font: inherit;
+}
 .layout {
   display: flex;
   min-height: 100vh;
@@ -140,6 +143,16 @@ th {
   background: var(--bg);
   color: var(--text);
 }
+.field textarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
 .btn {
   padding: 10px 16px;
   border-radius: 8px;
@@ -166,4 +179,12 @@ th {
 .muted {
   color: var(--muted);
   font-size: 0.85rem;
+}
+.ok {
+  color: var(--accent);
+  font-size: 0.9rem;
+  margin-top: 10px;
+}
+.group-form {
+  max-width: 860px;
 }

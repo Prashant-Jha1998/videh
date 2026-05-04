@@ -14,6 +14,7 @@ import { adminTotpConfigured, verifyAdminTotpCode } from "../lib/adminTotp";
 import { logger } from "../lib/logger";
 
 const router = Router();
+const MAX_ADMIN_GROUP_MEMBERS = 10000;
 
 function normalizeEmail(s: string): string {
   return s.trim().toLowerCase();
@@ -28,6 +29,20 @@ function timingSafeStringEqual(a: string, b: string): boolean {
   } catch {
     return false;
   }
+}
+
+function phoneKey(raw: string): string {
+  return String(raw ?? "").replace(/\D/g, "");
+}
+
+function splitPhoneList(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.map((x) => String(x ?? "").trim()).filter(Boolean);
+  }
+  return String(raw ?? "")
+    .split(/[\n,;]+/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
 }
 
 function cookieOpts(maxAge: number) {
@@ -182,6 +197,53 @@ router.get("/stats", requireAdmin, async (_req, res) => {
   }
 });
 
+router.get("/suspensions", requireAdmin, async (_req, res) => {
+  try {
+    const r = await query(
+      `SELECT ms.user_id, u.phone, u.name, ms.strike_count, ms.suspended_until, ms.permanently_suspended,
+              ms.last_reason, ms.updated_at
+       FROM user_moderation_state ms
+       JOIN users u ON u.id = ms.user_id
+       WHERE ms.permanently_suspended = TRUE
+          OR (ms.suspended_until IS NOT NULL AND ms.suspended_until > NOW())
+       ORDER BY ms.permanently_suspended DESC, ms.updated_at DESC
+       LIMIT 500`,
+      [],
+    );
+    res.json({ success: true, suspensions: r.rows });
+  } catch (err) {
+    logger.error({ err }, "admin /suspensions");
+    res.status(500).json({ success: false, message: "Could not load suspended accounts." });
+  }
+});
+
+router.post("/suspensions/:userId/revoke", requireAdmin, async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!userId) {
+    res.status(400).json({ success: false, message: "Invalid userId." });
+    return;
+  }
+  try {
+    await query(
+      `UPDATE user_moderation_state
+       SET suspended_until = NULL,
+           permanently_suspended = FALSE,
+           updated_at = NOW()
+       WHERE user_id = $1`,
+      [userId],
+    );
+    await query(
+      `INSERT INTO moderation_events (user_id, activity_type, reason, excerpt, severity, action_taken)
+       VALUES ($1, 'admin_action', 'Admin manually revoked suspension', NULL, 'high', 'admin_revoke')`,
+      [userId],
+    );
+    res.json({ success: true, message: "Suspension revoked." });
+  } catch (err) {
+    logger.error({ err }, "admin revoke suspension");
+    res.status(500).json({ success: false, message: "Could not revoke suspension." });
+  }
+});
+
 router.get("/users", requireAdmin, async (req, res) => {
   const limit = Math.min(100, Math.max(1, Number(req.query["limit"]) || 50));
   const offset = Math.max(0, Number(req.query["offset"]) || 0);
@@ -233,6 +295,149 @@ router.get("/chats", requireAdmin, async (req, res) => {
   } catch (err) {
     logger.error({ err }, "admin /chats");
     res.status(500).json({ success: false, message: "Chats query failed" });
+  }
+});
+
+router.post("/groups/create", requireAdmin, async (req, res) => {
+  const body = req.body as {
+    groupName?: string;
+    creatorPhone?: string;
+    creatorUserId?: number;
+    memberPhones?: string[] | string;
+    adminPhones?: string[] | string;
+    groupAvatarUrl?: string | null;
+    description?: string | null;
+  };
+  const groupName = String(body.groupName ?? "").trim();
+  if (groupName.length < 3) {
+    res.status(400).json({ success: false, message: "Group name must be at least 3 characters." });
+    return;
+  }
+
+  const creatorUserIdInput = Number(body.creatorUserId);
+  const creatorPhone = String(body.creatorPhone ?? "").trim();
+  const creatorPhoneKey = phoneKey(creatorPhone);
+  if (!creatorUserIdInput && !creatorPhoneKey) {
+    res.status(400).json({ success: false, message: "Provide creatorUserId or creatorPhone." });
+    return;
+  }
+
+  const memberPhonesRaw = splitPhoneList(body.memberPhones);
+  const memberPhoneKeys = Array.from(new Set(memberPhonesRaw.map(phoneKey).filter((x) => x.length >= 10)));
+  if (memberPhoneKeys.length === 0) {
+    res.status(400).json({ success: false, message: "Add at least one member phone number." });
+    return;
+  }
+  if (memberPhoneKeys.length > MAX_ADMIN_GROUP_MEMBERS) {
+    res.status(400).json({
+      success: false,
+      message: `Max ${MAX_ADMIN_GROUP_MEMBERS} member numbers are allowed per admin-created group.`,
+    });
+    return;
+  }
+
+  const adminPhonesRaw = splitPhoneList(body.adminPhones);
+  const adminPhoneKeys = new Set(adminPhonesRaw.map(phoneKey).filter((x) => x.length >= 10));
+
+  try {
+    let creatorId = creatorUserIdInput || 0;
+    if (!creatorId) {
+      const cr = await query(
+        `SELECT id FROM users
+         WHERE regexp_replace(phone, '\D', '', 'g') = $1
+         LIMIT 1`,
+        [creatorPhoneKey],
+      );
+      if (!cr.rows[0]?.id) {
+        res.status(404).json({ success: false, message: "Creator phone is not registered on Videh." });
+        return;
+      }
+      creatorId = Number(cr.rows[0].id);
+    } else {
+      const cr = await query("SELECT id FROM users WHERE id = $1 LIMIT 1", [creatorId]);
+      if (!cr.rows[0]?.id) {
+        res.status(404).json({ success: false, message: "creatorUserId was not found." });
+        return;
+      }
+    }
+
+    const usersRes = await query(
+      `SELECT id, phone, regexp_replace(phone, '\D', '', 'g') AS phone_key
+       FROM users
+       WHERE regexp_replace(phone, '\D', '', 'g') = ANY($1::text[])`,
+      [memberPhoneKeys],
+    );
+
+    const phoneToUserId = new Map<string, number>();
+    for (const r of usersRes.rows as Array<{ id: number; phone_key: string }>) {
+      if (r.phone_key) phoneToUserId.set(r.phone_key, Number(r.id));
+    }
+
+    const foundUserIds: number[] = [];
+    const missingPhones: string[] = [];
+    for (const pk of memberPhoneKeys) {
+      const uid = phoneToUserId.get(pk);
+      if (uid) foundUserIds.push(uid);
+      else missingPhones.push(pk);
+    }
+
+    const allMemberIds = Array.from(new Set([creatorId, ...foundUserIds]));
+    if (allMemberIds.length > MAX_ADMIN_GROUP_MEMBERS) {
+      res.status(400).json({
+        success: false,
+        message: `Registered members exceed ${MAX_ADMIN_GROUP_MEMBERS}.`,
+      });
+      return;
+    }
+
+    const newChat = await query(
+      `INSERT INTO chats (is_group, group_name, group_avatar_url, group_description, created_by)
+       VALUES (TRUE, $1, $2, $3, $4)
+       RETURNING id`,
+      [groupName, body.groupAvatarUrl ?? null, body.description ?? null, creatorId],
+    );
+    const chatId = Number(newChat.rows[0].id);
+
+    const adminIdSet = new Set<number>([creatorId]);
+    for (const pk of adminPhoneKeys) {
+      const uid = phoneToUserId.get(pk);
+      if (uid) adminIdSet.add(uid);
+    }
+
+    const chunkSize = 500;
+    for (let start = 0; start < allMemberIds.length; start += chunkSize) {
+      const chunk = allMemberIds.slice(start, start + chunkSize);
+      const valuesSql: string[] = [];
+      const params: Array<number | string | boolean> = [];
+      for (let i = 0; i < chunk.length; i++) {
+        const uid = chunk[i]!;
+        const isAdmin = adminIdSet.has(uid);
+        const p = i * 4;
+        valuesSql.push(`($${p + 1}, $${p + 2}, $${p + 3}, $${p + 4})`);
+        params.push(chatId, uid, isAdmin, true);
+      }
+      await query(
+        `INSERT INTO chat_members (chat_id, user_id, is_admin, can_send_messages)
+         VALUES ${valuesSql.join(", ")}
+         ON CONFLICT (chat_id, user_id) DO NOTHING`,
+        params,
+      );
+    }
+
+    res.json({
+      success: true,
+      chatId,
+      groupName,
+      creatorId,
+      totalInputPhones: memberPhoneKeys.length,
+      registeredAddedMembers: allMemberIds.length,
+      adminsSet: Array.from(adminIdSet).length,
+      notOnVidehPhones: missingPhones,
+      message: `Group created. ${allMemberIds.length} registered users were added.`,
+    });
+  } catch (err) {
+    logger.error({ err }, "admin /groups/create");
+    res.status(500).json({ success: false, message: "Could not create admin group." });
   }
 });
 
