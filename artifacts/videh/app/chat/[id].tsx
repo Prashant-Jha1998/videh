@@ -35,7 +35,8 @@ import { useColors } from "@/hooks/useColors";
 import { useApp, type Message } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
-import { formatFullTime } from "@/utils/time";
+import { formatChatBubbleTime } from "@/utils/time";
+import { DismissibleModal } from "@/components/DismissibleModal";
 import { DropdownMenu } from "@/components/DropdownMenu";
 import {
   encodeLocationPayload,
@@ -46,11 +47,83 @@ import {
   staticMapImageUrl,
 } from "@/lib/locationMessage";
 import { loadEnterIsSend } from "@/lib/chatSettings";
+import Svg, { Path } from "react-native-svg";
 
 const BASE_URL = getApiUrl();
 const { width: W } = Dimensions.get("window");
 const REACTION_EMOJIS = ["❤️", "👍", "😂", "😮", "😢", "🙏"];
 const REPLY_SWIPE_ACTION_W = 56;
+
+type ChatListRow =
+  | { rowType: "date"; id: string; label: string }
+  | { rowType: "msg"; message: Message };
+
+function startOfLocalDay(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** WhatsApp-style strip labels: Today, Yesterday, weekday, then dated. */
+function formatDateChipLabel(ts: number, nowMs = Date.now()): string {
+  const dayMs = 86400000;
+  const d0 = startOfLocalDay(ts);
+  const t0 = startOfLocalDay(nowMs);
+  const diffDays = Math.round((t0 - d0) / dayMs);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays >= 2 && diffDays < 7) {
+    return new Date(ts).toLocaleDateString(undefined, { weekday: "long" });
+  }
+  const y = new Date(ts).getFullYear();
+  const cy = new Date(nowMs).getFullYear();
+  if (y === cy) {
+    return new Date(ts).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  }
+  return new Date(ts).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function messagesWithDateRows(msgs: Message[]): ChatListRow[] {
+  const out: ChatListRow[] = [];
+  let prevDay: number | null = null;
+  for (const m of msgs) {
+    const day = startOfLocalDay(m.timestamp);
+    if (prevDay === null || day !== prevDay) {
+      out.push({
+        rowType: "date",
+        id: `date-${day}`,
+        label: formatDateChipLabel(m.timestamp),
+      });
+      prevDay = day;
+    }
+    out.push({ rowType: "msg", message: m });
+  }
+  return out;
+}
+
+/** Small filled tail under the bubble corner (flat SVG, WhatsApp-ish). */
+function ChatBubbleTail({ fill, side }: { fill: string; side: "left" | "right" }) {
+  const w = 7;
+  const h = 10;
+  const rightD = "M0 2 C0 0.5 1.5 0 3.5 1 C5.5 2.2 7 5.5 7 9.5 L7 10 L0 10 Z";
+  const leftD = "M7 2 C7 0.5 5.5 0 3.5 1 C1.5 2.2 0 5.5 0 9.5 L0 10 L7 10 Z";
+  return (
+    <Svg
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      style={[styles.bubbleTailSvg, side === "right" ? { right: -0.5 } : { left: -0.5 }]}
+      pointerEvents="none"
+    >
+      <Path d={side === "right" ? rightD : leftD} fill={fill} />
+    </Svg>
+  );
+}
 
 type ContactShareRow = { id: string; name: string; phone: string };
 
@@ -613,6 +686,8 @@ export default function ChatScreen() {
   const messages = searching && searchQuery.trim()
     ? allMessages.filter((m) => m.text.toLowerCase().includes(searchQuery.toLowerCase()))
     : allMessages;
+
+  const listRows = useMemo(() => messagesWithDateRows(messages), [messages]);
 
   const peerNameForVideo = name ?? chat?.name ?? "Chat";
 
@@ -1190,6 +1265,8 @@ export default function ChatScreen() {
         ? "rgba(0,0,0,0.55)"
         : colors.mutedForeground;
 
+    const showSvgTail = !isImage && !isVideo && !isLocation;
+
     // Group reactions by emoji
     const reactionGroups: Record<string, { count: number; mine: boolean }> = {};
     (item.reactions ?? []).forEach((r) => {
@@ -1212,26 +1289,39 @@ export default function ChatScreen() {
     );
 
     const isSelected = selectedIds.includes(item.id);
+    const selectionRowTint = colors.isDark ? "rgba(0, 168, 132, 0.2)" : "rgba(183, 223, 165, 0.55)";
+    const deletedMeLabel = colors.isDark ? "rgba(255,255,255,0.72)" : "rgba(0,0,0,0.52)";
+    const deletedMeIcon = colors.isDark ? "rgba(255,255,255,0.58)" : "rgba(0,0,0,0.42)";
+    const deletedMeTime = colors.isDark ? "rgba(255,255,255,0.62)" : "rgba(0,0,0,0.42)";
     const msgRow = (
-      <Pressable
-        onPress={() => {
-          if (selectedIds.length > 0 && !isDeleted) {
-            setSelectedIds((prev) =>
-              prev.includes(item.id) ? prev.filter((x) => x !== item.id) : [...prev, item.id],
-            );
-          }
-        }}
-        onLongPress={() => {
-          if (isDeleted) return;
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          setSelectedIds((prev) => {
-            if (prev.length === 0) return [item.id];
-            return prev.includes(item.id) ? prev.filter((x) => x !== item.id) : [...prev, item.id];
-          });
-        }}
-        delayLongPress={450}
-        style={[styles.msgWrap, isMe ? styles.msgRight : styles.msgLeft]}
-      >
+      <View style={[styles.msgRowOuter, isSelected && styles.msgRowOuterBleed]}>
+        {isSelected ? (
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: selectionRowTint }]} pointerEvents="none" />
+        ) : null}
+        <Pressable
+          onPress={() => {
+            if (selectedIds.length > 0 && !isDeleted) {
+              setSelectedIds((prev) =>
+                prev.includes(item.id) ? prev.filter((x) => x !== item.id) : [...prev, item.id],
+              );
+              return;
+            }
+            if (!isDeleted) {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setReactionTarget(item);
+            }
+          }}
+          onLongPress={() => {
+            if (isDeleted) return;
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            setSelectedIds((prev) => {
+              if (prev.length === 0) return [item.id];
+              return prev.includes(item.id) ? prev.filter((x) => x !== item.id) : [...prev, item.id];
+            });
+          }}
+          delayLongPress={450}
+          style={[styles.msgWrap, isMe ? styles.msgRight : styles.msgLeft]}
+        >
         {/* Forwarded label */}
         {item.isForwarded && !isDeleted && (
           <View style={[styles.fwdLabel, isMe ? { alignSelf: "flex-end" } : {}]}>
@@ -1242,17 +1332,18 @@ export default function ChatScreen() {
           </View>
         )}
 
-        <View
-          style={[
-            styles.bubble,
-            { backgroundColor: isMe ? colors.chatBubbleSent : colors.chatBubbleReceived },
-            isDeleted && { opacity: 0.55 },
-            (isImage || isVideo || isLocation) && styles.bubbleImg,
-            isSelected && { borderWidth: 2, borderColor: colors.primary },
-          ]}
-        >
+        <View style={styles.bubbleTailWrap}>
+          <View
+            style={[
+              styles.bubble,
+              showSvgTail && styles.bubbleWithTailShape,
+              { backgroundColor: isMe ? colors.chatBubbleSent : colors.chatBubbleReceived },
+              (isImage || isVideo || isLocation) && styles.bubbleImg,
+              isDeleted && styles.bubbleDeleted,
+            ]}
+          >
           {/* Reply strip */}
-          {item.replyToId && item.replyText && (
+          {item.replyToId && item.replyText && !isDeleted && (
             <View style={[styles.replyStrip, { borderLeftColor: colors.primary, backgroundColor: isMe ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.07)" }]}>
               <Text style={[styles.replyWho, { color: colors.primary }]}>
                 {item.replySenderName ?? (item.replyToId === "me" ? "You" : "Them")}
@@ -1263,9 +1354,25 @@ export default function ChatScreen() {
 
           {/* Content */}
           {isDeleted ? (
-            <View style={styles.deletedRow}>
-              <Ionicons name="ban-outline" size={13} color={colors.mutedForeground} />
-              <Text style={[styles.deletedText, { color: colors.mutedForeground }]}> This message was deleted</Text>
+            <View style={styles.deletedRowWa}>
+              <Ionicons
+                name="remove-circle-outline"
+                size={15}
+                color={isMe ? deletedMeIcon : colors.mutedForeground}
+                style={styles.deletedIconWa}
+              />
+              <Text
+                style={[
+                  styles.deletedTextWa,
+                  { color: isMe ? deletedMeLabel : colors.mutedForeground },
+                ]}
+                numberOfLines={3}
+              >
+                {isMe ? "You deleted this message" : "This message was deleted"}
+              </Text>
+              <Text style={[styles.deletedTimeWa, { color: isMe ? deletedMeTime : colors.mutedForeground }]}>
+                {formatChatBubbleTime(item.timestamp)}
+              </Text>
             </View>
           ) : isImage ? (
             <>
@@ -1389,16 +1496,25 @@ export default function ChatScreen() {
             </>
           )}
 
-          {/* Meta: time + edited + ticks */}
-          <View style={[styles.msgMeta, (isImage || isVideo || isLocation) && styles.msgMetaOnMedia]}>
-            {item.isEdited && <Text style={[styles.editedLabel, { color: colors.mutedForeground }]}>edited </Text>}
-            <Text style={[styles.msgTime, { color: metaTextColor }]}>
-              {formatFullTime(item.timestamp)}
-            </Text>
-            {isMe && !isDeleted && (
-              <TickIcon status={item.status} color={metaTextColor} />
-            )}
+          {/* Meta: time + edited + ticks (hidden for deleted — time sits on deleted row like WhatsApp) */}
+          {!isDeleted ? (
+            <View style={[styles.msgMeta, (isImage || isVideo || isLocation) && styles.msgMetaOnMedia]}>
+              {item.isEdited && <Text style={[styles.editedLabel, { color: colors.mutedForeground }]}>edited </Text>}
+              <Text style={[styles.msgTime, { color: metaTextColor }]}>
+                {formatChatBubbleTime(item.timestamp)}
+              </Text>
+              {isMe && (
+                <TickIcon status={item.status} color={metaTextColor} />
+              )}
+            </View>
+          ) : null}
           </View>
+          {showSvgTail ? (
+            <ChatBubbleTail
+              fill={isMe ? colors.chatBubbleSent : colors.chatBubbleReceived}
+              side={isMe ? "right" : "left"}
+            />
+          ) : null}
         </View>
 
         {/* Reactions */}
@@ -1417,6 +1533,7 @@ export default function ChatScreen() {
           </View>
         )}
       </Pressable>
+      </View>
     );
 
     if (Platform.OS === "web" || isDeleted || selectedIds.length > 0) return msgRow;
@@ -1448,6 +1565,24 @@ export default function ChatScreen() {
         {msgRow}
       </Swipeable>
     );
+  };
+
+  const renderChatListRow = ({ item: row }: { item: ChatListRow }) => {
+    if (row.rowType === "date") {
+      return (
+        <View style={styles.dateChipWrap} pointerEvents="none">
+          <View
+            style={[
+              styles.dateChipPill,
+              { backgroundColor: colors.isDark ? "rgba(38,52,59,0.92)" : "rgba(235,237,239,0.96)" },
+            ]}
+          >
+            <Text style={[styles.dateChipText, { color: colors.mutedForeground }]}>{row.label}</Text>
+          </View>
+        </View>
+      );
+    }
+    return renderMsg({ item: row.message });
   };
 
   const displayName = name ?? chat?.name ?? "Chat";
@@ -1529,16 +1664,16 @@ export default function ChatScreen() {
       )}
       {/* Header */}
       {selectionActive ? (
-        <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
+        <View style={[styles.header, styles.selectionHeader, { paddingTop: topPad }]}>
           <TouchableOpacity style={styles.backBtn} onPress={clearSelection}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
-          <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 8 }}>
+          <View style={{ flex: 1, minWidth: 0, justifyContent: "center", paddingHorizontal: 6 }}>
             <Text style={styles.headerName} numberOfLines={1}>
               {selectedIds.length} selected
             </Text>
           </View>
-          <View style={styles.headerActions}>
+          <View style={[styles.headerActions, styles.selectionHeaderActions]}>
             {selectedIds.length === 1 ? (
               <>
                 <TouchableOpacity
@@ -1556,24 +1691,57 @@ export default function ChatScreen() {
                     inputRef.current?.focus();
                   }}
                 >
-                  <Ionicons name="return-down-back" size={22} color="#fff" />
+                  <Ionicons name="arrow-undo-outline" size={21} color="#fff" />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.headerBtn}
                   onPress={() => {
                     const m = allMessages.find((x) => x.id === selectedIds[0]);
-                    if (!m) return;
-                    clearSelection();
-                    showMessageContextMenu(m);
+                    if (!m || !chatId || m.type === "deleted") return;
+                    starMessage(chatId, m.id);
                   }}
                 >
-                  <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+                  <Ionicons name="star-outline" size={21} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.headerBtn}
+                  onPress={() => {
+                    const m = allMessages.find((x) => x.id === selectedIds[0]);
+                    if (!m || m.type === "deleted") return;
+                    Clipboard.setString(m.text);
+                  }}
+                >
+                  <Ionicons name="copy-outline" size={21} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.headerBtn}
+                  onPress={() => {
+                    const m = allMessages.find((x) => x.id === selectedIds[0]);
+                    if (!m || m.type === "deleted") return;
+                    setForwardMsg(m);
+                    clearSelection();
+                  }}
+                >
+                  <Ionicons name="arrow-redo-outline" size={21} color="#fff" />
                 </TouchableOpacity>
               </>
             ) : null}
             <TouchableOpacity style={styles.headerBtn} onPress={() => setBulkDeleteOpen(true)}>
               <Ionicons name="trash-outline" size={22} color="#fff" />
             </TouchableOpacity>
+            {selectedIds.length === 1 ? (
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() => {
+                  const m = allMessages.find((x) => x.id === selectedIds[0]);
+                  if (!m) return;
+                  clearSelection();
+                  showMessageContextMenu(m);
+                }}
+              >
+                <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       ) : (
@@ -1658,11 +1826,11 @@ export default function ChatScreen() {
       >
         <FlatList
           ref={listRef}
-          data={messages}
+          data={listRows}
           extraData={selectedIds.join(",")}
-          keyExtractor={(item) => item.id}
-          renderItem={renderMsg}
-          contentContainerStyle={{ paddingVertical: 10, paddingHorizontal: 8 }}
+          keyExtractor={(row) => (row.rowType === "date" ? row.id : row.message.id)}
+          renderItem={renderChatListRow}
+          contentContainerStyle={{ paddingVertical: 12, paddingHorizontal: 10 }}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -1780,13 +1948,29 @@ export default function ChatScreen() {
 
         {/* Input bar */}
         {!selectionActive && (
-          <View style={[styles.inputBar, { backgroundColor: colors.background, paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 8) }]}>
+          <View
+            style={[
+              styles.inputBar,
+              {
+                backgroundColor: colors.isDark ? colors.background : "#F0F2F5",
+                borderTopColor: colors.isDark ? colors.border : "rgba(0,0,0,0.06)",
+                paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 8),
+              },
+            ]}
+          >
             <TouchableOpacity style={styles.inputIcon}>
               <Ionicons name="happy-outline" size={24} color={colors.mutedForeground} />
             </TouchableOpacity>
             <TextInput
               ref={inputRef}
-              style={[styles.inputField, { backgroundColor: colors.card, color: colors.foreground }]}
+              style={[
+                styles.inputField,
+                {
+                  backgroundColor: colors.isDark ? colors.card : "#FFFFFF",
+                  color: colors.foreground,
+                  borderColor: colors.isDark ? colors.border : "rgba(0,0,0,0.06)",
+                },
+              ]}
               placeholder={editTarget ? "Edit message..." : "Message"}
               placeholderTextColor={colors.mutedForeground}
               value={inputVal}
@@ -1988,8 +2172,8 @@ export default function ChatScreen() {
       </Modal>
 
       {/* Reaction picker modal */}
-      <Modal visible={!!reactionTarget} transparent animationType="fade" onRequestClose={() => setReactionTarget(null)}>
-        <Pressable style={styles.modalOverlay} onPress={() => setReactionTarget(null)}>
+      <DismissibleModal visible={!!reactionTarget} onClose={() => setReactionTarget(null)} animationType="fade">
+        <View style={[styles.reactionPickerWrap, { paddingBottom: insets.bottom + 96 }]}>
           <View style={styles.reactionPicker}>
             {REACTION_EMOJIS.map((e) => (
               <TouchableOpacity key={e} style={styles.reactionPickerBtn} onPress={() => {
@@ -2003,12 +2187,13 @@ export default function ChatScreen() {
               <Ionicons name="add" size={20} color="#64748b" />
             </TouchableOpacity>
           </View>
-        </Pressable>
-      </Modal>
+        </View>
+      </DismissibleModal>
 
-      {/* Delete modal */}
+      {/* Delete modal — centered card (WhatsApp-style), not bottom sheet */}
       <Modal visible={!!deleteTarget} transparent animationType="fade" onRequestClose={() => setDeleteTarget(null)}>
-        <Pressable style={styles.modalOverlay} onPress={() => setDeleteTarget(null)}>
+        <View style={styles.deleteModalRoot}>
+          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setDeleteTarget(null)} />
           <View style={styles.deleteCard}>
             <Text style={styles.deleteTitle}>Delete message?</Text>
             {deleteTarget?.senderId === "me" && (
@@ -2037,12 +2222,13 @@ export default function ChatScreen() {
               <Text style={styles.deleteCancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </Pressable>
+        </View>
       </Modal>
 
       {/* Bulk delete (multi-select) */}
       <Modal visible={bulkDeleteOpen} transparent animationType="fade" onRequestClose={() => setBulkDeleteOpen(false)}>
-        <Pressable style={styles.modalOverlay} onPress={() => setBulkDeleteOpen(false)}>
+        <View style={styles.deleteModalRoot}>
+          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setBulkDeleteOpen(false)} />
           <View style={styles.deleteCard}>
             <Text style={styles.deleteTitle}>Delete {selectedIds.length} messages?</Text>
             {bulkOthersCount > 0 ? (
@@ -2094,12 +2280,12 @@ export default function ChatScreen() {
               <Text style={styles.deleteCancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </Pressable>
+        </View>
       </Modal>
 
       {/* Forward modal */}
-      <Modal visible={!!forwardMsg} transparent animationType="slide" onRequestClose={() => setForwardMsg(null)}>
-        <Pressable style={styles.modalOverlay} onPress={() => setForwardMsg(null)}>
+      <DismissibleModal visible={!!forwardMsg} onClose={() => setForwardMsg(null)} animationType="slide">
+        <View style={styles.forwardModalWrap}>
           <View style={[styles.forwardSheet, { backgroundColor: colors.card }]}>
             <Text style={[styles.attachTitle, { color: colors.foreground }]}>Forward to</Text>
             <ScrollView>
@@ -2119,11 +2305,11 @@ export default function ChatScreen() {
               ))}
             </ScrollView>
           </View>
-        </Pressable>
-      </Modal>
+        </View>
+      </DismissibleModal>
 
       <Modal visible={!!mediaPreview} animationType="fade" transparent onRequestClose={() => setMediaPreview(null)}>
-        <View style={styles.mediaPreviewModal}>
+        <Pressable style={styles.mediaPreviewModal} onPress={() => setMediaPreview(null)}>
           <View style={styles.mediaPreviewHeader}>
             <TouchableOpacity style={styles.mediaPreviewBtn} onPress={() => setMediaPreview(null)}>
               <Ionicons name="close" size={24} color="#fff" />
@@ -2137,7 +2323,7 @@ export default function ChatScreen() {
               <Text style={styles.mediaPreviewCaption}>{mediaPreview.caption}</Text>
             </View>
           ) : null}
-        </View>
+        </Pressable>
       </Modal>
     </View>
   );
@@ -2152,6 +2338,8 @@ const styles = StyleSheet.create({
   mentionAvatarText: { color: "#fff", fontSize: 12, fontFamily: "Inter_700Bold" },
   mentionName: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   header: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 8, paddingBottom: 10, gap: 6 },
+  selectionHeader: { backgroundColor: "#1f2c34" },
+  selectionHeaderActions: { flexWrap: "wrap", justifyContent: "flex-end", flexShrink: 0 },
   backBtn: { padding: 6 },
   headerAvatarWrap: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   headerAvatarImg: { width: 38, height: 38 },
@@ -2165,26 +2353,58 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 15, fontFamily: "Inter_400Regular" },
   initWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 40, marginTop: 80 },
   initText: { fontSize: 14, fontFamily: "Inter_400Regular" },
+  dateChipWrap: { alignItems: "center", paddingVertical: 10, paddingHorizontal: 16 },
+  dateChipPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  dateChipText: { fontSize: 12, fontFamily: "Inter_600SemiBold", letterSpacing: 0.2 },
   msgSwipeRow: { width: "100%" },
   msgSwipeContainer: { overflow: "hidden" },
+  msgRowOuter: { width: "100%", position: "relative" },
+  msgRowOuterBleed: { marginHorizontal: -10 },
   swipeReplyRail: { justifyContent: "center", alignItems: "center" },
   msgWrap: { marginVertical: 2 },
   msgLeft: { alignItems: "flex-start" },
   msgRight: { alignItems: "flex-end" },
   fwdLabel: { flexDirection: "row", alignItems: "center", marginBottom: 2, paddingHorizontal: 4 },
   fwdText: { fontSize: 11, fontFamily: "Inter_400Regular", fontStyle: "italic" },
+  bubbleTailWrap: { position: "relative", maxWidth: "82%" },
+  bubbleTailSvg: { position: "absolute", bottom: 0, zIndex: 1 },
   bubble: {
-    maxWidth: "82%", borderRadius: 10, paddingHorizontal: 11, paddingVertical: 7,
-    elevation: 1, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 2,
+    maxWidth: "100%",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    elevation: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 0.5 },
+    shadowOpacity: 0.11,
+    shadowRadius: 1.5,
   },
-  bubbleImg: { paddingHorizontal: 0, paddingVertical: 0, overflow: "hidden" },
+  /** Bottom corners even; SVG tail sits at corner */
+  bubbleWithTailShape: { borderBottomLeftRadius: 10, borderBottomRightRadius: 10 },
+  bubbleDeleted: { paddingVertical: 7, paddingHorizontal: 9 },
+  bubbleImg: {
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    overflow: "hidden",
+    borderRadius: 12,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+  },
   replyStrip: { borderLeftWidth: 3, paddingLeft: 8, marginBottom: 5, paddingVertical: 2, borderRadius: 2, marginHorizontal: 0 },
   replyWho: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   replyText: { fontSize: 12, fontFamily: "Inter_400Regular" },
   msgText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
-  msgImage: { width: W * 0.62, height: W * 0.62, borderRadius: 10 },
-  msgVideo: { width: W * 0.62, height: W * 0.62, borderRadius: 10, backgroundColor: "#000" },
-  videoThumbWrap: { position: "relative", width: W * 0.62, height: W * 0.62, borderRadius: 10, overflow: "hidden" },
+  msgImage: { width: W * 0.62, height: W * 0.62, borderRadius: 12 },
+  msgVideo: { width: W * 0.62, height: W * 0.62, borderRadius: 12, backgroundColor: "#000" },
+  videoThumbWrap: { position: "relative", width: W * 0.62, height: W * 0.62, borderRadius: 12, overflow: "hidden" },
   videoThumbOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
@@ -2200,9 +2420,9 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   videoThumbDuration: { color: "#fff", fontSize: 12, fontFamily: "Inter_600SemiBold", textShadowColor: "rgba(0,0,0,0.75)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 },
-  videoLoadingWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 10, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
+  videoLoadingWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 12, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
   videoLoadingText: { color: "#fff", fontSize: 12, fontFamily: "Inter_500Medium" },
-  videoErrorWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 10, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
+  videoErrorWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 12, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
   videoErrorText: { color: "#fff", fontSize: 12, fontFamily: "Inter_500Medium" },
   viewOnceOverlay: { position: "absolute", top: 8, left: 8, flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   viewOnceText: { color: "#fff", fontSize: 11, fontFamily: "Inter_500Medium" },
@@ -2212,7 +2432,7 @@ const styles = StyleSheet.create({
   docIcon: { width: 48, height: 48, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   docName: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
   docMeta: { fontSize: 11, fontFamily: "Inter_400Regular" },
-  locationBubbleWrap: { overflow: "hidden", borderRadius: 10, minWidth: W * 0.62, maxWidth: W * 0.82 },
+  locationBubbleWrap: { overflow: "hidden", borderRadius: 12, minWidth: W * 0.62, maxWidth: W * 0.82 },
   locationMapImg: { width: W * 0.62, height: 200, backgroundColor: "#dfe6e4" },
   locationLiveBar: {
     flexDirection: "row",
@@ -2251,8 +2471,21 @@ const styles = StyleSheet.create({
   },
   editedLabel: { fontSize: 10, fontFamily: "Inter_400Regular", fontStyle: "italic" },
   msgTime: { fontSize: 11, fontFamily: "Inter_400Regular" },
-  deletedRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-  deletedText: { fontSize: 14, fontFamily: "Inter_400Regular", fontStyle: "italic" },
+  deletedRowWa: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingVertical: 1,
+  },
+  deletedIconWa: { marginTop: 1 },
+  deletedTextWa: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    fontStyle: "italic",
+    lineHeight: 19,
+  },
+  deletedTimeWa: { fontSize: 11, fontFamily: "Inter_400Regular", flexShrink: 0, paddingLeft: 4 },
   reactionsRow: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 2, marginHorizontal: 4 },
   reactionChip: { flexDirection: "row", alignItems: "center", gap: 2, borderRadius: 12, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 0.5, borderColor: "transparent" },
   reactionEmoji: { fontSize: 14 },
@@ -2291,11 +2524,45 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   groupLockBannerText: { flex: 1, fontSize: 13, fontFamily: "Inter_500Medium", lineHeight: 18 },
-  inputBar: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 8, paddingTop: 8, gap: 4 },
+  inputBar: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    gap: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
   inputIcon: { padding: 6 },
-  inputField: { flex: 1, borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, fontFamily: "Inter_400Regular", maxHeight: 120 },
-  sendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  inputField: {
+    flex: 1,
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+    maxHeight: 120,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  sendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 2,
+  },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
+  deleteModalRoot: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 28,
+  },
   attachModalRoot: { flex: 1, justifyContent: "flex-end" },
   attachBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.42)" },
   attachSheet: {
@@ -2333,11 +2600,33 @@ const styles = StyleSheet.create({
   attachWaCircleSm: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   attachViewOnceText: { fontSize: 14, fontFamily: "Inter_600SemiBold", flex: 1 },
   attachTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", marginBottom: 16, textAlign: "center" },
-  reactionPicker: { alignSelf: "center", flexDirection: "row", gap: 4, borderRadius: 28, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, marginBottom: 200, elevation: 12, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
+  reactionPickerWrap: { flex: 1, justifyContent: "flex-end", alignItems: "center" },
+  reactionPicker: { alignSelf: "center", flexDirection: "row", gap: 4, borderRadius: 28, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, elevation: 12, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
+  forwardModalWrap: { flex: 1, justifyContent: "flex-end" },
   reactionPickerBtn: { paddingHorizontal: 3, paddingVertical: 2 },
   reactionPickerPlus: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", marginLeft: 2, backgroundColor: "#f1f5f9" },
-  deleteCard: { alignSelf: "center", width: "84%", maxWidth: 320, borderRadius: 18, backgroundColor: "#fff", paddingVertical: 12, paddingHorizontal: 16, elevation: 8, shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
-  deleteTitle: { fontSize: 16, color: "#334155", fontFamily: "Inter_500Medium", marginBottom: 8 },
+  deleteCard: {
+    zIndex: 1,
+    width: "100%",
+    maxWidth: 340,
+    borderRadius: 28,
+    backgroundColor: "#fff",
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    elevation: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  deleteTitle: {
+    fontSize: 17,
+    color: "#1c1e21",
+    fontFamily: "Inter_700Bold",
+    marginBottom: 6,
+    alignSelf: "stretch",
+    textAlign: "left",
+  },
   bulkDeleteHint: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18, marginBottom: 12 },
   deleteAction: { paddingVertical: 10 },
   deleteActionText: { fontSize: 17, color: "#0f9d7a", fontFamily: "Inter_500Medium", textAlign: "center" },

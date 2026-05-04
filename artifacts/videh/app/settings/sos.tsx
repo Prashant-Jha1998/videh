@@ -10,6 +10,7 @@ import { useRouter } from "expo-router";
 import * as Location from "expo-location";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+import { DismissibleModal } from "@/components/DismissibleModal";
 
 const BASE_URL = getApiUrl();
 const MAX_SOS_CONTACTS = 5;
@@ -404,12 +405,14 @@ export default function SosScreen() {
 
       {/* Add contact modal */}
       <Modal visible={showAdd} animationType="slide" transparent onRequestClose={() => setShowAdd(false)}>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
-        >
+        <View style={{ flex: 1 }}>
           <Pressable style={styles.overlay} onPress={() => setShowAdd(false)} />
+          <KeyboardAvoidingView
+            style={{ flex: 1, justifyContent: "flex-end" }}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
+            pointerEvents="box-none"
+          >
           <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
             <Text style={styles.modalTitle}>Add Emergency Contact</Text>
 
@@ -439,12 +442,13 @@ export default function SosScreen() {
               {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnTxt}>Add Contact</Text>}
             </Pressable>
           </View>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
 
-      {/* SOS countdown modal */}
-      <Modal visible={showSOS} animationType="fade" transparent>
-        <View style={styles.countdownOverlay}>
+      {/* SOS countdown modal — back / tap scrim dismiss */}
+      <DismissibleModal visible={showSOS} onClose={cancelSOS} animationType="fade" backdropOpacity={0.82}>
+        <View style={styles.countdownCenter}>
           <View style={styles.countdownBox}>
             <Text style={styles.countdownTitle}>🚨 SOS Alert</Text>
             <Text style={styles.countdownNum}>{countdown}</Text>
@@ -454,7 +458,7 @@ export default function SosScreen() {
             </Pressable>
           </View>
         </View>
-      </Modal>
+      </DismissibleModal>
     </View>
   );
 }
@@ -496,7 +500,7 @@ const styles = StyleSheet.create({
   hint: { color: "#8FA3AD", fontSize: 12, marginTop: 6, lineHeight: 18 },
   saveBtn: { backgroundColor: "#00A884", borderRadius: 12, padding: 14, alignItems: "center", marginTop: 20 },
   saveBtnTxt: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  countdownOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.85)", alignItems: "center", justifyContent: "center" },
+  countdownCenter: { flex: 1, alignItems: "center", justifyContent: "center" },
   countdownBox: { backgroundColor: "#1F2C34", borderRadius: 20, padding: 32, alignItems: "center", gap: 12, width: 280 },
   countdownTitle: { color: "#fff", fontSize: 22, fontWeight: "700" },
   countdownNum: { color: "#E74C3C", fontSize: 80, fontWeight: "900" },

@@ -65,7 +65,7 @@ export function DropdownMenu({ visible, onClose, items, topOffset = 54 }: Props)
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: "transparent",
+    backgroundColor: "rgba(0,0,0,0.35)",
   },
   menu: {
     position: "absolute",

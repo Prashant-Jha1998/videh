@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { query } from "../lib/db";
+import { enforceModerationForActivity } from "../lib/moderation";
 
 const router = Router();
 
@@ -62,6 +63,24 @@ router.post("/", async (req: Request, res: Response) => {
   };
   if (!userId || !content) { res.status(400).json({ success: false }); return; }
   try {
+    const activityType = type === "video" ? "video_share" : "story_status";
+    const mod = await enforceModerationForActivity(userId, activityType, {
+      content,
+      mediaUrl: mediaUrl ?? null,
+      type: type ?? "text",
+    });
+    if (!mod.allowed) {
+      res.status(403).json({
+        success: false,
+        code: mod.code,
+        message: mod.message,
+        suspendedUntil: mod.suspendedUntil ?? null,
+        alert: mod.alert,
+        strikeCount: mod.strikeCount,
+      });
+      return;
+    }
+
     const result = await query(`
       INSERT INTO statuses (user_id, content, type, background_color, media_url)
       VALUES ($1, $2, $3, $4, $5)

@@ -1,14 +1,20 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as Contacts from "expo-contacts";
+import type { ExistingContact } from "expo-contacts";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
+  Dimensions,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   Share,
   StyleSheet,
@@ -18,6 +24,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { DismissibleModal } from "@/components/DismissibleModal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
@@ -25,6 +32,46 @@ import { formatTime } from "@/utils/time";
 import { getApiUrl } from "@/lib/api";
 
 const BASE_URL = getApiUrl();
+const SCREEN_H = Dimensions.get("window").height;
+
+type AddPickRow = { id: string; name: string; phone: string };
+
+function digitsOnly(p: string): string {
+  return p.replace(/\D/g, "");
+}
+
+function buildAddPickRows(data: ExistingContact[]): AddPickRow[] {
+  const out: AddPickRow[] = [];
+  for (const c of data) {
+    const nameRaw = (c.name ?? "").trim();
+    const phones = (c.phoneNumbers ?? []).map((x) => (x.number ?? "").trim()).filter(Boolean);
+    if (!nameRaw && phones.length === 0) continue;
+    const displayName = nameRaw || phones[0]!;
+    const primaryPhone = phones[0] ?? "";
+    out.push({ id: String(c.id), name: displayName, phone: primaryPhone });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  return out;
+}
+
+async function loadPagedDeviceContacts(): Promise<ExistingContact[]> {
+  const fields = [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers];
+  const aggregated: ExistingContact[] = [];
+  let pageOffset = 0;
+  const pageSize = 500;
+  for (let guard = 0; guard < 200; guard++) {
+    const res = await Contacts.getContactsAsync({
+      fields,
+      pageSize,
+      pageOffset,
+      sort: Contacts.SortTypes.FirstName,
+    });
+    aggregated.push(...res.data);
+    if (!res.hasNextPage) break;
+    pageOffset += res.data.length;
+  }
+  return aggregated;
+}
 
 type GroupMember = {
   id: number;
@@ -37,6 +84,12 @@ type GroupMember = {
   is_admin: boolean;
   can_send_messages?: boolean;
 };
+
+function isPhoneAlreadyInGroup(phone: string, groupMembers: GroupMember[]): boolean {
+  const d = digitsOnly(phone);
+  if (!d) return false;
+  return groupMembers.some((m) => m.phone && digitsOnly(m.phone) === d);
+}
 
 type InfoRowProps = {
   icon: string;
@@ -95,6 +148,11 @@ export default function ChatInfoScreen() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [memberMenuVisible, setMemberMenuVisible] = useState(false);
   const [selectedMember, setSelectedMember] = useState<GroupMember | null>(null);
+  const [disappearPickerOpen, setDisappearPickerOpen] = useState(false);
+  const [addPickRows, setAddPickRows] = useState<AddPickRow[]>([]);
+  const [addPickLoading, setAddPickLoading] = useState(false);
+  const [addPickPermissionDenied, setAddPickPermissionDenied] = useState(false);
+  const [lastServerSearchEmpty, setLastServerSearchEmpty] = useState(false);
   const [mediaMessages, setMediaMessages] = useState<Array<{ id: number; type: string; media_url: string; content: string }>>([]);
   const [groupMessagingPolicy, setGroupMessagingPolicy] = useState<"everyone" | "admins_only" | "allowlist">("everyone");
 
@@ -220,14 +278,67 @@ export default function ChatInfoScreen() {
     ]);
   };
 
-  const setDisappearTimer = () => {
-    Alert.alert("Disappearing Messages", "Set a time limit for messages", [
-      { text: "Off", onPress: () => { setChatDisappear(id!, null); setDisappearing(null); } },
-      { text: "24 hours", onPress: () => { setChatDisappear(id!, 86400); setDisappearing(86400); } },
-      { text: "7 days", onPress: () => { setChatDisappear(id!, 604800); setDisappearing(604800); } },
-      { text: "90 days", onPress: () => { setChatDisappear(id!, 7776000); setDisappearing(7776000); } },
-      { text: "Cancel", style: "cancel" },
-    ]);
+  const closeAddMemberModal = () => {
+    setAddMemberModal(false);
+    setSearchPhone("");
+    setSearchResult(null);
+    setAddPickRows([]);
+    setAddPickLoading(false);
+    setAddPickPermissionDenied(false);
+    setLastServerSearchEmpty(false);
+  };
+
+  useEffect(() => {
+    if (!addMemberModal || Platform.OS === "web") return;
+    let cancelled = false;
+    setAddPickLoading(true);
+    setAddPickPermissionDenied(false);
+    void (async () => {
+      try {
+        const { status } = await Contacts.requestPermissionsAsync();
+        if (status !== "granted") {
+          if (!cancelled) {
+            setAddPickRows([]);
+            setAddPickPermissionDenied(true);
+          }
+          return;
+        }
+        const raw = await loadPagedDeviceContacts();
+        if (cancelled) return;
+        setAddPickRows(buildAddPickRows(raw));
+      } catch {
+        if (!cancelled) setAddPickRows([]);
+      } finally {
+        if (!cancelled) setAddPickLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [addMemberModal]);
+
+  const addPickFiltered = useMemo(() => {
+    const q = searchPhone.trim().toLowerCase();
+    const qDigits = digitsOnly(searchPhone);
+    return addPickRows.filter((r) => {
+      if (isPhoneAlreadyInGroup(r.phone, members)) return false;
+      if (!q) return true;
+      if (r.name.toLowerCase().includes(q)) return true;
+      if (qDigits.length > 0 && digitsOnly(r.phone).includes(qDigits)) return true;
+      return false;
+    });
+  }, [addPickRows, searchPhone, members]);
+
+  const applyDisappear = (seconds: number | null) => {
+    if (!id) return;
+    if (seconds === null) {
+      setChatDisappear(id, null);
+      setDisappearing(null);
+    } else {
+      setChatDisappear(id, seconds);
+      setDisappearing(seconds);
+    }
+    setDisappearPickerOpen(false);
   };
 
   const disappearLabel = disappearing === null
@@ -334,12 +445,20 @@ export default function ChatInfoScreen() {
   };
 
   const searchUser = async () => {
-    if (!searchPhone) return;
+    const raw = searchPhone.trim();
+    if (!raw) return;
+    setLastServerSearchEmpty(false);
     try {
-      const res = await fetch(`${BASE_URL}/api/users/search/${searchPhone}`);
+      const enc = encodeURIComponent(raw.replace(/\s+/g, ""));
+      const res = await fetch(`${BASE_URL}/api/users/search/${enc}`);
       const data = await res.json();
-      setSearchResult(data.users?.[0] ?? null);
-    } catch { setSearchResult(null); }
+      const first = data.users?.[0] ?? null;
+      setSearchResult(first);
+      setLastServerSearchEmpty(!first);
+    } catch {
+      setSearchResult(null);
+      setLastServerSearchEmpty(true);
+    }
   };
 
   const addMember = async (memberId: number) => {
@@ -353,11 +472,40 @@ export default function ChatInfoScreen() {
         setAddMemberModal(false);
         setSearchPhone("");
         setSearchResult(null);
+        setAddPickRows([]);
+        setAddPickLoading(false);
+        setAddPickPermissionDenied(false);
+        setLastServerSearchEmpty(false);
         fetchMembers();
       } else {
         Alert.alert("Error", data.message ?? "Could not add member.");
       }
     } catch { Alert.alert("Error", "Could not add member."); }
+  };
+
+  const lookupContactAndAdd = async (row: AddPickRow) => {
+    if (!id || !row.phone?.trim()) {
+      Alert.alert("No phone", "This contact has no phone number on file.");
+      return;
+    }
+    if (isPhoneAlreadyInGroup(row.phone, members)) {
+      Alert.alert("Already in group", "This person is already a member.");
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const enc = encodeURIComponent(row.phone.replace(/\s+/g, ""));
+    try {
+      const res = await fetch(`${BASE_URL}/api/users/search/${enc}`);
+      const data = await res.json();
+      const u = data.users?.[0] as { id: number } | undefined;
+      if (!u) {
+        Alert.alert("Not on Videh", "This number is not registered on Videh yet. Ask them to sign up first.");
+        return;
+      }
+      await addMember(u.id);
+    } catch {
+      Alert.alert("Error", "Could not look up this contact.");
+    }
   };
 
   const removeMember = (member: GroupMember) => {
@@ -591,7 +739,7 @@ export default function ChatInfoScreen() {
             label="Disappearing messages"
             value={disappearLabel}
             colors={colors}
-            onPress={setDisappearTimer}
+            onPress={() => setDisappearPickerOpen(true)}
           />
           {isGroup && (
             <InfoRow
@@ -722,10 +870,10 @@ export default function ChatInfoScreen() {
         </View>
       </ScrollView>
 
-      {/* Profile Photo Fullscreen */}
+      {/* Profile Photo Fullscreen — tap outside / back closes */}
       <Modal visible={photoVisible} transparent animationType="fade" onRequestClose={() => setPhotoVisible(false)}>
-        <View style={styles.photoModal}>
-          <TouchableOpacity style={styles.photoClose} onPress={() => setPhotoVisible(false)}>
+        <Pressable style={styles.photoModal} onPress={() => setPhotoVisible(false)}>
+          <TouchableOpacity style={styles.photoClose} onPress={() => setPhotoVisible(false)} activeOpacity={0.8}>
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.photoName}>{name ?? chat?.name}</Text>
@@ -736,37 +884,85 @@ export default function ChatInfoScreen() {
               <Text style={styles.bigAvatarFullText}>{initials}</Text>
             </View>
           )}
-        </View>
+        </Pressable>
       </Modal>
 
-      {/* Add Member Modal */}
-      <Modal visible={addMemberModal} transparent animationType="slide" onRequestClose={() => setAddMemberModal(false)}>
-        <View style={styles.addMemberModalWrap}>
-          <View style={[styles.addMemberSheet, { backgroundColor: colors.card }]}>
+      {/* Disappearing messages — modal (tap scrim or back to dismiss) */}
+      <DismissibleModal visible={disappearPickerOpen} onClose={() => setDisappearPickerOpen(false)} animationType="fade">
+        <View style={styles.disappearCenter}>
+          <View style={[styles.disappearCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.disappearTitle, { color: colors.foreground }]}>Disappearing Messages</Text>
+            <Text style={[styles.disappearSub, { color: colors.mutedForeground }]}>Set a time limit for messages</Text>
+            <TouchableOpacity style={styles.disappearRow} onPress={() => applyDisappear(null)}>
+              <Text style={[styles.disappearRowText, { color: colors.primary }]}>Off</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.disappearRow} onPress={() => applyDisappear(86400)}>
+              <Text style={[styles.disappearRowText, { color: colors.primary }]}>24 hours</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.disappearRow} onPress={() => applyDisappear(604800)}>
+              <Text style={[styles.disappearRowText, { color: colors.primary }]}>7 days</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.disappearRow} onPress={() => applyDisappear(7776000)}>
+              <Text style={[styles.disappearRowText, { color: colors.primary }]}>90 days</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.disappearRow} onPress={() => setDisappearPickerOpen(false)}>
+              <Text style={[styles.disappearCancel, { color: colors.mutedForeground }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </DismissibleModal>
+
+      {/* Add Member Modal — device contacts + phone search */}
+      <DismissibleModal visible={addMemberModal} onClose={closeAddMemberModal} animationType="slide">
+        <KeyboardAvoidingView
+          style={styles.addMemberOuter}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
+        >
+          <View
+            style={[
+              styles.addMemberSheet,
+              { backgroundColor: colors.card, height: Math.min(SCREEN_H * 0.88, 640), maxHeight: SCREEN_H * 0.92 },
+            ]}
+          >
             <View style={styles.addMemberTitle}>
               <Text style={[styles.addMemberTitleText, { color: colors.foreground }]}>Add participant</Text>
-              <TouchableOpacity onPress={() => { setAddMemberModal(false); setSearchPhone(""); setSearchResult(null); }}>
+              <TouchableOpacity onPress={closeAddMemberModal} hitSlop={12}>
                 <Ionicons name="close" size={22} color={colors.foreground} />
               </TouchableOpacity>
             </View>
-            <View style={[styles.searchRow, { backgroundColor: colors.muted }]}>
-              <Ionicons name="search" size={16} color={colors.mutedForeground} />
+            <View
+              style={[
+                styles.searchInputWrap,
+                { borderColor: colors.border, backgroundColor: colors.background },
+              ]}
+            >
+              <Ionicons name="search" size={18} color={colors.mutedForeground} />
               <TextInput
                 style={[styles.searchInput, { color: colors.foreground }]}
                 value={searchPhone}
-                onChangeText={setSearchPhone}
-                placeholder="Search by phone number..."
+                onChangeText={(t) => {
+                  setSearchPhone(t);
+                  setSearchResult(null);
+                  setLastServerSearchEmpty(false);
+                }}
+                placeholder="Search name or phone number..."
                 placeholderTextColor={colors.mutedForeground}
-                keyboardType="phone-pad"
+                keyboardType="default"
                 returnKeyType="search"
                 onSubmitEditing={searchUser}
+                autoCorrect={false}
+                autoCapitalize="none"
+                underlineColorAndroid="transparent"
+                selectionColor={colors.primary}
+                caretHidden={false}
               />
             </View>
             <TouchableOpacity style={[styles.searchBtn, { backgroundColor: colors.primary }]} onPress={searchUser}>
-              <Text style={{ color: "#fff", fontWeight: "600" }}>Search</Text>
+              <Text style={{ color: "#fff", fontWeight: "600" }}>Search on Videh</Text>
             </TouchableOpacity>
-            {searchResult && (
-              <View style={[styles.searchResultRow, { borderColor: colors.border }]}>
+            {searchResult ? (
+              <View style={[styles.searchResultRow, { borderColor: colors.border, marginBottom: 10 }]}>
                 <View style={[styles.memberAvatar, { backgroundColor: `hsl(${(searchResult.name ?? "?").charCodeAt(0) * 37 % 360},50%,45%)` }]}>
                   <Text style={styles.memberInitials}>{(searchResult.name ?? "?").slice(0, 2).toUpperCase()}</Text>
                 </View>
@@ -778,17 +974,78 @@ export default function ChatInfoScreen() {
                   <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>Add</Text>
                 </TouchableOpacity>
               </View>
-            )}
-            {searchPhone.length > 0 && searchResult === null && (
-              <Text style={[styles.noResult, { color: colors.mutedForeground }]}>No user found with this number</Text>
-            )}
+            ) : null}
+            {lastServerSearchEmpty && searchPhone.trim().length > 0 ? (
+              <Text style={[styles.noResult, { color: colors.mutedForeground, marginBottom: 8 }]}>No user found with this number</Text>
+            ) : null}
+            {addPickPermissionDenied ? (
+              <Text style={[styles.addPickHint, { color: colors.mutedForeground }]}>
+                Allow Contacts access in system settings to pick people from your phonebook.
+              </Text>
+            ) : null}
+            {addPickLoading ? (
+              <View style={styles.addPickLoadingWrap}>
+                <ActivityIndicator color={colors.primary} />
+                <Text style={[styles.addPickHint, { color: colors.mutedForeground, marginTop: 8 }]}>Loading contacts…</Text>
+              </View>
+            ) : null}
+            <Text style={[styles.addPickSectionLabel, { color: colors.mutedForeground }]}>Contacts</Text>
+            <FlatList
+              data={addPickFiltered}
+              keyExtractor={(item) => item.id}
+              keyboardShouldPersistTaps="handled"
+              style={styles.addPickList}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 16, flexGrow: 1 }}
+              nestedScrollEnabled
+              renderItem={({ item }) => {
+                const hasPhone = Boolean(item.phone?.trim());
+                return (
+                  <View style={[styles.addPickRow, { borderBottomColor: colors.border }]}>
+                    <View
+                      style={[
+                        styles.memberAvatar,
+                        { backgroundColor: `hsl(${(item.name || "?").charCodeAt(0) * 37 % 360},50%,45%)` },
+                      ]}
+                    >
+                      <Text style={styles.memberInitials}>{(item.name || "?").slice(0, 2).toUpperCase()}</Text>
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[styles.memberName, { color: colors.foreground }]} numberOfLines={1}>
+                        {item.name}
+                      </Text>
+                      <Text style={[styles.memberPhone, { color: colors.mutedForeground }]} numberOfLines={1}>
+                        {hasPhone ? item.phone : "No phone number"}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.addBtn, { backgroundColor: colors.primary, opacity: !hasPhone ? 0.45 : 1 }]}
+                      disabled={!hasPhone}
+                      onPress={() => void lookupContactAndAdd(item)}
+                    >
+                      <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>Add</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              }}
+              ListEmptyComponent={
+                !addPickLoading && !addPickPermissionDenied ? (
+                  <Text style={[styles.addPickHint, { color: colors.mutedForeground }]}>
+                    {Platform.OS === "web"
+                      ? "Contact list is available on the mobile app. Use search above to add by phone."
+                      : addPickRows.length === 0
+                        ? "No contacts on this device, or contacts could not be loaded."
+                        : "No contacts match your search."}
+                  </Text>
+                ) : null
+              }
+            />
           </View>
-        </View>
-      </Modal>
+        </KeyboardAvoidingView>
+      </DismissibleModal>
 
       {/* Member Context Menu */}
-      <Modal visible={memberMenuVisible} transparent animationType="fade" onRequestClose={() => setMemberMenuVisible(false)}>
-        <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setMemberMenuVisible(false)}>
+      <DismissibleModal visible={memberMenuVisible} onClose={() => setMemberMenuVisible(false)} animationType="fade">
+        <View style={styles.menuOverlay}>
           <View style={[styles.menuCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.menuTitle, { color: colors.foreground }]}>{selectedMember?.name}</Text>
             <TouchableOpacity style={styles.menuItem} onPress={() => selectedMember && goToChat(selectedMember)}>
@@ -826,8 +1083,8 @@ export default function ChatInfoScreen() {
               </>
             )}
           </View>
-        </TouchableOpacity>
-      </Modal>
+        </View>
+      </DismissibleModal>
     </View>
   );
 }
@@ -891,24 +1148,53 @@ const styles = StyleSheet.create({
   dangerText: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
 
   photoModal: { flex: 1, backgroundColor: "#000", justifyContent: "center", alignItems: "center" },
+  disappearCenter: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 28 },
+  disappearCard: { width: "100%", maxWidth: 320, borderRadius: 14, paddingVertical: 8, overflow: "hidden" },
+  disappearTitle: { fontSize: 18, fontFamily: "Inter_700Bold", paddingHorizontal: 18, paddingTop: 14, paddingBottom: 4 },
+  disappearSub: { fontSize: 14, fontFamily: "Inter_400Regular", paddingHorizontal: 18, paddingBottom: 10 },
+  disappearRow: { paddingVertical: 14, paddingHorizontal: 18 },
+  disappearRowText: { fontSize: 17, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  disappearCancel: { fontSize: 17, fontFamily: "Inter_500Medium", textAlign: "center" },
   photoClose: { position: "absolute", top: 56, left: 16, zIndex: 10, padding: 8 },
   photoName: { position: "absolute", top: 60, alignSelf: "center", color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold", zIndex: 10 },
   photoFull: { width: "100%", height: "80%" },
   bigAvatarFull: { width: 220, height: 220, borderRadius: 110, alignItems: "center", justifyContent: "center" },
   bigAvatarFullText: { color: "#fff", fontSize: 80, fontFamily: "Inter_700Bold" },
 
-  addMemberModalWrap: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.5)" },
-  addMemberSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, minHeight: 300 },
+  addMemberOuter: { flex: 1, justifyContent: "flex-end", width: "100%" },
+  addMemberSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 12,
+    width: "100%",
+    flexGrow: 0,
+    flexDirection: "column",
+  },
   addMemberTitle: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
   addMemberTitleText: { fontSize: 18, fontFamily: "Inter_700Bold" },
-  searchRow: { flexDirection: "row", alignItems: "center", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, gap: 8, marginBottom: 12 },
-  searchInput: { flex: 1, fontSize: 15 },
-  searchBtn: { borderRadius: 10, paddingVertical: 12, alignItems: "center", marginBottom: 16 },
+  searchInputWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    minHeight: 48,
+    gap: 10,
+    marginBottom: 12,
+  },
+  searchInput: { flex: 1, fontSize: 16, paddingVertical: Platform.OS === "android" ? 10 : 12, minHeight: 44 },
+  searchBtn: { borderRadius: 10, paddingVertical: 12, alignItems: "center", marginBottom: 12 },
+  addPickSectionLabel: { fontSize: 12, fontFamily: "Inter_600SemiBold", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 },
+  addPickList: { flex: 1, minHeight: 120 },
+  addPickRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  addPickHint: { fontSize: 14, lineHeight: 20 },
+  addPickLoadingWrap: { alignItems: "center", paddingVertical: 12 },
   searchResultRow: { flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderRadius: 12, padding: 12 },
   addBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
   noResult: { textAlign: "center", fontSize: 14, marginTop: 8 },
 
-  menuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", alignItems: "center" },
+  menuOverlay: { flex: 1, justifyContent: "center", alignItems: "center" },
   menuCard: { width: 260, borderRadius: 16, overflow: "hidden", paddingVertical: 8 },
   menuTitle: { fontSize: 16, fontFamily: "Inter_700Bold", paddingHorizontal: 16, paddingVertical: 10 },
   menuItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 14 },

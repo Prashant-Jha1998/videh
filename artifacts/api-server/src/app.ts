@@ -1,5 +1,6 @@
 import express, { type Express } from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import cron from "node-cron";
 import { EXPO_ANDROID_CHANNEL_ID, isExpoPushToken, sendExpoPush } from "./lib/expoPush";
@@ -32,6 +33,7 @@ app.use(
   }),
 );
 app.use(cors());
+app.use(cookieParser());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -40,6 +42,28 @@ const currentDir = path.dirname(currentFilePath);
 const apiServerDir = path.resolve(currentDir, "..");
 const videhWebDistDir = path.resolve(apiServerDir, "../videh-web/dist/public");
 const videhWebIndexPath = path.join(videhWebDistDir, "index.html");
+const adminWebDistDir = path.resolve(apiServerDir, "../admin-web/dist/public");
+const adminWebIndexPath = path.join(adminWebDistDir, "index.html");
+
+if (fs.existsSync(adminWebIndexPath)) {
+  app.use(
+    "/admin",
+    express.static(adminWebDistDir, {
+      index: false,
+      redirect: false,
+    }),
+  );
+  app.get(/^\/admin\/?(?:.*)?$/, (req, res, next) => {
+    const rel = req.path.replace(/^\/admin\/?/, "");
+    if (rel.startsWith("assets/") || /\.[a-zA-Z0-9]+$/.test(rel)) {
+      next();
+      return;
+    }
+    res.sendFile(adminWebIndexPath);
+  });
+} else {
+  logger.warn({ adminWebDistDir }, "admin-web build not found; /admin route disabled");
+}
 
 if (fs.existsSync(videhWebIndexPath)) {
   app.use(
@@ -62,6 +86,7 @@ app.get("/", (_req, res) => {
     status: "ok",
     apiHealth: "/api/healthz",
     videhWeb: "/videh-web/",
+    adminPanel: fs.existsSync(adminWebIndexPath) ? "/admin/" : null,
   });
 });
 

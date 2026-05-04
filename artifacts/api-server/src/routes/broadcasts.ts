@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
 import { query } from "../lib/db";
+import { enforceModerationForActivity } from "../lib/moderation";
 
 const router = Router();
 
@@ -84,6 +85,23 @@ router.post("/:listId/send", async (req: Request, res: Response) => {
   const { senderId, content, type = "text", mediaUrl } = req.body as any;
   if (!senderId || !content) { res.status(400).json({ success: false, message: "senderId and content required" }); return; }
   try {
+    const mod = await enforceModerationForActivity(senderId, "broadcast", {
+      content,
+      mediaUrl: mediaUrl ?? null,
+      type,
+    });
+    if (!mod.allowed) {
+      res.status(403).json({
+        success: false,
+        code: mod.code,
+        message: mod.message,
+        suspendedUntil: mod.suspendedUntil ?? null,
+        alert: mod.alert,
+        strikeCount: mod.strikeCount,
+      });
+      return;
+    }
+
     const listResult = await query("SELECT * FROM broadcast_lists WHERE id=$1 AND creator_id=$2", [req.params.listId, senderId]);
     if (listResult.rows.length === 0) { res.status(403).json({ success: false, message: "Not authorized" }); return; }
 

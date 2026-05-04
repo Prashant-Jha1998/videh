@@ -12,6 +12,7 @@ import khataRouter from "./khata";
 import translateRouter from "./translate";
 import sosRouter from "./sos";
 import broadcastsRouter from "./broadcasts";
+import adminRouter from "./admin";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use("/khata", khataRouter);
 router.use("/translate", translateRouter);
 router.use("/sos", sosRouter);
 router.use("/broadcasts", broadcastsRouter);
+router.use("/admin", adminRouter);
 
 export default router;

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --env-file=.env --env-file=../../.env ./build.mjs && node --env-file=.env --env-file=../../.env --enable-source-maps ./dist/index.mjs",
-    "build": "node ./build.mjs && pnpm --dir ../videh-web run build",
+    "build": "node ./build.mjs && pnpm --dir ../videh-web run build && pnpm --dir ../admin-web run build",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -22,6 +22,7 @@
     "express": "^5",
     "multer": "^2.1.1",
     "node-cron": "^4.2.1",
+    "otpauth": "^9.3.6",
     "pg": "^8.20.0",
     "pino": "^9",
     "pino-http": "^10"

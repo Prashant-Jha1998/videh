@@ -8,7 +8,6 @@ import {
   Alert,
   Animated,
   Dimensions,
-  Modal,
   Platform,
   StyleSheet,
   Text,
@@ -18,6 +17,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { DismissibleModal } from "@/components/DismissibleModal";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
 
@@ -350,12 +350,15 @@ export default function ViewStatusScreen() {
       </View>
 
       {/* ── 3-DOT MENU MODAL ── */}
-      <Modal visible={showMenu} transparent animationType="fade" onRequestClose={() => { setShowMenu(false); startAnim(currentIdx, pausedProgressRef.current); }}>
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => { setShowMenu(false); startAnim(currentIdx, pausedProgressRef.current); }}
-        >
+      <DismissibleModal
+        visible={showMenu}
+        onClose={() => {
+          setShowMenu(false);
+          startAnim(currentIdx, pausedProgressRef.current);
+        }}
+        animationType="fade"
+      >
+        <View style={styles.statusMenuLift}>
           <View style={styles.menuCard}>
             {MENU_ITEMS.map((item, idx) => (
               <TouchableOpacity
@@ -372,8 +375,8 @@ export default function ViewStatusScreen() {
               </TouchableOpacity>
             ))}
           </View>
-        </TouchableOpacity>
-      </Modal>
+        </View>
+      </DismissibleModal>
     </View>
   );
 }
@@ -418,7 +421,7 @@ const styles = StyleSheet.create({
   reactionChipEmoji: { fontSize: 15 },
   reactionChipCount: { color: "#fff", fontSize: 12, fontFamily: "Inter_600SemiBold" },
   // Menu modal
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  statusMenuLift: { flex: 1, justifyContent: "flex-end" },
   menuCard: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 20 },
   menuItem: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingVertical: 16, gap: 16 },
   menuItemBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#f0f2f5" },

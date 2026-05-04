@@ -106,7 +106,13 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
           transparent={true}
           onRequestClose={() => setIsModalVisible(false)}
         >
-          <View style={styles.modalOverlay}>
+          <View style={{ flex: 1 }}>
+            <Pressable
+              style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(0, 0, 0, 0.5)" }]}
+              onPress={() => setIsModalVisible(false)}
+              accessibilityLabel="Dismiss"
+            />
+            <View style={styles.modalOverlayLift} pointerEvents="box-none">
             <View
               style={[
                 styles.modalContainer,
@@ -163,6 +169,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
                   </Text>
                 </View>
               </ScrollView>
+            </View>
             </View>
           </View>
         </Modal>
@@ -228,9 +235,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 16,
   },
-  modalOverlay: {
+  modalOverlayLift: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "flex-end",
   },
   modalContainer: {

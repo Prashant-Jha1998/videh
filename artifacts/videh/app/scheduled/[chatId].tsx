@@ -144,8 +144,9 @@ export default function ScheduledScreen() {
 
       {/* Add modal */}
       <Modal visible={showAdd} animationType="slide" transparent onRequestClose={() => setShowAdd(false)}>
-        <Pressable style={styles.overlay} onPress={() => setShowAdd(false)} />
-        <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
+        <View style={{ flex: 1 }}>
+          <Pressable style={styles.overlay} onPress={() => setShowAdd(false)} />
+          <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
           <Text style={styles.modalTitle}>Schedule message</Text>
 
           <Text style={styles.label}>Message</Text>
@@ -186,6 +187,7 @@ export default function ScheduledScreen() {
               <Text style={styles.schedBtnTxt}>Schedule ⏰</Text>
             )}
           </Pressable>
+        </View>
         </View>
       </Modal>
     </View>

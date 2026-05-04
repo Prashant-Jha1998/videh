@@ -192,8 +192,13 @@ export default function KhataScreen() {
 
       {/* Add modal */}
       <Modal visible={showAdd} animationType="slide" transparent onRequestClose={() => setShowAdd(false)}>
-        <Pressable style={styles.overlay} onPress={() => setShowAdd(false)} />
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <View style={{ flex: 1 }}>
+          <Pressable style={styles.overlay} onPress={() => setShowAdd(false)} />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={{ flex: 1, justifyContent: "flex-end" }}
+            pointerEvents="box-none"
+          >
           <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
             <Text style={styles.modalTitle}>💰 Add ledger entry</Text>
 
@@ -231,7 +236,8 @@ export default function KhataScreen() {
               )}
             </Pressable>
           </View>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
     </View>
   );

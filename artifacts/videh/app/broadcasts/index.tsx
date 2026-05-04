@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { DismissibleModal } from "@/components/DismissibleModal";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
@@ -203,9 +204,9 @@ export default function BroadcastsScreen() {
       />
 
       {/* Create List Modal */}
-      <Modal visible={createModal} transparent animationType="slide" onRequestClose={() => setCreateModal(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setCreateModal(false)}>
-          <TouchableOpacity activeOpacity={1} style={[styles.modalCard, { backgroundColor: colors.card }]}>
+      <DismissibleModal visible={createModal} onClose={() => setCreateModal(false)} animationType="slide">
+        <View style={styles.modalAlignBottom}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.modalTitle, { color: colors.foreground }]}>New broadcast list</Text>
             <TextInput
               style={[styles.input, { backgroundColor: colors.background, color: colors.foreground, borderColor: colors.border }]}
@@ -223,9 +224,9 @@ export default function BroadcastsScreen() {
                 <Text style={[styles.modalBtnText, { color: "#fff" }]}>Create</Text>
               </TouchableOpacity>
             </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+          </View>
+        </View>
+      </DismissibleModal>
 
       {/* Detail Modal */}
       <Modal visible={detailModal} animationType="slide" onRequestClose={() => setDetailModal(false)}>
@@ -282,9 +283,9 @@ export default function BroadcastsScreen() {
       </Modal>
 
       {/* Send Modal */}
-      <Modal visible={sendModal} transparent animationType="slide" onRequestClose={() => setSendModal(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSendModal(false)}>
-          <TouchableOpacity activeOpacity={1} style={[styles.modalCard, { backgroundColor: colors.card }]}>
+      <DismissibleModal visible={sendModal} onClose={() => setSendModal(false)} animationType="slide">
+        <View style={styles.modalAlignBottom}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.modalTitle, { color: colors.foreground }]}>Broadcast Message</Text>
             <Text style={[styles.modalSub, { color: colors.mutedForeground }]}>
               This message will be sent separately to {recipients.length} people
@@ -308,9 +309,9 @@ export default function BroadcastsScreen() {
                 <Text style={[styles.modalBtnText, { color: "#fff" }]}>Send</Text>
               </TouchableOpacity>
             </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+          </View>
+        </View>
+      </DismissibleModal>
 
       {/* Add Contact Modal */}
       <Modal visible={addContactModal} transparent animationType="slide" onRequestClose={() => setAddContactModal(false)}>
@@ -379,7 +380,7 @@ const styles = StyleSheet.create({
   sendBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12, borderRadius: 12, gap: 8 },
   sendBtnText: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   sendHint: { fontSize: 12, fontFamily: "Inter_400Regular", textAlign: "center" },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  modalAlignBottom: { flex: 1, justifyContent: "flex-end" },
   modalCard: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, gap: 16 },
   modalTitle: { fontSize: 18, fontFamily: "Inter_600SemiBold" },
   modalSub: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: -8 },
