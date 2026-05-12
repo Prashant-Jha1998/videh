@@ -1,1 +1,1 @@
-export { useAgoraCall } from "./useAgoraCall.native";
+export { useVidehCall as useAgoraCall } from "./useVidehCall.native";

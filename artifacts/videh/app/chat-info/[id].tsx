@@ -127,7 +127,7 @@ export default function ChatInfoScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
-  const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, setChatDisappear, createDirectChat } = useApp();
+  const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, reportUser, setChatDisappear, createDirectChat } = useApp();
 
   const chat = chats.find((c) => c.id === id);
   const isGroup = chat?.isGroup ?? false;
@@ -173,6 +173,12 @@ export default function ChatInfoScreen() {
         if (other) {
           chatOtherUserId.current = other.id;
           setAboutText(other.about || "Hey there! I am using Videh.");
+          fetch(`${BASE_URL}/api/users/${user?.dbId}/block-status?otherUserId=${other.id}`)
+            .then((r) => r.json())
+            .then((s: { success?: boolean; i_blocked_them?: boolean }) => {
+              if (s.success) setIsBlocked(Boolean(s.i_blocked_them));
+            })
+            .catch(() => {});
         }
       }
     } catch { }
@@ -269,6 +275,33 @@ export default function ChatInfoScreen() {
         },
       ]
     );
+  };
+
+  const doReport = () => {
+    const targetId = chatOtherUserId.current;
+    if (isGroup || !targetId) {
+      Alert.alert("Report", "Your report has been submitted.");
+      return;
+    }
+    Alert.alert(`Report ${name ?? "contact"}?`, "The latest messages from this chat may be reviewed. This contact will not be notified.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Report",
+        onPress: async () => {
+          await reportUser(targetId, { chatId: id, reason: "reported_contact" });
+          Alert.alert("Report sent", "Thank you. We will review this contact.");
+        },
+      },
+      {
+        text: "Report and block",
+        style: "destructive",
+        onPress: async () => {
+          await reportUser(targetId, { chatId: id, reason: "reported_and_blocked", block: true });
+          setIsBlocked(true);
+          Alert.alert("Reported and blocked", "This contact can no longer call or message you.");
+        },
+      },
+    ]);
   };
 
   const doArchive = () => {
@@ -863,7 +896,7 @@ export default function ChatInfoScreen() {
               <Text style={[styles.dangerText, { color: colors.destructive }]}>Leave group</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity style={[styles.dangerRow, { borderTopWidth: 0.5, borderTopColor: colors.border }]} onPress={() => Alert.alert("Report", "Your report has been submitted.")} activeOpacity={0.7}>
+          <TouchableOpacity style={[styles.dangerRow, { borderTopWidth: 0.5, borderTopColor: colors.border }]} onPress={doReport} activeOpacity={0.7}>
             <Ionicons name="flag-outline" size={20} color={colors.destructive} />
             <Text style={[styles.dangerText, { color: colors.destructive }]}>Report {isGroup ? "group" : name}</Text>
           </TouchableOpacity>

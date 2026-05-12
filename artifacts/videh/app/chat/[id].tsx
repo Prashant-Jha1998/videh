@@ -591,6 +591,7 @@ export default function ChatScreen() {
     chats, user, sendMessage, sendImageMessage, sendAudioMessage,
     setTyping, clearTyping, markAsRead, deleteMessage, deleteForEveryone,
     editMessage, reactToMessage, starMessage, muteChat, createDirectChat,
+    blockUser, unblockUser, reportUser,
     loadMessages, forwardMessage, updateLocationOnServer, stopLiveLocationSession,
   } = useApp();
 
@@ -692,6 +693,7 @@ export default function ChatScreen() {
   const peerNameForVideo = name ?? chat?.name ?? "Chat";
 
   const [groupSendPermission, setGroupSendPermission] = useState<{ canSend: boolean; policy: string } | null>(null);
+  const [blockState, setBlockState] = useState<{ iBlockedThem: boolean; theyBlockedMe: boolean }>({ iBlockedThem: false, theyBlockedMe: false });
 
   useEffect(() => {
     setGroupSendPermission(null);
@@ -723,8 +725,32 @@ export default function ChatScreen() {
     }, [chatId, chat?.isGroup, user?.dbId]),
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      if (!chatId || chat?.isGroup || !user?.dbId) {
+        setBlockState({ iBlockedThem: false, theyBlockedMe: false });
+        return;
+      }
+      const otherId = chat?.otherUserId;
+      if (!otherId) return;
+      let cancelled = false;
+      fetch(`${BASE_URL}/api/users/${user.dbId}/block-status?otherUserId=${otherId}`)
+        .then((r) => r.json())
+        .then((s: { success?: boolean; i_blocked_them?: boolean; they_blocked_me?: boolean }) => {
+          if (!cancelled && s.success) {
+            setBlockState({ iBlockedThem: Boolean(s.i_blocked_them), theyBlockedMe: Boolean(s.they_blocked_me) });
+          }
+        })
+        .catch(() => {});
+      return () => { cancelled = true; };
+    }, [chatId, chat?.isGroup, chat?.otherUserId, user?.dbId])
+  );
+
   const composerEnabled =
-    !initializing && (editTarget != null || !chat?.isGroup || groupSendPermission?.canSend === true);
+    !initializing
+    && !blockState.iBlockedThem
+    && !blockState.theyBlockedMe
+    && (editTarget != null || !chat?.isGroup || groupSendPermission?.canSend === true);
 
   const openChatVideoFullScreen = useCallback(
     async (mediaUri: string, senderIsMe: boolean, ts: number) => {
@@ -1621,6 +1647,68 @@ export default function ChatScreen() {
     }
   }, [chatId, user?.dbId]);
 
+  const directContactId = !chat?.isGroup ? chat?.otherUserId : undefined;
+
+  const handleMenuBlockToggle = useCallback(() => {
+    if (!directContactId) {
+      Alert.alert("Error", "Cannot identify this contact.");
+      return;
+    }
+    const action = blockState.iBlockedThem ? "Unblock" : "Block";
+    Alert.alert(
+      `${action} ${displayName}?`,
+      blockState.iBlockedThem
+        ? "They will be able to message and call you again."
+        : "Blocked contacts cannot message, call, or see your status updates.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: action,
+          style: blockState.iBlockedThem ? "default" : "destructive",
+          onPress: async () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            if (blockState.iBlockedThem) {
+              await unblockUser(directContactId);
+              setBlockState((prev) => ({ ...prev, iBlockedThem: false }));
+            } else {
+              await blockUser(directContactId);
+              setBlockState((prev) => ({ ...prev, iBlockedThem: true }));
+            }
+          },
+        },
+      ],
+    );
+  }, [blockState.iBlockedThem, blockUser, directContactId, displayName, unblockUser]);
+
+  const handleMenuReport = useCallback((blockAfterReport: boolean) => {
+    if (!directContactId || !chatId) {
+      Alert.alert("Report", "Your report has been submitted.");
+      return;
+    }
+    Alert.alert(
+      blockAfterReport ? `Report and block ${displayName}?` : `Report ${displayName}?`,
+      blockAfterReport
+        ? "This contact will be reported and blocked. They will not be notified."
+        : "This contact will be reported. They will not be notified.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: blockAfterReport ? "Report and block" : "Report",
+          style: blockAfterReport ? "destructive" : "default",
+          onPress: async () => {
+            await reportUser(directContactId, {
+              chatId,
+              reason: blockAfterReport ? "reported_and_blocked_from_chat_menu" : "reported_from_chat_menu",
+              block: blockAfterReport,
+            });
+            if (blockAfterReport) setBlockState((prev) => ({ ...prev, iBlockedThem: true }));
+            Alert.alert(blockAfterReport ? "Reported and blocked" : "Report sent", blockAfterReport ? "This contact can no longer call or message you." : "Thank you. We will review this contact.");
+          },
+        },
+      ],
+    );
+  }, [chatId, directContactId, displayName, reportUser]);
+
   const chatMenuItems = [
     { label: "Chat info", icon: "information-circle-outline", onPress: () => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } }) },
     { label: "Starred messages", icon: "star-outline", onPress: () => router.push("/starred") },
@@ -1633,6 +1721,13 @@ export default function ChatScreen() {
     { label: "Ledger 💰", icon: "cash-outline", onPress: () => chatId && router.push({ pathname: "/khata/[chatId]", params: { chatId, name: displayName } }) },
     { label: "Mute notifications", icon: "notifications-off-outline", onPress: () => chatId && muteChat(chatId) },
     { label: "Search", icon: "search-outline", onPress: () => { clearSelection(); setSearching(true); setSearchQuery(""); } },
+    ...(!chat?.isGroup && directContactId ? [
+      { label: blockState.iBlockedThem ? `Unblock ${displayName}` : `Block ${displayName}`, icon: blockState.iBlockedThem ? "checkmark-circle-outline" : "ban-outline", danger: !blockState.iBlockedThem, onPress: handleMenuBlockToggle },
+      { label: `Report ${displayName}`, icon: "flag-outline", danger: true, onPress: () => handleMenuReport(false) },
+      { label: "Report and block", icon: "shield-outline", danger: true, onPress: () => handleMenuReport(true) },
+    ] : [
+      { label: "Report group", icon: "flag-outline", danger: true, onPress: () => Alert.alert("Report group", "Your report has been submitted.") },
+    ]),
   ];
 
   const bulkSelectedMessages = selectedIds
@@ -1778,10 +1873,18 @@ export default function ChatScreen() {
           <View style={styles.headerActions}>
             {!searching && (
               <>
-                <TouchableOpacity style={styles.headerBtn} onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })}>
+                <TouchableOpacity
+                  style={[styles.headerBtn, (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe)) && { opacity: 0.45 }]}
+                  disabled={!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe)}
+                  onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })}
+                >
                   <Ionicons name="videocam-outline" size={22} color="#fff" />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.headerBtn} onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })}>
+                <TouchableOpacity
+                  style={[styles.headerBtn, (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe)) && { opacity: 0.45 }]}
+                  disabled={!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe)}
+                  onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })}
+                >
                   <Ionicons name="call-outline" size={22} color="#fff" />
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.headerBtn} onPress={() => setMenuOpen(true)}>
@@ -1932,6 +2035,17 @@ export default function ChatScreen() {
             >
               <Ionicons name="send" size={18} color="#fff" />
             </TouchableOpacity>
+          </View>
+        )}
+
+        {!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe) && !editTarget && (
+          <View style={[styles.groupLockBanner, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+            <Ionicons name="ban-outline" size={18} color={colors.mutedForeground} />
+            <Text style={[styles.groupLockBannerText, { color: colors.foreground }]}>
+              {blockState.iBlockedThem
+                ? "You blocked this contact. Unblock to send messages or call."
+                : "You cannot message or call this contact."}
+            </Text>
           </View>
         )}
 

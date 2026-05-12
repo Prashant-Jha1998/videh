@@ -42,16 +42,27 @@ export default function KhataScreen() {
     try {
       const r = await fetch(`${BASE_URL}/api/khata/chat/${chatId}`);
       const d = await r.json();
-      if (d.success) setEntries(d.entries);
-    } catch {}
+      if (d.success) {
+        setEntries(d.entries);
+      } else {
+        Alert.alert("Could not load ledger", d.message ?? "Please try again.");
+      }
+    } catch {
+      Alert.alert("Could not load ledger", "Please check your connection and try again.");
+    }
     setLoading(false);
   }, [chatId]);
 
   useEffect(() => { load(); }, [load]);
 
   const addEntry = async () => {
-    if (!debtorName.trim() || !amount.trim() || isNaN(parseFloat(amount))) {
-      Alert.alert("Incomplete", "Name and amount are required.");
+    const parsedAmount = Number(amount);
+    if (!debtorName.trim() || !amount.trim() || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert("Incomplete", "Please enter a name and a valid amount.");
+      return;
+    }
+    if (!user?.dbId) {
+      Alert.alert("Not signed in", "Please sign in again before adding a ledger entry.");
       return;
     }
     setSaving(true);
@@ -61,9 +72,9 @@ export default function KhataScreen() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chatId: Number(chatId),
-          createdBy: user?.dbId,
+          createdBy: user.dbId,
           debtorName: debtorName.trim(),
-          amount: parseFloat(amount),
+          amount: parsedAmount,
           note: note.trim() || null,
         }),
       });
@@ -72,19 +83,24 @@ export default function KhataScreen() {
         setShowAdd(false);
         setDebtorName(""); setAmount(""); setNote("");
         load();
-      } else Alert.alert("Error", d.message);
-    } catch { Alert.alert("Error", "Network error"); }
+      } else Alert.alert("Could not save entry", d.message ?? "Please try again.");
+    } catch { Alert.alert("Could not save entry", "Please check your connection and try again."); }
     setSaving(false);
   };
 
   const markPaid = (entry: KhataEntry) => {
     Alert.alert(
       "Mark as Paid?",
-      `${entry.debtor_name}'s ₹${Number(entry.amount).toFixed(2)} entry will be marked as paid and the group will be notified.`,
+      `${entry.debtor_name}'s ₹${Number(entry.amount).toFixed(2)} entry will be marked as paid and the chat will be notified.`,
       [
         { text: "Mark paid", onPress: async () => {
-          await fetch(`${BASE_URL}/api/khata/${entry.id}/pay`, { method: "PUT" });
-          load();
+          const r = await fetch(`${BASE_URL}/api/khata/${entry.id}/pay`, { method: "PUT" });
+          if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            Alert.alert("Could not mark as paid", d.message ?? "Please try again.");
+            return;
+          }
+          await load();
         }},
         { text: "Cancel" },
       ]
@@ -94,8 +110,13 @@ export default function KhataScreen() {
   const deleteEntry = (id: number) => {
     Alert.alert("Delete?", "This entry will be deleted.", [
       { text: "Delete", style: "destructive", onPress: async () => {
-        await fetch(`${BASE_URL}/api/khata/${id}`, { method: "DELETE" });
-        load();
+        const r = await fetch(`${BASE_URL}/api/khata/${id}`, { method: "DELETE" });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          Alert.alert("Could not delete entry", d.message ?? "Please try again.");
+          return;
+        }
+        await load();
       }},
       { text: "Cancel" },
     ]);
@@ -117,7 +138,7 @@ export default function KhataScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>💰 Ledger</Text>
+          <Text style={styles.headerTitle}>Ledger</Text>
           {name ? <Text style={styles.headerSub}>{name}</Text> : null}
         </View>
         <Pressable onPress={() => setShowAdd(true)} style={styles.addBtn}>
@@ -149,7 +170,7 @@ export default function KhataScreen() {
       ) : filtered.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>
-            {filter === "pending" ? "All clear! 🎉" : "No entries found."}
+            {filter === "pending" ? "No pending entries." : "No entries found."}
           </Text>
           <Text style={styles.emptySub}>Use the + button to add an entry</Text>
         </View>
@@ -192,15 +213,15 @@ export default function KhataScreen() {
 
       {/* Add modal */}
       <Modal visible={showAdd} animationType="slide" transparent onRequestClose={() => setShowAdd(false)}>
-        <View style={{ flex: 1 }}>
+        <View style={styles.modalRoot}>
           <Pressable style={styles.overlay} onPress={() => setShowAdd(false)} />
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            style={{ flex: 1, justifyContent: "flex-end" }}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.keyboardAvoider}
             pointerEvents="box-none"
           >
           <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
-            <Text style={styles.modalTitle}>💰 Add ledger entry</Text>
+            <Text style={styles.modalTitle}>Add Ledger Entry</Text>
 
             <Text style={styles.label}>Who owes (name)</Text>
             <TextInput
@@ -218,7 +239,7 @@ export default function KhataScreen() {
               placeholderTextColor="#666"
               value={amount}
               onChangeText={setAmount}
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
             />
 
             <Text style={styles.label}>Note (optional)</Text>
@@ -269,8 +290,10 @@ const styles = StyleSheet.create({
   paidBadge: { backgroundColor: "#00A88420", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
   paidBadgeTxt: { color: "#00A884", fontSize: 12, fontWeight: "600" },
   payBtn: { },
+  modalRoot: { flex: 1 },
+  keyboardAvoider: { flex: 1, justifyContent: "flex-end" },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
-  modal: { backgroundColor: "#1F2C34", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, position: "absolute", bottom: 0, left: 0, right: 0 },
+  modal: { backgroundColor: "#1F2C34", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, width: "100%" },
   modalTitle: { color: "#fff", fontSize: 18, fontWeight: "700", marginBottom: 12 },
   label: { color: "#8696A0", fontSize: 13, marginBottom: 4, marginTop: 12 },
   input: { backgroundColor: "#2A3942", color: "#E9EEF0", borderRadius: 10, padding: 12, fontSize: 15 },

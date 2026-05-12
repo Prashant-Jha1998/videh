@@ -3,6 +3,24 @@ import { query } from "../lib/db";
 
 const router = Router();
 
+let reportTablesEnsured = false;
+async function ensureReportTables() {
+  if (reportTablesEnsured) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS user_reports (
+      id SERIAL PRIMARY KEY,
+      reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reported_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      chat_id INTEGER REFERENCES chats(id) ON DELETE SET NULL,
+      reason TEXT NOT NULL DEFAULT 'reported_by_user',
+      details TEXT,
+      block_after_report BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  reportTablesEnsured = true;
+}
+
 // Register or login user (called after OTP verification)
 router.post("/register", async (req: Request, res: Response) => {
   const { phone } = req.body as { phone?: string };
@@ -112,6 +130,21 @@ router.post("/:id/block", async (req: Request, res: Response) => {
   } catch { res.status(500).json({ success: false }); }
 });
 
+// Check block relationship between two users
+router.get("/:id/block-status", async (req: Request, res: Response) => {
+  const otherUserId = Number(req.query["otherUserId"]);
+  const userId = Number(req.params.id);
+  if (!userId || !otherUserId) { res.status(400).json({ success: false }); return; }
+  try {
+    const r = await query(`
+      SELECT
+        EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2) AS i_blocked_them,
+        EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id = $2 AND blocked_id = $1) AS they_blocked_me
+    `, [userId, otherUserId]);
+    res.json({ success: true, ...r.rows[0] });
+  } catch { res.status(500).json({ success: false }); }
+});
+
 // Unblock user
 router.delete("/:id/block", async (req: Request, res: Response) => {
   const { blockerId } = req.body as { blockerId?: number };
@@ -129,6 +162,29 @@ router.get("/:id/blocked", async (req: Request, res: Response) => {
       JOIN users u ON u.id = b.blocked_id WHERE b.blocker_id = $1
     `, [req.params.id]);
     res.json({ success: true, blocked: result.rows });
+  } catch { res.status(500).json({ success: false }); }
+});
+
+// Report user or chat, optionally block reported user
+router.post("/:id/report", async (req: Request, res: Response) => {
+  const reportedUserId = Number(req.params.id);
+  const { reporterId, chatId, reason, details, block } = req.body as {
+    reporterId?: number; chatId?: number; reason?: string; details?: string; block?: boolean;
+  };
+  if (!reporterId || !reportedUserId) { res.status(400).json({ success: false }); return; }
+  try {
+    await ensureReportTables();
+    await query(`
+      INSERT INTO user_reports (reporter_id, reported_user_id, chat_id, reason, details, block_after_report)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `, [reporterId, reportedUserId, chatId ?? null, reason ?? "reported_by_user", details ?? null, Boolean(block)]);
+    if (block) {
+      await query(
+        "INSERT INTO blocked_users (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        [reporterId, reportedUserId],
+      );
+    }
+    res.json({ success: true });
   } catch { res.status(500).json({ success: false }); }
 });
 

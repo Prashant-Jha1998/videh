@@ -8,6 +8,10 @@ import { registerExpoPushTokenWithServer } from "@/lib/pushNotifications";
 import { encodeLocationPayload, mapsUrl as buildMapsUrl } from "@/lib/locationMessage";
 
 const BASE_URL = getApiUrl();
+const STATUS_LIFETIME_MS = 24 * 60 * 60 * 1000;
+
+const getStatusExpiryTime = (status: Status) => status.expiresAt ?? status.timestamp + STATUS_LIFETIME_MS;
+const isStatusActive = (status: Status) => getStatusExpiryTime(status) > Date.now();
 
 const api = async (path: string, options?: RequestInit) => {
   const res = await fetch(`${BASE_URL}/api${path}`, {
@@ -79,6 +83,10 @@ export interface Status {
   type: "text" | "image" | "video";
   mediaUrl?: string;
   timestamp: number;
+  expiresAt?: number;
+  isBoosted?: boolean;
+  boostEndsAt?: number;
+  boostStatus?: "pending_verification" | "active" | "rejected";
   viewed: boolean;
   backgroundColor?: string;
 }
@@ -140,6 +148,7 @@ interface AppContextType {
   markStatusViewedLocally: (statusId: string) => void;
   blockUser: (otherUserId: number) => Promise<void>;
   unblockUser: (otherUserId: number) => Promise<void>;
+  reportUser: (otherUserId: number, args?: { chatId?: string; reason?: string; details?: string; block?: boolean }) => Promise<void>;
   setChatDisappear: (chatId: string, seconds: number | null) => Promise<void>;
   updateLocationOnServer: (chatId: string, messageId: string, body: { content?: string; mediaUrl?: string }) => Promise<void>;
   startLiveLocationSession: (args: { chatId: string; messageId: string; untilMs: number; comment?: string }) => void;
@@ -278,10 +287,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           type: s.type ?? "text",
           mediaUrl: s.media_url ?? undefined,
           timestamp: new Date(s.created_at).getTime(),
+          expiresAt: s.expires_at ? new Date(s.expires_at).getTime() : undefined,
+          isBoosted: Boolean(s.is_boosted),
+          boostEndsAt: s.boost_ends_at ? new Date(s.boost_ends_at).getTime() : undefined,
+          boostStatus: s.boost_status ?? undefined,
           viewed: Boolean(s.viewed),
           backgroundColor: s.background_color ?? "#00A884",
         };
-      });
+      }).filter(isStatusActive);
       setStatuses(mapped);
     } catch {}
   }, []);
@@ -329,6 +342,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }, 30000);
     return () => { clearInterval(chatTimer); clearInterval(statusTimer); clearInterval(callTimer); };
   }, [isAuthenticated]);
+
+  // WhatsApp-like expiry: hide status locally as soon as the 24-hour window ends.
+  useEffect(() => {
+    const expiryTimer = setInterval(() => {
+      setStatuses((prev) => prev.filter(isStatusActive));
+    }, 30000);
+    return () => clearInterval(expiryTimer);
+  }, []);
 
   // Online presence tracking via AppState
   useEffect(() => {
@@ -787,10 +808,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const newStatus: Status = {
       id: Date.now().toString(), userId: "me", userName: u.name,
       userAvatar: u.avatar,
-      content, type, mediaUrl, timestamp: Date.now(), viewed: false,
+      content, type, mediaUrl, timestamp: Date.now(), expiresAt: Date.now() + STATUS_LIFETIME_MS, viewed: false,
       backgroundColor: bg ?? "#00A884",
     };
-    setStatuses((prev) => [newStatus, ...prev]);
+    setStatuses((prev) => [newStatus, ...prev].filter(isStatusActive));
 
     if (u.dbId) {
       void (async () => {
@@ -958,6 +979,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }).catch(() => {});
   }, []);
 
+  const reportUser = useCallback(async (otherUserId: number, args?: { chatId?: string; reason?: string; details?: string; block?: boolean }) => {
+    const uid = userRef.current?.dbId;
+    if (!uid) return;
+    await api(`/users/${otherUserId}/report`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reporterId: uid,
+        chatId: args?.chatId ? Number(args.chatId) : undefined,
+        reason: args?.reason ?? "reported_by_user",
+        details: args?.details,
+        block: args?.block ?? false,
+      }),
+    }).catch(() => {});
+  }, []);
+
   const setChatDisappear = useCallback(async (chatId: string, seconds: number | null) => {
     await api(`/chats/${chatId}/disappear`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
@@ -1057,7 +1093,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       createDirectChat, loadMessages, refreshChats,
       sendImageMessage, sendAudioMessage, setTyping, clearTyping,
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
-      blockUser, unblockUser, setChatDisappear,
+      blockUser, unblockUser, reportUser, setChatDisappear,
       updateLocationOnServer, startLiveLocationSession, stopLiveLocationSession,
     }}>
       {children}

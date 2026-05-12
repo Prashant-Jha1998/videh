@@ -84,6 +84,7 @@ export default function ViewStatusScreen() {
   const currentStatus = statuses.find((s) => s.id === ids[currentIdx]);
   const isMyStatus = currentStatus?.userId === "me";
   const isMedia = currentStatus?.type === "image" || currentStatus?.type === "video";
+  const isBoostedStory = Boolean(currentStatus?.isBoosted);
 
   useEffect(() => {
     // Move status group to Viewed instantly when viewer opens.
@@ -169,7 +170,10 @@ export default function ViewStatusScreen() {
         currentStatus.userName ?? "Contact",
         currentStatus.userAvatar
       );
-      sendMessage(chatId, reply.trim());
+      const replyText = isBoostedStory
+        ? `Reply to your boosted story: ${reply.trim()}`
+        : reply.trim();
+      sendMessage(chatId, replyText);
       setReply("");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert("Sent!", `Your reply was sent to ${currentStatus.userName ?? "Contact"}.`);
@@ -236,6 +240,12 @@ export default function ViewStatusScreen() {
             {new Date(currentStatus.timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
             {ids.length > 1 ? `  ·  ${currentIdx + 1}/${ids.length}` : ""}
           </Text>
+          {isBoostedStory && !isMyStatus && (
+            <View style={styles.sponsoredPill}>
+              <Ionicons name="flash" size={10} color="#111B21" />
+              <Text style={styles.sponsoredText}>Sponsored</Text>
+            </View>
+          )}
         </View>
         <TouchableOpacity style={styles.iconBtn} onPress={() => { setPaused((p) => { if (!p) animRef.current?.stop(); else startAnim(currentIdx, pausedProgressRef.current); return !p; }); }}>
           <Ionicons name={paused ? "play" : "pause"} size={17} color="#fff" />
@@ -326,7 +336,7 @@ export default function ViewStatusScreen() {
                 style={styles.replyInput}
                 value={reply}
                 onChangeText={setReply}
-                placeholder={`Reply to ${currentStatus.userName}...`}
+                placeholder={isBoostedStory ? "Reply to this boosted story..." : `Reply to ${currentStatus.userName}...`}
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 onFocus={() => { animRef.current?.stop(); setPaused(true); }}
                 onBlur={() => { if (paused) { startAnim(currentIdx, pausedProgressRef.current); setPaused(false); } }}
@@ -396,6 +406,8 @@ const styles = StyleSheet.create({
   headerInfo: { flex: 1 },
   headerName: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   headerTime: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontFamily: "Inter_400Regular" },
+  sponsoredPill: { marginTop: 4, alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#FACC15", borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
+  sponsoredText: { color: "#111B21", fontSize: 10, fontFamily: "Inter_700Bold" },
   // Content
   statusText: { color: "#fff", fontSize: 26, fontFamily: "Inter_600SemiBold", textAlign: "center", lineHeight: 36 },
   captionBar: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.5)", padding: 12 },

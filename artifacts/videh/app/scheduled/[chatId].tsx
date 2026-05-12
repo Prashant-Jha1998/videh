@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, FlatList, Pressable, TextInput, Modal,
-  StyleSheet, Alert, ActivityIndicator, Platform
+  StyleSheet, Alert, ActivityIndicator, Platform, KeyboardAvoidingView
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -144,20 +144,24 @@ export default function ScheduledScreen() {
 
       {/* Add modal */}
       <Modal visible={showAdd} animationType="slide" transparent onRequestClose={() => setShowAdd(false)}>
-        <View style={{ flex: 1 }}>
+        <KeyboardAvoidingView
+          style={styles.modalRoot}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
           <Pressable style={styles.overlay} onPress={() => setShowAdd(false)} />
           <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
-          <Text style={styles.modalTitle}>Schedule message</Text>
+          <Text style={styles.modalTitle}>Schedule Message</Text>
 
           <Text style={styles.label}>Message</Text>
           <TextInput
             style={styles.input}
-            placeholder="Type your message..."
+            placeholder="Type your message here..."
             placeholderTextColor="#666"
             value={newText}
             onChangeText={setNewText}
             multiline
             maxLength={1000}
+            selectionColor="#00A884"
           />
 
           <Text style={styles.label}>Date (YYYY-MM-DD)</Text>
@@ -167,28 +171,32 @@ export default function ScheduledScreen() {
             placeholderTextColor="#666"
             value={schedDate}
             onChangeText={setSchedDate}
-            keyboardType="numeric"
+            autoCapitalize="none"
+            autoCorrect={false}
             maxLength={10}
+            selectionColor="#00A884"
           />
 
-          <Text style={styles.label}>Time (HH:MM) — 24 hour format</Text>
+          <Text style={styles.label}>Time (HH:MM) - 24 hour format</Text>
           <TextInput
             style={styles.inputRow}
             placeholder="08:30"
             placeholderTextColor="#666"
             value={schedTime}
             onChangeText={setSchedTime}
-            keyboardType="numeric"
+            autoCapitalize="none"
+            autoCorrect={false}
             maxLength={5}
+            selectionColor="#00A884"
           />
 
           <Pressable style={[styles.schedBtn, saving && { opacity: 0.6 }]} onPress={schedule} disabled={saving}>
             {saving ? <ActivityIndicator color="#fff" /> : (
-              <Text style={styles.schedBtnTxt}>Schedule ⏰</Text>
+              <Text style={styles.schedBtnTxt}>Schedule Message</Text>
             )}
           </Pressable>
         </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -208,8 +216,9 @@ const styles = StyleSheet.create({
   cardTime: { color: "#00A884", fontSize: 13, marginBottom: 6 },
   cardContent: { color: "#E9EEF0", fontSize: 15, lineHeight: 22 },
   delBtn: { marginLeft: 10, marginTop: 2 },
+  modalRoot: { flex: 1, justifyContent: "flex-end" },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
-  modal: { backgroundColor: "#1F2C34", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, position: "absolute", bottom: 0, left: 0, right: 0 },
+  modal: { backgroundColor: "#1F2C34", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, width: "100%" },
   modalTitle: { color: "#fff", fontSize: 18, fontWeight: "700", marginBottom: 16 },
   label: { color: "#8696A0", fontSize: 13, marginBottom: 4, marginTop: 10 },
   input: { backgroundColor: "#2A3942", color: "#E9EEF0", borderRadius: 10, padding: 12, fontSize: 15, minHeight: 80, textAlignVertical: "top" },

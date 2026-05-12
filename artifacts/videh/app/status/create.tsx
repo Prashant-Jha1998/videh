@@ -28,6 +28,20 @@ const MAX_STORY_PARTICIPANTS = 100;
 type AudienceMode = "all_contacts" | "selected_contacts";
 type StoryContact = { id: number; name: string; phone: string };
 
+function formatMediaDuration(durationMs?: number | null): string {
+  if (!durationMs || durationMs <= 0) return "0:00";
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatMediaSize(bytes?: number | null): string {
+  if (!bytes || bytes <= 0) return "";
+  const mb = bytes / (1024 * 1024);
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+}
+
 function VideoPreview({ uri }: { uri: string }) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
@@ -62,6 +76,8 @@ export default function StatusCreateScreen() {
   const [fontIdx, setFontIdx] = useState(0);
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<"image" | "video">("image");
+  const [mediaDurationMs, setMediaDurationMs] = useState<number | null>(null);
+  const [mediaSizeBytes, setMediaSizeBytes] = useState<number | null>(null);
   const [caption, setCaption] = useState("");
   const [posting, setPosting] = useState(false);
   const [storySubject, setStorySubject] = useState("");
@@ -73,6 +89,8 @@ export default function StatusCreateScreen() {
   const inputRef = useRef<TextInput>(null);
   const fonts = ["Inter_400Regular", "Inter_700Bold", "Inter_300Light", "Inter_600SemiBold"];
   const fontLabels = ["Aa", "𝐁", "𝐿", "𝑺"];
+  const mediaDurationLabel = formatMediaDuration(mediaDurationMs);
+  const mediaSizeLabel = formatMediaSize(mediaSizeBytes);
 
   useEffect(() => {
     if (mode === "media") pickMedia();
@@ -147,6 +165,13 @@ export default function StatusCreateScreen() {
     }
     setMediaUri(asset.uri);
     setMediaType(asset.type === "video" ? "video" : "image");
+    setMediaDurationMs(typeof asset.duration === "number" ? asset.duration : null);
+    setMediaSizeBytes(typeof asset.fileSize === "number" ? asset.fileSize : null);
+  };
+
+  const showEditorTool = (label: string) => {
+    Haptics.selectionAsync();
+    Alert.alert(label, "This editor tool is ready in the layout. Media editing will be connected next.");
   };
 
   const proceedToAudience = async () => {
@@ -197,6 +222,8 @@ export default function StatusCreateScreen() {
       }
       setMediaUri(asset.uri);
       setMediaType(asset.type === "video" ? "video" : "image");
+      setMediaDurationMs(typeof asset.duration === "number" ? asset.duration : null);
+      setMediaSizeBytes(typeof asset.fileSize === "number" ? asset.fileSize : null);
       setMode("media");
     }
   };
@@ -290,9 +317,30 @@ export default function StatusCreateScreen() {
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}><Ionicons name="close" size={26} color="#fff" /></TouchableOpacity>
           <View style={{ flex: 1 }} />
+          <TouchableOpacity onPress={() => showEditorTool("Add music")} style={styles.editorIconBtn}><Ionicons name="musical-notes-outline" size={21} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={() => showEditorTool("Stickers")} style={styles.editorIconBtn}><Ionicons name="happy-outline" size={21} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={() => showEditorTool("Text")} style={styles.editorTextBtn}><Text style={styles.editorTextBtnLabel}>Aa</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => showEditorTool("Draw")} style={styles.editorIconBtn}><Ionicons name="pencil" size={20} color="#fff" /></TouchableOpacity>
           <TouchableOpacity onPress={openCamera} style={styles.iconBtn}><Ionicons name="camera-outline" size={24} color="#fff" /></TouchableOpacity>
           <TouchableOpacity onPress={pickMedia} style={styles.iconBtn}><Ionicons name="images-outline" size={24} color="#fff" /></TouchableOpacity>
         </View>
+        {mediaUri && mediaType === "video" && (
+          <View style={styles.videoTimelineWrap}>
+            <View style={styles.videoTimeline}>
+              {Array.from({ length: 14 }).map((_, i) => (
+                <View key={i} style={styles.videoFrame}>
+                  <Ionicons name="videocam" size={13} color="rgba(255,255,255,0.9)" />
+                </View>
+              ))}
+              <View style={styles.trimHandleLeft} />
+              <View style={styles.trimHandleRight} />
+            </View>
+            <View style={styles.mediaMetaRow}>
+              <Ionicons name="volume-high-outline" size={14} color="#fff" />
+              <Text style={styles.mediaMetaText}>{mediaDurationLabel}{mediaSizeLabel ? ` · ${mediaSizeLabel}` : ""}</Text>
+            </View>
+          </View>
+        )}
         {mediaUri ? (
           <View style={styles.mediaPreview}>
             {mediaType === "video" ? <VideoPreview uri={mediaUri} /> : <Image source={{ uri: mediaUri }} style={{ width: "100%", height: "100%" }} resizeMode="contain" />}
@@ -307,6 +355,10 @@ export default function StatusCreateScreen() {
         )}
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
           <View style={[styles.captionBar, { paddingBottom: insets.bottom + 8 }]}>
+            <View style={styles.statusAudiencePill}>
+              <Ionicons name="link-outline" size={13} color="#d9fdd3" />
+              <Text style={styles.statusAudienceText}>Status (Contacts)</Text>
+            </View>
             <View style={[styles.captionInput, { backgroundColor: "rgba(0,0,0,0.6)" }]}>
               <Ionicons name="happy-outline" size={22} color="rgba(255,255,255,0.7)" />
               <TextInput value={caption} onChangeText={setCaption} placeholder="Add a caption..." placeholderTextColor="rgba(255,255,255,0.5)" style={styles.captionText} multiline />
@@ -352,6 +404,9 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   topBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingBottom: 8, gap: 4 },
   iconBtn: { padding: 10 },
+  editorIconBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.12)" },
+  editorTextBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.12)" },
+  editorTextBtnLabel: { color: "#fff", fontSize: 16, fontWeight: "700" },
   textColorBtn: { width: 26, height: 26, borderRadius: 13, margin: 8, borderWidth: 1.5 },
   textArea: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 28 },
   textInput: { fontSize: 28, textAlign: "center", width: "100%", lineHeight: 38 },
@@ -362,8 +417,17 @@ const styles = StyleSheet.create({
   postBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 28 },
   postBtnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
   charCount: { position: "absolute", top: 80, right: 18, fontSize: 13 },
+  videoTimelineWrap: { paddingHorizontal: 12, paddingBottom: 10, gap: 6 },
+  videoTimeline: { height: 42, borderRadius: 4, overflow: "hidden", borderWidth: 2, borderColor: "#fff", flexDirection: "row", backgroundColor: "#111" },
+  videoFrame: { flex: 1, alignItems: "center", justifyContent: "center", borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: "rgba(255,255,255,0.28)", backgroundColor: "#1F2937" },
+  trimHandleLeft: { position: "absolute", left: 0, top: 0, bottom: 0, width: 7, backgroundColor: "#fff" },
+  trimHandleRight: { position: "absolute", right: 0, top: 0, bottom: 0, width: 7, backgroundColor: "#fff" },
+  mediaMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 2 },
+  mediaMetaText: { color: "#fff", fontSize: 12, fontWeight: "600" },
   mediaPreview: { flex: 1, width: W },
-  captionBar: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 12, paddingTop: 8, gap: 10 },
+  captionBar: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 12, paddingTop: 8, gap: 10, flexWrap: "wrap" },
+  statusAudiencePill: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", backgroundColor: "rgba(17,27,33,0.92)", borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 2 },
+  statusAudienceText: { color: "#d9fdd3", fontSize: 11, fontWeight: "600" },
   captionInput: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 24, paddingHorizontal: 14, paddingVertical: 10, minHeight: 48 },
   captionText: { flex: 1, color: "#fff", fontSize: 15, maxHeight: 100 },
   sendBtn: { width: 50, height: 50, borderRadius: 25, alignItems: "center", justifyContent: "center" },

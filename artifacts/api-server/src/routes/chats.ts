@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { query } from "../lib/db";
 import { isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
 import { enforceModerationForActivity } from "../lib/moderation";
+import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
 
 const router = Router();
 
@@ -12,6 +13,23 @@ type GroupSendEval = {
   isGroup: boolean;
   isAdmin: boolean;
 };
+
+async function directChatBlocked(chatId: string | string[], senderId: number): Promise<boolean> {
+  const id = Array.isArray(chatId) ? chatId[0] : chatId;
+  const r = await query(`
+    SELECT EXISTS(
+      SELECT 1
+      FROM chats c
+      JOIN chat_members me ON me.chat_id = c.id AND me.user_id = $2
+      JOIN chat_members other ON other.chat_id = c.id AND other.user_id != $2
+      JOIN blocked_users b
+        ON (b.blocker_id = me.user_id AND b.blocked_id = other.user_id)
+        OR (b.blocker_id = other.user_id AND b.blocked_id = me.user_id)
+      WHERE c.id = $1 AND c.is_group = FALSE
+    ) AS blocked
+  `, [id, senderId]);
+  return Boolean(r.rows[0]?.blocked);
+}
 
 /** Resolves whether a user may post in this chat (direct chats always allowed). */
 async function evaluateGroupSendPermission(chatId: string | string[], userId: number): Promise<GroupSendEval | null> {
@@ -111,6 +129,18 @@ router.post("/direct", async (req: Request, res: Response) => {
   const { userId, otherUserId } = req.body as { userId?: number; otherUserId?: number };
   if (!userId || !otherUserId) { res.status(400).json({ success: false }); return; }
   try {
+    const block = await query(`
+      SELECT EXISTS(
+        SELECT 1 FROM blocked_users
+        WHERE (blocker_id = $1 AND blocked_id = $2)
+           OR (blocker_id = $2 AND blocked_id = $1)
+      ) AS blocked
+    `, [userId, otherUserId]);
+    if (block.rows[0]?.blocked) {
+      res.status(403).json({ success: false, code: "blocked", message: "You cannot start a chat with this contact." });
+      return;
+    }
+
     const existing = await query(`
       SELECT c.id FROM chats c
       JOIN chat_members cm1 ON cm1.chat_id = c.id AND cm1.user_id = $1
@@ -157,6 +187,19 @@ router.post("/group", async (req: Request, res: Response) => {
     return;
   }
   try {
+    const policy = await enforceGroupCreationPolicy(creatorId);
+    if (!policy.allowed) {
+      res.status(403).json({
+        success: false,
+        code: policy.code,
+        message: policy.message,
+        suspendedUntil: policy.suspendedUntil ?? null,
+        alert: policy.alert,
+        strikeCount: policy.strikeCount,
+      });
+      return;
+    }
+
     const chat = await query(
       "INSERT INTO chats (is_group, group_name, group_avatar_url, group_description, created_by) VALUES (TRUE, $1, $2, $3, $4) RETURNING id",
       [trimmedName, groupAvatarUrl ?? null, description ?? null, creatorId]
@@ -325,6 +368,14 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
           ? "Only group admins can send messages in this group."
           : "You do not have permission to send messages. Ask a group admin to allow you.";
       res.status(403).json({ success: false, code: perm.code, message });
+      return;
+    }
+    if (!perm.isGroup && await directChatBlocked(chatId, senderId)) {
+      res.status(403).json({
+        success: false,
+        code: "blocked",
+        message: "You cannot send messages to this contact.",
+      });
       return;
     }
 

@@ -23,6 +23,7 @@ interface StatusGroup {
   statuses: Status[];
   latestTime: number;
   hasUnviewed: boolean;
+  isBoosted: boolean;
 }
 
 export default function StatusScreen() {
@@ -57,9 +58,13 @@ export default function StatusScreen() {
           statuses: sorted,
           latestTime: Math.max(...group.map((s) => s.timestamp)),
           hasUnviewed: group.some((s) => !s.viewed),
+          isBoosted: group.some((s) => s.isBoosted),
         };
       })
       .sort((a, b) => {
+        // Boosted stories get top placement while still keeping unread behavior.
+        if (a.isBoosted && !b.isBoosted) return -1;
+        if (!a.isBoosted && b.isBoosted) return 1;
         // Unviewed first, then by latest time
         if (a.hasUnviewed && !b.hasUnviewed) return -1;
         if (!a.hasUnviewed && b.hasUnviewed) return 1;
@@ -251,6 +256,12 @@ function StatusGroupRow({ group, colors, onPress }: { group: StatusGroup; colors
           {formatTime(group.latestTime)}
           {count > 1 ? ` · ${count} updates` : ""}
         </Text>
+        {group.isBoosted && (
+          <View style={styles.boostBadge}>
+            <Ionicons name="flash" size={11} color="#111B21" />
+            <Text style={styles.boostBadgeText}>Sponsored</Text>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -282,6 +293,8 @@ const styles = StyleSheet.create({
   statusInfo: { flex: 1 },
   statusName: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
   statusTime: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
+  boostBadge: { marginTop: 5, alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#FACC15", borderRadius: 11, paddingHorizontal: 7, paddingVertical: 2 },
+  boostBadgeText: { color: "#111B21", fontSize: 10, fontFamily: "Inter_700Bold" },
   empty: { alignItems: "center", marginTop: 60, paddingHorizontal: 40, gap: 12 },
   emptyText: { fontSize: 16, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   emptyHint: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center" },

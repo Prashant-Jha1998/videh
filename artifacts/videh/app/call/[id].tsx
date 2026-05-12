@@ -8,22 +8,49 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  Vibration,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAgoraCall } from "@/hooks/useAgoraCall";
+import { useVidehCall } from "@/hooks/useVidehCall";
 import { useApp } from "@/context/AppContext";
 import { AgoraLocalView, AgoraRemoteView } from "@/components/AgoraVideoView";
+import { getApiUrl } from "@/lib/api";
 
 export default function CallScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { id, name, type } = useLocalSearchParams<{ id: string; name: string; type: string }>();
+  const { id, name, type, channel, callId, incoming } = useLocalSearchParams<{ id: string; name: string; type: string; channel?: string; callId?: string; incoming?: string }>();
   const { user } = useApp();
   const isVideo = type === "video";
 
-  const channelName = `videh_${id ?? "default"}`;
+  const [activeCallId, setActiveCallId] = useState(callId ?? "");
+  const [activeChannel, setActiveChannel] = useState(channel ?? (incoming === "1" ? `videh_${id ?? "default"}` : ""));
+  const [participantCount, setParticipantCount] = useState(1);
+  const [acceptedCount, setAcceptedCount] = useState(1);
+  const [ringingCount, setRingingCount] = useState(0);
   const numericUid = Math.abs((user?.dbId ?? 0) % 999999) || Math.floor(Math.random() * 99999) + 1;
+
+  useEffect(() => {
+    if (!id || !user?.dbId || incoming === "1" || channel) return;
+    let cancelled = false;
+    fetch(`${getApiUrl()}/api/webrtc/calls`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId: Number(id), callerId: user.dbId, type: isVideo ? "video" : "audio" }),
+    })
+      .then((res) => res.json())
+      .then((data: { success?: boolean; call?: { channel?: string; callId?: string; participantCount?: number; acceptedCount?: number; ringingCount?: number } }) => {
+        if (cancelled || !data.success || !data.call?.channel) return;
+        setActiveChannel(data.call.channel);
+        setActiveCallId(data.call.callId ?? "");
+        setParticipantCount(data.call.participantCount ?? 1);
+        setAcceptedCount(data.call.acceptedCount ?? 1);
+        setRingingCount(data.call.ringingCount ?? 0);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [id, user?.dbId, incoming, channel, isVideo]);
 
   const {
     joined,
@@ -38,13 +65,50 @@ export default function CallScreen() {
     toggleSpeaker,
     leave,
     ...rest
-  } = useAgoraCall(channelName, numericUid, isVideo);
+  } = useVidehCall(activeChannel, numericUid, isVideo);
 
   const remoteUid: number | null = (rest as any).remoteUid ?? null;
+  const localStreamUrl = (rest as any).localStreamUrl as string | undefined;
+  const remoteStreamUrl = (rest as any).remoteStreamUrl as string | undefined;
 
   const [duration, setDuration] = useState(0);
   const pulse = useRef(new Animated.Value(1)).current;
-  const needsDevBuild = error === "EXPO_GO";
+  const needsDevBuild = error === "SELF_HOSTED_WEBRTC_NATIVE_REQUIRED";
+
+  useEffect(() => {
+    if (incoming === "1" || joined || error) {
+      if (Platform.OS !== "web") Vibration.cancel();
+      return;
+    }
+    if (Platform.OS !== "web") Vibration.vibrate([0, 450, 500], true);
+    const timeout = setTimeout(() => {
+      if (!joined) {
+        if (activeCallId) fetch(`${getApiUrl()}/api/webrtc/calls/${activeCallId}/end`, { method: "POST" }).catch(() => {});
+        router.back();
+      }
+    }, 60000);
+    return () => {
+      clearTimeout(timeout);
+      if (Platform.OS !== "web") Vibration.cancel();
+    };
+  }, [incoming, joined, error, activeCallId]);
+
+  useEffect(() => {
+    if (!activeCallId || !user?.dbId) return;
+    const timer = setInterval(() => {
+      fetch(`${getApiUrl()}/api/webrtc/calls/${activeCallId}/status?userId=${user.dbId}`)
+        .then((res) => res.json())
+        .then((data: { success?: boolean; acceptedCount?: number; ringingCount?: number; call?: { participantCount?: number }; ended?: boolean }) => {
+          if (!data.success) return;
+          setAcceptedCount(data.acceptedCount ?? 1);
+          setRingingCount(data.ringingCount ?? 0);
+          setParticipantCount(data.call?.participantCount ?? participantCount);
+          if (data.ended) router.back();
+        })
+        .catch(() => {});
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [activeCallId, user?.dbId, participantCount]);
 
   useEffect(() => {
     const anim = Animated.loop(
@@ -74,6 +138,9 @@ export default function CallScreen() {
   const endCall = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     await leave();
+    if (activeCallId) {
+      fetch(`${getApiUrl()}/api/webrtc/calls/${activeCallId}/end`, { method: "POST" }).catch(() => {});
+    }
     router.back();
   };
 
@@ -83,13 +150,17 @@ export default function CallScreen() {
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const statusText = needsDevBuild
-    ? "Install Videh app to call"
+    ? "Self-hosted call module required"
     : error && !needsDevBuild
     ? `Error: ${error}`
     : joined
     ? remoteCount > 0
       ? formatDuration(duration)
+      : acceptedCount > 1
+      ? "Connecting participants..."
       : "Waiting for other party..."
+    : ringingCount > 1
+    ? `Ringing ${ringingCount} people...`
     : isVideo ? "Video calling..." : "Ringing...";
 
   const showVideoUI = isVideo && !needsDevBuild && !error;
@@ -99,7 +170,15 @@ export default function CallScreen() {
       <TouchableOpacity style={styles.backBtn} onPress={router.back}>
         <Ionicons name="chevron-down" size={28} color="rgba(255,255,255,0.8)" />
       </TouchableOpacity>
-      <Text style={styles.callTypeLabel}>{isVideo ? "Videh Video Call" : "Videh Voice Call"}</Text>
+      <Text style={styles.callTypeLabel}>{isVideo ? "Videh Self-hosted Video Call" : "Videh Self-hosted Voice Call"}</Text>
+      {participantCount > 2 && (
+        <View style={styles.conferencePill}>
+          <Ionicons name="people" size={13} color="#d9fdd3" />
+          <Text style={styles.conferenceText}>
+            Conference call · {acceptedCount}/{participantCount} joined
+          </Text>
+        </View>
+      )}
 
       {needsDevBuild ? (
         <View style={styles.center}>
@@ -107,8 +186,8 @@ export default function CallScreen() {
             <Ionicons name="call" size={48} color="#00A884" />
             <Text style={styles.devCardTitle}>Videh Calls</Text>
             <Text style={styles.devCardText}>
-              Voice and video calls are fully supported in the Videh app.
-              Install the Videh app on your phone to make and receive calls.
+              Agora has been removed. Self-hosted calling uses Videh WebRTC signaling.
+              For native mobile builds, add the WebRTC native module in a development build.
             </Text>
             <View style={styles.devCardBadge}>
               <Ionicons name="shield-checkmark" size={14} color="#a3e635" />
@@ -119,7 +198,7 @@ export default function CallScreen() {
       ) : showVideoUI ? (
         <View style={styles.videoContainer}>
           {(Platform.OS === "web" ? hasRemoteVideo : remoteUid !== null) ? (
-            <AgoraRemoteView uid={remoteUid ?? 0} style={styles.remoteVideo} />
+            <AgoraRemoteView uid={remoteUid ?? 0} nativeId={rest.remoteVideoId} streamUrl={remoteStreamUrl} style={styles.remoteVideo} />
           ) : (
             <View style={[styles.remoteVideo, styles.videoPlaceholder]}>
               <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: !joined ? pulse : 1 }] }]}>
@@ -133,7 +212,7 @@ export default function CallScreen() {
           )}
           {joined && !cameraOff && (
             <View style={styles.localVideoWrapper}>
-              <AgoraLocalView style={styles.localVideoFill} />
+              <AgoraLocalView nativeId={rest.localVideoId} streamUrl={localStreamUrl} style={styles.localVideoFill} />
             </View>
           )}
         </View>
@@ -203,6 +282,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, alignItems: "center" },
   backBtn: { alignSelf: "flex-start", padding: 16 },
   callTypeLabel: { color: "rgba(255,255,255,0.6)", fontSize: 13, fontFamily: "Inter_400Regular", marginTop: -8 },
+  conferencePill: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,168,132,0.18)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 5, marginTop: 8 },
+  conferenceText: { color: "#d9fdd3", fontSize: 12, fontFamily: "Inter_600SemiBold" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   videoContainer: { flex: 1, width: "100%", position: "relative" },
   remoteVideo: { flex: 1, width: "100%", backgroundColor: "#111" },

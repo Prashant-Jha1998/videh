@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-type Tab = "overview" | "users" | "chats" | "group-create" | "suspensions" | "scheduled" | "broadcasts" | "calls";
+type Tab = "overview" | "users" | "chats" | "group-create" | "suspensions" | "boosts" | "scheduled" | "broadcasts" | "calls";
 
 type Stats = {
   users: number;
@@ -13,6 +13,9 @@ type Stats = {
   scheduled_pending: number;
   broadcast_lists: number;
   statuses_active: number;
+  status_boosts_active: number;
+  status_boosts_pending: number;
+  status_boost_revenue_inr: number;
   web_sessions_active: number;
 };
 
@@ -55,6 +58,7 @@ export default function App() {
   const [broadcasts, setBroadcasts] = useState<unknown[]>([]);
   const [calls, setCalls] = useState<unknown[]>([]);
   const [suspensions, setSuspensions] = useState<unknown[]>([]);
+  const [boosts, setBoosts] = useState<unknown[]>([]);
   const [userSearch, setUserSearch] = useState("");
   const [groupName, setGroupName] = useState("");
   const [groupCreatorPhone, setGroupCreatorPhone] = useState("");
@@ -177,6 +181,35 @@ export default function App() {
     if (ready !== "authed" || tab !== "calls") return;
     void loadCalls();
   }, [ready, tab, loadCalls]);
+
+  const loadBoosts = useCallback(async () => {
+    setErr(null);
+    try {
+      const d = await api<{ boosts: unknown[] }>("/admin/status-boosts?status=pending_verification");
+      setBoosts(d.boosts);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to load boosts");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (ready !== "authed" || tab !== "boosts") return;
+    void loadBoosts();
+  }, [ready, tab, loadBoosts]);
+
+  const reviewBoost = useCallback(async (boostId: number, action: "approve" | "reject") => {
+    const note = window.prompt(action === "approve" ? "Approval note (optional)" : "Reject reason") ?? "";
+    try {
+      await api(`/admin/status-boosts/${boostId}/${action}`, {
+        method: "POST",
+        body: JSON.stringify({ note }),
+      });
+      await loadBoosts();
+      if (tab === "overview") await loadStats();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : `Failed to ${action} boost`);
+    }
+  }, [loadBoosts, loadStats, tab]);
 
   const loadSuspensions = useCallback(async () => {
     setErr(null);
@@ -398,6 +431,7 @@ export default function App() {
         {nav("chats", "Chats")}
         {nav("group-create", "Create Group")}
         {nav("suspensions", "Suspensions")}
+        {nav("boosts", "Story Boosts")}
         {nav("scheduled", "Scheduled")}
         {nav("broadcasts", "Broadcasts")}
         {nav("calls", "Calls")}
@@ -453,6 +487,18 @@ export default function App() {
                 <div className="stat">
                   <b>{stats.statuses_active}</b>
                   <span>Active statuses</span>
+                </div>
+                <div className="stat">
+                  <b>{stats.status_boosts_active}</b>
+                  <span>Active boosts</span>
+                </div>
+                <div className="stat">
+                  <b>{stats.status_boosts_pending}</b>
+                  <span>Pending boosts</span>
+                </div>
+                <div className="stat">
+                  <b>₹{stats.status_boost_revenue_inr}</b>
+                  <span>Boost revenue</span>
                 </div>
                 <div className="stat">
                   <b>{stats.web_sessions_active}</b>
@@ -699,6 +745,64 @@ export default function App() {
                 </tbody>
               </table>
               {suspensions.length === 0 ? <p className="muted" style={{ marginTop: 12 }}>No active suspensions.</p> : null}
+            </div>
+          </>
+        )}
+
+        {tab === "boosts" && (
+          <>
+            <h2 style={{ marginTop: 0 }}>Story Boost Verification</h2>
+            <p className="muted">Paid story boosts stay pending until admin approves. Approval starts the paid boost duration.</p>
+            <div className="card" style={{ overflowX: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Owner</th>
+                    <th>Story</th>
+                    <th>Target</th>
+                    <th>Days</th>
+                    <th>Reach</th>
+                    <th>Paid</th>
+                    <th>Payment</th>
+                    <th>Created</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {boosts.map((b: any) => (
+                    <tr key={b.id}>
+                      <td>{b.id}</td>
+                      <td>{b.owner_name ?? "—"}</td>
+                      <td style={{ maxWidth: 220 }}>
+                        <b>{b.type}</b>
+                        <div className="muted">{(b.content ?? "").slice(0, 80)}{(b.content ?? "").length > 80 ? "…" : ""}</div>
+                      </td>
+                      <td>
+                        {b.target_city ?? "Any city"}, {b.target_state ?? "Any state"}
+                        <div className="muted">{b.target_radius_km} km radius</div>
+                      </td>
+                      <td>{b.duration_days}</td>
+                      <td>{b.estimated_reach}</td>
+                      <td>₹{b.amount_inr}</td>
+                      <td>
+                        {b.payment_provider}
+                        <div className="muted">{b.payment_reference ?? "—"}</div>
+                      </td>
+                      <td>{b.created_at ? String(b.created_at).slice(0, 16) : "—"}</td>
+                      <td style={{ display: "flex", gap: 8 }}>
+                        <button type="button" className="btn btn-primary" style={{ width: "auto", padding: "6px 10px" }} onClick={() => void reviewBoost(Number(b.id), "approve")}>
+                          Verify
+                        </button>
+                        <button type="button" className="btn" style={{ width: "auto", padding: "6px 10px" }} onClick={() => void reviewBoost(Number(b.id), "reject")}>
+                          Reject
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {boosts.length === 0 ? <p className="muted" style={{ marginTop: 12 }}>No pending boost requests.</p> : null}
             </div>
           </>
         )}

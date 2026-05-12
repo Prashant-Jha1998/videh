@@ -16,6 +16,50 @@ import { logger } from "../lib/logger";
 const router = Router();
 const MAX_ADMIN_GROUP_MEMBERS = 10000;
 
+let statusBoostTablesEnsured = false;
+async function ensureStatusBoostTables(): Promise<void> {
+  if (statusBoostTablesEnsured) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS status_boosts (
+      id SERIAL PRIMARY KEY,
+      status_id INTEGER NOT NULL REFERENCES statuses(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount_inr INTEGER NOT NULL,
+      duration_hours INTEGER NOT NULL,
+      duration_days INTEGER NOT NULL DEFAULT 1,
+      estimated_reach INTEGER NOT NULL,
+      target_state TEXT,
+      target_city TEXT,
+      target_radius_km INTEGER NOT NULL DEFAULT 10,
+      status TEXT NOT NULL DEFAULT 'pending_verification',
+      payment_status TEXT NOT NULL DEFAULT 'paid',
+      payment_provider TEXT NOT NULL DEFAULT 'manual',
+      payment_reference TEXT,
+      verification_note TEXT,
+      verified_at TIMESTAMPTZ,
+      rejected_at TIMESTAMPTZ,
+      pending_hold_until TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '24 hours',
+      starts_at TIMESTAMPTZ,
+      ends_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`
+    ALTER TABLE status_boosts
+      ADD COLUMN IF NOT EXISTS target_state TEXT,
+      ADD COLUMN IF NOT EXISTS target_city TEXT,
+      ADD COLUMN IF NOT EXISTS target_radius_km INTEGER NOT NULL DEFAULT 10,
+      ADD COLUMN IF NOT EXISTS duration_days INTEGER NOT NULL DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'paid',
+      ADD COLUMN IF NOT EXISTS verification_note TEXT,
+      ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS pending_hold_until TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '24 hours'
+  `);
+  await query("ALTER TABLE status_boosts ALTER COLUMN starts_at DROP NOT NULL");
+  statusBoostTablesEnsured = true;
+}
+
 function normalizeEmail(s: string): string {
   return s.trim().toLowerCase();
 }
@@ -174,6 +218,7 @@ router.get("/me", requireAdmin, (_req, res) => {
 
 router.get("/stats", requireAdmin, async (_req, res) => {
   try {
+    await ensureStatusBoostTables();
     const r = await query(
       `SELECT
         (SELECT COUNT(*)::int FROM users) AS users,
@@ -186,6 +231,9 @@ router.get("/stats", requireAdmin, async (_req, res) => {
         (SELECT COUNT(*)::int FROM scheduled_messages WHERE sent = FALSE) AS scheduled_pending,
         (SELECT COUNT(*)::int FROM broadcast_lists) AS broadcast_lists,
         (SELECT COUNT(*)::int FROM statuses WHERE expires_at > NOW()) AS statuses_active,
+        (SELECT COUNT(*)::int FROM status_boosts WHERE status = 'active' AND ends_at > NOW()) AS status_boosts_active,
+        (SELECT COUNT(*)::int FROM status_boosts WHERE status = 'pending_verification') AS status_boosts_pending,
+        (SELECT COALESCE(SUM(amount_inr), 0)::int FROM status_boosts WHERE payment_status IN ('paid', 'captured')) AS status_boost_revenue_inr,
         (SELECT COUNT(*)::int FROM web_sessions WHERE status = 'linked' AND expires_at > NOW()) AS web_sessions_active`,
       [],
     );
@@ -241,6 +289,100 @@ router.post("/suspensions/:userId/revoke", requireAdmin, async (req, res) => {
   } catch (err) {
     logger.error({ err }, "admin revoke suspension");
     res.status(500).json({ success: false, message: "Could not revoke suspension." });
+  }
+});
+
+router.get("/status-boosts", requireAdmin, async (req, res) => {
+  const status = String(req.query["status"] ?? "pending_verification");
+  const safeStatus = ["pending_verification", "active", "rejected"].includes(status) ? status : "pending_verification";
+  try {
+    await ensureStatusBoostTables();
+    const r = await query(
+      `SELECT sb.*, s.content, s.type, s.media_url, s.created_at AS story_created_at,
+              u.name AS owner_name
+       FROM status_boosts sb
+       JOIN statuses s ON s.id = sb.status_id
+       JOIN users u ON u.id = sb.user_id
+       WHERE sb.status = $1
+       ORDER BY sb.created_at DESC
+       LIMIT 100`,
+      [safeStatus],
+    );
+    res.json({ success: true, boosts: r.rows });
+  } catch (err) {
+    logger.error({ err }, "admin /status-boosts");
+    res.status(500).json({ success: false, message: "Could not load status boosts." });
+  }
+});
+
+router.post("/status-boosts/:boostId/approve", requireAdmin, async (req, res) => {
+  const boostId = Number(req.params["boostId"]);
+  const note = String((req.body as { note?: string }).note ?? "").trim() || null;
+  if (!boostId) {
+    res.status(400).json({ success: false, message: "Invalid boostId." });
+    return;
+  }
+  try {
+    await ensureStatusBoostTables();
+    const approved = await query(
+      `UPDATE status_boosts
+       SET status = 'active',
+           verification_note = $2,
+           verified_at = NOW(),
+           starts_at = NOW(),
+           ends_at = NOW() + (duration_days::int * INTERVAL '1 day')
+       WHERE id = $1
+         AND status = 'pending_verification'
+         AND payment_status IN ('paid', 'captured')
+         AND pending_hold_until > NOW()
+       RETURNING *`,
+      [boostId, note],
+    );
+    const row = approved.rows[0];
+    if (!row) {
+      res.status(404).json({ success: false, message: "Pending captured boost not found or verification window expired." });
+      return;
+    }
+    await query(
+      `UPDATE statuses
+       SET expires_at = GREATEST(expires_at, $2::timestamptz)
+       WHERE id = $1`,
+      [row.status_id, row.ends_at],
+    );
+    res.json({ success: true, boost: row, message: "Boost approved and activated." });
+  } catch (err) {
+    logger.error({ err }, "admin approve status boost");
+    res.status(500).json({ success: false, message: "Could not approve boost." });
+  }
+});
+
+router.post("/status-boosts/:boostId/reject", requireAdmin, async (req, res) => {
+  const boostId = Number(req.params["boostId"]);
+  const note = String((req.body as { note?: string }).note ?? "").trim() || null;
+  if (!boostId) {
+    res.status(400).json({ success: false, message: "Invalid boostId." });
+    return;
+  }
+  try {
+    await ensureStatusBoostTables();
+    const rejected = await query(
+      `UPDATE status_boosts
+       SET status = 'rejected',
+           verification_note = $2,
+           rejected_at = NOW()
+       WHERE id = $1
+         AND status = 'pending_verification'
+       RETURNING *`,
+      [boostId, note],
+    );
+    if (!rejected.rows[0]) {
+      res.status(404).json({ success: false, message: "Pending boost not found." });
+      return;
+    }
+    res.json({ success: true, boost: rejected.rows[0], message: "Boost rejected." });
+  } catch (err) {
+    logger.error({ err }, "admin reject status boost");
+    res.status(500).json({ success: false, message: "Could not reject boost." });
   }
 });
 
