@@ -1,0 +1,2 @@
+ALTER TABLE statuses
+  ADD COLUMN IF NOT EXISTS editor_data JSONB;

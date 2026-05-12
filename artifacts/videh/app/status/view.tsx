@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -20,18 +21,37 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+import Svg, { Path } from "react-native-svg";
 
 const { width: W, height: H } = Dimensions.get("window");
 
-function VideoStatusPlayer({ uri, paused }: { uri: string; paused: boolean }) {
+function strokeToPath(points: Array<{ x: number; y: number }>): string {
+  if (points.length === 0) return "";
+  return points.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+}
+
+function VideoStatusPlayer({ uri, paused, trimStartMs, trimEndMs }: { uri: string; paused: boolean; trimStartMs?: number; trimEndMs?: number }) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = false;
+    if (trimStartMs) {
+      (p as any).currentTime = trimStartMs / 1000;
+    }
     if (!paused) p.play();
   });
   useEffect(() => {
     if (paused) player.pause();
     else player.play();
   }, [paused]);
+  useEffect(() => {
+    if (!trimEndMs) return;
+    const timer = setInterval(() => {
+      const currentTime = Number((player as any).currentTime ?? 0);
+      if (currentTime * 1000 >= trimEndMs) {
+        player.pause();
+      }
+    }, 250);
+    return () => clearInterval(timer);
+  }, [player, trimEndMs]);
   return (
     <VideoView
       player={player}
@@ -40,6 +60,34 @@ function VideoStatusPlayer({ uri, paused }: { uri: string; paused: boolean }) {
       nativeControls={false}
     />
   );
+}
+
+function StoryMusicPlayer({ uri, paused }: { uri?: string; paused: boolean }) {
+  const soundRef = useRef<Audio.Sound | null>(null);
+  useEffect(() => {
+    if (!uri) return;
+    let mounted = true;
+    Audio.Sound.createAsync({ uri }, { shouldPlay: !paused, isLooping: true, volume: 0.8 })
+      .then(({ sound: s }) => {
+        if (!mounted) {
+          void s.unloadAsync();
+          return;
+        }
+        soundRef.current = s;
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+      if (soundRef.current) void soundRef.current.unloadAsync();
+      soundRef.current = null;
+    };
+  }, [uri]);
+  useEffect(() => {
+    if (!soundRef.current) return;
+    if (paused) void soundRef.current.pauseAsync();
+    else void soundRef.current.playAsync();
+  }, [paused, uri]);
+  return null;
 }
 
 const BASE_URL = getApiUrl();
@@ -85,6 +133,7 @@ export default function ViewStatusScreen() {
   const isMyStatus = currentStatus?.userId === "me";
   const isMedia = currentStatus?.type === "image" || currentStatus?.type === "video";
   const isBoostedStory = Boolean(currentStatus?.isBoosted);
+  const editorData = currentStatus?.editorData;
 
   useEffect(() => {
     // Move status group to Viewed instantly when viewer opens.
@@ -117,7 +166,10 @@ export default function ViewStatusScreen() {
   const startAnim = useCallback((idx: number, fromValue = 0) => {
     progress.setValue(fromValue);
     const status = statuses.find((s) => s.id === ids[idx]);
-    const duration = ((status?.type === "image" || status?.type === "video") ? 8000 : 5000) * (1 - fromValue);
+    const trimmedVideoMs = status?.type === "video" && status.editorData?.trimEndMs
+      ? Math.max(1000, status.editorData.trimEndMs - (status.editorData.trimStartMs ?? 0))
+      : null;
+    const duration = (trimmedVideoMs ?? ((status?.type === "image" || status?.type === "video") ? 8000 : 5000)) * (1 - fromValue);
     const anim = Animated.timing(progress, { toValue: 1, duration, useNativeDriver: false });
     animRef.current = anim;
     anim.start(({ finished }) => {
@@ -204,6 +256,7 @@ export default function ViewStatusScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: bgColor, paddingTop: topPad }]}>
+      <StoryMusicPlayer uri={editorData?.musicUri} paused={paused || showMenu} />
 
       {/* ── MULTIPLE PROGRESS BARS ── */}
       <View style={styles.barsWrap}>
@@ -269,10 +322,45 @@ export default function ViewStatusScreen() {
           {isMedia && currentStatus.mediaUrl ? (
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
               {currentStatus.type === "video" ? (
-                <VideoStatusPlayer uri={currentStatus.mediaUrl} paused={paused} />
+                <VideoStatusPlayer uri={currentStatus.mediaUrl} paused={paused} trimStartMs={editorData?.trimStartMs} trimEndMs={editorData?.trimEndMs} />
               ) : (
                 <Image source={{ uri: currentStatus.mediaUrl }} style={{ width: W, height: H * 0.75 }} contentFit="contain" />
               )}
+              <Svg style={[StyleSheet.absoluteFill, { top: H * 0.02 }]} pointerEvents="none">
+                {(editorData?.strokes ?? []).map((stroke) => (
+                  <Path
+                    key={stroke.id}
+                    d={strokeToPath(stroke.points.map((p) => ({ x: p.x * W, y: p.y * H * 0.75 })))}
+                    stroke={stroke.color}
+                    strokeWidth={stroke.width}
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                ))}
+              </Svg>
+              {(editorData?.overlays ?? []).map((overlay) => (
+                <Text
+                  key={overlay.id}
+                  style={[
+                    styles.storyOverlay,
+                    {
+                      left: `${overlay.x * 100}%`,
+                      top: `${overlay.y * 75}%`,
+                      color: overlay.kind === "text" ? overlay.color : "#fff",
+                      fontSize: overlay.size,
+                    },
+                  ]}
+                >
+                  {overlay.text}
+                </Text>
+              ))}
+              {editorData?.musicName ? (
+                <View style={styles.musicPill}>
+                  <Ionicons name="musical-notes" size={12} color="#d9fdd3" />
+                  <Text style={styles.musicPillText}>{editorData.musicName}</Text>
+                </View>
+              ) : null}
               {currentStatus.content && currentStatus.content !== "📷 Photo" && currentStatus.content !== "📹 Video" && (
                 <View style={styles.captionBar}>
                   <Text style={styles.captionText}>{currentStatus.content}</Text>
@@ -410,6 +498,9 @@ const styles = StyleSheet.create({
   sponsoredText: { color: "#111B21", fontSize: 10, fontFamily: "Inter_700Bold" },
   // Content
   statusText: { color: "#fff", fontSize: 26, fontFamily: "Inter_600SemiBold", textAlign: "center", lineHeight: 36 },
+  storyOverlay: { position: "absolute", textAlign: "center", fontWeight: "800", textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 5, transform: [{ translateX: -60 }, { translateY: -20 }], maxWidth: W * 0.82 },
+  musicPill: { position: "absolute", top: 12, left: 14, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6 },
+  musicPillText: { color: "#d9fdd3", fontSize: 11, fontFamily: "Inter_700Bold", maxWidth: W * 0.7 },
   captionBar: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.5)", padding: 12 },
   captionText: { color: "#fff", fontSize: 15, textAlign: "center" },
   // Bottom

@@ -8,10 +8,12 @@ import { Platform, StyleSheet, Text, TouchableOpacity, Vibration, View } from "r
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { StatusBar } from "expo-status-bar";
 import { AppProvider, useApp } from "@/context/AppContext";
 import { UiPreferencesProvider } from "@/context/UiPreferencesContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { getApiUrl } from "@/lib/api";
+import { useColors } from "@/hooks/useColors";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -32,6 +34,7 @@ if (Platform.OS !== "web") {
 
 function RootLayoutNav() {
   const { isAuthenticated, isInitialized, user } = useApp();
+  const colors = useColors();
   const router = useRouter();
   const notifResponseRef = useRef<Notifications.NotificationResponse | null>(null);
   const [incomingCall, setIncomingCall] = useState<{
@@ -138,6 +141,7 @@ function RootLayoutNav() {
 
   return (
     <>
+      <StatusBar style="light" backgroundColor={colors.headerBg} translucent={false} />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="auth/phone" options={{ headerShown: false }} />
@@ -210,19 +214,19 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <ErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-          <GestureHandlerRootView style={{ flex: 1 }}>
-            <KeyboardProvider>
-              <UiPreferencesProvider>
+      <UiPreferencesProvider>
+        <ErrorBoundary>
+          <QueryClientProvider client={queryClient}>
+            <GestureHandlerRootView style={{ flex: 1 }}>
+              <KeyboardProvider>
                 <AppProvider>
                   <RootLayoutNav />
                 </AppProvider>
-              </UiPreferencesProvider>
-            </KeyboardProvider>
-          </GestureHandlerRootView>
-        </QueryClientProvider>
-      </ErrorBoundary>
+              </KeyboardProvider>
+            </GestureHandlerRootView>
+          </QueryClientProvider>
+        </ErrorBoundary>
+      </UiPreferencesProvider>
     </SafeAreaProvider>
   );
 }

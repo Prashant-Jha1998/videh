@@ -188,3 +188,85 @@ th {
 .group-form {
   max-width: 860px;
 }
+
+.story-preview-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(11, 20, 26, 0.7);
+  color: var(--text);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.story-thumb {
+  width: 46px;
+  height: 64px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #000;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.modal-card {
+  width: min(620px, 100%);
+  max-height: 92vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+  padding: 18px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+
+.story-preview-modal {
+  width: min(760px, 100%);
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.modal-head h3 {
+  margin: 0 0 4px;
+}
+
+.modal-close {
+  width: auto;
+  margin-top: 0;
+}
+
+.story-preview-media {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  border-radius: 14px;
+  object-fit: contain;
+  background: #000;
+}
+
+.story-text-preview {
+  min-height: 220px;
+  border-radius: 14px;
+  padding: 24px;
+  background: linear-gradient(135deg, #00a884, #075e54);
+  color: #fff;
+  font-size: 1.25rem;
+  line-height: 1.5;
+}

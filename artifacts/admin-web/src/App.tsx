@@ -19,6 +19,23 @@ type Stats = {
   web_sessions_active: number;
 };
 
+type StatusBoostRow = {
+  id: number;
+  owner_name?: string;
+  content?: string;
+  type?: "text" | "image" | "video";
+  media_url?: string;
+  target_city?: string;
+  target_state?: string;
+  target_radius_km?: number;
+  duration_days?: number;
+  estimated_reach?: number;
+  amount_inr?: number;
+  payment_provider?: string;
+  payment_reference?: string;
+  created_at?: string;
+};
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,
@@ -58,7 +75,10 @@ export default function App() {
   const [broadcasts, setBroadcasts] = useState<unknown[]>([]);
   const [calls, setCalls] = useState<unknown[]>([]);
   const [suspensions, setSuspensions] = useState<unknown[]>([]);
-  const [boosts, setBoosts] = useState<unknown[]>([]);
+  const [boosts, setBoosts] = useState<StatusBoostRow[]>([]);
+  const [previewBoost, setPreviewBoost] = useState<StatusBoostRow | null>(null);
+  const [rejectBoost, setRejectBoost] = useState<StatusBoostRow | null>(null);
+  const [rejectNote, setRejectNote] = useState("");
   const [userSearch, setUserSearch] = useState("");
   const [groupName, setGroupName] = useState("");
   const [groupCreatorPhone, setGroupCreatorPhone] = useState("");
@@ -185,7 +205,7 @@ export default function App() {
   const loadBoosts = useCallback(async () => {
     setErr(null);
     try {
-      const d = await api<{ boosts: unknown[] }>("/admin/status-boosts?status=pending_verification");
+      const d = await api<{ boosts: StatusBoostRow[] }>("/admin/status-boosts?status=pending_verification");
       setBoosts(d.boosts);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to load boosts");
@@ -199,6 +219,10 @@ export default function App() {
 
   const reviewBoost = useCallback(async (boostId: number, action: "approve" | "reject") => {
     const note = window.prompt(action === "approve" ? "Approval note (optional)" : "Reject reason") ?? "";
+    if (action === "reject" && !note.trim()) {
+      setErr("Reject reason is required.");
+      return;
+    }
     try {
       await api(`/admin/status-boosts/${boostId}/${action}`, {
         method: "POST",
@@ -210,6 +234,27 @@ export default function App() {
       setErr(e instanceof Error ? e.message : `Failed to ${action} boost`);
     }
   }, [loadBoosts, loadStats, tab]);
+
+  const submitRejectBoost = useCallback(async () => {
+    if (!rejectBoost) return;
+    const note = rejectNote.trim();
+    if (!note) {
+      setErr("Reject reason is required.");
+      return;
+    }
+    try {
+      await api(`/admin/status-boosts/${rejectBoost.id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ note }),
+      });
+      setRejectBoost(null);
+      setRejectNote("");
+      await loadBoosts();
+      if (tab === "overview") await loadStats();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to reject boost");
+    }
+  }, [loadBoosts, loadStats, rejectBoost, rejectNote, tab]);
 
   const loadSuspensions = useCallback(async () => {
     setErr(null);
@@ -760,6 +805,7 @@ export default function App() {
                     <th>ID</th>
                     <th>Owner</th>
                     <th>Story</th>
+                    <th>Preview</th>
                     <th>Target</th>
                     <th>Days</th>
                     <th>Reach</th>
@@ -770,13 +816,29 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {boosts.map((b: any) => (
+                  {boosts.map((b: StatusBoostRow) => (
                     <tr key={b.id}>
                       <td>{b.id}</td>
                       <td>{b.owner_name ?? "—"}</td>
                       <td style={{ maxWidth: 220 }}>
                         <b>{b.type}</b>
                         <div className="muted">{(b.content ?? "").slice(0, 80)}{(b.content ?? "").length > 80 ? "…" : ""}</div>
+                      </td>
+                      <td>
+                        {b.media_url ? (
+                          <button type="button" className="story-preview-btn" onClick={() => setPreviewBoost(b)}>
+                            {b.type === "video" ? (
+                              <video src={b.media_url} muted preload="metadata" className="story-thumb" />
+                            ) : (
+                              <img src={b.media_url} alt="Story preview" className="story-thumb" />
+                            )}
+                            <span>{b.type === "video" ? "Play video" : "View image"}</span>
+                          </button>
+                        ) : (
+                          <button type="button" className="btn" style={{ width: "auto", padding: "6px 10px" }} onClick={() => setPreviewBoost(b)}>
+                            View text
+                          </button>
+                        )}
                       </td>
                       <td>
                         {b.target_city ?? "Any city"}, {b.target_state ?? "Any state"}
@@ -794,7 +856,15 @@ export default function App() {
                         <button type="button" className="btn btn-primary" style={{ width: "auto", padding: "6px 10px" }} onClick={() => void reviewBoost(Number(b.id), "approve")}>
                           Verify
                         </button>
-                        <button type="button" className="btn" style={{ width: "auto", padding: "6px 10px" }} onClick={() => void reviewBoost(Number(b.id), "reject")}>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ width: "auto", padding: "6px 10px" }}
+                          onClick={() => {
+                            setRejectBoost(b);
+                            setRejectNote("");
+                          }}
+                        >
                           Reject
                         </button>
                       </td>
@@ -870,6 +940,66 @@ export default function App() {
             </div>
           </>
         )}
+
+        {previewBoost ? (
+          <div className="modal-backdrop" role="dialog" aria-modal="true">
+            <div className="modal-card story-preview-modal">
+              <div className="modal-head">
+                <div>
+                  <h3>Story preview</h3>
+                  <p className="muted">{previewBoost.owner_name ?? "Unknown owner"} · {previewBoost.type ?? "story"}</p>
+                </div>
+                <button type="button" className="btn btn-ghost modal-close" onClick={() => setPreviewBoost(null)}>
+                  Close
+                </button>
+              </div>
+              {previewBoost.media_url ? (
+                previewBoost.type === "video" ? (
+                  <video src={previewBoost.media_url} controls autoPlay className="story-preview-media" />
+                ) : (
+                  <img src={previewBoost.media_url} alt="Story preview" className="story-preview-media" />
+                )
+              ) : (
+                <div className="story-text-preview">{previewBoost.content || "No text content"}</div>
+              )}
+              {previewBoost.content ? <p className="muted">{previewBoost.content}</p> : null}
+            </div>
+          </div>
+        ) : null}
+
+        {rejectBoost ? (
+          <div className="modal-backdrop" role="dialog" aria-modal="true">
+            <div className="modal-card">
+              <div className="modal-head">
+                <div>
+                  <h3>Reject story boost</h3>
+                  <p className="muted">Write the reason. This note will be shown to the story owner.</p>
+                </div>
+                <button type="button" className="btn btn-ghost modal-close" onClick={() => setRejectBoost(null)}>
+                  Close
+                </button>
+              </div>
+              <div className="field">
+                <label htmlFor="reject-note">Admin note</label>
+                <textarea
+                  id="reject-note"
+                  value={rejectNote}
+                  onChange={(e) => setRejectNote(e.target.value)}
+                  placeholder="Example: Story contains unclear/invalid promotional content. Please upload a corrected story and try again."
+                  required
+                />
+              </div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button type="button" className="btn" onClick={() => setRejectBoost(null)}>
+                  Cancel
+                </button>
+                <button type="button" className="btn btn-primary" style={{ width: "auto" }} onClick={() => void submitRejectBoost()}>
+                  Reject and send note
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </main>
     </div>
   );

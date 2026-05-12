@@ -77,7 +77,10 @@ function buildCombinedText(payload: {
   mediaUrl?: string | null;
   type?: string | null;
 }): string {
-  return [payload.type ?? "", payload.content ?? "", payload.mediaUrl ?? ""].join(" ").trim();
+  const mediaText = payload.mediaUrl?.startsWith("data:")
+    ? ""
+    : payload.mediaUrl ?? "";
+  return [payload.type ?? "", payload.content ?? "", mediaText].join(" ").trim();
 }
 
 function alertText(msg: string): string {

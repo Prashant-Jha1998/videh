@@ -99,6 +99,7 @@ export default function SettingsScreen() {
     () => [
       { icon: "key-outline", iconBg: "#2196F3", label: t("settings.row.account"), value: t("settings.row.accountSub"), onPress: () => router.push("/settings/account") },
       { icon: "lock-closed-outline", iconBg: "#9C27B0", label: t("settings.row.privacy"), value: t("settings.row.privacySub"), onPress: () => router.push("/settings/privacy") },
+      { icon: "color-palette-outline", iconBg: "#7C3AED", label: "App Theme", value: "20 colors and 30 gradients, free for 1 year", onPress: () => router.push("/settings/theme" as never) },
       { icon: "chatbubble-outline", iconBg: "#00BCD4", label: t("settings.row.chats"), value: t("settings.row.chatsSub"), onPress: () => router.push("/settings/chats") },
       { icon: "radio-outline", iconBg: "#E91E63", label: t("settings.row.broadcasts"), value: t("settings.row.broadcastsSub"), onPress: () => router.push("/broadcasts") },
       { icon: "warning-outline", iconBg: "#E74C3C", label: t("settings.row.sos"), value: t("settings.row.sosSub"), onPress: () => router.push("/settings/sos") },

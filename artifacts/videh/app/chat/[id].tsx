@@ -4,6 +4,8 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import * as MediaLibrary from "expo-media-library";
+import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
 import type { ExistingContact } from "expo-contacts";
 import { Audio, ResizeMode, Video } from "expo-av";
@@ -53,6 +55,24 @@ const BASE_URL = getApiUrl();
 const { width: W } = Dimensions.get("window");
 const REACTION_EMOJIS = ["❤️", "👍", "😂", "😮", "😢", "🙏"];
 const REPLY_SWIPE_ACTION_W = 56;
+
+const MIME_EXTENSION_MAP: Record<string, string> = {
+  "application/pdf": "pdf",
+  "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "text/plain": "txt",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+
+function safeFileName(name: string, fallback: string, ext: string) {
+  const cleaned = (name || fallback).replace(/[^\w.-]/g, "_").replace(/^_+|_+$/g, "");
+  if (!cleaned) return `${fallback}.${ext}`;
+  return cleaned.toLowerCase().endsWith(`.${ext.toLowerCase()}`) ? cleaned : `${cleaned}.${ext}`;
+}
 
 type ChatListRow =
   | { rowType: "date"; id: string; label: string }
@@ -1188,28 +1208,59 @@ export default function ChatScreen() {
     try {
       const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
       if (!cacheDir) throw new Error("No writable cache directory");
+      let fileUri = uri;
+      let mime = "application/octet-stream";
       if (uri.startsWith("data:")) {
         const mimeMatch = uri.match(/^data:([^;]+);base64,/);
         const base64 = uri.replace(/^data:[^;]+;base64,/, "");
-        const mime = mimeMatch?.[1] ?? "application/octet-stream";
-        const extMap: Record<string, string> = {
-          "application/pdf": "pdf",
-          "application/vnd.ms-excel": "xls",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-          "application/msword": "doc",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-          "text/plain": "txt",
-        };
-        const ext = extMap[mime] ?? "bin";
-        const safeName = (item.text || `document_${Date.now()}`).replace(/[^\w.-]/g, "_");
-        const fileUri = `${cacheDir}${safeName}.${ext}`;
+        mime = mimeMatch?.[1] ?? "application/octet-stream";
+        const ext = MIME_EXTENSION_MAP[mime] ?? "bin";
+        fileUri = `${cacheDir}${safeFileName(item.text, `document_${Date.now()}`, ext)}`;
         await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-        await Linking.openURL(fileUri);
-      } else {
-        await Linking.openURL(uri);
+      } else if (/^https?:\/\//i.test(uri)) {
+        const guessedExt = item.text?.split(".").pop()?.slice(0, 8) || "bin";
+        const downloadTarget = `${cacheDir}${safeFileName(item.text, `document_${Date.now()}`, guessedExt)}`;
+        const downloaded = await FileSystem.downloadAsync(uri, downloadTarget);
+        fileUri = downloaded.uri;
       }
+      if (Platform.OS !== "web" && await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: mime,
+          dialogTitle: item.text || "Open document",
+        });
+        return;
+      }
+      await Linking.openURL(fileUri);
     } catch {
       Alert.alert("Error", "Could not open this document on your device.");
+    }
+  }, []);
+
+  const saveImageToGallery = useCallback(async (uri: string) => {
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission required", "Photo library permission is required to save images.");
+        return;
+      }
+      const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
+      if (!cacheDir) throw new Error("No writable cache directory");
+      let fileUri = uri;
+      if (uri.startsWith("data:")) {
+        const mimeMatch = uri.match(/^data:([^;]+);base64,/);
+        const mime = mimeMatch?.[1] ?? "image/jpeg";
+        const ext = MIME_EXTENSION_MAP[mime] ?? "jpg";
+        const base64 = uri.replace(/^data:[^;]+;base64,/, "");
+        fileUri = `${cacheDir}videh_image_${Date.now()}.${ext}`;
+        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+      } else if (/^https?:\/\//i.test(uri)) {
+        const downloaded = await FileSystem.downloadAsync(uri, `${cacheDir}videh_image_${Date.now()}.jpg`);
+        fileUri = downloaded.uri;
+      }
+      await MediaLibrary.saveToLibraryAsync(fileUri);
+      Alert.alert("Saved", "Image saved to your gallery.");
+    } catch {
+      Alert.alert("Error", "Could not save this image. Please try again.");
     }
   }, []);
 
@@ -2428,6 +2479,16 @@ export default function ChatScreen() {
             <TouchableOpacity style={styles.mediaPreviewBtn} onPress={() => setMediaPreview(null)}>
               <Ionicons name="close" size={24} color="#fff" />
             </TouchableOpacity>
+            <View style={{ flex: 1 }} />
+            {mediaPreview?.type === "image" && mediaPreview.uri ? (
+              <TouchableOpacity
+                style={styles.mediaPreviewSaveBtn}
+                onPress={() => { void saveImageToGallery(mediaPreview.uri); }}
+              >
+                <Ionicons name="download-outline" size={20} color="#fff" />
+                <Text style={styles.mediaPreviewSaveText}>Save</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
           {mediaPreview?.uri ? (
             <Image source={{ uri: mediaPreview.uri }} style={styles.mediaPreviewImage} contentFit="contain" />
@@ -2752,6 +2813,8 @@ const styles = StyleSheet.create({
   mediaPreviewModal: { flex: 1, backgroundColor: "rgba(0,0,0,0.98)" },
   mediaPreviewHeader: { paddingTop: 46, paddingHorizontal: 12, paddingBottom: 8, flexDirection: "row", alignItems: "center" },
   mediaPreviewBtn: { padding: 8 },
+  mediaPreviewSaveBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.14)" },
+  mediaPreviewSaveText: { color: "#fff", fontSize: 13, fontFamily: "Inter_700Bold" },
   mediaPreviewImage: { flex: 1, width: "100%" },
   mediaPreviewCaptionWrap: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 20, backgroundColor: "rgba(0,0,0,0.55)" },
   mediaPreviewCaption: { color: "#fff", fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "left" },

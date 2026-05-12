@@ -87,9 +87,31 @@ export interface Status {
   isBoosted?: boolean;
   boostEndsAt?: number;
   boostStatus?: "pending_verification" | "active" | "rejected";
+  boostVerificationNote?: string;
+  editorData?: StoryEditorData;
   viewed: boolean;
   backgroundColor?: string;
 }
+
+export type StoryEditorOverlay =
+  | { id: string; kind: "text"; text: string; x: number; y: number; color: string; size: number }
+  | { id: string; kind: "sticker"; text: string; x: number; y: number; size: number };
+
+export type StoryEditorStroke = {
+  id: string;
+  color: string;
+  width: number;
+  points: Array<{ x: number; y: number }>;
+};
+
+export type StoryEditorData = {
+  overlays?: StoryEditorOverlay[];
+  strokes?: StoryEditorStroke[];
+  musicUri?: string;
+  musicName?: string;
+  trimStartMs?: number;
+  trimEndMs?: number;
+};
 
 export interface Contact {
   id: string;
@@ -125,7 +147,7 @@ interface AppContextType {
   sendMessage: (chatId: string, text: string, replyToId?: string) => void;
   createGroup: (name: string, memberIds: number[], groupAvatarUrl?: string) => void;
   markAsRead: (chatId: string) => void;
-  addStatus: (content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string) => Promise<void> | undefined;
+  addStatus: (content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string, videoDurationMs?: number | null, editorData?: StoryEditorData) => Promise<void> | undefined;
   deleteStatus: (statusId: string) => Promise<void>;
   deleteMessage: (chatId: string, messageId: string) => void;
   pinChat: (chatId: string) => void;
@@ -291,6 +313,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           isBoosted: Boolean(s.is_boosted),
           boostEndsAt: s.boost_ends_at ? new Date(s.boost_ends_at).getTime() : undefined,
           boostStatus: s.boost_status ?? undefined,
+          boostVerificationNote: s.boost_verification_note ?? undefined,
+          editorData: s.editor_data ?? undefined,
           viewed: Boolean(s.viewed),
           backgroundColor: s.background_color ?? "#00A884",
         };
@@ -802,37 +826,47 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }).catch(() => {});
   }, []);
 
-  const addStatus = useCallback((content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string) => {
+  const addStatus = useCallback(async (content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string, videoDurationMs?: number | null, editorData?: StoryEditorData) => {
     const u = userRef.current;
     if (!u) return;
+    const tempId = Date.now().toString();
     const newStatus: Status = {
-      id: Date.now().toString(), userId: "me", userName: u.name,
+      id: tempId, userId: "me", userName: u.name,
       userAvatar: u.avatar,
       content, type, mediaUrl, timestamp: Date.now(), expiresAt: Date.now() + STATUS_LIFETIME_MS, viewed: false,
+      editorData,
       backgroundColor: bg ?? "#00A884",
     };
     setStatuses((prev) => [newStatus, ...prev].filter(isStatusActive));
 
     if (u.dbId) {
-      void (async () => {
+      try {
         const shareableMediaUrl = mediaUrl
           ? await toShareableMediaUri(mediaUrl, type === "video" ? "video/mp4" : "image/jpeg")
           : null;
-        api("/statuses", {
+        const res = await fetch(`${BASE_URL}/api/statuses`, {
           method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             userId: u.dbId,
             content,
             type,
             backgroundColor: bg ?? "#00A884",
             mediaUrl: shareableMediaUrl,
+            videoDurationMs: type === "video" ? videoDurationMs ?? null : undefined,
+            editorData: editorData ?? null,
           }),
-        })
-          .then(() => loadStatuses(u.dbId!))
-          .catch(() => {});
-      })();
+        });
+        const data = await res.json().catch(() => ({})) as { success?: boolean; message?: string };
+        if (!res.ok || !data.success) {
+          throw new Error(data.message ?? "Could not publish story.");
+        }
+        await loadStatuses(u.dbId);
+      } catch (err) {
+        setStatuses((prev) => prev.filter((s) => s.id !== tempId));
+        throw err;
+      }
     }
-    return Promise.resolve();
   }, [loadStatuses, toShareableMediaUri]);
 
   const markStatusViewedLocally = useCallback((statusId: string) => {

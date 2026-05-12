@@ -363,6 +363,10 @@ router.post("/status-boosts/:boostId/reject", requireAdmin, async (req, res) => 
     res.status(400).json({ success: false, message: "Invalid boostId." });
     return;
   }
+  if (!note) {
+    res.status(400).json({ success: false, message: "Reject reason is required." });
+    return;
+  }
   try {
     await ensureStatusBoostTables();
     const rejected = await query(

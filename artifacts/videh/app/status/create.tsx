@@ -1,5 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Contacts from "expo-contacts";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -11,6 +13,8 @@ import {
   Dimensions,
   Image,
   KeyboardAvoidingView,
+  Modal,
+  PanResponder,
   Platform,
   ScrollView,
   StyleSheet,
@@ -20,11 +24,15 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useApp } from "@/context/AppContext";
+import Svg, { Path } from "react-native-svg";
+import { useApp, type StoryEditorOverlay, type StoryEditorStroke } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
 
-const { width: W } = Dimensions.get("window");
+const { width: W, height: H } = Dimensions.get("window");
 const MAX_STORY_PARTICIPANTS = 100;
+const MAX_VIDEO_STORY_DURATION_MS = 60000;
+const STICKER_OPTIONS = ["❤️", "😂", "🔥", "✨", "🙏", "🎉", "😍", "👍", "📍", "⭐", "😎", "💯"];
+const DRAW_COLOR = "#FACC15";
 type AudienceMode = "all_contacts" | "selected_contacts";
 type StoryContact = { id: number; name: string; phone: string };
 
@@ -40,6 +48,11 @@ function formatMediaSize(bytes?: number | null): string {
   if (!bytes || bytes <= 0) return "";
   const mb = bytes / (1024 * 1024);
   return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+}
+
+function strokeToPath(points: StoryEditorStroke["points"]): string {
+  if (points.length === 0) return "";
+  return points.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 }
 
 function VideoPreview({ uri }: { uri: string }) {
@@ -78,8 +91,18 @@ export default function StatusCreateScreen() {
   const [mediaType, setMediaType] = useState<"image" | "video">("image");
   const [mediaDurationMs, setMediaDurationMs] = useState<number | null>(null);
   const [mediaSizeBytes, setMediaSizeBytes] = useState<number | null>(null);
+  const [trimStartMs, setTrimStartMs] = useState(0);
+  const [trimEndMs, setTrimEndMs] = useState<number | null>(null);
   const [caption, setCaption] = useState("");
   const [posting, setPosting] = useState(false);
+  const [storyMusicUri, setStoryMusicUri] = useState<string | null>(null);
+  const [storyMusicName, setStoryMusicName] = useState<string | null>(null);
+  const [editorOverlays, setEditorOverlays] = useState<StoryEditorOverlay[]>([]);
+  const [editorStrokes, setEditorStrokes] = useState<StoryEditorStroke[]>([]);
+  const [drawMode, setDrawMode] = useState(false);
+  const [textModalVisible, setTextModalVisible] = useState(false);
+  const [overlayTextDraft, setOverlayTextDraft] = useState("");
+  const [stickerModalVisible, setStickerModalVisible] = useState(false);
   const [storySubject, setStorySubject] = useState("");
   const [audienceMode, setAudienceMode] = useState<AudienceMode>("all_contacts");
   const [audienceContacts, setAudienceContacts] = useState<StoryContact[]>([]);
@@ -87,15 +110,55 @@ export default function StatusCreateScreen() {
   const [audienceSearch, setAudienceSearch] = useState("");
   const [audienceLoading, setAudienceLoading] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const drawModeRef = useRef(false);
   const fonts = ["Inter_400Regular", "Inter_700Bold", "Inter_300Light", "Inter_600SemiBold"];
   const fontLabels = ["Aa", "𝐁", "𝐿", "𝑺"];
   const mediaDurationLabel = formatMediaDuration(mediaDurationMs);
   const mediaSizeLabel = formatMediaSize(mediaSizeBytes);
+  const effectiveTrimEndMs = trimEndMs ?? mediaDurationMs ?? MAX_VIDEO_STORY_DURATION_MS;
+  const trimDurationLabel = formatMediaDuration(Math.max(0, effectiveTrimEndMs - trimStartMs));
+
+  const addStrokePoint = (x: number, y: number) => {
+    setEditorStrokes((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (!last) return prev;
+      last.points = [...last.points, { x: Math.max(0, Math.min(1, x / W)), y: Math.max(0, Math.min(1, y / (H * 0.75))) }];
+      return next;
+    });
+  };
+
+  const drawResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => drawModeRef.current,
+      onMoveShouldSetPanResponder: () => drawModeRef.current,
+      onPanResponderGrant: (evt) => {
+        if (!drawModeRef.current) return;
+        const { locationX, locationY } = evt.nativeEvent;
+        const stroke: StoryEditorStroke = {
+          id: `stroke_${Date.now()}`,
+          color: DRAW_COLOR,
+          width: 4,
+          points: [{ x: Math.max(0, Math.min(1, locationX / W)), y: Math.max(0, Math.min(1, locationY / (H * 0.75))) }],
+        };
+        setEditorStrokes((prev) => [...prev, stroke]);
+      },
+      onPanResponderMove: (evt) => {
+        if (!drawModeRef.current) return;
+        const { locationX, locationY } = evt.nativeEvent;
+        addStrokePoint(locationX, locationY);
+      },
+    })
+  ).current;
 
   useEffect(() => {
     if (mode === "media") pickMedia();
     else setTimeout(() => inputRef.current?.focus(), 200);
   }, []);
+
+  useEffect(() => {
+    drawModeRef.current = drawMode;
+  }, [drawMode]);
 
   const loadAudienceContacts = async () => {
     if (Platform.OS === "web") {
@@ -159,19 +222,76 @@ export default function StatusCreateScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], allowsEditing: false, quality: 0.8, base64: false });
     if (result.canceled || !result.assets[0]) { setMode("text"); return; }
     const asset = result.assets[0];
-    if (asset.type === "video" && typeof asset.duration === "number" && asset.duration > 120000) {
-      Alert.alert("Video too long", "Please select a video up to 2 minutes.");
+    if (asset.type === "video" && typeof asset.duration === "number" && asset.duration > MAX_VIDEO_STORY_DURATION_MS) {
+      Alert.alert("Video too long", "You can add a video story up to 1 minute only.");
       return;
     }
     setMediaUri(asset.uri);
     setMediaType(asset.type === "video" ? "video" : "image");
-    setMediaDurationMs(typeof asset.duration === "number" ? asset.duration : null);
+    const nextDurationMs = asset.type === "video"
+      ? (typeof asset.duration === "number" && asset.duration > 0 ? asset.duration : MAX_VIDEO_STORY_DURATION_MS)
+      : null;
+    setMediaDurationMs(nextDurationMs);
+    setTrimStartMs(0);
+    setTrimEndMs(asset.type === "video" && nextDurationMs ? Math.min(nextDurationMs, MAX_VIDEO_STORY_DURATION_MS) : null);
     setMediaSizeBytes(typeof asset.fileSize === "number" ? asset.fileSize : null);
   };
 
-  const showEditorTool = (label: string) => {
+  const pickMusic = async () => {
     Haptics.selectionAsync();
-    Alert.alert(label, "This editor tool is ready in the layout. Media editing will be connected next.");
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ["audio/*"],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    const asset = result.assets[0];
+    try {
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+      setStoryMusicUri(`data:${asset.mimeType ?? "audio/mpeg"};base64,${base64}`);
+      setStoryMusicName(asset.name ?? "Background music");
+    } catch {
+      setStoryMusicUri(asset.uri);
+      setStoryMusicName(asset.name ?? "Background music");
+    }
+  };
+
+  const addTextOverlay = () => {
+    const textValue = overlayTextDraft.trim();
+    if (!textValue) return;
+    setEditorOverlays((prev) => [
+      ...prev,
+      { id: `text_${Date.now()}`, kind: "text", text: textValue, x: 0.5, y: 0.42, color: "#FFFFFF", size: 28 },
+    ]);
+    setOverlayTextDraft("");
+    setTextModalVisible(false);
+  };
+
+  const addSticker = (sticker: string) => {
+    setEditorOverlays((prev) => [
+      ...prev,
+      { id: `sticker_${Date.now()}`, kind: "sticker", text: sticker, x: 0.5, y: 0.5, size: 44 },
+    ]);
+    setStickerModalVisible(false);
+  };
+
+  const nudgeTrim = (edge: "start" | "end", deltaMs: number) => {
+    const duration = mediaDurationMs ?? MAX_VIDEO_STORY_DURATION_MS;
+    if (edge === "start") {
+      setTrimStartMs((prev) => Math.max(0, Math.min(prev + deltaMs, effectiveTrimEndMs - 1000)));
+      return;
+    }
+    setTrimEndMs((prev) => Math.max(trimStartMs + 1000, Math.min((prev ?? duration) + deltaMs, duration)));
+  };
+
+  const removeLastEdit = () => {
+    if (editorStrokes.length > 0) {
+      setEditorStrokes((prev) => prev.slice(0, -1));
+      return;
+    }
+    if (editorOverlays.length > 0) {
+      setEditorOverlays((prev) => prev.slice(0, -1));
+    }
   };
 
   const proceedToAudience = async () => {
@@ -181,6 +301,10 @@ export default function StatusCreateScreen() {
     }
     if (mode === "media" && !mediaUri) {
       Alert.alert("Select media", "Choose a photo or video first.");
+      return;
+    }
+    if (mode === "media" && mediaType === "video" && typeof mediaDurationMs === "number" && mediaDurationMs > MAX_VIDEO_STORY_DURATION_MS) {
+      Alert.alert("Video too long", "You can add a video story up to 1 minute only.");
       return;
     }
     setStage("audience");
@@ -200,13 +324,20 @@ export default function StatusCreateScreen() {
         await addStatus(text.trim(), "text", bgColor);
       } else if (mediaUri) {
         const content = caption.trim() || (mediaType === "video" ? "📹 Video" : "📷 Photo");
-        await addStatus(content, mediaType, bgColor, mediaUri);
+        await addStatus(content, mediaType, bgColor, mediaUri, mediaType === "video" ? mediaDurationMs : undefined, {
+          overlays: editorOverlays,
+          strokes: editorStrokes,
+          musicUri: storyMusicUri ?? undefined,
+          musicName: storyMusicName ?? undefined,
+          trimStartMs: mediaType === "video" ? trimStartMs : undefined,
+          trimEndMs: mediaType === "video" ? effectiveTrimEndMs : undefined,
+        });
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
-    } catch {
+    } catch (err) {
       setPosting(false);
-      Alert.alert("Error", "Could not publish story. Please try again.");
+      Alert.alert("Error", err instanceof Error ? err.message : "Could not publish story. Please try again.");
     }
   };
 
@@ -216,13 +347,18 @@ export default function StatusCreateScreen() {
     const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images", "videos"], allowsEditing: false, quality: 0.8, base64: false });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
-      if (asset.type === "video" && typeof asset.duration === "number" && asset.duration > 120000) {
-        Alert.alert("Video too long", "Please record a video up to 2 minutes.");
+      if (asset.type === "video" && typeof asset.duration === "number" && asset.duration > MAX_VIDEO_STORY_DURATION_MS) {
+        Alert.alert("Video too long", "You can add a video story up to 1 minute only.");
         return;
       }
       setMediaUri(asset.uri);
       setMediaType(asset.type === "video" ? "video" : "image");
-      setMediaDurationMs(typeof asset.duration === "number" ? asset.duration : null);
+      const nextDurationMs = asset.type === "video"
+        ? (typeof asset.duration === "number" && asset.duration > 0 ? asset.duration : MAX_VIDEO_STORY_DURATION_MS)
+        : null;
+      setMediaDurationMs(nextDurationMs);
+      setTrimStartMs(0);
+      setTrimEndMs(asset.type === "video" && nextDurationMs ? Math.min(nextDurationMs, MAX_VIDEO_STORY_DURATION_MS) : null);
       setMediaSizeBytes(typeof asset.fileSize === "number" ? asset.fileSize : null);
       setMode("media");
     }
@@ -317,10 +453,11 @@ export default function StatusCreateScreen() {
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}><Ionicons name="close" size={26} color="#fff" /></TouchableOpacity>
           <View style={{ flex: 1 }} />
-          <TouchableOpacity onPress={() => showEditorTool("Add music")} style={styles.editorIconBtn}><Ionicons name="musical-notes-outline" size={21} color="#fff" /></TouchableOpacity>
-          <TouchableOpacity onPress={() => showEditorTool("Stickers")} style={styles.editorIconBtn}><Ionicons name="happy-outline" size={21} color="#fff" /></TouchableOpacity>
-          <TouchableOpacity onPress={() => showEditorTool("Text")} style={styles.editorTextBtn}><Text style={styles.editorTextBtnLabel}>Aa</Text></TouchableOpacity>
-          <TouchableOpacity onPress={() => showEditorTool("Draw")} style={styles.editorIconBtn}><Ionicons name="pencil" size={20} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={pickMusic} style={[styles.editorIconBtn, storyMusicUri && styles.editorIconBtnActive]}><Ionicons name="musical-notes-outline" size={21} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={() => setStickerModalVisible(true)} style={styles.editorIconBtn}><Ionicons name="happy-outline" size={21} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={() => setTextModalVisible(true)} style={styles.editorTextBtn}><Text style={styles.editorTextBtnLabel}>Aa</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => setDrawMode((v) => !v)} style={[styles.editorIconBtn, drawMode && styles.editorIconBtnActive]}><Ionicons name="pencil" size={20} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={removeLastEdit} style={styles.editorIconBtn}><Ionicons name="arrow-undo-outline" size={20} color="#fff" /></TouchableOpacity>
           <TouchableOpacity onPress={openCamera} style={styles.iconBtn}><Ionicons name="camera-outline" size={24} color="#fff" /></TouchableOpacity>
           <TouchableOpacity onPress={pickMedia} style={styles.iconBtn}><Ionicons name="images-outline" size={24} color="#fff" /></TouchableOpacity>
         </View>
@@ -337,13 +474,50 @@ export default function StatusCreateScreen() {
             </View>
             <View style={styles.mediaMetaRow}>
               <Ionicons name="volume-high-outline" size={14} color="#fff" />
-              <Text style={styles.mediaMetaText}>{mediaDurationLabel}{mediaSizeLabel ? ` · ${mediaSizeLabel}` : ""}</Text>
+              <Text style={styles.mediaMetaText}>{mediaDurationLabel}{mediaSizeLabel ? ` · ${mediaSizeLabel}` : ""} · Max 1:00</Text>
+            </View>
+            <View style={styles.trimControls}>
+              <TouchableOpacity style={styles.trimBtn} onPress={() => nudgeTrim("start", -1000)}><Text style={styles.trimBtnText}>Start -1s</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.trimBtn} onPress={() => nudgeTrim("start", 1000)}><Text style={styles.trimBtnText}>Start +1s</Text></TouchableOpacity>
+              <Text style={styles.trimLabel}>{formatMediaDuration(trimStartMs)} - {formatMediaDuration(effectiveTrimEndMs)} ({trimDurationLabel})</Text>
+              <TouchableOpacity style={styles.trimBtn} onPress={() => nudgeTrim("end", -1000)}><Text style={styles.trimBtnText}>End -1s</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.trimBtn} onPress={() => nudgeTrim("end", 1000)}><Text style={styles.trimBtnText}>End +1s</Text></TouchableOpacity>
             </View>
           </View>
         )}
         {mediaUri ? (
-          <View style={styles.mediaPreview}>
+          <View style={styles.mediaPreview} {...drawResponder.panHandlers}>
             {mediaType === "video" ? <VideoPreview uri={mediaUri} /> : <Image source={{ uri: mediaUri }} style={{ width: "100%", height: "100%" }} resizeMode="contain" />}
+            <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+              {editorStrokes.map((stroke) => (
+                <Path
+                  key={stroke.id}
+                  d={strokeToPath(stroke.points.map((p) => ({ x: p.x * W, y: p.y * H * 0.75 })))}
+                  stroke={stroke.color}
+                  strokeWidth={stroke.width}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ))}
+            </Svg>
+            {editorOverlays.map((overlay) => (
+              <Text
+                key={overlay.id}
+                style={[
+                  styles.storyOverlay,
+                  {
+                    left: `${overlay.x * 100}%`,
+                    top: `${overlay.y * 100}%`,
+                    color: overlay.kind === "text" ? overlay.color : "#fff",
+                    fontSize: overlay.size,
+                  },
+                ]}
+              >
+                {overlay.text}
+              </Text>
+            ))}
+            {drawMode ? <View style={styles.drawModePill}><Text style={styles.drawModeText}>Draw on the story</Text></View> : null}
           </View>
         ) : (
           <View style={[styles.mediaPreview, { alignItems: "center", justifyContent: "center" }]}>
@@ -357,7 +531,7 @@ export default function StatusCreateScreen() {
           <View style={[styles.captionBar, { paddingBottom: insets.bottom + 8 }]}>
             <View style={styles.statusAudiencePill}>
               <Ionicons name="link-outline" size={13} color="#d9fdd3" />
-              <Text style={styles.statusAudienceText}>Status (Contacts)</Text>
+              <Text style={styles.statusAudienceText}>{storyMusicName ? `Music: ${storyMusicName.slice(0, 16)}` : "Status (Contacts)"}</Text>
             </View>
             <View style={[styles.captionInput, { backgroundColor: "rgba(0,0,0,0.6)" }]}>
               <Ionicons name="happy-outline" size={22} color="rgba(255,255,255,0.7)" />
@@ -366,6 +540,32 @@ export default function StatusCreateScreen() {
             <TouchableOpacity style={[styles.sendBtn, { backgroundColor: "#00A884" }]} onPress={proceedToAudience}><Ionicons name="arrow-forward" size={22} color="#fff" /></TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
+        <Modal visible={textModalVisible} transparent animationType="fade" onRequestClose={() => setTextModalVisible(false)}>
+          <View style={styles.editorModalBackdrop}>
+            <View style={styles.editorModalCard}>
+              <Text style={styles.editorModalTitle}>Add text</Text>
+              <TextInput value={overlayTextDraft} onChangeText={setOverlayTextDraft} placeholder="Type text..." placeholderTextColor="#94a3b8" style={styles.editorModalInput} autoFocus />
+              <View style={styles.editorModalActions}>
+                <TouchableOpacity onPress={() => setTextModalVisible(false)} style={styles.editorModalBtn}><Text style={styles.editorModalBtnText}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity onPress={addTextOverlay} style={[styles.editorModalBtn, styles.editorModalPrimary]}><Text style={styles.editorModalPrimaryText}>Add</Text></TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+        <Modal visible={stickerModalVisible} transparent animationType="fade" onRequestClose={() => setStickerModalVisible(false)}>
+          <View style={styles.editorModalBackdrop}>
+            <View style={styles.editorModalCard}>
+              <Text style={styles.editorModalTitle}>Choose sticker</Text>
+              <View style={styles.stickerGrid}>
+                {STICKER_OPTIONS.map((sticker) => (
+                  <TouchableOpacity key={sticker} style={styles.stickerBtn} onPress={() => addSticker(sticker)}>
+                    <Text style={styles.stickerText}>{sticker}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     );
   }
@@ -405,6 +605,7 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingBottom: 8, gap: 4 },
   iconBtn: { padding: 10 },
   editorIconBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.12)" },
+  editorIconBtnActive: { backgroundColor: "rgba(0,168,132,0.75)" },
   editorTextBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.12)" },
   editorTextBtnLabel: { color: "#fff", fontSize: 16, fontWeight: "700" },
   textColorBtn: { width: 26, height: 26, borderRadius: 13, margin: 8, borderWidth: 1.5 },
@@ -424,7 +625,14 @@ const styles = StyleSheet.create({
   trimHandleRight: { position: "absolute", right: 0, top: 0, bottom: 0, width: 7, backgroundColor: "#fff" },
   mediaMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 2 },
   mediaMetaText: { color: "#fff", fontSize: 12, fontWeight: "600" },
+  trimControls: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 4 },
+  trimBtn: { backgroundColor: "rgba(255,255,255,0.14)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 5 },
+  trimBtnText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  trimLabel: { color: "#d9fdd3", fontSize: 11, fontWeight: "700" },
   mediaPreview: { flex: 1, width: W },
+  storyOverlay: { position: "absolute", textAlign: "center", fontWeight: "800", textShadowColor: "rgba(0,0,0,0.75)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4, transform: [{ translateX: -60 }, { translateY: -20 }], maxWidth: W * 0.82 },
+  drawModePill: { position: "absolute", top: 12, alignSelf: "center", backgroundColor: "rgba(0,168,132,0.92)", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6 },
+  drawModeText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   captionBar: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 12, paddingTop: 8, gap: 10, flexWrap: "wrap" },
   statusAudiencePill: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", backgroundColor: "rgba(17,27,33,0.92)", borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 2 },
   statusAudienceText: { color: "#d9fdd3", fontSize: 11, fontWeight: "600" },
@@ -433,6 +641,18 @@ const styles = StyleSheet.create({
   sendBtn: { width: 50, height: 50, borderRadius: 25, alignItems: "center", justifyContent: "center" },
   pickMediaBtn: { alignItems: "center", gap: 16 },
   pickMediaText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  editorModalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center", padding: 24 },
+  editorModalCard: { width: "100%", borderRadius: 16, backgroundColor: "#111B21", padding: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  editorModalTitle: { color: "#fff", fontSize: 18, fontWeight: "800", marginBottom: 12 },
+  editorModalInput: { backgroundColor: "#1F2C34", color: "#fff", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16 },
+  editorModalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 14 },
+  editorModalBtn: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: "#2A3942" },
+  editorModalBtnText: { color: "#d9fdd3", fontWeight: "700" },
+  editorModalPrimary: { backgroundColor: "#00A884" },
+  editorModalPrimaryText: { color: "#fff", fontWeight: "800" },
+  stickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  stickerBtn: { width: 54, height: 54, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#1F2C34" },
+  stickerText: { fontSize: 28 },
   audienceHeader: { flexDirection: "row", alignItems: "flex-start", gap: 8, paddingHorizontal: 8, paddingBottom: 8 },
   audienceTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
   audienceSub: { color: "#9db0b8", fontSize: 12, marginTop: 2 },

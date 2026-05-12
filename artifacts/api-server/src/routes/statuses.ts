@@ -4,6 +4,7 @@ import { query } from "../lib/db";
 import { enforceModerationForActivity } from "../lib/moderation";
 
 const router = Router();
+const MAX_VIDEO_STORY_DURATION_MS = 60000;
 
 const BOOST_BASE_PRICE_INR = 499;
 const BOOST_DAY_PRICE_INR = 299;
@@ -14,6 +15,13 @@ const BOOST_MIN_DAYS = 1;
 const BOOST_MAX_DAYS = 30;
 const BOOST_MIN_RADIUS_KM = 5;
 const BOOST_MAX_RADIUS_KM = 500;
+
+let statusEditorColumnsEnsured = false;
+async function ensureStatusEditorColumns(): Promise<void> {
+  if (statusEditorColumnsEnsured) return;
+  await query("ALTER TABLE statuses ADD COLUMN IF NOT EXISTS editor_data JSONB");
+  statusEditorColumnsEnsured = true;
+}
 
 function clampInt(value: unknown, min: number, max: number): number {
   const n = Math.round(Number(value));
@@ -199,10 +207,11 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
   const { userId } = req.params;
   try {
     await ensureBoostTables();
+    await ensureStatusEditorColumns();
     const result = await query(`
       SELECT
         s.id, s.user_id, s.content, s.type, s.background_color,
-        s.media_url, s.expires_at, s.created_at,
+        s.media_url, s.editor_data, s.expires_at, s.created_at,
         u.name AS user_name, u.avatar_url AS user_avatar,
         EXISTS(
           SELECT 1 FROM status_boosts sb
@@ -220,10 +229,18 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
           SELECT sb.status FROM status_boosts sb
           WHERE sb.status_id = s.id
             AND sb.payment_status IN ('paid', 'captured')
-            AND sb.status IN ('pending_verification', 'active')
+            AND sb.status IN ('pending_verification', 'active', 'rejected')
           ORDER BY sb.created_at DESC
           LIMIT 1
         ) AS boost_status,
+        (
+          SELECT sb.verification_note FROM status_boosts sb
+          WHERE sb.status_id = s.id
+            AND sb.payment_status IN ('paid', 'captured')
+            AND sb.status IN ('pending_verification', 'active', 'rejected')
+          ORDER BY sb.created_at DESC
+          LIMIT 1
+        ) AS boost_verification_note,
         EXISTS(
           SELECT 1 FROM status_views sv
           WHERE sv.status_id = s.id AND sv.viewer_id = $1::int
@@ -495,11 +512,23 @@ router.get("/:statusId/boost/analytics", async (req: Request, res: Response) => 
 
 // Post a status
 router.post("/", async (req: Request, res: Response) => {
-  const { userId, content, type, backgroundColor, mediaUrl } = req.body as {
-    userId?: number; content?: string; type?: string; backgroundColor?: string; mediaUrl?: string;
+  const { userId, content, type, backgroundColor, mediaUrl, videoDurationMs, editorData } = req.body as {
+    userId?: number; content?: string; type?: string; backgroundColor?: string; mediaUrl?: string; videoDurationMs?: number | null; editorData?: unknown;
   };
   if (!userId || !content) { res.status(400).json({ success: false }); return; }
+  if (type === "video") {
+    const durationMs = Number(videoDurationMs);
+    if (!Number.isFinite(durationMs) || durationMs <= 0) {
+      res.status(400).json({ success: false, message: "Video duration is required for video stories." });
+      return;
+    }
+    if (durationMs > MAX_VIDEO_STORY_DURATION_MS) {
+      res.status(400).json({ success: false, message: "Video story can be up to 1 minute only." });
+      return;
+    }
+  }
   try {
+    await ensureStatusEditorColumns();
     const activityType = type === "video" ? "video_share" : "story_status";
     const mod = await enforceModerationForActivity(userId, activityType, {
       content,
@@ -519,10 +548,10 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     const result = await query(`
-      INSERT INTO statuses (user_id, content, type, background_color, media_url, expires_at)
-      VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '24 hours')
+      INSERT INTO statuses (user_id, content, type, background_color, media_url, editor_data, expires_at)
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW() + INTERVAL '24 hours')
       RETURNING *
-    `, [userId, content, type ?? "text", backgroundColor ?? "#00A884", mediaUrl ?? null]);
+    `, [userId, content, type ?? "text", backgroundColor ?? "#00A884", mediaUrl ?? null, editorData ? JSON.stringify(editorData) : null]);
     res.json({ success: true, status: result.rows[0] });
   } catch (err) {
     res.status(500).json({ success: false });

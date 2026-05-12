@@ -25,7 +25,6 @@ export default function SplashAnimScreen({ onDone }: { onDone?: () => void }) {
           source={require("@/assets/images/videh_logo.png")}
           style={styles.logo}
           resizeMode="contain"
-          tintColor="#00A884"
         />
       </Animated.View>
       <Animated.View style={{ opacity: textOpacity }}>
