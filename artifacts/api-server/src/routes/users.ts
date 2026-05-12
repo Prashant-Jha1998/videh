@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { query } from "../lib/db";
-import { isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
+import { EXPO_CHAT_MESSAGE_CATEGORY_ID, isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
 import { assertSameUser, issueSessionToken } from "../lib/auth";
 
 const router = Router();
@@ -383,7 +383,13 @@ router.post("/:id/test-push", async (req: Request, res: Response) => {
       res.status(404).json({ success: false, message: "No valid push token saved for this user." });
       return;
     }
-    sendExpoChatPush(token, "Videh test notification", "Push notifications are working.", { type: "test" });
+    sendExpoChatPush(
+      token,
+      "Videh test notification",
+      "Push notifications are working.",
+      { type: "test", notificationKind: "chat_message" },
+      { categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID, threadId: "test-push" },
+    );
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "test push");

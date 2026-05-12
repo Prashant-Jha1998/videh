@@ -14,6 +14,14 @@ import { UiPreferencesProvider } from "@/context/UiPreferencesContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { getApiUrl } from "@/lib/api";
 import { useColors } from "@/hooks/useColors";
+import {
+  ensureVidehNotificationSetup,
+  NOTIFICATION_ACTION_ACCEPT_CALL,
+  NOTIFICATION_ACTION_DECLINE_CALL,
+  NOTIFICATION_ACTION_MARK_READ,
+  NOTIFICATION_ACTION_MUTE,
+  NOTIFICATION_ACTION_REPLY,
+} from "@/lib/pushNotifications";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -33,7 +41,7 @@ if (Platform.OS !== "web") {
 }
 
 function RootLayoutNav() {
-  const { isAuthenticated, isInitialized, user } = useApp();
+  const { isAuthenticated, isInitialized, user, markAsRead, muteChat, sendMessage } = useApp();
   const colors = useColors();
   const router = useRouter();
   const notifResponseRef = useRef<Notifications.NotificationResponse | null>(null);
@@ -49,8 +57,54 @@ function RootLayoutNav() {
   // Navigate to chat when notification is tapped
   useEffect(() => {
     if (Platform.OS === "web") return;
+    ensureVidehNotificationSetup().catch(() => {});
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as any;
+      const actionId = response.actionIdentifier;
+      const chatId = data?.chatId ? String(data.chatId) : "";
+      if (actionId === NOTIFICATION_ACTION_MARK_READ && chatId && isAuthenticated) {
+        markAsRead(chatId);
+        return;
+      }
+      if (actionId === NOTIFICATION_ACTION_MUTE && chatId && isAuthenticated) {
+        muteChat(chatId);
+        return;
+      }
+      if (actionId === NOTIFICATION_ACTION_REPLY && chatId && isAuthenticated) {
+        const replyText = String((response as any).userText ?? "").trim();
+        if (replyText) sendMessage(chatId, replyText);
+        return;
+      }
+      if (
+        (actionId === NOTIFICATION_ACTION_ACCEPT_CALL || actionId === NOTIFICATION_ACTION_DECLINE_CALL)
+        && data?.callId
+        && user?.dbId
+      ) {
+        const action = actionId === NOTIFICATION_ACTION_ACCEPT_CALL ? "accept" : "decline";
+        void fetch(`${getApiUrl()}/api/webrtc/calls/${data.callId}/respond`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+          },
+          body: JSON.stringify({ userId: user.dbId, action }),
+        }).then(() => {
+          if (action === "accept") {
+            router.push({
+              pathname: "/call/[id]",
+              params: {
+                id: String(data.chatId),
+                name: String(data.callerName ?? "Videh user"),
+                type: data.type === "video" ? "video" : "audio",
+                channel: String(data.channel ?? ""),
+                callId: String(data.callId),
+                incoming: "1",
+              },
+            });
+          }
+        }).catch(() => {});
+        return;
+      }
       if (data?.callId && isAuthenticated) {
         void fetch(`${getApiUrl()}/api/webrtc/calls/${data.callId}/status?userId=${user?.dbId ?? ""}`)
           .then((res) => res.json())
@@ -67,7 +121,7 @@ function RootLayoutNav() {
       }
     });
     return () => sub.remove();
-  }, [isAuthenticated, user?.dbId]);
+  }, [isAuthenticated, markAsRead, muteChat, router, sendMessage, user?.dbId, user?.sessionToken]);
 
   // Wait for AsyncStorage to load before deciding where to route
   useEffect(() => {
@@ -96,7 +150,8 @@ function RootLayoutNav() {
                 title: `${next.type === "video" ? "Video" : "Voice"} call`,
                 body: `${next.callerName ?? "Videh user"} is calling`,
                 sound: "default",
-                data: { callId: next.callId, chatId: next.chatId, type: next.type },
+                data: { callId: next.callId, chatId: next.chatId, type: next.type, channel: next.channel, callerName: next.callerName },
+                categoryIdentifier: "incoming_call",
               },
               trigger: null,
             }).catch(() => {});

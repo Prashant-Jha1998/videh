@@ -65,12 +65,13 @@ export default function PhoneScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <View style={[styles.inner, { paddingTop: topPad, paddingBottom: insets.bottom + 20 }]}>
-        <Image
-          source={require("@/assets/images/videh_logo.png")}
-          style={styles.logo}
-          resizeMode="contain"
-          tintColor={colors.primary}
-        />
+        <View style={styles.logoWrap}>
+          <Image
+            source={require("@/assets/images/videh_logo.png")}
+            style={[styles.logo, { tintColor: colors.primary }]}
+            resizeMode="contain"
+          />
+        </View>
         <Text style={[styles.title, { color: colors.primary }]}>Videh</Text>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
           Enter your mobile number to get started
@@ -160,7 +161,8 @@ export default function PhoneScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   inner: { flex: 1, alignItems: "center", paddingHorizontal: 24 },
-  logo: { width: 122, height: 122, marginBottom: 8 },
+  logoWrap: { width: 92, height: 92, marginBottom: 8, alignItems: "center", justifyContent: "center" },
+  logo: { width: 72, height: 72 },
   title: { fontSize: 32, fontFamily: "Inter_700Bold", letterSpacing: 1 },
   subtitle: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", marginTop: 8, marginBottom: 32 },
   card: { width: "100%", borderRadius: 16, padding: 20, marginBottom: 24 },

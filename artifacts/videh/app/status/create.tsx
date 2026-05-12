@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Contacts from "expo-contacts";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -29,6 +30,7 @@ import { getApiUrl } from "@/lib/api";
 const { width: W, height: H } = Dimensions.get("window");
 const MAX_STORY_PARTICIPANTS = 100;
 const MAX_VIDEO_STORY_DURATION_MS = 60000;
+const MAX_STORY_MEDIA_BYTES = 150 * 1024 * 1024;
 const STICKER_OPTIONS = ["❤️", "😂", "🔥", "✨", "🙏", "🎉", "😍", "👍", "📍", "⭐", "😎", "💯"];
 const DRAW_COLOR = "#FACC15";
 type AudienceMode = "all_contacts" | "selected_contacts";
@@ -116,6 +118,13 @@ function normalizePhone(raw: string): string {
 
 const TEXT_BG_COLORS = ["#00A884", "#128C7E", "#075E54", "#2563EB", "#7C3AED", "#DB2777", "#DC2626", "#EA580C", "#CA8A04", "#16A34A", "#0891B2", "#374151", "#1F2937", "#6B21A8", "#BE123C"];
 const TEXT_COLORS = ["#FFFFFF", "#000000", "#F3F4F6", "#FEF9C3", "#ECFDF5"];
+
+function mediaExt(uri: string, type: "image" | "video"): string {
+  const clean = uri.split("?")[0].toLowerCase();
+  const match = clean.match(/\.([a-z0-9]{2,5})$/);
+  if (match?.[1]) return match[1];
+  return type === "video" ? "mp4" : "jpg";
+}
 
 export default function StatusCreateScreen() {
   const insets = useSafeAreaInsets();
@@ -340,6 +349,15 @@ export default function StatusCreateScreen() {
     });
   };
 
+  const prepareMediaForStoryUpload = async (uri: string, type: "image" | "video") => {
+    if (!uri || uri.startsWith("file://") || uri.startsWith("http://") || uri.startsWith("https://")) return uri;
+    const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
+    if (!cacheDir) return uri;
+    const target = `${cacheDir}story_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${mediaExt(uri, type)}`;
+    await FileSystem.copyAsync({ from: uri, to: target });
+    return target;
+  };
+
   const pickMedia = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
@@ -352,6 +370,10 @@ export default function StatusCreateScreen() {
     const asset = result.assets[0];
     if (asset.type === "video" && typeof asset.duration === "number" && asset.duration > MAX_VIDEO_STORY_DURATION_MS) {
       Alert.alert("Video too long", "You can add a video story up to 1 minute only.");
+      return;
+    }
+    if (typeof asset.fileSize === "number" && asset.fileSize > MAX_STORY_MEDIA_BYTES) {
+      Alert.alert("Video too large", "Please choose a story video under 150 MB.");
       return;
     }
     setMediaUri(asset.uri);
@@ -454,7 +476,8 @@ export default function StatusCreateScreen() {
         await addStatus(text.trim(), "text", bgColor);
       } else if (mediaUri) {
         const content = caption.trim() || (mediaType === "video" ? "📹 Video" : "📷 Photo");
-        await addStatus(content, mediaType, bgColor, mediaUri, mediaType === "video" ? mediaDurationMs : undefined, {
+        const uploadUri = await prepareMediaForStoryUpload(mediaUri, mediaType);
+        await addStatus(content, mediaType, bgColor, uploadUri, mediaType === "video" ? mediaDurationMs : undefined, {
           overlays: editorOverlays,
           strokes: editorStrokes,
           musicUri: storyMusicUri ?? undefined,
@@ -479,6 +502,10 @@ export default function StatusCreateScreen() {
       const asset = result.assets[0];
       if (asset.type === "video" && typeof asset.duration === "number" && asset.duration > MAX_VIDEO_STORY_DURATION_MS) {
         Alert.alert("Video too long", "You can add a video story up to 1 minute only.");
+        return;
+      }
+      if (typeof asset.fileSize === "number" && asset.fileSize > MAX_STORY_MEDIA_BYTES) {
+        Alert.alert("Video too large", "Please choose a story video under 150 MB.");
         return;
       }
       setMediaUri(asset.uri);

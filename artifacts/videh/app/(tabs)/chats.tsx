@@ -594,47 +594,49 @@ function ChatRow({
   const statusRing = useMemo(() => getContactStatusRingState(chat, statuses), [chat, statuses]);
 
   return (
-    <View style={[styles.row, { borderBottomColor: colors.border }, selected && { backgroundColor: colors.primary + "1F" }]}>
+    <View style={[styles.row, { borderBottomColor: colors.border }, selected && { backgroundColor: colors.primary + "14" }]}>
       <TouchableOpacity
-        style={statusRing ? styles.avatarRingTouchable : [styles.avatarWrap, { backgroundColor: avatarBg }]}
+        style={styles.avatarTapArea}
         onPress={onAvatarPress}
         activeOpacity={0.85}
       >
-        {statusRing ? (
-          <View
-            style={[
-              styles.statusRingOuter,
-              {
-                borderColor: statusRing.hasUnviewed ? "#25D366" : "#8696a0",
-                borderStyle:
-                  Platform.OS !== "web" && statusRing.count > 1 && !statusRing.hasUnviewed ? "dashed" : "solid",
-              },
-            ]}
-          >
-            {chat.avatar ? (
-              <Image source={{ uri: chat.avatar }} style={styles.statusRingInnerImg} contentFit="cover" />
-            ) : (
-              <View style={[styles.statusRingInnerFallback, { backgroundColor: avatarBg }]}>
-                <Text style={styles.statusRingInnerText}>{initials}</Text>
-              </View>
-            )}
-            {statusRing.count > 1 && (
-              <View style={[styles.statusRingCountBadge, { backgroundColor: colors.primary }]}>
-                <Text style={styles.statusRingCountText}>{statusRing.count > 9 ? "9+" : statusRing.count}</Text>
-              </View>
-            )}
-          </View>
-        ) : chat.avatar ? (
-          <Image source={{ uri: chat.avatar }} style={styles.avatarImg} contentFit="cover" />
-        ) : (
-          <Text style={styles.avatarText}>{initials}</Text>
-        )}
+        <View style={statusRing ? styles.avatarRingTouchable : [styles.avatarWrap, { backgroundColor: avatarBg }]}>
+          {statusRing ? (
+            <View
+              style={[
+                styles.statusRingOuter,
+                {
+                  borderColor: statusRing.hasUnviewed ? "#25D366" : "#8696a0",
+                  borderStyle:
+                    Platform.OS !== "web" && statusRing.count > 1 && !statusRing.hasUnviewed ? "dashed" : "solid",
+                },
+              ]}
+            >
+              {chat.avatar ? (
+                <Image source={{ uri: chat.avatar }} style={styles.statusRingInnerImg} contentFit="cover" />
+              ) : (
+                <View style={[styles.statusRingInnerFallback, { backgroundColor: avatarBg }]}>
+                  <Text style={styles.statusRingInnerText}>{initials}</Text>
+                </View>
+              )}
+              {statusRing.count > 1 && !selected && (
+                <View style={[styles.statusRingCountBadge, { backgroundColor: colors.primary }]}>
+                  <Text style={styles.statusRingCountText}>{statusRing.count > 9 ? "9+" : statusRing.count}</Text>
+                </View>
+              )}
+            </View>
+          ) : chat.avatar ? (
+            <Image source={{ uri: chat.avatar }} style={styles.avatarImg} contentFit="cover" />
+          ) : (
+            <Text style={styles.avatarText}>{initials}</Text>
+          )}
+        </View>
         {!chat.isGroup && chat.isOnline && (
           <View style={[styles.onlineDot, { backgroundColor: colors.onlineGreen }]} />
         )}
         {selected ? (
           <View style={[styles.selectedBadge, { backgroundColor: colors.primary }]}>
-            <Ionicons name="checkmark" size={14} color="#fff" />
+            <Ionicons name="checkmark" size={15} color="#fff" />
           </View>
         ) : null}
       </TouchableOpacity>
@@ -696,15 +698,16 @@ const styles = StyleSheet.create({
   filterChip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
   filterChipText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   filterChipPlus: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 0.5 },
-  avatarWrap: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", marginRight: 12, position: "relative", overflow: "hidden" },
+  row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 0.5 },
+  avatarTapArea: { width: 60, height: 58, marginRight: 10, alignItems: "center", justifyContent: "center", position: "relative", overflow: "visible" },
+  avatarWrap: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden" },
   avatarRingTouchable: {
     width: 56,
     height: 56,
-    marginRight: 10,
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
+    overflow: "visible",
   },
   statusRingOuter: {
     width: 54,
@@ -732,8 +735,24 @@ const styles = StyleSheet.create({
   statusRingCountText: { color: "#fff", fontSize: 10, fontFamily: "Inter_700Bold" },
   avatarImg: { width: 52, height: 52 },
   avatarText: { color: "#fff", fontSize: 18, fontFamily: "Inter_700Bold" },
-  onlineDot: { width: 14, height: 14, borderRadius: 7, position: "absolute", bottom: 1, right: 1, borderWidth: 2, borderColor: "#fff" },
-  selectedBadge: { position: "absolute", right: -2, bottom: -2, width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#fff" },
+  onlineDot: { width: 14, height: 14, borderRadius: 7, position: "absolute", bottom: 4, right: 3, borderWidth: 2, borderColor: "#fff" },
+  selectedBadge: {
+    position: "absolute",
+    right: 0,
+    bottom: 1,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2.5,
+    borderColor: "#fff",
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 2,
+  },
   rowContent: { flex: 1 },
   rowTop: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
   nameRow: { flexDirection: "row", alignItems: "center", flex: 1, marginRight: 8 },

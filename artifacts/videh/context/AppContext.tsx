@@ -1023,7 +1023,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const muteChat = useCallback((chatId: string) => {
-    setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, isMuted: !c.isMuted } : c));
+    let nextMuted = false;
+    setChats((prev) => prev.map((c) => {
+      if (c.id !== chatId) return c;
+      nextMuted = !c.isMuted;
+      return { ...c, isMuted: nextMuted };
+    }));
+    const u = userRef.current;
+    if (u?.dbId) {
+      api(`/chats/${chatId}/mute`, {
+        method: "PATCH",
+        body: JSON.stringify({ userId: u.dbId, muted: nextMuted }),
+      }).catch(() => {});
+    }
   }, []);
 
   const archiveChat = useCallback((chatId: string, archived = true) => {

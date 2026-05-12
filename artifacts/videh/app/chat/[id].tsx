@@ -484,6 +484,7 @@ function VoiceNotePlayer({
 function ChatVideoThumbnailBubble({ uri, onOpen }: { uri: string; onOpen: () => void }) {
   const { playableUri, failed, loading } = usePlayableVideoUri(uri);
   const [durationSec, setDurationSec] = useState(0);
+  const [thumbFailed, setThumbFailed] = useState(false);
 
   if (failed) {
     return (
@@ -509,20 +510,25 @@ function ChatVideoThumbnailBubble({ uri, onOpen }: { uri: string; onOpen: () => 
 
   return (
     <TouchableOpacity activeOpacity={0.88} onPress={onOpen} style={styles.videoThumbWrap}>
-      <Video
-        source={{ uri: playableUri }}
-        style={styles.msgVideo}
-        useNativeControls={false}
-        resizeMode={ResizeMode.COVER}
-        shouldPlay={false}
-        isLooping={false}
-        isMuted
-        onLoad={(status) => {
-          if (status.isLoaded && typeof status.durationMillis === "number") {
-            setDurationSec(status.durationMillis / 1000);
-          }
-        }}
-      />
+      {thumbFailed ? (
+        <View style={[styles.msgVideo, styles.videoFallbackBg]} />
+      ) : (
+        <Video
+          source={{ uri: playableUri }}
+          style={styles.msgVideo}
+          useNativeControls={false}
+          resizeMode={ResizeMode.COVER}
+          shouldPlay={false}
+          isLooping={false}
+          isMuted
+          onLoad={(status) => {
+            if (status.isLoaded && typeof status.durationMillis === "number") {
+              setDurationSec(status.durationMillis / 1000);
+            }
+          }}
+          onError={() => setThumbFailed(true)}
+        />
+      )}
       <View style={styles.videoThumbOverlay} pointerEvents="none">
         <Ionicons name="play-circle" size={56} color="rgba(255,255,255,0.92)" />
       </View>
@@ -1834,6 +1840,14 @@ export default function ChatScreen() {
   const mentionResults = mentionQuery !== null
     ? groupMembers.filter((m) => m.name.toLowerCase().startsWith(mentionQuery.toLowerCase()) && m.id !== user?.dbId)
     : [];
+  const selectedMessage = selectedIds.length === 1 ? allMessages.find((m) => m.id === selectedIds[0]) : null;
+  const canOpenMessageInfo = Boolean(chatId && selectedMessage && selectedMessage.senderId === "me" && selectedMessage.type !== "deleted");
+
+  const openSelectedMessageInfo = () => {
+    if (!chatId || !selectedMessage) return;
+    clearSelection();
+    router.push({ pathname: "/chat/message-info", params: { chatId, messageId: selectedMessage.id } });
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: wallpaper ? "transparent" : colors.chatBackground }]}>
@@ -1848,7 +1862,7 @@ export default function ChatScreen() {
       )}
       {/* Header */}
       {selectionActive ? (
-        <View style={[styles.header, styles.selectionHeader, { paddingTop: topPad }]}>
+        <ThemedHeader style={[styles.header, styles.selectionHeader, { paddingTop: topPad }]}>
           <TouchableOpacity style={styles.backBtn} onPress={clearSelection}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
@@ -1892,22 +1906,20 @@ export default function ChatScreen() {
                   onPress={() => {
                     const m = allMessages.find((x) => x.id === selectedIds[0]);
                     if (!m || m.type === "deleted") return;
-                    Clipboard.setString(m.text);
-                  }}
-                >
-                  <Ionicons name="copy-outline" size={21} color="#fff" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.headerBtn}
-                  onPress={() => {
-                    const m = allMessages.find((x) => x.id === selectedIds[0]);
-                    if (!m || m.type === "deleted") return;
                     setForwardMsg(m);
                     clearSelection();
                   }}
                 >
                   <Ionicons name="arrow-redo-outline" size={21} color="#fff" />
                 </TouchableOpacity>
+                {canOpenMessageInfo ? (
+                  <TouchableOpacity
+                    style={styles.headerBtn}
+                    onPress={openSelectedMessageInfo}
+                  >
+                    <Ionicons name="information-circle-outline" size={22} color="#fff" />
+                  </TouchableOpacity>
+                ) : null}
               </>
             ) : null}
             <TouchableOpacity style={styles.headerBtn} onPress={() => setBulkDeleteOpen(true)}>
@@ -1927,7 +1939,7 @@ export default function ChatScreen() {
               </TouchableOpacity>
             ) : null}
           </View>
-        </View>
+        </ThemedHeader>
       ) : (
         <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
@@ -2551,7 +2563,7 @@ const styles = StyleSheet.create({
   mentionAvatarText: { color: "#fff", fontSize: 12, fontFamily: "Inter_700Bold" },
   mentionName: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   header: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 8, paddingBottom: 10, gap: 6 },
-  selectionHeader: { backgroundColor: "#1f2c34" },
+  selectionHeader: {},
   selectionHeaderActions: { flexWrap: "wrap", justifyContent: "flex-end", flexShrink: 0 },
   backBtn: { padding: 6 },
   headerAvatarWrap: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", overflow: "hidden" },
@@ -2617,6 +2629,7 @@ const styles = StyleSheet.create({
   msgText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
   msgImage: { width: W * 0.62, height: W * 0.62, borderRadius: 12 },
   msgVideo: { width: W * 0.62, height: W * 0.62, borderRadius: 12, backgroundColor: "#000" },
+  videoFallbackBg: { alignItems: "center", justifyContent: "center" },
   videoThumbWrap: { position: "relative", width: W * 0.62, height: W * 0.62, borderRadius: 12, overflow: "hidden" },
   videoThumbOverlay: {
     ...StyleSheet.absoluteFillObject,

@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { query } from "../lib/db";
-import { isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
+import { EXPO_INCOMING_CALL_CATEGORY_ID, isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
 import { stateDelete, stateGetJson, stateKeys, stateSetJson } from "../lib/sharedState";
 
 type Role = "caller" | "callee";
@@ -170,7 +170,8 @@ router.post("/calls", async (req: Request, res: Response) => {
         pushTokens,
         body.type === "video" ? "Video call" : "Voice call",
         `${caller.name ?? "Videh user"} is calling`,
-        { callId, chatId, type: invite.type, channel, kind: "call" },
+        { callId, chatId, type: invite.type, channel, callerName: caller.name ?? "Videh user", kind: "call", notificationKind: "incoming_call" },
+        { categoryId: EXPO_INCOMING_CALL_CATEGORY_ID, threadId: `call-${callId}` },
       );
     }
     res.json({ success: true, call: serializeIncoming(invite, callerId), participantIds: callableParticipantIds });

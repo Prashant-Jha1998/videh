@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Audio, ResizeMode, Video } from "expo-av";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -31,7 +31,9 @@ export default function ChatVideoViewerScreen() {
 
   const playUri = playUriEncoded ? decodeURIComponent(String(playUriEncoded)) : "";
   const { playableUri, failed, loading } = usePlayableVideoUri(playUri || undefined);
+  const videoRef = useRef<Video>(null);
   const [saving, setSaving] = useState(false);
+  const [ended, setEnded] = useState(false);
 
   useEffect(() => {
     if (!playUri) router.back();
@@ -40,6 +42,10 @@ export default function ChatVideoViewerScreen() {
   useEffect(() => {
     void Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
   }, []);
+
+  useEffect(() => {
+    setEnded(false);
+  }, [playableUri]);
 
   const ts = timestamp ? Number(timestamp) : Date.now();
   const sub = formatRelativeHeader(Number.isFinite(ts) ? ts : Date.now());
@@ -59,6 +65,11 @@ export default function ChatVideoViewerScreen() {
       setSaving(false);
     }
   }, [playUri, saving]);
+
+  const replay = useCallback(async () => {
+    setEnded(false);
+    await videoRef.current?.setStatusAsync({ positionMillis: 0, shouldPlay: true });
+  }, []);
 
   return (
     <View style={styles.root}>
@@ -108,14 +119,29 @@ export default function ChatVideoViewerScreen() {
             <Text style={styles.loadingText}>Preparing video…</Text>
           </View>
         ) : (
-          <Video
-            source={{ uri: playableUri }}
-            style={styles.video}
-            useNativeControls
-            resizeMode={ResizeMode.CONTAIN}
-            shouldPlay
-            isLooping={false}
-          />
+          <View style={styles.videoBox}>
+            <Video
+              ref={videoRef}
+              source={{ uri: playableUri }}
+              style={styles.video}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+              isLooping={false}
+              onPlaybackStatusUpdate={(status) => {
+                if (status.isLoaded && status.didJustFinish) {
+                  setEnded(true);
+                  videoRef.current?.setStatusAsync({ positionMillis: 0, shouldPlay: false }).catch(() => {});
+                }
+              }}
+            />
+            {ended ? (
+              <TouchableOpacity style={styles.replayOverlay} onPress={() => { void replay(); }} activeOpacity={0.85}>
+                <Ionicons name="play-circle" size={74} color="rgba(255,255,255,0.94)" />
+                <Text style={styles.replayText}>Play again</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         )}
       </View>
 
@@ -148,7 +174,10 @@ const styles = StyleSheet.create({
   headerName: { color: "#fff", fontSize: 17, fontFamily: "Inter_600SemiBold" },
   headerSub: { color: "rgba(255,255,255,0.65)", fontSize: 13, marginTop: 2, fontFamily: "Inter_400Regular" },
   body: { flex: 1, backgroundColor: "#000", justifyContent: "center" },
+  videoBox: { flex: 1, backgroundColor: "#000", justifyContent: "center" },
   video: { width: W, flex: 1, backgroundColor: "#000" },
+  replayOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.18)" },
+  replayText: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold", marginTop: 8 },
   centerBox: { padding: 24, alignItems: "center", justifyContent: "center", gap: 12 },
   errText: { color: "#e2e8f0", fontSize: 15, fontFamily: "Inter_500Medium", textAlign: "center" },
   loadingText: { color: "#94a3b8", fontSize: 14, marginTop: 8, fontFamily: "Inter_400Regular" },

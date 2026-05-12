@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { Router, type Request, type Response } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,9 +26,11 @@ const statusMediaUpload = multer({
       cb(null, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${safeExt}`);
     },
   }),
-  limits: { fileSize: 75 * 1024 * 1024 },
+  limits: { fileSize: 150 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (/^(image|video|audio)\//.test(file.mimetype)) cb(null, true);
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    const allowedExt = new Set([".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v", ".3gp", ".aac", ".m4a", ".mp3"]);
+    if (/^(image|video|audio)\//.test(file.mimetype) || file.mimetype === "application/octet-stream" || allowedExt.has(ext)) cb(null, true);
     else cb(new Error("Only image, video, and audio files are allowed."));
   },
 });
@@ -36,12 +38,28 @@ const statusMediaUpload = multer({
 function mediaExtension(mime: string): string {
   if (mime === "video/quicktime") return ".mov";
   if (mime === "video/mp4") return ".mp4";
+  if (mime === "video/3gpp") return ".3gp";
   if (mime === "image/png") return ".png";
   if (mime === "image/webp") return ".webp";
   if (mime === "audio/mpeg") return ".mp3";
   if (mime === "audio/mp4") return ".m4a";
   if (mime === "audio/aac") return ".aac";
   return mime.startsWith("image/") ? ".jpg" : ".bin";
+}
+
+function runStatusMediaUpload(req: Request, res: Response, next: NextFunction): void {
+  statusMediaUpload.single("file")(req, res, (err: unknown) => {
+    if (!err) {
+      next();
+      return;
+    }
+    const message = err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE"
+      ? "Story media is too large. Please choose a video under 150 MB."
+      : err instanceof Error
+        ? err.message
+        : "Could not upload story media.";
+    res.status(400).json({ success: false, message });
+  });
 }
 
 const BOOST_BASE_PRICE_INR = 499;
@@ -355,7 +373,7 @@ router.get("/boost/quote", async (req: Request, res: Response) => {
   });
 });
 
-router.post("/media", statusMediaUpload.single("file"), (req: Request, res: Response) => {
+router.post("/media", runStatusMediaUpload, (req: Request, res: Response) => {
   const file = req.file;
   if (!file) {
     res.status(400).json({ success: false, message: "Media file is required." });

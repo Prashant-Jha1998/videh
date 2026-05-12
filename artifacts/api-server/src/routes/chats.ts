@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { query } from "../lib/db";
-import { isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
+import { EXPO_CHAT_MESSAGE_CATEGORY_ID, isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
 import { enforceModerationForActivity } from "../lib/moderation";
 import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
 import { assertSameUser, requireAuth } from "../lib/auth";
@@ -505,7 +505,10 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
 
     // Mark as delivered for all other members + gather push tokens
     const members = await query(
-      "SELECT u.id AS user_id, u.push_token, u.name FROM chat_members cm JOIN users u ON u.id = cm.user_id WHERE cm.chat_id = $1 AND cm.user_id != $2",
+      `SELECT u.id AS user_id, u.push_token, u.name, cm.is_muted
+       FROM chat_members cm
+       JOIN users u ON u.id = cm.user_id
+       WHERE cm.chat_id = $1 AND cm.user_id != $2`,
       [chatId, senderId]
     );
     const recipientIds = members.rows.map((member: any) => Number(member.user_id)).filter(Boolean);
@@ -522,10 +525,27 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     // Send push notifications (fire and forget)
     const senderRow = await query("SELECT name FROM users WHERE id = $1", [senderId]);
     const senderName = senderRow.rows[0]?.name ?? "Videh";
-    const tokens = members.rows.map((m: any) => m.push_token).filter(isExpoPushToken);
+    const tokens = members.rows
+      .filter((m: any) => !m.is_muted)
+      .map((m: any) => m.push_token)
+      .filter(isExpoPushToken);
     if (tokens.length > 0) {
       const preview = (content ?? "").length > 60 ? content!.slice(0, 60) + "..." : (content ?? "");
-      sendExpoChatPush(tokens, senderName, preview, { chatId, type: "message" });
+      sendExpoChatPush(
+        tokens,
+        senderName,
+        preview,
+        {
+          chatId,
+          messageId: result.rows[0].id,
+          senderId,
+          senderName,
+          messageType: type ?? "text",
+          type: "message",
+          notificationKind: "chat_message",
+        },
+        { categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID, threadId: `chat-${chatId}` },
+      );
     }
     publishChatEvent({
       type: "message",
@@ -669,6 +689,30 @@ router.post("/:chatId/read", async (req: Request, res: Response) => {
     `, [chatId, userId]);
     res.json({ success: true });
   } catch (err) {
+    res.status(500).json({ success: false });
+  }
+});
+
+router.patch("/:chatId/mute", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { userId, muted } = req.body as { userId?: number; muted?: boolean };
+  if (!userId || typeof muted !== "boolean") {
+    res.status(400).json({ success: false, message: "userId and muted are required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    const result = await query(
+      "UPDATE chat_members SET is_muted = $1 WHERE chat_id = $2 AND user_id = $3 RETURNING is_muted",
+      [muted, chatId, userId],
+    );
+    if (!result.rows[0]) {
+      res.status(404).json({ success: false, message: "Chat membership not found" });
+      return;
+    }
+    res.json({ success: true, isMuted: result.rows[0].is_muted });
+  } catch (err) {
+    req.log.error({ err }, "mute chat error");
     res.status(500).json({ success: false });
   }
 });

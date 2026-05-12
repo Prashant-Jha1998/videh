@@ -1,26 +1,28 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Audio } from "expo-av";
+import { Audio, ResizeMode, Video as AvVideo } from "expo-av";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { VideoView, useVideoPlayer } from "expo-video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
+  Image as NativeImage,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
 import Svg, { Path } from "react-native-svg";
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -30,34 +32,66 @@ function strokeToPath(points: Array<{ x: number; y: number }>): string {
   return points.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 }
 
-function VideoStatusPlayer({ uri, paused, trimStartMs, trimEndMs }: { uri: string; paused: boolean; trimStartMs?: number; trimEndMs?: number }) {
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = false;
-    if (trimStartMs) {
-      (p as any).currentTime = trimStartMs / 1000;
+function VideoStatusPlayer({
+  uri,
+  paused,
+  trimStartMs,
+  trimEndMs,
+  onLoadError,
+}: {
+  uri: string;
+  paused: boolean;
+  trimStartMs?: number;
+  trimEndMs?: number;
+  onLoadError: () => void;
+}) {
+  const videoRef = useRef<AvVideo>(null);
+  const { playableUri, failed, loading } = usePlayableVideoUri(uri);
+
+  useEffect(() => {
+    if (failed) onLoadError();
+  }, [failed, onLoadError]);
+
+  useEffect(() => {
+    if (!playableUri) return;
+    if (paused) {
+      videoRef.current?.pauseAsync().catch(() => {});
+    } else {
+      videoRef.current?.playAsync().catch(() => {});
     }
-    if (!paused) p.play();
-  });
-  useEffect(() => {
-    if (paused) player.pause();
-    else player.play();
-  }, [paused]);
-  useEffect(() => {
-    if (!trimEndMs) return;
-    const timer = setInterval(() => {
-      const currentTime = Number((player as any).currentTime ?? 0);
-      if (currentTime * 1000 >= trimEndMs) {
-        player.pause();
-      }
-    }, 250);
-    return () => clearInterval(timer);
-  }, [player, trimEndMs]);
+  }, [paused, playableUri]);
+
+  if (loading) {
+    return <ActivityIndicator color="#fff" />;
+  }
+  if (!playableUri) {
+    return null;
+  }
+
   return (
-    <VideoView
-      player={player}
+    <AvVideo
+      ref={videoRef}
+      source={{ uri: playableUri }}
       style={{ width: W, height: H * 0.75 }}
-      contentFit="contain"
-      nativeControls={false}
+      useNativeControls={false}
+      resizeMode={ResizeMode.CONTAIN}
+      shouldPlay={!paused}
+      isLooping={false}
+      onLoad={() => {
+        if (trimStartMs && trimStartMs > 0) {
+          videoRef.current?.setPositionAsync(trimStartMs).catch(() => {});
+        }
+        if (!paused) {
+          videoRef.current?.playAsync().catch(() => {});
+        }
+      }}
+      onError={onLoadError}
+      onPlaybackStatusUpdate={(status) => {
+        if (!status.isLoaded || !trimEndMs) return;
+        if ((status.positionMillis ?? 0) >= trimEndMs) {
+          videoRef.current?.pauseAsync().catch(() => {});
+        }
+      }}
     />
   );
 }
@@ -67,6 +101,11 @@ function StoryMusicPlayer({ uri, paused }: { uri?: string; paused: boolean }) {
   useEffect(() => {
     if (!uri) return;
     let mounted = true;
+    Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+    }).catch(() => {});
     Audio.Sound.createAsync({ uri }, { shouldPlay: !paused, isLooping: true, volume: 0.8 })
       .then(({ sound: s }) => {
         if (!mounted) {
@@ -124,10 +163,15 @@ export default function ViewStatusScreen() {
   const [viewCount, setViewCount] = useState(0);
   const [reactionSummary, setReactionSummary] = useState<Record<string, number>>({});
   const [reply, setReply] = useState("");
+  const [useNativeImageFallback, setUseNativeImageFallback] = useState(false);
+  const [mediaLoadFailed, setMediaLoadFailed] = useState(false);
 
   const progress = useRef(new Animated.Value(0)).current;
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
   const pausedProgressRef = useRef(0);
+  const longPressActiveRef = useRef(false);
+  const longPressConsumedRef = useRef(false);
+  const wasPausedBeforeHoldRef = useRef(false);
 
   const currentStatus = statuses.find((s) => s.id === ids[currentIdx]);
   const isMyStatus = currentStatus?.userId === "me";
@@ -189,6 +233,26 @@ export default function ViewStatusScreen() {
     return () => animRef.current?.stop();
   }, [currentIdx]);
 
+  useEffect(() => {
+    setUseNativeImageFallback(false);
+    setMediaLoadFailed(false);
+  }, [currentStatus?.id, currentStatus?.mediaUrl]);
+
+  const pauseStory = useCallback(() => {
+    if (paused) return;
+    animRef.current?.stop();
+    progress.stopAnimation((value) => {
+      if (typeof value === "number") pausedProgressRef.current = Math.max(0, Math.min(1, value));
+    });
+    setPaused(true);
+  }, [paused, progress]);
+
+  const resumeStory = useCallback(() => {
+    if (!paused) return;
+    startAnim(currentIdx, pausedProgressRef.current);
+    setPaused(false);
+  }, [currentIdx, paused, startAnim]);
+
   const goNext = () => {
     animRef.current?.stop();
     if (currentIdx < ids.length - 1) setCurrentIdx((i) => i + 1);
@@ -202,15 +266,8 @@ export default function ViewStatusScreen() {
   };
 
   const togglePause = () => {
-    if (paused) {
-      startAnim(currentIdx, pausedProgressRef.current);
-      setPaused(false);
-    } else {
-      animRef.current?.stop();
-      const listener = progress.addListener(({ value }) => { pausedProgressRef.current = value; });
-      progress.removeAllListeners();
-      setPaused(true);
-    }
+    if (paused) resumeStory();
+    else pauseStory();
   };
 
   const sendReply = async () => {
@@ -306,20 +363,35 @@ export default function ViewStatusScreen() {
             </View>
           )}
         </View>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => { setPaused((p) => { if (!p) animRef.current?.stop(); else startAnim(currentIdx, pausedProgressRef.current); return !p; }); }}>
+        <TouchableOpacity style={styles.iconBtn} onPress={togglePause}>
           <Ionicons name={paused ? "play" : "pause"} size={17} color="#fff" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => { setShowMenu(true); animRef.current?.stop(); }}>
+        <TouchableOpacity style={styles.iconBtn} onPress={() => { setShowMenu(true); pauseStory(); }}>
           <Ionicons name="ellipsis-vertical" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
 
       {/* ── CONTENT ── (tap left = prev, tap right = next) */}
       <View style={{ flex: 1 }}>
-        <TouchableOpacity
+        <Pressable
           style={StyleSheet.absoluteFill}
-          activeOpacity={1}
+          delayLongPress={180}
+          onLongPress={() => {
+            longPressActiveRef.current = true;
+            longPressConsumedRef.current = true;
+            wasPausedBeforeHoldRef.current = paused;
+            pauseStory();
+          }}
+          onPressOut={() => {
+            if (!longPressActiveRef.current) return;
+            longPressActiveRef.current = false;
+            if (!wasPausedBeforeHoldRef.current && !showMenu) resumeStory();
+          }}
           onPress={(e) => {
+            if (longPressConsumedRef.current) {
+              longPressConsumedRef.current = false;
+              return;
+            }
             if (showReactions || showMenu) { setShowReactions(false); return; }
             const x = e.nativeEvent.locationX;
             if (x < W * 0.3) goPrev(); else goNext();
@@ -327,10 +399,34 @@ export default function ViewStatusScreen() {
         >
           {isMedia && currentStatus.mediaUrl ? (
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-              {currentStatus.type === "video" ? (
-                <VideoStatusPlayer uri={currentStatus.mediaUrl} paused={paused} trimStartMs={editorData?.trimStartMs} trimEndMs={editorData?.trimEndMs} />
+              {mediaLoadFailed ? (
+                <View style={styles.mediaErrorCard}>
+                  <Ionicons name="image-outline" size={38} color="rgba(255,255,255,0.78)" />
+                  <Text style={styles.mediaErrorTitle}>Could not load this story media</Text>
+                  <Text style={styles.mediaErrorHint}>Please check your connection and try again.</Text>
+                </View>
+              ) : currentStatus.type === "video" ? (
+                <VideoStatusPlayer
+                  uri={currentStatus.mediaUrl}
+                  paused={paused}
+                  trimStartMs={editorData?.trimStartMs}
+                  trimEndMs={editorData?.trimEndMs}
+                  onLoadError={() => setMediaLoadFailed(true)}
+                />
+              ) : useNativeImageFallback ? (
+                <NativeImage
+                  source={{ uri: currentStatus.mediaUrl }}
+                  style={{ width: W, height: H * 0.75 }}
+                  resizeMode="contain"
+                  onError={() => setMediaLoadFailed(true)}
+                />
               ) : (
-                <Image source={{ uri: currentStatus.mediaUrl }} style={{ width: W, height: H * 0.75 }} contentFit="contain" />
+                <Image
+                  source={{ uri: currentStatus.mediaUrl }}
+                  style={{ width: W, height: H * 0.75 }}
+                  contentFit="contain"
+                  onError={() => setUseNativeImageFallback(true)}
+                />
               )}
               <Svg style={[StyleSheet.absoluteFill, { top: H * 0.02 }]} pointerEvents="none">
                 {(editorData?.strokes ?? []).map((stroke) => (
@@ -378,7 +474,7 @@ export default function ViewStatusScreen() {
               <Text style={styles.statusText}>{currentStatus.content}</Text>
             </View>
           )}
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
       {/* ── BOTTOM ── */}
@@ -432,8 +528,8 @@ export default function ViewStatusScreen() {
                 onChangeText={setReply}
                 placeholder={isBoostedStory ? "Reply to this boosted story..." : `Reply to ${currentStatus.userName}...`}
                 placeholderTextColor="rgba(255,255,255,0.5)"
-                onFocus={() => { animRef.current?.stop(); setPaused(true); }}
-                onBlur={() => { if (paused) { startAnim(currentIdx, pausedProgressRef.current); setPaused(false); } }}
+                onFocus={pauseStory}
+                onBlur={resumeStory}
                 returnKeyType="send"
                 onSubmitEditing={sendReply}
               />
@@ -458,7 +554,7 @@ export default function ViewStatusScreen() {
         visible={showMenu}
         onClose={() => {
           setShowMenu(false);
-          startAnim(currentIdx, pausedProgressRef.current);
+          resumeStory();
         }}
         animationType="fade"
       >
@@ -470,7 +566,7 @@ export default function ViewStatusScreen() {
                 style={[styles.menuItem, idx < MENU_ITEMS.length - 1 && styles.menuItemBorder]}
                 onPress={() => {
                   setShowMenu(false);
-                  startAnim(currentIdx, pausedProgressRef.current);
+                  resumeStory();
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 }}
               >
@@ -504,6 +600,9 @@ const styles = StyleSheet.create({
   sponsoredText: { color: "#111B21", fontSize: 10, fontFamily: "Inter_700Bold" },
   // Content
   statusText: { color: "#fff", fontSize: 26, fontFamily: "Inter_600SemiBold", textAlign: "center", lineHeight: 36 },
+  mediaErrorCard: { alignItems: "center", justifyContent: "center", paddingHorizontal: 28, gap: 8 },
+  mediaErrorTitle: { color: "#fff", fontSize: 16, fontFamily: "Inter_700Bold", textAlign: "center" },
+  mediaErrorHint: { color: "rgba(255,255,255,0.68)", fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center" },
   storyOverlay: { position: "absolute", textAlign: "center", fontWeight: "800", textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 5, transform: [{ translateX: -60 }, { translateY: -20 }], maxWidth: W * 0.82 },
   musicPill: { position: "absolute", top: 12, left: 14, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6 },
   musicPillText: { color: "#d9fdd3", fontSize: 11, fontFamily: "Inter_700Bold", maxWidth: W * 0.7 },

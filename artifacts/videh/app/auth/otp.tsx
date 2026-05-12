@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Platform,
   StyleSheet,
   Text,
@@ -176,8 +177,12 @@ export default function OtpScreen() {
       </TouchableOpacity>
 
       <View style={styles.content}>
-        <View style={[styles.iconCircle, { backgroundColor: colors.accent }]}>
-          <Ionicons name="shield-checkmark" size={40} color={colors.primary} />
+        <View style={styles.logoWrap}>
+          <Image
+            source={require("@/assets/images/videh_logo.png")}
+            style={[styles.logo, { tintColor: colors.primary }]}
+            resizeMode="contain"
+          />
         </View>
         <Text style={[styles.title, { color: colors.foreground }]}>Verify OTP</Text>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
@@ -242,7 +247,8 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   back: { padding: 20 },
   content: { flex: 1, alignItems: "center", paddingHorizontal: 24 },
-  iconCircle: { width: 88, height: 88, borderRadius: 44, alignItems: "center", justifyContent: "center", marginBottom: 20 },
+  logoWrap: { width: 92, height: 92, alignItems: "center", justifyContent: "center", marginBottom: 20 },
+  logo: { width: 72, height: 72 },
   title: { fontSize: 28, fontFamily: "Inter_700Bold", marginBottom: 10 },
   subtitle: { fontSize: 15, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 22, marginBottom: 32 },
   phone: { fontFamily: "Inter_600SemiBold" },
