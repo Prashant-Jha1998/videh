@@ -128,6 +128,9 @@ export default function ChatVideoViewerScreen() {
               resizeMode={ResizeMode.CONTAIN}
               shouldPlay
               isLooping={false}
+              onError={() => {
+                Alert.alert("Video error", "Could not play this video on this device.");
+              }}
               onPlaybackStatusUpdate={(status) => {
                 if (status.isLoaded && status.didJustFinish) {
                   setEnded(true);

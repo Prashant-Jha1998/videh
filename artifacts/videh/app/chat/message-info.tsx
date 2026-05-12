@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { formatTime } from "@/utils/time";
 import { getApiUrl } from "@/lib/api";
@@ -30,6 +31,7 @@ export default function MessageInfoScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user } = useApp();
   const { chatId, messageId } = useLocalSearchParams<{ chatId: string; messageId: string }>();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
@@ -37,13 +39,15 @@ export default function MessageInfoScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!chatId || !messageId) return;
-    fetch(`${BASE_URL}/api/chats/${chatId}/messages/${messageId}/info`)
+    if (!chatId || !messageId || !user?.dbId) return;
+    fetch(`${BASE_URL}/api/chats/${chatId}/messages/${messageId}/info?userId=${user.dbId}`, {
+      headers: user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : undefined,
+    })
       .then((r) => r.json())
       .then((d) => { if (d.success) setReceipts(d.receipts ?? []); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [chatId, messageId]);
+  }, [chatId, messageId, user?.dbId, user?.sessionToken]);
 
   const read = receipts.filter((r) => r.status === "read");
   const delivered = receipts.filter((r) => r.status === "delivered");

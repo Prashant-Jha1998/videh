@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import { query } from "../lib/db";
 import { enforceModerationForActivity } from "../lib/moderation";
-import { assertSameUser } from "../lib/auth";
+import { assertSameUser, requireAuth } from "../lib/auth";
 import { publicMediaUrl } from "../lib/mediaStorage";
 
 const router = Router();
@@ -77,6 +77,35 @@ async function ensureStatusEditorColumns(): Promise<void> {
   if (statusEditorColumnsEnsured) return;
   await query("ALTER TABLE statuses ADD COLUMN IF NOT EXISTS editor_data JSONB");
   statusEditorColumnsEnsured = true;
+}
+
+let statusMediaTableEnsured = false;
+async function ensureStatusMediaTable(): Promise<void> {
+  if (statusMediaTableEnsured) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS status_media_files (
+      filename TEXT PRIMARY KEY,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  statusMediaTableEnsured = true;
+}
+
+function mimeFromFilename(filename: string, fallback: string): string {
+  const ext = path.extname(filename).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".mp4" || ext === ".m4v") return "video/mp4";
+  if (ext === ".mov") return "video/quicktime";
+  if (ext === ".3gp") return "video/3gpp";
+  if (ext === ".mp3") return "audio/mpeg";
+  if (ext === ".m4a") return "audio/mp4";
+  if (ext === ".aac") return "audio/aac";
+  return fallback || "application/octet-stream";
 }
 
 function clampInt(value: unknown, min: number, max: number): number {
@@ -373,19 +402,84 @@ router.get("/boost/quote", async (req: Request, res: Response) => {
   });
 });
 
-router.post("/media", runStatusMediaUpload, (req: Request, res: Response) => {
+router.get("/media/:filename", async (req: Request, res: Response) => {
+  try {
+    await ensureStatusMediaTable();
+    const rawFilename = Array.isArray(req.params.filename) ? req.params.filename[0] : req.params.filename;
+    const filename = path.basename(rawFilename ?? "");
+    const result = await query(
+      "SELECT filename, mime_type, size_bytes, data FROM status_media_files WHERE filename = $1",
+      [filename],
+    );
+    const row = result.rows[0] as { filename: string; mime_type: string; size_bytes: number; data: Buffer } | undefined;
+    if (!row) {
+      res.status(404).json({ success: false, message: "Media not found." });
+      return;
+    }
+
+    const data = row.data;
+    const size = Number(row.size_bytes) || data.length;
+    const mimeType = mimeFromFilename(row.filename, row.mime_type);
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+
+    const range = req.headers.range;
+    if (range) {
+      const match = range.match(/bytes=(\d*)-(\d*)/);
+      const start = match?.[1] ? Number(match[1]) : 0;
+      const requestedEnd = match?.[2] ? Number(match[2]) : size - 1;
+      const end = Math.min(requestedEnd, size - 1);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) {
+        res.status(416).setHeader("Content-Range", `bytes */${size}`).end();
+        return;
+      }
+      res.status(206);
+      res.setHeader("Content-Range", `bytes ${start}-${end}/${size}`);
+      res.setHeader("Content-Length", String(end - start + 1));
+      res.end(data.subarray(start, end + 1));
+      return;
+    }
+
+    res.setHeader("Content-Length", String(size));
+    res.end(data);
+  } catch (err) {
+    req.log.error({ err }, "status media read error");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/media", requireAuth, runStatusMediaUpload, async (req: Request, res: Response) => {
   const file = req.file;
   if (!file) {
     res.status(400).json({ success: false, message: "Media file is required." });
     return;
   }
-  const relPath = `/uploads/statuses/${encodeURIComponent(file.filename)}`;
-  res.json({
-    success: true,
-    url: publicMediaUrl(req, relPath),
-    mimeType: file.mimetype,
-    size: file.size,
-  });
+  try {
+    await ensureStatusMediaTable();
+    const data = await fs.promises.readFile(file.path);
+    const mimeType = mimeFromFilename(file.filename, file.mimetype);
+    await query(
+      `INSERT INTO status_media_files (filename, mime_type, size_bytes, data)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (filename)
+       DO UPDATE SET mime_type = EXCLUDED.mime_type, size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data`,
+      [file.filename, mimeType, file.size, data],
+    );
+    await fs.promises.unlink(file.path).catch(() => {});
+
+    const relPath = `/api/statuses/media/${encodeURIComponent(file.filename)}`;
+    res.json({
+      success: true,
+      url: publicMediaUrl(req, relPath),
+      mimeType,
+      size: file.size,
+    });
+  } catch (err) {
+    req.log.error({ err }, "status media upload error");
+    await fs.promises.unlink(file.path).catch(() => {});
+    res.status(500).json({ success: false, message: "Could not save story media." });
+  }
 });
 
 router.post("/:statusId/boost/order", async (req: Request, res: Response) => {
@@ -638,6 +732,7 @@ router.post("/", async (req: Request, res: Response) => {
 router.post("/:statusId/view", async (req: Request, res: Response) => {
   const { statusId } = req.params;
   const { viewerId } = req.body as { viewerId?: number };
+  if (!assertSameUser(req, res, viewerId)) return;
   try {
     await query(
       "INSERT INTO status_views (status_id, viewer_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -653,6 +748,7 @@ router.post("/:statusId/view", async (req: Request, res: Response) => {
 router.get("/:statusId/viewers", async (req: Request, res: Response) => {
   const { statusId } = req.params;
   const { ownerId } = req.query as { ownerId?: string };
+  if (!assertSameUser(req, res, ownerId)) return;
   try {
     const result = await query(`
       SELECT

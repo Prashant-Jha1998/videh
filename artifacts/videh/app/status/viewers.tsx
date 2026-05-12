@@ -44,7 +44,9 @@ export default function StatusViewersScreen() {
 
   useEffect(() => {
     if (!statusId || !user?.dbId) return;
-    fetch(`${BASE_URL}/api/statuses/${statusId}/viewers?ownerId=${user.dbId}`)
+    fetch(`${BASE_URL}/api/statuses/${statusId}/viewers?ownerId=${user.dbId}`, {
+      headers: user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : undefined,
+    })
       .then((r) => r.json())
       .then((data) => {
         if (data.success) {

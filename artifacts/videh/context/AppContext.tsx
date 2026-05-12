@@ -261,6 +261,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } as any);
     const res = await fetch(`${BASE_URL}/api/statuses/media`, {
       method: "POST",
+      headers: authHeaders(),
       body: form,
     });
     const data = await res.json().catch(() => ({})) as { success?: boolean; url?: string; message?: string };
@@ -733,7 +734,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const msgType: Message["type"] = isVideo ? "video" : "image";
     const newMsg: Message = {
       id: tempId, text, timestamp: Date.now(), senderId: "me",
-      type: msgType, status: "sent", mediaUrl: mediaUri, isViewOnce,
+      type: msgType, status: "sent", mediaUrl: shareableMediaUri, isViewOnce,
     };
     setChats((prev) =>
       prev.map((c) =>
@@ -768,7 +769,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setChats((prev) =>
           prev.map((c) =>
             c.id === chatId
-              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered" } : m) }
+              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered", mediaUrl: shareableMediaUri } : m) }
               : c,
           ),
         );
@@ -786,7 +787,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const shareableAudioUri = await toShareableMediaUri(audioUri, "audio/mp4");
     const newMsg: Message = {
       id: tempId, text, timestamp: Date.now(), senderId: "me",
-      type: "audio", status: "sent", mediaUrl: audioUri,
+      type: "audio", status: "sent", mediaUrl: shareableAudioUri,
     };
     setChats((prev) =>
       prev.map((c) =>
@@ -815,7 +816,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setChats((prev) =>
           prev.map((c) =>
             c.id === chatId
-              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered" } : m) }
+              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered", mediaUrl: shareableAudioUri } : m) }
               : c,
           ),
         );
@@ -1050,6 +1051,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const starMessage = useCallback((chatId: string, messageId: string) => {
+    const u = userRef.current;
     setChats((prev) =>
       prev.map((c) =>
         c.id === chatId
@@ -1064,7 +1066,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           : c
       )
     );
-    api(`/chats/${chatId}/messages/${messageId}/star`, { method: "POST" }).catch(() => {});
+    if (u?.dbId) {
+      api(`/chats/${chatId}/messages/${messageId}/star`, {
+        method: "POST",
+        body: JSON.stringify({ userId: u.dbId }),
+      }).catch(() => {});
+    }
   }, []);
 
   const forwardMessage = useCallback((chatId: string, messageId: string, targetChatId: string) => {

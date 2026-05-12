@@ -191,7 +191,10 @@ export default function ViewStatusScreen() {
       markStatusViewedLocally(currentStatus.id);
       fetch(`${BASE_URL}/api/statuses/${currentStatus.id}/view`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+        },
         body: JSON.stringify({ viewerId: user.dbId }),
       }).catch(() => {});
       // Reset reaction for new status

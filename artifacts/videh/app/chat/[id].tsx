@@ -21,6 +21,7 @@ import {
   FlatList,
   Linking,
   Modal,
+  Image as NativeImage,
   Platform,
   Pressable,
   ScrollView,
@@ -281,6 +282,7 @@ function VoiceNotePlayer({
   const [position, setPosition] = useState(0);
   const [preparing, setPreparing] = useState(false);
   const [rate, setRate] = useState(1);
+  const [ended, setEnded] = useState(false);
   const [waveW, setWaveW] = useState(0);
   const resolvedUriRef = useRef<string | null>(null);
   const bars = useMemo(() => voiceWaveHeights(messageId + uri.slice(-24), VOICE_NOTE_WAVE_BARS), [messageId, uri]);
@@ -323,7 +325,11 @@ function VoiceNotePlayer({
               setPosition((status.positionMillis ?? 0) / 1000);
               const d = (status.durationMillis ?? 0) / 1000;
               if (d > 0.05) setDuration(d);
-              if (status.didJustFinish) { setPlaying(false); setPosition(0); }
+              if (status.didJustFinish) {
+                setPlaying(false);
+                setEnded(true);
+                setPosition(0);
+              }
             }
           }
         );
@@ -335,7 +341,13 @@ function VoiceNotePlayer({
         await sound.pauseAsync();
         setPlaying(false);
       } else {
-        await sound.playAsync();
+        if (ended || position >= duration - 0.25) {
+          await sound.setStatusAsync({ positionMillis: 0, shouldPlay: true });
+          setPosition(0);
+          setEnded(false);
+        } else {
+          await sound.playAsync();
+        }
         setPlaying(true);
       }
     } catch {
@@ -355,6 +367,7 @@ function VoiceNotePlayer({
     try {
       await sound.setPositionAsync(p * duration * 1000);
       setPosition(p * duration);
+      setEnded(false);
     } catch { /* ignore */ }
   };
 
@@ -536,6 +549,46 @@ function ChatVideoThumbnailBubble({ uri, onOpen }: { uri: string; onOpen: () => 
         <Ionicons name="videocam" size={13} color="#fff" />
         <Text style={styles.videoThumbDuration}>{durationLabel}</Text>
       </View>
+    </TouchableOpacity>
+  );
+}
+
+function ChatImageBubble({
+  uri,
+  onOpen,
+}: {
+  uri: string;
+  onOpen: () => void;
+}) {
+  const [useNativeFallback, setUseNativeFallback] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <TouchableOpacity activeOpacity={0.9} onPress={onOpen} style={[styles.msgImage, styles.imageFallbackBg]}>
+        <Ionicons name="image-outline" size={32} color="rgba(255,255,255,0.9)" />
+        <Text style={styles.imageFallbackText}>Tap to open image</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <TouchableOpacity activeOpacity={0.9} onPress={onOpen}>
+      {useNativeFallback ? (
+        <NativeImage
+          source={{ uri }}
+          style={styles.msgImage}
+          resizeMode="cover"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <Image
+          source={{ uri }}
+          style={styles.msgImage}
+          contentFit="cover"
+          onError={() => setUseNativeFallback(true)}
+        />
+      )}
     </TouchableOpacity>
   );
 }
@@ -1261,12 +1314,22 @@ export default function ChatScreen() {
         const downloaded = await FileSystem.downloadAsync(uri, downloadTarget);
         fileUri = downloaded.uri;
       }
-      if (Platform.OS !== "web" && await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: mime,
-          dialogTitle: item.text || "Open document",
-        });
-        return;
+      if (Platform.OS !== "web") {
+        const getContentUri = (FileSystem as unknown as { getContentUriAsync?: (uri: string) => Promise<string> }).getContentUriAsync;
+        const openUri = getContentUri ? await getContentUri(fileUri) : fileUri;
+        try {
+          await Linking.openURL(openUri);
+          return;
+        } catch {
+          if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(fileUri, {
+              mimeType: mime,
+              dialogTitle: item.text || "Open document",
+            });
+            return;
+          }
+          throw new Error("No app available");
+        }
       }
       await Linking.openURL(fileUri);
     } catch {
@@ -1483,7 +1546,7 @@ export default function ChatScreen() {
                 ]}
                 numberOfLines={3}
               >
-                {isMe ? "You deleted this message" : "This message was deleted"}
+                {isMe ? "Deleted for everyone" : "This message was deleted"}
               </Text>
               <Text style={[styles.deletedTimeWa, { color: isMe ? deletedMeTime : colors.mutedForeground }]}>
                 {formatChatBubbleTime(item.timestamp)}
@@ -1491,14 +1554,10 @@ export default function ChatScreen() {
             </View>
           ) : isImage ? (
             <>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={() => {
+              <ChatImageBubble
+                uri={item.mediaUrl!}
+                onOpen={() => {
                   if (!item.mediaUrl) return;
-                  if (item.type === "video") {
-                    Linking.openURL(item.mediaUrl).catch(() => {});
-                    return;
-                  }
                   setMediaPreview({
                     uri: item.mediaUrl,
                     type: "image",
@@ -1507,9 +1566,7 @@ export default function ChatScreen() {
                       : undefined,
                   });
                 }}
-              >
-                <Image source={{ uri: item.mediaUrl }} style={styles.msgImage} contentFit="cover" />
-              </TouchableOpacity>
+              />
               {item.isViewOnce && (
                 <View style={styles.viewOnceOverlay}>
                   <Ionicons name="eye-outline" size={18} color="#fff" />
@@ -2612,7 +2669,7 @@ const styles = StyleSheet.create({
   },
   /** Bottom corners even; SVG tail sits at corner */
   bubbleWithTailShape: { borderBottomLeftRadius: 10, borderBottomRightRadius: 10 },
-  bubbleDeleted: { paddingVertical: 7, paddingHorizontal: 9 },
+  bubbleDeleted: { paddingVertical: 7, paddingHorizontal: 9, minWidth: 190, maxWidth: W * 0.78 },
   bubbleImg: {
     paddingHorizontal: 0,
     paddingVertical: 0,
@@ -2628,6 +2685,8 @@ const styles = StyleSheet.create({
   replyText: { fontSize: 12, fontFamily: "Inter_400Regular" },
   msgText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
   msgImage: { width: W * 0.62, height: W * 0.62, borderRadius: 12 },
+  imageFallbackBg: { backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 8 },
+  imageFallbackText: { color: "#fff", fontSize: 13, fontFamily: "Inter_600SemiBold" },
   msgVideo: { width: W * 0.62, height: W * 0.62, borderRadius: 12, backgroundColor: "#000" },
   videoFallbackBg: { alignItems: "center", justifyContent: "center" },
   videoThumbWrap: { position: "relative", width: W * 0.62, height: W * 0.62, borderRadius: 12, overflow: "hidden" },
@@ -2756,10 +2815,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 7,
     paddingVertical: 1,
+    minWidth: 172,
   },
   deletedIconWa: { marginTop: 1 },
   deletedTextWa: {
-    flex: 1,
+    flexShrink: 1,
     fontSize: 14,
     fontFamily: "Inter_400Regular",
     fontStyle: "italic",

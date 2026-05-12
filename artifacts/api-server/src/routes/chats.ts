@@ -35,6 +35,24 @@ function mediaExtension(mime: string): string {
   return mime.startsWith("image/") ? ".jpg" : ".bin";
 }
 
+function mimeFromFilename(filename: string, fallback: string): string {
+  const ext = path.extname(filename).toLowerCase();
+  if (ext === ".pdf") return "application/pdf";
+  if (ext === ".xls") return "application/vnd.ms-excel";
+  if (ext === ".xlsx") return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (ext === ".doc") return "application/msword";
+  if (ext === ".docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".mp4" || ext === ".m4v") return "video/mp4";
+  if (ext === ".mov") return "video/quicktime";
+  if (ext === ".mp3") return "audio/mpeg";
+  if (ext === ".m4a") return "audio/mp4";
+  if (ext === ".aac") return "audio/aac";
+  return fallback || "application/octet-stream";
+}
+
 const chatMediaUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, chatUploadsDir),
@@ -44,8 +62,23 @@ const chatMediaUpload = multer({
       cb(null, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${safeExt}`);
     },
   }),
-  limits: { fileSize: 32 * 1024 * 1024 },
+  limits: { fileSize: 150 * 1024 * 1024 },
 });
+
+let chatMediaTableEnsured = false;
+async function ensureChatMediaTable(): Promise<void> {
+  if (chatMediaTableEnsured) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS chat_media_files (
+      filename TEXT PRIMARY KEY,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  chatMediaTableEnsured = true;
+}
 
 let chatMemberArchiveEnsured = false;
 async function ensureChatMemberArchiveColumn(): Promise<void> {
@@ -319,18 +352,83 @@ router.post("/group", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/media", requireAuth, chatMediaUpload.single("file"), (req: Request, res: Response) => {
+router.get("/media/:filename", async (req: Request, res: Response) => {
+  try {
+    await ensureChatMediaTable();
+    const rawFilename = Array.isArray(req.params.filename) ? req.params.filename[0] : req.params.filename;
+    const filename = path.basename(rawFilename ?? "");
+    const result = await query(
+      "SELECT filename, mime_type, size_bytes, data FROM chat_media_files WHERE filename = $1",
+      [filename],
+    );
+    const row = result.rows[0] as { filename: string; mime_type: string; size_bytes: number; data: Buffer } | undefined;
+    if (!row) {
+      res.status(404).json({ success: false, message: "Media not found." });
+      return;
+    }
+
+    const data = row.data;
+    const size = Number(row.size_bytes) || data.length;
+    const mimeType = mimeFromFilename(row.filename, row.mime_type);
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+
+    const range = req.headers.range;
+    if (range) {
+      const match = range.match(/bytes=(\d*)-(\d*)/);
+      const start = match?.[1] ? Number(match[1]) : 0;
+      const requestedEnd = match?.[2] ? Number(match[2]) : size - 1;
+      const end = Math.min(requestedEnd, size - 1);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) {
+        res.status(416).setHeader("Content-Range", `bytes */${size}`).end();
+        return;
+      }
+      res.status(206);
+      res.setHeader("Content-Range", `bytes ${start}-${end}/${size}`);
+      res.setHeader("Content-Length", String(end - start + 1));
+      res.end(data.subarray(start, end + 1));
+      return;
+    }
+
+    res.setHeader("Content-Length", String(size));
+    res.end(data);
+  } catch (err) {
+    req.log.error({ err }, "chat media read error");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/media", requireAuth, chatMediaUpload.single("file"), async (req: Request, res: Response) => {
   if (!req.file) {
     res.status(400).json({ success: false, message: "file is required" });
     return;
   }
-  const rel = `/uploads/chats/${encodeURIComponent(req.file.filename)}`;
-  res.json({
-    success: true,
-    url: publicMediaUrl(req, rel),
-    mimeType: req.file.mimetype,
-    size: req.file.size,
-  });
+  try {
+    await ensureChatMediaTable();
+    const data = await fs.promises.readFile(req.file.path);
+    const mimeType = mimeFromFilename(req.file.filename, req.file.mimetype);
+    await query(
+      `INSERT INTO chat_media_files (filename, mime_type, size_bytes, data)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (filename)
+       DO UPDATE SET mime_type = EXCLUDED.mime_type, size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data`,
+      [req.file.filename, mimeType, req.file.size, data],
+    );
+    await fs.promises.unlink(req.file.path).catch(() => {});
+
+    const rel = `/api/chats/media/${encodeURIComponent(req.file.filename)}`;
+    res.json({
+      success: true,
+      url: publicMediaUrl(req, rel),
+      mimeType,
+      size: req.file.size,
+    });
+  } catch (err) {
+    req.log.error({ err }, "chat media upload error");
+    await fs.promises.unlink(req.file.path).catch(() => {});
+    res.status(500).json({ success: false, message: "Could not save chat media." });
+  }
 });
 
 // Get messages in a chat (with read status, reactions, forward_count)
@@ -339,6 +437,7 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
   const userId = req.query.userId as string | undefined;
   const limit = Number(req.query.limit ?? 50);
   const before = req.query.before as string | undefined;
+  if (!assertSameUser(req, res, userId)) return;
   try {
     const result = await query(`
       SELECT
@@ -406,6 +505,7 @@ router.delete("/:chatId/typing", async (req: Request, res: Response) => {
 router.get("/:chatId/typing", async (req: Request, res: Response) => {
   const { chatId } = req.params;
   const { userId } = req.query as { userId?: string };
+  if (!assertSameUser(req, res, userId)) return;
   try {
     const result = await query(
       `SELECT u.name FROM typing_sessions ts JOIN users u ON u.id = ts.user_id
@@ -424,6 +524,7 @@ router.get("/:chatId/messaging-permission", async (req: Request, res: Response) 
     res.status(400).json({ success: false });
     return;
   }
+  if (!assertSameUser(req, res, userId)) return;
   try {
     const perm = await evaluateGroupSendPermission(chatId, userId);
     if (!perm) {
@@ -630,12 +731,27 @@ router.put("/:chatId/messages/:messageId", async (req: Request, res: Response) =
 
 // Star/unstar message
 router.post("/:chatId/messages/:messageId/star", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
   const { messageId } = req.params;
+  const { userId } = req.body as { userId?: number };
+  if (!assertSameUser(req, res, userId)) return;
   try {
     const result = await query(
-      "UPDATE messages SET is_starred = NOT is_starred WHERE id = $1 RETURNING is_starred",
-      [messageId]
+      `UPDATE messages m
+       SET is_starred = NOT is_starred
+       WHERE m.id = $1
+         AND m.chat_id = $2
+         AND EXISTS (
+           SELECT 1 FROM chat_members cm
+           WHERE cm.chat_id = m.chat_id AND cm.user_id = $3
+         )
+       RETURNING is_starred`,
+      [messageId, chatId, userId]
     );
+    if (!result.rows[0]) {
+      res.status(404).json({ success: false, message: "Message not found" });
+      return;
+    }
     res.json({ success: true, isStarred: result.rows[0]?.is_starred });
   } catch (err) {
     res.status(500).json({ success: false });
@@ -986,6 +1102,8 @@ router.put("/:chatId/disappear", async (req: Request, res: Response) => {
 // Message info (delivery/read/not-seen status for each recipient)
 router.get("/:chatId/messages/:messageId/info", async (req: Request, res: Response) => {
   const { chatId, messageId } = req.params;
+  const userId = Number(req.query["userId"]);
+  if (!assertSameUser(req, res, userId)) return;
   try {
     const msg = await query(
       "SELECT sender_id FROM messages WHERE id = $1 AND chat_id = $2",
@@ -996,6 +1114,10 @@ router.get("/:chatId/messages/:messageId/info", async (req: Request, res: Respon
       return;
     }
     const senderId = Number(msg.rows[0].sender_id);
+    if (senderId !== userId) {
+      res.status(403).json({ success: false, message: "Only the sender can view message info" });
+      return;
+    }
     const result = await query(`
       SELECT
         u.id AS user_id,
