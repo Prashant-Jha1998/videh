@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system/legacy";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -38,7 +39,9 @@ export default function StorageScreen() {
     const load = async () => {
       if (!user) return;
       try {
-        const r = await fetch(`${API_URL}/users/${user.dbId}/storage-stats`);
+        const r = await fetch(`${API_URL}/users/${user.dbId}/storage-stats`, {
+          headers: user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : undefined,
+        });
         const d = await r.json();
         if (d.success) setStats(d.stats);
       } catch {}
@@ -47,6 +50,21 @@ export default function StorageScreen() {
   }, [user]);
 
   const fmtNum = (n: number) => n?.toLocaleString("en-IN") ?? "—";
+
+  const clearCache = async () => {
+    try {
+      const dir = FileSystem.cacheDirectory;
+      if (!dir) {
+        Alert.alert("Cache", "No cache directory found.");
+        return;
+      }
+      const entries = await FileSystem.readDirectoryAsync(dir);
+      await Promise.all(entries.map((entry) => FileSystem.deleteAsync(`${dir}${entry}`, { idempotent: true }).catch(() => {})));
+      Alert.alert("Cache cleared", "Temporary files were deleted.");
+    } catch {
+      Alert.alert("Error", "Could not clear cache.");
+    }
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -109,13 +127,13 @@ export default function StorageScreen() {
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <TouchableOpacity
             style={styles.dangerRow}
-            onPress={() => Alert.alert("Cache cleared", "App cache was cleared.", [{ text: "OK" }])}
+            onPress={() => { void clearCache(); }}
             activeOpacity={0.7}
           >
             <Ionicons name="trash-outline" size={20} color={colors.destructive} />
             <View>
               <Text style={[styles.dangerLabel, { color: colors.destructive }]}>Clear cache</Text>
-              <Text style={[styles.dangerHint, { color: colors.mutedForeground }]}>Temporary files delete honge</Text>
+              <Text style={[styles.dangerHint, { color: colors.mutedForeground }]}>Temporary files will be deleted</Text>
             </View>
           </TouchableOpacity>
         </View>

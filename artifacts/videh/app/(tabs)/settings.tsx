@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { ThemedHeader } from "@/components/ThemedHeader";
 
 interface SettingRow {
   icon: string;
@@ -127,7 +128,7 @@ export default function SettingsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
+      <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
         <Text style={styles.headerTitle}>{t("settings.header")}</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.headerBtn}>
@@ -137,7 +138,7 @@ export default function SettingsScreen() {
             <Ionicons name="search-outline" size={22} color="#fff" />
           </TouchableOpacity>
         </View>
-      </View>
+      </ThemedHeader>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}>
         {/* Profile block */}

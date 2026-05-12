@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { ThemedHeader } from "@/components/ThemedHeader";
 import {
   APP_THEME_OPTIONS,
   GRADIENT_APP_THEMES,
@@ -73,13 +74,13 @@ export default function AppThemeSettingsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
+      <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>App Theme</Text>
         <View style={{ width: 40 }} />
-      </View>
+      </ThemedHeader>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 48 }}>
         <LinearGradient colors={selectedTheme.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>

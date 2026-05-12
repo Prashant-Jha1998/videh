@@ -1,5 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { query } from "../lib/db";
+import { isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
+import { assertSameUser, issueSessionToken } from "../lib/auth";
 
 const router = Router();
 
@@ -31,13 +33,13 @@ router.post("/register", async (req: Request, res: Response) => {
     if (existing.rows.length > 0) {
       const user = existing.rows[0];
       await query("UPDATE users SET is_online = TRUE, last_seen = NOW() WHERE id = $1", [user.id]);
-      res.json({ success: true, user: { ...user, is_online: true } });
+      res.json({ success: true, user: { ...user, is_online: true }, sessionToken: issueSessionToken(user.id) });
     } else {
       const result = await query(
         "INSERT INTO users (phone, is_online) VALUES ($1, TRUE) RETURNING *",
         [phone]
       );
-      res.json({ success: true, user: result.rows[0], isNew: true });
+      res.json({ success: true, user: result.rows[0], isNew: true, sessionToken: issueSessionToken(result.rows[0].id) });
     }
   } catch (err) {
     req.log.error({ err }, "register error");
@@ -69,6 +71,7 @@ router.get("/:id", async (req: Request, res: Response) => {
 // Update profile (name, about)
 router.put("/:id", async (req: Request, res: Response) => {
   const { name, about } = req.body as { name?: string; about?: string };
+  if (!assertSameUser(req, res, req.params.id)) return;
   try {
     const result = await query(
       "UPDATE users SET name = COALESCE($1, name), about = COALESCE($2, about), updated_at = NOW() WHERE id = $3 RETURNING *",
@@ -85,6 +88,7 @@ router.put("/:id", async (req: Request, res: Response) => {
 router.post("/:id/avatar", async (req: Request, res: Response) => {
   const { base64, mimeType } = req.body as { base64?: string; mimeType?: string };
   if (!base64) { res.status(400).json({ success: false, message: "base64 data required" }); return; }
+  if (!assertSameUser(req, res, req.params.id)) return;
 
   try {
     const dataUrl = `data:${mimeType ?? "image/jpeg"};base64,${base64}`;
@@ -101,6 +105,7 @@ router.post("/:id/avatar", async (req: Request, res: Response) => {
 
 // Set online
 router.post("/:id/online", async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
   try {
     await query("UPDATE users SET is_online = TRUE WHERE id = $1", [req.params.id]);
     res.json({ success: true });
@@ -109,6 +114,7 @@ router.post("/:id/online", async (req: Request, res: Response) => {
 
 // Set offline
 router.post("/:id/offline", async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
   try {
     await query("UPDATE users SET is_online = FALSE, last_seen = NOW() WHERE id = $1", [req.params.id]);
     res.json({ success: true });
@@ -121,6 +127,7 @@ router.post("/:id/offline", async (req: Request, res: Response) => {
 router.post("/:id/block", async (req: Request, res: Response) => {
   const { blockerId } = req.body as { blockerId?: number };
   if (!blockerId) { res.status(400).json({ success: false }); return; }
+  if (!assertSameUser(req, res, blockerId)) return;
   try {
     await query(
       "INSERT INTO blocked_users (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -148,6 +155,7 @@ router.get("/:id/block-status", async (req: Request, res: Response) => {
 // Unblock user
 router.delete("/:id/block", async (req: Request, res: Response) => {
   const { blockerId } = req.body as { blockerId?: number };
+  if (!assertSameUser(req, res, blockerId)) return;
   try {
     await query("DELETE FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2", [blockerId, req.params.id]);
     res.json({ success: true });
@@ -172,6 +180,7 @@ router.post("/:id/report", async (req: Request, res: Response) => {
     reporterId?: number; chatId?: number; reason?: string; details?: string; block?: boolean;
   };
   if (!reporterId || !reportedUserId) { res.status(400).json({ success: false }); return; }
+  if (!assertSameUser(req, res, reporterId)) return;
   try {
     await ensureReportTables();
     await query(`
@@ -250,6 +259,7 @@ router.get("/:id/two-step-status", async (req: Request, res: Response) => {
 // Set two-step PIN
 router.post("/:id/two-step-pin", async (req: Request, res: Response) => {
   const { pin } = req.body as { pin?: string };
+  if (!assertSameUser(req, res, req.params.id)) return;
   if (!pin || pin.length !== 6 || !/^\d+$/.test(pin)) {
     res.status(400).json({ success: false, message: "6-digit numeric PIN required" }); return;
   }
@@ -262,6 +272,7 @@ router.post("/:id/two-step-pin", async (req: Request, res: Response) => {
 // Remove two-step PIN
 router.delete("/:id/two-step-pin", async (req: Request, res: Response) => {
   const { pin } = req.body as { pin?: string };
+  if (!assertSameUser(req, res, req.params.id)) return;
   try {
     const r = await query("SELECT two_step_pin FROM users WHERE id = $1", [req.params.id]);
     if (!r.rows[0] || r.rows[0].two_step_pin !== pin) {
@@ -303,6 +314,7 @@ router.post("/:id/verify-two-step", async (req: Request, res: Response) => {
         name: row.name ?? null,
         about: row.about ?? null,
         avatarUrl: row.avatar_url ?? null,
+        sessionToken: issueSessionToken(row.id),
       });
       return;
     }
@@ -315,6 +327,7 @@ router.post("/:id/verify-two-step", async (req: Request, res: Response) => {
       name: row.name ?? null,
       about: row.about ?? null,
       avatarUrl: row.avatar_url ?? null,
+      sessionToken: issueSessionToken(row.id),
     });
   } catch (err) {
     req.log.error({ err }, "verify-two-step error");
@@ -324,6 +337,7 @@ router.post("/:id/verify-two-step", async (req: Request, res: Response) => {
 
 // Storage stats
 router.get("/:id/storage-stats", async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
   try {
     const stats = await query(`
       SELECT 
@@ -343,11 +357,38 @@ router.get("/:id/storage-stats", async (req: Request, res: Response) => {
 // Save push token
 router.put("/:id/push-token", async (req: Request, res: Response) => {
   const { token } = req.body as { token?: string };
-  if (!token) { res.status(400).json({ success: false }); return; }
+  if (!assertSameUser(req, res, req.params.id)) return;
+  if (!isExpoPushToken(token)) {
+    res.status(400).json({ success: false, message: "Invalid Expo push token" });
+    return;
+  }
   try {
-    await query("UPDATE users SET push_token = $1 WHERE id = $2", [token, req.params.id]);
+    const result = await query("UPDATE users SET push_token = $1 WHERE id = $2 RETURNING id", [token, req.params.id]);
+    if (!result.rows[0]) {
+      res.status(404).json({ success: false, message: "User not found" });
+      return;
+    }
+    res.json({ success: true, hasPush: true });
+  } catch (err) {
+    req.log.error({ err }, "save push token");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:id/test-push", async (req: Request, res: Response) => {
+  try {
+    const r = await query("SELECT push_token FROM users WHERE id = $1", [req.params.id]);
+    const token = r.rows[0]?.push_token;
+    if (!isExpoPushToken(token)) {
+      res.status(404).json({ success: false, message: "No valid push token saved for this user." });
+      return;
+    }
+    sendExpoChatPush(token, "Videh test notification", "Push notifications are working.", { type: "test" });
     res.json({ success: true });
-  } catch { res.status(500).json({ success: false }); }
+  } catch (err) {
+    req.log.error({ err }, "test push");
+    res.status(500).json({ success: false });
+  }
 });
 
 // Search users by phone

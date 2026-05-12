@@ -1,5 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { query } from "../lib/db";
+import { isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
+import { stateDelete, stateGetJson, stateKeys, stateSetJson } from "../lib/sharedState";
 
 type Role = "caller" | "callee";
 type SignalSession = {
@@ -28,25 +30,49 @@ type CallInvite = {
 };
 
 const router = Router();
-const sessions = new Map<string, SignalSession>();
-const callInvites = new Map<string, CallInvite>();
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 const RING_TIMEOUT_MS = 60 * 1000;
+const sessionKey = (channel: string) => `webrtc:session:${channel}`;
+const callKey = (callId: string) => `webrtc:call:${callId}`;
 
-function cleanupSessions() {
+async function getSession(channel: string): Promise<SignalSession | null> {
+  return stateGetJson<SignalSession>(sessionKey(channel));
+}
+
+async function saveSession(session: SignalSession): Promise<void> {
+  await stateSetJson(sessionKey(session.channel), session, SESSION_TTL_MS);
+}
+
+async function getCall(callId: string): Promise<CallInvite | null> {
+  return stateGetJson<CallInvite>(callKey(callId));
+}
+
+async function saveCall(call: CallInvite): Promise<void> {
+  await stateSetJson(callKey(call.callId), call, SESSION_TTL_MS);
+}
+
+async function cleanupSessions() {
   const now = Date.now();
-  for (const [channel, session] of sessions) {
-    if (now - session.updatedAt > SESSION_TTL_MS) sessions.delete(channel);
+  for (const key of await stateKeys("webrtc:session:")) {
+    const session = await stateGetJson<SignalSession>(key);
+    if (session && now - session.updatedAt > SESSION_TTL_MS) await stateDelete(key);
   }
-  for (const [callId, call] of callInvites) {
+  for (const key of await stateKeys("webrtc:call:")) {
+    const call = await stateGetJson<CallInvite>(key);
+    if (!call) continue;
     if (now - call.updatedAt > SESSION_TTL_MS) {
-      callInvites.delete(callId);
+      await stateDelete(key);
       continue;
     }
     if (now - call.createdAt > RING_TIMEOUT_MS) {
+      let changed = false;
       for (const uid of call.participantIds) {
-        if (call.statuses[uid] === "ringing") call.statuses[uid] = "missed";
+        if (call.statuses[uid] === "ringing") {
+          call.statuses[uid] = "missed";
+          changed = true;
+        }
       }
+      if (changed) await saveCall(call);
     }
   }
 }
@@ -74,7 +100,7 @@ function serializeIncoming(call: CallInvite, userId: number) {
 }
 
 router.post("/calls", async (req: Request, res: Response) => {
-  cleanupSessions();
+  await cleanupSessions();
   const body = req.body as { chatId?: number; callerId?: number; type?: "audio" | "video" };
   const chatId = Number(body.chatId);
   const callerId = Number(body.callerId);
@@ -85,7 +111,7 @@ router.post("/calls", async (req: Request, res: Response) => {
 
   try {
     const members = await query(
-      `SELECT cm.user_id, u.name
+      `SELECT cm.user_id, u.name, u.push_token
        FROM chat_members cm
        JOIN users u ON u.id = cm.user_id
        WHERE cm.chat_id = $1`,
@@ -134,7 +160,19 @@ router.post("/calls", async (req: Request, res: Response) => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    callInvites.set(callId, invite);
+    await saveCall(invite);
+    const pushTokens = members.rows
+      .filter((row: any) => callableParticipantIds.includes(Number(row.user_id)))
+      .map((row: any) => row.push_token)
+      .filter(isExpoPushToken);
+    if (pushTokens.length > 0) {
+      sendExpoChatPush(
+        pushTokens,
+        body.type === "video" ? "Video call" : "Voice call",
+        `${caller.name ?? "Videh user"} is calling`,
+        { callId, chatId, type: invite.type, channel, kind: "call" },
+      );
+    }
     res.json({ success: true, call: serializeIncoming(invite, callerId), participantIds: callableParticipantIds });
   } catch (err) {
     req.log?.error?.({ err }, "create webrtc call invite");
@@ -142,19 +180,21 @@ router.post("/calls", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/calls/incoming/:userId", (req: Request, res: Response) => {
-  cleanupSessions();
+router.get("/calls/incoming/:userId", async (req: Request, res: Response) => {
+  await cleanupSessions();
   const userId = Number(req.params.userId);
-  const incoming = Array.from(callInvites.values())
+  const calls = (await Promise.all((await stateKeys("webrtc:call:")).map((key) => stateGetJson<CallInvite>(key))))
+    .filter((call): call is CallInvite => Boolean(call));
+  const incoming = calls
     .filter((call) => call.statuses[userId] === "ringing")
     .sort((a, b) => b.createdAt - a.createdAt)
     .map((call) => serializeIncoming(call, userId));
   res.json({ success: true, calls: incoming });
 });
 
-router.post("/calls/:callId/respond", (req: Request, res: Response) => {
-  cleanupSessions();
-  const call = callInvites.get(String(req.params.callId));
+router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
+  await cleanupSessions();
+  const call = await getCall(String(req.params.callId));
   const body = req.body as { userId?: number; action?: "accept" | "decline" };
   const userId = Number(body.userId);
   if (!call || !userId || !call.statuses[userId]) {
@@ -163,12 +203,13 @@ router.post("/calls/:callId/respond", (req: Request, res: Response) => {
   }
   call.statuses[userId] = body.action === "accept" ? "accepted" : "declined";
   call.updatedAt = Date.now();
+  await saveCall(call);
   res.json({ success: true, call: serializeIncoming(call, userId) });
 });
 
-router.get("/calls/:callId/status", (req: Request, res: Response) => {
-  cleanupSessions();
-  const call = callInvites.get(String(req.params.callId));
+router.get("/calls/:callId/status", async (req: Request, res: Response) => {
+  await cleanupSessions();
+  const call = await getCall(String(req.params.callId));
   const userId = Number(req.query.userId);
   if (!call) {
     res.status(404).json({ success: false, message: "Call not found." });
@@ -191,18 +232,19 @@ router.get("/calls/:callId/status", (req: Request, res: Response) => {
   });
 });
 
-router.post("/calls/:callId/end", (req: Request, res: Response) => {
-  const call = callInvites.get(String(req.params.callId));
+router.post("/calls/:callId/end", async (req: Request, res: Response) => {
+  const call = await getCall(String(req.params.callId));
   if (call) {
     Object.keys(call.statuses).forEach((uid) => { call.statuses[Number(uid)] = "ended"; });
     call.updatedAt = Date.now();
-    sessions.delete(call.channel);
+    await saveCall(call);
+    await stateDelete(sessionKey(call.channel));
   }
   res.json({ success: true });
 });
 
-router.post("/sessions", (req: Request, res: Response) => {
-  cleanupSessions();
+router.post("/sessions", async (req: Request, res: Response) => {
+  await cleanupSessions();
   const body = req.body as { channel?: string; userId?: number; type?: "audio" | "video" };
   const channel = safeChannel(body.channel);
   const userId = Number(body.userId);
@@ -211,7 +253,7 @@ router.post("/sessions", (req: Request, res: Response) => {
     return;
   }
 
-  let session = sessions.get(channel);
+  let session = await getSession(channel);
   let role: Role = "caller";
   if (!session) {
     session = {
@@ -223,25 +265,26 @@ router.post("/sessions", (req: Request, res: Response) => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    sessions.set(channel, session);
   } else {
     role = session.callerId === userId ? "caller" : "callee";
     if (role === "callee") session.calleeId = userId;
     session.updatedAt = Date.now();
   }
+  await saveSession(session);
 
   res.json({ success: true, role, session: { channel: session.channel, type: session.type, hasOffer: Boolean(session.offer), hasAnswer: Boolean(session.answer) } });
 });
 
-router.get("/sessions/:channel", (req: Request, res: Response) => {
-  cleanupSessions();
+router.get("/sessions/:channel", async (req: Request, res: Response) => {
+  await cleanupSessions();
   const channel = safeChannel(req.params.channel);
-  const session = sessions.get(channel);
+  const session = await getSession(channel);
   if (!session) {
     res.status(404).json({ success: false, message: "Call session not found." });
     return;
   }
   session.updatedAt = Date.now();
+  await saveSession(session);
   res.json({
     success: true,
     session: {
@@ -255,33 +298,35 @@ router.get("/sessions/:channel", (req: Request, res: Response) => {
   });
 });
 
-router.post("/sessions/:channel/offer", (req: Request, res: Response) => {
+router.post("/sessions/:channel/offer", async (req: Request, res: Response) => {
   const channel = safeChannel(req.params.channel);
-  const session = sessions.get(channel);
+  const session = await getSession(channel);
   if (!session) {
     res.status(404).json({ success: false });
     return;
   }
   session.offer = (req.body as { offer?: unknown }).offer ?? null;
   session.updatedAt = Date.now();
+  await saveSession(session);
   res.json({ success: true });
 });
 
-router.post("/sessions/:channel/answer", (req: Request, res: Response) => {
+router.post("/sessions/:channel/answer", async (req: Request, res: Response) => {
   const channel = safeChannel(req.params.channel);
-  const session = sessions.get(channel);
+  const session = await getSession(channel);
   if (!session) {
     res.status(404).json({ success: false });
     return;
   }
   session.answer = (req.body as { answer?: unknown }).answer ?? null;
   session.updatedAt = Date.now();
+  await saveSession(session);
   res.json({ success: true });
 });
 
-router.post("/sessions/:channel/candidates", (req: Request, res: Response) => {
+router.post("/sessions/:channel/candidates", async (req: Request, res: Response) => {
   const channel = safeChannel(req.params.channel);
-  const session = sessions.get(channel);
+  const session = await getSession(channel);
   const role = (req.body as { role?: Role }).role;
   const candidate = (req.body as { candidate?: unknown }).candidate;
   if (!session || (role !== "caller" && role !== "callee") || !candidate) {
@@ -291,12 +336,13 @@ router.post("/sessions/:channel/candidates", (req: Request, res: Response) => {
   if (role === "caller") session.callerCandidates.push(candidate);
   else session.calleeCandidates.push(candidate);
   session.updatedAt = Date.now();
+  await saveSession(session);
   res.json({ success: true });
 });
 
-router.get("/sessions/:channel/candidates", (req: Request, res: Response) => {
+router.get("/sessions/:channel/candidates", async (req: Request, res: Response) => {
   const channel = safeChannel(req.params.channel);
-  const session = sessions.get(channel);
+  const session = await getSession(channel);
   const role = String(req.query.role ?? "") as Role;
   const since = Math.max(0, Number(req.query.since) || 0);
   if (!session || (role !== "caller" && role !== "callee")) {
@@ -305,11 +351,12 @@ router.get("/sessions/:channel/candidates", (req: Request, res: Response) => {
   }
   const remoteCandidates = role === "caller" ? session.calleeCandidates : session.callerCandidates;
   session.updatedAt = Date.now();
+  await saveSession(session);
   res.json({ success: true, candidates: remoteCandidates.slice(since), next: remoteCandidates.length });
 });
 
-router.delete("/sessions/:channel", (req: Request, res: Response) => {
-  sessions.delete(safeChannel(req.params.channel));
+router.delete("/sessions/:channel", async (req: Request, res: Response) => {
+  await stateDelete(sessionKey(safeChannel(req.params.channel)));
   res.json({ success: true });
 });
 

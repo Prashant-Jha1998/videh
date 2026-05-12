@@ -1,10 +1,48 @@
 import crypto from "node:crypto";
 import { Router, type Request, type Response } from "express";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import multer from "multer";
 import { query } from "../lib/db";
 import { enforceModerationForActivity } from "../lib/moderation";
+import { assertSameUser } from "../lib/auth";
+import { publicMediaUrl } from "../lib/mediaStorage";
 
 const router = Router();
 const MAX_VIDEO_STORY_DURATION_MS = 60000;
+const currentFilePath = fileURLToPath(import.meta.url);
+const routesDir = path.dirname(currentFilePath);
+const apiServerDir = path.resolve(routesDir, "../..");
+const statusUploadsDir = path.join(apiServerDir, "uploads", "statuses");
+fs.mkdirSync(statusUploadsDir, { recursive: true });
+
+const statusMediaUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, statusUploadsDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || "") || mediaExtension(file.mimetype);
+      const safeExt = ext.replace(/[^.\w]/g, "") || ".bin";
+      cb(null, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${safeExt}`);
+    },
+  }),
+  limits: { fileSize: 75 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (/^(image|video|audio)\//.test(file.mimetype)) cb(null, true);
+    else cb(new Error("Only image, video, and audio files are allowed."));
+  },
+});
+
+function mediaExtension(mime: string): string {
+  if (mime === "video/quicktime") return ".mov";
+  if (mime === "video/mp4") return ".mp4";
+  if (mime === "image/png") return ".png";
+  if (mime === "image/webp") return ".webp";
+  if (mime === "audio/mpeg") return ".mp3";
+  if (mime === "audio/mp4") return ".m4a";
+  if (mime === "audio/aac") return ".aac";
+  return mime.startsWith("image/") ? ".jpg" : ".bin";
+}
 
 const BOOST_BASE_PRICE_INR = 499;
 const BOOST_DAY_PRICE_INR = 299;
@@ -205,6 +243,7 @@ async function ensureBoostTables(): Promise<void> {
 // Get all active statuses for contacts
 router.get("/user/:userId", async (req: Request, res: Response) => {
   const { userId } = req.params;
+  if (!assertSameUser(req, res, userId)) return;
   try {
     await ensureBoostTables();
     await ensureStatusEditorColumns();
@@ -316,6 +355,21 @@ router.get("/boost/quote", async (req: Request, res: Response) => {
   });
 });
 
+router.post("/media", statusMediaUpload.single("file"), (req: Request, res: Response) => {
+  const file = req.file;
+  if (!file) {
+    res.status(400).json({ success: false, message: "Media file is required." });
+    return;
+  }
+  const relPath = `/uploads/statuses/${encodeURIComponent(file.filename)}`;
+  res.json({
+    success: true,
+    url: publicMediaUrl(req, relPath),
+    mimeType: file.mimetype,
+    size: file.size,
+  });
+});
+
 router.post("/:statusId/boost/order", async (req: Request, res: Response) => {
   const { statusId } = req.params;
   const { userId, durationDays, radiusKm, targetCity, targetState } = req.body as {
@@ -329,6 +383,7 @@ router.post("/:statusId/boost/order", async (req: Request, res: Response) => {
     res.status(400).json({ success: false, message: "userId is required." });
     return;
   }
+  if (!assertSameUser(req, res, userId)) return;
 
   try {
     await ensureBoostTables();
@@ -395,6 +450,7 @@ router.post("/:statusId/boost", async (req: Request, res: Response) => {
     res.status(400).json({ success: false, message: "Invalid payment or boost plan." });
     return;
   }
+  if (!assertSameUser(req, res, userId)) return;
   if (!verifyRazorpaySignature(razorpayOrderId, razorpayPaymentId, razorpaySignature)) {
     res.status(400).json({ success: false, message: "Payment signature verification failed." });
     return;
@@ -470,6 +526,7 @@ router.get("/:statusId/boost/analytics", async (req: Request, res: Response) => 
     res.status(400).json({ success: false, message: "ownerId is required." });
     return;
   }
+  if (!assertSameUser(req, res, ownerId)) return;
 
   try {
     await ensureBoostTables();
@@ -516,6 +573,7 @@ router.post("/", async (req: Request, res: Response) => {
     userId?: number; content?: string; type?: string; backgroundColor?: string; mediaUrl?: string; videoDurationMs?: number | null; editorData?: unknown;
   };
   if (!userId || !content) { res.status(400).json({ success: false }); return; }
+  if (!assertSameUser(req, res, userId)) return;
   if (type === "video") {
     const durationMs = Number(videoDurationMs);
     if (!Number.isFinite(durationMs) || durationMs <= 0) {
@@ -615,6 +673,7 @@ router.post("/:statusId/react", async (req: Request, res: Response) => {
   const { statusId } = req.params;
   const { userId, emoji } = req.body as { userId?: number; emoji?: string };
   if (!userId || !emoji) { res.status(400).json({ success: false }); return; }
+  if (!assertSameUser(req, res, userId)) return;
   try {
     await query(`
       INSERT INTO status_reactions (status_id, user_id, emoji)
@@ -631,6 +690,7 @@ router.post("/:statusId/react", async (req: Request, res: Response) => {
 router.delete("/:statusId/react", async (req: Request, res: Response) => {
   const { statusId } = req.params;
   const { userId } = req.body as { userId?: number };
+  if (!assertSameUser(req, res, userId)) return;
   try {
     await query("DELETE FROM status_reactions WHERE status_id = $1 AND user_id = $2", [statusId, userId]);
     res.json({ success: true });
@@ -643,6 +703,7 @@ router.delete("/:statusId/react", async (req: Request, res: Response) => {
 router.delete("/:statusId", async (req: Request, res: Response) => {
   const { statusId } = req.params;
   const { userId } = req.body as { userId?: number };
+  if (!assertSameUser(req, res, userId)) return;
   try {
     await query("DELETE FROM statuses WHERE id = $1 AND user_id = $2", [statusId, userId]);
     res.json({ success: true });

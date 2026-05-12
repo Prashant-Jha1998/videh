@@ -40,6 +40,7 @@ import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
 import { formatChatBubbleTime } from "@/utils/time";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { DropdownMenu } from "@/components/DropdownMenu";
+import { ThemedHeader } from "@/components/ThemedHeader";
 import {
   encodeLocationPayload,
   formatLiveUntil,
@@ -548,6 +549,7 @@ function LocationMessageBubble({
   userAvatar?: string;
   onStopLive: (msg: Message) => void;
 }) {
+  const [mapFailed, setMapFailed] = useState(false);
   const parsed = parseLocationPayload(item.text);
   const legacy = !parsed ? parseLegacyLocation(item.text) : null;
   const lat = parsed?.lat ?? legacy?.lat ?? 0;
@@ -562,25 +564,60 @@ function LocationMessageBubble({
       ? "Sharing ended"
       : parsed?.label || (legacy ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : item.text.replace(/^📍[^\n]*\n?/, "").slice(0, 80));
 
+  useEffect(() => {
+    setMapFailed(false);
+  }, [mapPreview]);
+
   return (
     <View style={styles.locationBubbleWrap}>
-      <Pressable onPress={() => item.mediaUrl && Linking.openURL(item.mediaUrl).catch(() => {})}>
-        <Image source={{ uri: mapPreview }} style={styles.locationMapImg} contentFit="cover" />
+      <Pressable
+        onPress={() => item.mediaUrl && Linking.openURL(item.mediaUrl).catch(() => {})}
+        style={styles.locationMapPreview}
+      >
+        <View style={styles.locationMapFallback}>
+          <View style={[styles.locationMapPatch, styles.locationMapPatchA]} />
+          <View style={[styles.locationMapPatch, styles.locationMapPatchB]} />
+          <View style={[styles.locationMapRoad, styles.locationMapRoadH]} />
+          <View style={[styles.locationMapRoad, styles.locationMapRoadV]} />
+          <View style={[styles.locationMapRoad, styles.locationMapRoadDiag]} />
+          <View style={styles.locationMapRiver} />
+        </View>
+        {mapPreview && !mapFailed ? (
+          <Image
+            source={{ uri: mapPreview }}
+            style={styles.locationMapImg}
+            contentFit="cover"
+            onError={() => setMapFailed(true)}
+          />
+        ) : null}
+        <View style={styles.locationMapTint} pointerEvents="none" />
+        <View style={styles.locationPinWrap} pointerEvents="none">
+          {isLiveActive && userAvatar ? (
+            <Image source={{ uri: userAvatar }} style={styles.locationAvatarPin} contentFit="cover" />
+          ) : (
+            <View style={styles.locationPinCircle}>
+              <Ionicons name="location" size={25} color="#fff" />
+            </View>
+          )}
+          <View style={styles.locationPinStem} />
+        </View>
+        <View style={styles.locationMapCredit} pointerEvents="none">
+          <Text style={styles.locationMapCreditText}>{mapFailed ? "Map preview" : "Open map"}</Text>
+        </View>
       </Pressable>
       {isLiveActive ? (
         <View style={[styles.locationLiveBar, { borderTopColor: "rgba(0,0,0,0.08)" }]}>
-          <Ionicons name="radio" size={16} color="#111" style={{ marginRight: 4 }} />
-          <Ionicons name="location" size={18} color="#111" />
-          <Ionicons name="radio" size={16} color="#111" style={{ marginLeft: 4 }} />
+          <View style={styles.locationLiveIconGroup}>
+            <Ionicons name="radio" size={14} color="#111" />
+            <Ionicons name="location" size={18} color="#111" />
+            <Ionicons name="radio" size={14} color="#111" />
+          </View>
           <View style={{ flex: 1, marginLeft: 8 }}>
             <Text style={[styles.locationLiveSmall, { color: colors.mutedForeground }]}>Live until</Text>
             <Text style={[styles.locationLiveTime, { color: colors.foreground }]}>
               {untilMs ? formatLiveUntil(untilMs) : "—"}
             </Text>
           </View>
-          {userAvatar ? (
-            <Image source={{ uri: userAvatar }} style={styles.locationAvatarOnMap} contentFit="cover" />
-          ) : null}
         </View>
       ) : (
         <View style={[styles.locationStaticFooter, { paddingHorizontal: 10, paddingVertical: 8 }]}>
@@ -659,6 +696,8 @@ export default function ChatScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const messagePollInFlightRef = useRef(false);
+  const typingPollInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!rawId?.startsWith("new_")) return;
@@ -680,14 +719,23 @@ export default function ChatScreen() {
     useCallback(() => {
       void loadEnterIsSend().then(setEnterIsSend);
       if (!chatId) return;
-      const msgTimer = setInterval(() => loadMessages(chatId), 4000);
+      const pollMessages = () => {
+        if (messagePollInFlightRef.current) return;
+        messagePollInFlightRef.current = true;
+        loadMessages(chatId).finally(() => { messagePollInFlightRef.current = false; });
+      };
+      const msgTimer = setInterval(pollMessages, 4000);
       const typingTimer = setInterval(async () => {
-        if (!user?.dbId) return;
+        if (!user?.dbId || typingPollInFlightRef.current) return;
+        typingPollInFlightRef.current = true;
         try {
           const res = await fetch(`${BASE_URL}/api/chats/${chatId}/typing?userId=${user.dbId}`);
           const data = await res.json();
           setTypingNames(data.typing ?? []);
-        } catch {}
+        } catch {
+        } finally {
+          typingPollInFlightRef.current = false;
+        }
       }, 3000);
       return () => { clearInterval(msgTimer); clearInterval(typingTimer); };
     }, [chatId, user?.dbId])
@@ -1068,43 +1116,24 @@ export default function ChatScreen() {
       const fileSizeMB = (asset.size ?? 0) / 1024 / 1024;
       if (fileSizeMB > 16) { Alert.alert("File too large", "Maximum allowed file size is 16MB."); return; }
       try {
-        const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
-        if (!cacheDir) throw new Error("No writable cache directory");
         const mimeType = asset.mimeType ?? "application/octet-stream";
         const ext = asset.name?.split(".").pop() ?? "bin";
-
-        // Some Android providers return content:// URIs that fail on direct read.
-        // Use layered fallbacks so PDF/Excel/Docs can still be sent reliably.
-        let base64 = "";
-        const attemptReadBase64 = async (uri: string) => {
-          return FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-        };
-        try {
-          base64 = await attemptReadBase64(asset.uri);
-        } catch {
-          try {
-            const fallbackPath = `${cacheDir}doc_${Date.now()}.${ext}`;
-            await FileSystem.copyAsync({ from: asset.uri, to: fallbackPath });
-            base64 = await attemptReadBase64(fallbackPath);
-          } catch {
-            const resp = await fetch(asset.uri);
-            const blob = await resp.blob();
-            base64 = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onloadend = () => {
-                const dataUrl = typeof reader.result === "string" ? reader.result : "";
-                const payload = dataUrl.replace(/^data:[^;]+;base64,/, "");
-                if (!payload) reject(new Error("Empty file payload"));
-                else resolve(payload);
-              };
-              reader.onerror = () => reject(new Error("Failed to convert document to base64"));
-              reader.readAsDataURL(blob);
-            });
-          }
+        const form = new FormData();
+        form.append("file", {
+          uri: asset.uri,
+          name: asset.name || `document_${Date.now()}.${ext}`,
+          type: mimeType,
+        } as any);
+        const uploadRes = await fetch(`${BASE_URL}/api/chats/media`, {
+          method: "POST",
+          headers: user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : undefined,
+          body: form,
+        });
+        const upload = await uploadRes.json().catch(() => ({})) as { success?: boolean; url?: string; message?: string };
+        if (!uploadRes.ok || !upload.success || !upload.url) {
+          throw new Error(upload.message ?? "Upload failed");
         }
-
-        const dataUri = `data:${mimeType};base64,${base64}`;
-        sendSpecialMessage(chatId, asset.name, "document", dataUri);
+        sendSpecialMessage(chatId, asset.name, "document", upload.url);
       } catch { Alert.alert("Error", "Could not read the selected file. Please try again."); }
 
     } else if (type === "location") {
@@ -1143,7 +1172,10 @@ export default function ChatScreen() {
         try {
           const res = await fetch(`${BASE_URL}/api/chats/${cid}/messages`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...(u.sessionToken ? { Authorization: `Bearer ${u.sessionToken}` } : {}),
+            },
             body: JSON.stringify({ senderId: u.dbId, content: text, type: msgType, mediaUrl: mediaUrl ?? null }),
           });
           const data = (await res.json()) as { success?: boolean; message?: string };
@@ -1681,7 +1713,10 @@ export default function ChatScreen() {
     if (chatId && user?.dbId) {
       fetch(`${BASE_URL}/api/chats/${chatId}/wallpaper`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+        },
         body: JSON.stringify({ userId: user.dbId, wallpaper: dataUri }),
       }).catch(() => {});
     }
@@ -1692,7 +1727,10 @@ export default function ChatScreen() {
     if (chatId && user?.dbId) {
       fetch(`${BASE_URL}/api/chats/${chatId}/wallpaper`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+        },
         body: JSON.stringify({ userId: user.dbId, wallpaper: null }),
       }).catch(() => {});
     }
@@ -1891,7 +1929,7 @@ export default function ChatScreen() {
           </View>
         </View>
       ) : (
-        <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
+        <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
@@ -1949,7 +1987,7 @@ export default function ChatScreen() {
               </TouchableOpacity>
             )}
           </View>
-        </View>
+        </ThemedHeader>
       )}
       <DropdownMenu
         visible={menuOpen}
@@ -2608,7 +2646,61 @@ const styles = StyleSheet.create({
   docName: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
   docMeta: { fontSize: 11, fontFamily: "Inter_400Regular" },
   locationBubbleWrap: { overflow: "hidden", borderRadius: 12, minWidth: W * 0.62, maxWidth: W * 0.82 },
-  locationMapImg: { width: W * 0.62, height: 200, backgroundColor: "#dfe6e4" },
+  locationMapPreview: {
+    width: W * 0.62,
+    height: 200,
+    backgroundColor: "#dfe6e4",
+    overflow: "hidden",
+    position: "relative",
+  },
+  locationMapImg: { ...StyleSheet.absoluteFillObject, backgroundColor: "#dfe6e4" },
+  locationMapFallback: { ...StyleSheet.absoluteFillObject, backgroundColor: "#dfe6e4" },
+  locationMapPatch: { position: "absolute", borderRadius: 18, opacity: 0.78 },
+  locationMapPatchA: { width: 170, height: 95, left: -22, top: 16, backgroundColor: "#cfe3d5", transform: [{ rotate: "-10deg" }] },
+  locationMapPatchB: { width: 150, height: 100, right: -32, bottom: 8, backgroundColor: "#e8dccd", transform: [{ rotate: "13deg" }] },
+  locationMapRoad: { position: "absolute", backgroundColor: "#fff", borderColor: "#d6d9d6", borderWidth: 1 },
+  locationMapRoadH: { height: 18, left: -18, right: -18, top: 78, transform: [{ rotate: "-5deg" }] },
+  locationMapRoadV: { width: 18, top: -24, bottom: -24, left: "49%", transform: [{ rotate: "8deg" }] },
+  locationMapRoadDiag: { height: 14, left: -28, right: -28, bottom: 45, transform: [{ rotate: "22deg" }] },
+  locationMapRiver: { position: "absolute", width: 44, top: -18, bottom: -18, right: 40, backgroundColor: "#b8d8ef", opacity: 0.65, transform: [{ rotate: "-16deg" }] },
+  locationMapTint: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(255,255,255,0.08)" },
+  locationPinWrap: { position: "absolute", left: "50%", top: "50%", alignItems: "center", transform: [{ translateX: -22 }, { translateY: -40 }] },
+  locationPinCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#E53935",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 3,
+    borderColor: "#fff",
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  locationAvatarPin: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 3,
+    borderColor: "#fff",
+    backgroundColor: "#00A884",
+  },
+  locationPinStem: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 7,
+    borderRightWidth: 7,
+    borderTopWidth: 12,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: "#E53935",
+    marginTop: -3,
+  },
+  locationMapCredit: { position: "absolute", left: 8, bottom: 7, backgroundColor: "rgba(255,255,255,0.86)", borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 },
+  locationMapCreditText: { color: "#4b5563", fontSize: 10, fontFamily: "Inter_600SemiBold" },
   locationLiveBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -2617,9 +2709,9 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     backgroundColor: "rgba(255,255,255,0.92)",
   },
+  locationLiveIconGroup: { flexDirection: "row", alignItems: "center", gap: 2 },
   locationLiveSmall: { fontSize: 11, fontFamily: "Inter_400Regular" },
   locationLiveTime: { fontSize: 15, fontFamily: "Inter_700Bold", marginTop: 1 },
-  locationAvatarOnMap: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: "#fff" },
   locationStaticFooter: { backgroundColor: "rgba(255,255,255,0.96)" },
   locationStaticTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
   locationCoords: { fontSize: 12, fontFamily: "Inter_400Regular", marginBottom: 2 },

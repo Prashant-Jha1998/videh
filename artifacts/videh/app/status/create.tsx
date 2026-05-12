@@ -1,7 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Contacts from "expo-contacts";
-import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -35,6 +33,29 @@ const STICKER_OPTIONS = ["❤️", "😂", "🔥", "✨", "🙏", "🎉", "😍"
 const DRAW_COLOR = "#FACC15";
 type AudienceMode = "all_contacts" | "selected_contacts";
 type StoryContact = { id: number; name: string; phone: string };
+type MusicTab = "for_you" | "trending" | "saved" | "original";
+type MusicTrack = { id: string; title: string; artist: string; duration: string; tab: Exclude<MusicTab, "saved">; uri: string; color: string };
+
+const MUSIC_TABS: Array<{ key: MusicTab; label: string }> = [
+  { key: "for_you", label: "For you" },
+  { key: "trending", label: "Trending" },
+  { key: "saved", label: "Saved" },
+  { key: "original", label: "Original audio" },
+];
+
+const MUSIC_CATALOG: MusicTrack[] = [
+  { id: "sukoon", title: "Sukoon", artist: "Videh Originals", duration: "3:05", tab: "for_you", uri: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", color: "#F59E0B" },
+  { id: "mafia-style", title: "Mafia Style", artist: "Beat Lab", duration: "2:32", tab: "for_you", uri: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3", color: "#7C3AED" },
+  { id: "jungle", title: "King of the Jungle", artist: "Instrumental", duration: "3:03", tab: "trending", uri: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3", color: "#F97316" },
+  { id: "bella", title: "Bella Ciao Mood", artist: "Acoustic Mix", duration: "2:09", tab: "trending", uri: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3", color: "#EF4444" },
+  { id: "falak", title: "Falak", artist: "Melody Mix", duration: "4:40", tab: "for_you", uri: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3", color: "#64748B" },
+  { id: "meherban", title: "Meherban", artist: "Soft Pop", duration: "3:32", tab: "trending", uri: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3", color: "#DC2626" },
+  { id: "blue", title: "Blue", artist: "Instrumental", duration: "3:35", tab: "for_you", uri: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3", color: "#38BDF8" },
+  { id: "matargashti", title: "Matargashti Cover", artist: "Roadtrip Loop", duration: "5:31", tab: "original", uri: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3", color: "#0EA5E9" },
+  { id: "aadat", title: "Aadat | 51 Glorious Days", artist: "Indie Chill", duration: "3:40", tab: "original", uri: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3", color: "#8B5CF6" },
+  { id: "no-fear", title: "No Fear", artist: "Trap Beat", duration: "2:55", tab: "trending", uri: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3", color: "#111827" },
+  { id: "senorita", title: "Señorita Instrumental", artist: "Latin Pop", duration: "3:12", tab: "for_you", uri: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-11.mp3", color: "#FB7185" },
+];
 
 function formatMediaDuration(durationMs?: number | null): string {
   if (!durationMs || durationMs <= 0) return "0:00";
@@ -55,11 +76,31 @@ function strokeToPath(points: StoryEditorStroke["points"]): string {
   return points.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 }
 
-function VideoPreview({ uri }: { uri: string }) {
+function VideoPreview({ uri, trimStartMs, trimEndMs }: { uri: string; trimStartMs?: number; trimEndMs?: number }) {
   const player = useVideoPlayer(uri, (p) => {
-    p.loop = true;
+    p.loop = false;
+    if (trimStartMs) {
+      (p as any).currentTime = trimStartMs / 1000;
+    }
     p.play();
   });
+  useEffect(() => {
+    if (typeof trimStartMs === "number") {
+      (player as any).currentTime = trimStartMs / 1000;
+      player.play();
+    }
+  }, [player, trimStartMs]);
+  useEffect(() => {
+    if (!trimEndMs) return;
+    const timer = setInterval(() => {
+      const currentTime = Number((player as any).currentTime ?? 0);
+      if (currentTime * 1000 >= trimEndMs) {
+        (player as any).currentTime = (trimStartMs ?? 0) / 1000;
+        player.play();
+      }
+    }, 200);
+    return () => clearInterval(timer);
+  }, [player, trimEndMs, trimStartMs]);
   return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="contain" nativeControls={false} />;
 }
 
@@ -97,7 +138,12 @@ export default function StatusCreateScreen() {
   const [posting, setPosting] = useState(false);
   const [storyMusicUri, setStoryMusicUri] = useState<string | null>(null);
   const [storyMusicName, setStoryMusicName] = useState<string | null>(null);
+  const [musicSheetVisible, setMusicSheetVisible] = useState(false);
+  const [musicSearch, setMusicSearch] = useState("");
+  const [musicTab, setMusicTab] = useState<MusicTab>("for_you");
+  const [savedMusicIds, setSavedMusicIds] = useState<string[]>([]);
   const [editorOverlays, setEditorOverlays] = useState<StoryEditorOverlay[]>([]);
+  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
   const [editorStrokes, setEditorStrokes] = useState<StoryEditorStroke[]>([]);
   const [drawMode, setDrawMode] = useState(false);
   const [textModalVisible, setTextModalVisible] = useState(false);
@@ -111,12 +157,94 @@ export default function StatusCreateScreen() {
   const [audienceLoading, setAudienceLoading] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const drawModeRef = useRef(false);
+  const timelineRef = useRef<View>(null);
+  const timelineXRef = useRef(0);
+  const timelineWidthRef = useRef(1);
   const fonts = ["Inter_400Regular", "Inter_700Bold", "Inter_300Light", "Inter_600SemiBold"];
   const fontLabels = ["Aa", "𝐁", "𝐿", "𝑺"];
   const mediaDurationLabel = formatMediaDuration(mediaDurationMs);
   const mediaSizeLabel = formatMediaSize(mediaSizeBytes);
   const effectiveTrimEndMs = trimEndMs ?? mediaDurationMs ?? MAX_VIDEO_STORY_DURATION_MS;
   const trimDurationLabel = formatMediaDuration(Math.max(0, effectiveTrimEndMs - trimStartMs));
+  const timelineDurationMs = Math.max(1000, mediaDurationMs ?? MAX_VIDEO_STORY_DURATION_MS);
+  const trimStartPercent = Math.max(0, Math.min(100, (trimStartMs / timelineDurationMs) * 100));
+  const trimEndPercent = Math.max(0, Math.min(100, (effectiveTrimEndMs / timelineDurationMs) * 100));
+  const filteredMusic = MUSIC_CATALOG.filter((track) => {
+    const tabMatch = musicTab === "saved" ? savedMusicIds.includes(track.id) : track.tab === musicTab;
+    const q = musicSearch.trim().toLowerCase();
+    const queryMatch = !q || `${track.title} ${track.artist}`.toLowerCase().includes(q);
+    return tabMatch && queryMatch;
+  });
+
+  const measureTimeline = () => {
+    timelineRef.current?.measureInWindow((x, _y, width) => {
+      timelineXRef.current = x;
+      timelineWidthRef.current = Math.max(1, width);
+    });
+  };
+
+  const updateTrimFromScreenX = (edge: "start" | "end", screenX: number) => {
+    const duration = Math.max(1000, mediaDurationMs ?? MAX_VIDEO_STORY_DURATION_MS);
+    const rawMs = ((screenX - timelineXRef.current) / timelineWidthRef.current) * duration;
+    const nextMs = Math.max(0, Math.min(duration, rawMs));
+    if (edge === "start") {
+      setTrimStartMs(Math.max(0, Math.min(nextMs, effectiveTrimEndMs - 1000)));
+      return;
+    }
+    setTrimEndMs(Math.max(trimStartMs + 1000, Math.min(nextMs, duration)));
+  };
+
+  const leftTrimResponder = PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (evt) => {
+      measureTimeline();
+      updateTrimFromScreenX("start", evt.nativeEvent.pageX);
+    },
+    onPanResponderMove: (_evt, gesture) => updateTrimFromScreenX("start", gesture.moveX),
+  });
+
+  const rightTrimResponder = PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (evt) => {
+      measureTimeline();
+      updateTrimFromScreenX("end", evt.nativeEvent.pageX);
+    },
+    onPanResponderMove: (_evt, gesture) => updateTrimFromScreenX("end", gesture.moveX),
+  });
+
+  const moveOverlay = (id: string, locationX: number, locationY: number) => {
+    setEditorOverlays((prev) =>
+      prev.map((overlay) =>
+        overlay.id === id
+          ? {
+              ...overlay,
+              x: Math.max(0.06, Math.min(0.94, locationX / W)),
+              y: Math.max(0.06, Math.min(0.94, locationY / (H * 0.75))),
+            }
+          : overlay,
+      ),
+    );
+  };
+
+  const createOverlayResponder = (id: string) => PanResponder.create({
+    onStartShouldSetPanResponder: () => !drawModeRef.current,
+    onMoveShouldSetPanResponder: () => !drawModeRef.current,
+    onPanResponderGrant: (evt) => {
+      setSelectedOverlayId(id);
+      moveOverlay(id, evt.nativeEvent.locationX, evt.nativeEvent.locationY);
+    },
+    onPanResponderMove: (evt) => {
+      moveOverlay(id, evt.nativeEvent.locationX, evt.nativeEvent.locationY);
+    },
+  });
+
+  const removeSelectedOverlay = () => {
+    if (!selectedOverlayId) return;
+    setEditorOverlays((prev) => prev.filter((overlay) => overlay.id !== selectedOverlayId));
+    setSelectedOverlayId(null);
+  };
 
   const addStrokePoint = (x: number, y: number) => {
     setEditorStrokes((prev) => {
@@ -239,39 +367,40 @@ export default function StatusCreateScreen() {
 
   const pickMusic = async () => {
     Haptics.selectionAsync();
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ["audio/*"],
-      copyToCacheDirectory: true,
-      multiple: false,
-    });
-    if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    try {
-      const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
-      setStoryMusicUri(`data:${asset.mimeType ?? "audio/mpeg"};base64,${base64}`);
-      setStoryMusicName(asset.name ?? "Background music");
-    } catch {
-      setStoryMusicUri(asset.uri);
-      setStoryMusicName(asset.name ?? "Background music");
-    }
+    setMusicSheetVisible(true);
+  };
+
+  const selectMusicTrack = (track: MusicTrack) => {
+    setStoryMusicUri(track.uri);
+    setStoryMusicName(`${track.title} - ${track.artist}`);
+    setMusicSheetVisible(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const toggleSavedMusic = (trackId: string) => {
+    setSavedMusicIds((prev) => prev.includes(trackId) ? prev.filter((id) => id !== trackId) : [...prev, trackId]);
   };
 
   const addTextOverlay = () => {
     const textValue = overlayTextDraft.trim();
     if (!textValue) return;
+    const id = `text_${Date.now()}`;
     setEditorOverlays((prev) => [
       ...prev,
-      { id: `text_${Date.now()}`, kind: "text", text: textValue, x: 0.5, y: 0.42, color: "#FFFFFF", size: 28 },
+      { id, kind: "text", text: textValue, x: 0.5, y: 0.42, color: "#FFFFFF", size: 28 },
     ]);
+    setSelectedOverlayId(id);
     setOverlayTextDraft("");
     setTextModalVisible(false);
   };
 
   const addSticker = (sticker: string) => {
+    const id = `sticker_${Date.now()}`;
     setEditorOverlays((prev) => [
       ...prev,
-      { id: `sticker_${Date.now()}`, kind: "sticker", text: sticker, x: 0.5, y: 0.5, size: 44 },
+      { id, kind: "sticker", text: sticker, x: 0.5, y: 0.5, size: 44 },
     ]);
+    setSelectedOverlayId(id);
     setStickerModalVisible(false);
   };
 
@@ -291,6 +420,7 @@ export default function StatusCreateScreen() {
     }
     if (editorOverlays.length > 0) {
       setEditorOverlays((prev) => prev.slice(0, -1));
+      setSelectedOverlayId(null);
     }
   };
 
@@ -463,20 +593,41 @@ export default function StatusCreateScreen() {
         </View>
         {mediaUri && mediaType === "video" && (
           <View style={styles.videoTimelineWrap}>
-            <View style={styles.videoTimeline}>
+            <View
+              ref={timelineRef}
+              style={styles.videoTimeline}
+              onLayout={(event) => {
+                timelineWidthRef.current = Math.max(1, event.nativeEvent.layout.width);
+                measureTimeline();
+              }}
+            >
               {Array.from({ length: 14 }).map((_, i) => (
                 <View key={i} style={styles.videoFrame}>
                   <Ionicons name="videocam" size={13} color="rgba(255,255,255,0.9)" />
                 </View>
               ))}
-              <View style={styles.trimHandleLeft} />
-              <View style={styles.trimHandleRight} />
+              <View pointerEvents="none" style={[styles.trimShade, { left: 0, width: `${trimStartPercent}%` }]} />
+              <View pointerEvents="none" style={[styles.trimShade, { right: 0, width: `${100 - trimEndPercent}%` }]} />
+              <View pointerEvents="none" style={[styles.trimSelection, { left: `${trimStartPercent}%`, right: `${100 - trimEndPercent}%` }]} />
+              <View
+                style={[styles.trimHandle, { left: `${trimStartPercent}%` }]}
+                {...leftTrimResponder.panHandlers}
+              >
+                <Ionicons name="chevron-back" size={14} color="#111827" />
+              </View>
+              <View
+                style={[styles.trimHandle, styles.trimHandleRight, { left: `${trimEndPercent}%` }]}
+                {...rightTrimResponder.panHandlers}
+              >
+                <Ionicons name="chevron-forward" size={14} color="#111827" />
+              </View>
             </View>
             <View style={styles.mediaMetaRow}>
               <Ionicons name="volume-high-outline" size={14} color="#fff" />
               <Text style={styles.mediaMetaText}>{mediaDurationLabel}{mediaSizeLabel ? ` · ${mediaSizeLabel}` : ""} · Max 1:00</Text>
             </View>
             <View style={styles.trimControls}>
+              <Text style={styles.trimHint}>Drag white handles to choose video start and end</Text>
               <TouchableOpacity style={styles.trimBtn} onPress={() => nudgeTrim("start", -1000)}><Text style={styles.trimBtnText}>Start -1s</Text></TouchableOpacity>
               <TouchableOpacity style={styles.trimBtn} onPress={() => nudgeTrim("start", 1000)}><Text style={styles.trimBtnText}>Start +1s</Text></TouchableOpacity>
               <Text style={styles.trimLabel}>{formatMediaDuration(trimStartMs)} - {formatMediaDuration(effectiveTrimEndMs)} ({trimDurationLabel})</Text>
@@ -487,7 +638,7 @@ export default function StatusCreateScreen() {
         )}
         {mediaUri ? (
           <View style={styles.mediaPreview} {...drawResponder.panHandlers}>
-            {mediaType === "video" ? <VideoPreview uri={mediaUri} /> : <Image source={{ uri: mediaUri }} style={{ width: "100%", height: "100%" }} resizeMode="contain" />}
+            {mediaType === "video" ? <VideoPreview uri={mediaUri} trimStartMs={trimStartMs} trimEndMs={effectiveTrimEndMs} /> : <Image source={{ uri: mediaUri }} style={{ width: "100%", height: "100%" }} resizeMode="contain" />}
             <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
               {editorStrokes.map((stroke) => (
                 <Path
@@ -502,21 +653,37 @@ export default function StatusCreateScreen() {
               ))}
             </Svg>
             {editorOverlays.map((overlay) => (
-              <Text
+              <View
                 key={overlay.id}
                 style={[
-                  styles.storyOverlay,
+                  styles.storyOverlayWrap,
+                  selectedOverlayId === overlay.id && styles.storyOverlaySelected,
                   {
                     left: `${overlay.x * 100}%`,
                     top: `${overlay.y * 100}%`,
-                    color: overlay.kind === "text" ? overlay.color : "#fff",
-                    fontSize: overlay.size,
                   },
                 ]}
+                {...createOverlayResponder(overlay.id).panHandlers}
               >
-                {overlay.text}
-              </Text>
+                <Text
+                  style={[
+                    styles.storyOverlay,
+                    {
+                      color: overlay.kind === "text" ? overlay.color : "#fff",
+                      fontSize: overlay.size,
+                    },
+                  ]}
+                >
+                  {overlay.text}
+                </Text>
+              </View>
             ))}
+            {selectedOverlayId ? (
+              <TouchableOpacity style={styles.deleteOverlayBtn} onPress={removeSelectedOverlay}>
+                <Ionicons name="trash-outline" size={16} color="#fff" />
+                <Text style={styles.deleteOverlayText}>Remove</Text>
+              </TouchableOpacity>
+            ) : null}
             {drawMode ? <View style={styles.drawModePill}><Text style={styles.drawModeText}>Draw on the story</Text></View> : null}
           </View>
         ) : (
@@ -563,6 +730,63 @@ export default function StatusCreateScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
+            </View>
+          </View>
+        </Modal>
+        <Modal visible={musicSheetVisible} transparent animationType="slide" onRequestClose={() => setMusicSheetVisible(false)}>
+          <View style={styles.musicSheetBackdrop}>
+            <View style={[styles.musicSheet, { paddingBottom: insets.bottom + 12 }]}>
+              <View style={styles.musicGrabber} />
+              <View style={styles.musicSearchBox}>
+                <Ionicons name="search-outline" size={16} color="#94A3B8" />
+                <TextInput
+                  value={musicSearch}
+                  onChangeText={setMusicSearch}
+                  placeholder="Search music..."
+                  placeholderTextColor="#94A3B8"
+                  style={styles.musicSearchInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.musicTabs}>
+                {MUSIC_TABS.map((tab) => (
+                  <TouchableOpacity
+                    key={tab.key}
+                    style={[styles.musicTab, musicTab === tab.key && styles.musicTabActive]}
+                    onPress={() => setMusicTab(tab.key)}
+                  >
+                    <Text style={[styles.musicTabText, musicTab === tab.key && styles.musicTabTextActive]}>{tab.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <ScrollView style={styles.musicList} contentContainerStyle={{ paddingBottom: 10 }}>
+                {filteredMusic.map((track) => {
+                  const saved = savedMusicIds.includes(track.id);
+                  const selected = storyMusicUri === track.uri;
+                  return (
+                    <TouchableOpacity key={track.id} style={styles.musicRow} onPress={() => selectMusicTrack(track)} activeOpacity={0.82}>
+                      <View style={[styles.musicCover, { backgroundColor: track.color }]}>
+                        <Ionicons name="musical-note" size={18} color="#fff" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.musicTitle} numberOfLines={1}>{track.title}</Text>
+                        <Text style={styles.musicArtist} numberOfLines={1}>{track.artist} • {track.duration}</Text>
+                      </View>
+                      {selected ? <Ionicons name="checkmark-circle" size={20} color="#00A884" /> : null}
+                      <TouchableOpacity style={styles.musicSaveBtn} onPress={() => toggleSavedMusic(track.id)}>
+                        <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={22} color="#fff" />
+                      </TouchableOpacity>
+                    </TouchableOpacity>
+                  );
+                })}
+                {filteredMusic.length === 0 ? (
+                  <View style={styles.musicEmpty}>
+                    <Ionicons name="musical-notes-outline" size={32} color="#94A3B8" />
+                    <Text style={styles.musicEmptyText}>No music found</Text>
+                  </View>
+                ) : null}
+              </ScrollView>
             </View>
           </View>
         </Modal>
@@ -619,18 +843,25 @@ const styles = StyleSheet.create({
   postBtnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
   charCount: { position: "absolute", top: 80, right: 18, fontSize: 13 },
   videoTimelineWrap: { paddingHorizontal: 12, paddingBottom: 10, gap: 6 },
-  videoTimeline: { height: 42, borderRadius: 4, overflow: "hidden", borderWidth: 2, borderColor: "#fff", flexDirection: "row", backgroundColor: "#111" },
+  videoTimeline: { height: 48, borderRadius: 6, overflow: "visible", borderWidth: 2, borderColor: "#fff", flexDirection: "row", backgroundColor: "#111" },
   videoFrame: { flex: 1, alignItems: "center", justifyContent: "center", borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: "rgba(255,255,255,0.28)", backgroundColor: "#1F2937" },
-  trimHandleLeft: { position: "absolute", left: 0, top: 0, bottom: 0, width: 7, backgroundColor: "#fff" },
-  trimHandleRight: { position: "absolute", right: 0, top: 0, bottom: 0, width: 7, backgroundColor: "#fff" },
+  trimShade: { position: "absolute", top: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.58)" },
+  trimSelection: { position: "absolute", top: -2, bottom: -2, borderTopWidth: 3, borderBottomWidth: 3, borderColor: "#fff" },
+  trimHandle: { position: "absolute", top: -8, bottom: -8, width: 26, marginLeft: -13, borderRadius: 8, backgroundColor: "#fff", alignItems: "center", justifyContent: "center", elevation: 5, shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 4 },
+  trimHandleRight: {},
   mediaMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 2 },
   mediaMetaText: { color: "#fff", fontSize: 12, fontWeight: "600" },
   trimControls: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 4 },
+  trimHint: { width: "100%", color: "rgba(255,255,255,0.68)", fontSize: 11, fontWeight: "600" },
   trimBtn: { backgroundColor: "rgba(255,255,255,0.14)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 5 },
   trimBtnText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   trimLabel: { color: "#d9fdd3", fontSize: 11, fontWeight: "700" },
   mediaPreview: { flex: 1, width: W },
-  storyOverlay: { position: "absolute", textAlign: "center", fontWeight: "800", textShadowColor: "rgba(0,0,0,0.75)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4, transform: [{ translateX: -60 }, { translateY: -20 }], maxWidth: W * 0.82 },
+  storyOverlayWrap: { position: "absolute", minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, transform: [{ translateX: -40 }, { translateY: -24 }] },
+  storyOverlaySelected: { borderWidth: 1.5, borderColor: "#fff", backgroundColor: "rgba(0,0,0,0.16)" },
+  storyOverlay: { textAlign: "center", fontWeight: "800", textShadowColor: "rgba(0,0,0,0.75)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4, maxWidth: W * 0.82 },
+  deleteOverlayBtn: { position: "absolute", top: 12, right: 12, flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(239,68,68,0.92)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 7 },
+  deleteOverlayText: { color: "#fff", fontSize: 12, fontWeight: "800" },
   drawModePill: { position: "absolute", top: 12, alignSelf: "center", backgroundColor: "rgba(0,168,132,0.92)", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6 },
   drawModeText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   captionBar: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 12, paddingTop: 8, gap: 10, flexWrap: "wrap" },
@@ -653,6 +884,24 @@ const styles = StyleSheet.create({
   stickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   stickerBtn: { width: 54, height: 54, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#1F2C34" },
   stickerText: { fontSize: 28 },
+  musicSheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", justifyContent: "flex-end" },
+  musicSheet: { maxHeight: "82%", backgroundColor: "#20242A", borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingHorizontal: 14, paddingTop: 8 },
+  musicGrabber: { width: 34, height: 3, borderRadius: 2, backgroundColor: "#CBD5E1", alignSelf: "center", marginBottom: 10 },
+  musicSearchBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#2B3138", borderRadius: 8, paddingHorizontal: 10, marginBottom: 10 },
+  musicSearchInput: { flex: 1, color: "#fff", fontSize: 14, paddingVertical: 9 },
+  musicTabs: { gap: 8, paddingBottom: 10 },
+  musicTab: { backgroundColor: "#2B3138", borderRadius: 7, paddingHorizontal: 12, paddingVertical: 7 },
+  musicTabActive: { backgroundColor: "#fff" },
+  musicTabText: { color: "#E5E7EB", fontSize: 12, fontWeight: "700" },
+  musicTabTextActive: { color: "#111827" },
+  musicList: { maxHeight: H * 0.56 },
+  musicRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 7 },
+  musicCover: { width: 42, height: 42, borderRadius: 6, alignItems: "center", justifyContent: "center" },
+  musicTitle: { color: "#fff", fontSize: 13, fontWeight: "800" },
+  musicArtist: { color: "#AAB2BD", fontSize: 12, marginTop: 1 },
+  musicSaveBtn: { padding: 8 },
+  musicEmpty: { alignItems: "center", paddingVertical: 36, gap: 8 },
+  musicEmptyText: { color: "#94A3B8", fontSize: 13, fontWeight: "700" },
   audienceHeader: { flexDirection: "row", alignItems: "flex-start", gap: 8, paddingHorizontal: 8, paddingBottom: 8 },
   audienceTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
   audienceSub: { color: "#9db0b8", fontSize: 12, marginTop: 2 },

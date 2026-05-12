@@ -20,6 +20,7 @@ const BASE_URL = getApiUrl();
 type Receipt = {
   user_id: number;
   name: string;
+  phone?: string;
   avatar_url?: string;
   status: "sent" | "delivered" | "read";
   updated_at: string;
@@ -49,7 +50,6 @@ export default function MessageInfoScreen() {
   const sent = receipts.filter((r) => r.status === "sent");
 
   const renderSection = (title: string, icon: string, color: string, items: Receipt[]) => {
-    if (items.length === 0) return null;
     return (
       <>
         <View style={[styles.sectionHeader, { backgroundColor: colors.muted }]}>
@@ -57,6 +57,11 @@ export default function MessageInfoScreen() {
           <Text style={[styles.sectionTitle, { color }]}>{title}</Text>
           <Text style={[styles.sectionCount, { color: colors.mutedForeground }]}>{items.length}</Text>
         </View>
+        {items.length === 0 ? (
+          <View style={[styles.emptySectionRow, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.emptySectionText, { color: colors.mutedForeground }]}>No one yet</Text>
+          </View>
+        ) : null}
         {items.map((item) => {
           const initials = (item.name ?? "?").slice(0, 2).toUpperCase();
           const hue = ((item.name ?? "?").charCodeAt(0) * 37) % 360;
@@ -71,10 +76,20 @@ export default function MessageInfoScreen() {
               )}
               <View style={{ flex: 1 }}>
                 <Text style={[styles.name, { color: colors.foreground }]}>{item.name}</Text>
+                {item.phone ? (
+                  <Text style={[styles.phone, { color: colors.mutedForeground }]}>{item.phone}</Text>
+                ) : null}
               </View>
-              <Text style={[styles.time, { color: colors.mutedForeground }]}>
-                {formatTime(new Date(item.updated_at).getTime())}
-              </Text>
+              <View style={styles.statusRight}>
+                <Ionicons
+                  name={item.status === "read" ? "checkmark-done" : item.status === "delivered" ? "checkmark-done-outline" : "checkmark-outline"}
+                  size={16}
+                  color={item.status === "read" ? "#4FC3F7" : colors.mutedForeground}
+                />
+                <Text style={[styles.time, { color: colors.mutedForeground }]}>
+                  {formatTime(new Date(item.updated_at).getTime())}
+                </Text>
+              </View>
             </View>
           );
         })}
@@ -105,8 +120,7 @@ export default function MessageInfoScreen() {
           ListHeaderComponent={
             <>
               {renderSection("Read", "checkmark-done", "#4FC3F7", read)}
-              {renderSection("Delivered", "checkmark-done", "#888", delivered)}
-              {renderSection("Sent", "checkmark", "#888", sent)}
+              {renderSection("Not seen", "checkmark-done-outline", "#888", [...delivered, ...sent])}
             </>
           }
           contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
@@ -152,7 +166,11 @@ const styles = StyleSheet.create({
   avatar: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   initials: { color: "#fff", fontSize: 16, fontFamily: "Inter_700Bold" },
   name: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  phone: { fontSize: 12, marginTop: 2 },
+  statusRight: { alignItems: "flex-end", gap: 2 },
   time: { fontSize: 12 },
+  emptySectionRow: { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5 },
+  emptySectionText: { fontSize: 13 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   emptyText: { fontSize: 15 },
 });

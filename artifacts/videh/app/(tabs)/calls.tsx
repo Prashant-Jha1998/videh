@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, type CallLog } from "@/context/AppContext";
+import { ThemedHeader } from "@/components/ThemedHeader";
 
 function formatCallTime(ts: number): string {
   const now = Date.now();
@@ -37,7 +38,7 @@ export default function CallsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
+      <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
         <Text style={styles.headerTitle}>Calls</Text>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerBtn}>
@@ -47,7 +48,7 @@ export default function CallsScreen() {
             <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
           </TouchableOpacity>
         </View>
-      </View>
+      </ThemedHeader>
 
       <View style={[styles.tabs, { borderBottomColor: colors.border }]}>
         {(["all", "missed"] as const).map((t) => (

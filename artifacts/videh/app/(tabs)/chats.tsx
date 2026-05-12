@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -19,6 +20,8 @@ import { useColors } from "@/hooks/useColors";
 import { useApp, Chat, type Status } from "@/context/AppContext";
 import { formatTime } from "@/utils/time";
 import { DropdownMenu } from "@/components/DropdownMenu";
+import { ThemedHeader } from "@/components/ThemedHeader";
+import { safeJsonArray } from "@/lib/safeJson";
 
 /** Status ring for 1:1 chats: green if any update unseen, grey if all seen (like WhatsApp). */
 function getContactStatusRingState(chat: Chat, statuses: Status[]): { count: number; hasUnviewed: boolean } | null {
@@ -32,19 +35,42 @@ function getContactStatusRingState(chat: Chat, statuses: Status[]): { count: num
   };
 }
 
+const FAVORITES_KEY = "videh_favorite_chat_ids";
+const HIDDEN_CHATS_KEY = "videh_hidden_chat_ids";
+const MANUAL_UNREAD_KEY = "videh_manual_unread_chat_ids";
+const LOCKED_CHATS_KEY = "videh_locked_chat_ids";
+const CHAT_SHORTCUTS_KEY = "videh_chat_shortcut_ids";
+const CUSTOM_LIST_KEY = "videh_custom_list_chat_ids";
+
 export default function ChatsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { chats, pinChat, muteChat, archiveChat, refreshChats } = useApp();
+  const { chats, pinChat, muteChat, archiveChat, refreshChats, blockUser, markAsRead } = useApp();
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<"all" | "unread" | "groups">("all");
+  const [tab, setTab] = useState<"all" | "unread" | "favorites" | "groups">("all");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [selectionMenuOpen, setSelectionMenuOpen] = useState(false);
   const [previewChat, setPreviewChat] = useState<Chat | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+  const [manualUnreadIds, setManualUnreadIds] = useState<string[]>([]);
+  const [lockedIds, setLockedIds] = useState<string[]>([]);
+  const [shortcutIds, setShortcutIds] = useState<string[]>([]);
+  const [customListIds, setCustomListIds] = useState<string[]>([]);
 
-  const filtered = chats.filter((c) => {
+  const selectedChats = chats.filter((c) => selectedIds.includes(c.id));
+  const isSelectionMode = selectedIds.length > 0;
+  const visibleBase = chats.filter((c) => !hiddenIds.includes(c.id));
+  const archivedChats = visibleBase.filter((c) => c.isArchived);
+  const visibleChats = showArchived ? archivedChats : visibleBase.filter((c) => !c.isArchived);
+  const getUnreadCount = (chat: Chat) => manualUnreadIds.includes(chat.id) ? Math.max(chat.unreadCount, 1) : chat.unreadCount;
+  const filtered = visibleChats.filter((c) => {
     const matchSearch = c.name.toLowerCase().includes(search.toLowerCase());
-    if (tab === "unread") return matchSearch && c.unreadCount > 0;
+    if (tab === "unread") return matchSearch && getUnreadCount(c) > 0;
+    if (tab === "favorites") return matchSearch && favoriteIds.includes(c.id);
     if (tab === "groups") return matchSearch && c.isGroup;
     return matchSearch;
   });
@@ -53,19 +79,224 @@ export default function ChatsScreen() {
   const unpinned = filtered.filter((c) => !c.isPinned);
   const sorted = [...pinned, ...unpinned];
 
+  useEffect(() => {
+    AsyncStorage.multiGet([
+      FAVORITES_KEY,
+      HIDDEN_CHATS_KEY,
+      MANUAL_UNREAD_KEY,
+      LOCKED_CHATS_KEY,
+      CHAT_SHORTCUTS_KEY,
+      CUSTOM_LIST_KEY,
+    ]).then((rows) => {
+      const favRaw = rows.find(([key]) => key === FAVORITES_KEY)?.[1];
+      const hiddenRaw = rows.find(([key]) => key === HIDDEN_CHATS_KEY)?.[1];
+      const unreadRaw = rows.find(([key]) => key === MANUAL_UNREAD_KEY)?.[1];
+      const lockedRaw = rows.find(([key]) => key === LOCKED_CHATS_KEY)?.[1];
+      const shortcutRaw = rows.find(([key]) => key === CHAT_SHORTCUTS_KEY)?.[1];
+      const listRaw = rows.find(([key]) => key === CUSTOM_LIST_KEY)?.[1];
+      setFavoriteIds(safeJsonArray(favRaw));
+      setHiddenIds(safeJsonArray(hiddenRaw));
+      setManualUnreadIds(safeJsonArray(unreadRaw));
+      setLockedIds(safeJsonArray(lockedRaw));
+      setShortcutIds(safeJsonArray(shortcutRaw));
+      setCustomListIds(safeJsonArray(listRaw));
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (selectedIds.length === 0) setSelectionMenuOpen(false);
+  }, [selectedIds.length]);
+
   const openChat = (chat: Chat) => {
+    if (isSelectionMode) {
+      toggleSelect(chat.id);
+      return;
+    }
+    if (lockedIds.includes(chat.id)) {
+      Alert.alert("Locked chat", "Unlock this chat to open it.", [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Unlock and open",
+          onPress: () => {
+            const next = lockedIds.filter((id) => id !== chat.id);
+            setLockedIds(next);
+            AsyncStorage.setItem(LOCKED_CHATS_KEY, JSON.stringify(next)).catch(() => {});
+            setManualUnreadIds((prev) => {
+              const updated = prev.filter((id) => id !== chat.id);
+              AsyncStorage.setItem(MANUAL_UNREAD_KEY, JSON.stringify(updated)).catch(() => {});
+              return updated;
+            });
+            markAsRead(chat.id);
+            router.push({ pathname: "/chat/[id]", params: { id: chat.id, name: chat.name } });
+          },
+        },
+      ]);
+      return;
+    }
+    setManualUnreadIds((prev) => {
+      const next = prev.filter((id) => id !== chat.id);
+      if (next.length !== prev.length) AsyncStorage.setItem(MANUAL_UNREAD_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
     router.push({ pathname: "/chat/[id]", params: { id: chat.id, name: chat.name } });
+  };
+
+  const toggleSelect = (chatId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedIds((prev) => prev.includes(chatId) ? prev.filter((id) => id !== chatId) : [...prev, chatId]);
+  };
+
+  const clearSelection = () => {
+    setSelectedIds([]);
+    setSelectionMenuOpen(false);
+  };
+
+  const persistFavoriteIds = (next: string[]) => {
+    setFavoriteIds(next);
+    AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(next)).catch(() => {});
+  };
+
+  const persistIds = (key: string, setter: (ids: string[]) => void, next: string[]) => {
+    setter(next);
+    AsyncStorage.setItem(key, JSON.stringify(next)).catch(() => {});
+  };
+
+  const toggleFavoriteSelected = () => {
+    if (selectedIds.length === 0) return;
+    const allFavorite = selectedIds.every((id) => favoriteIds.includes(id));
+    const next = allFavorite
+      ? favoriteIds.filter((id) => !selectedIds.includes(id))
+      : Array.from(new Set([...favoriteIds, ...selectedIds]));
+    persistFavoriteIds(next);
+    clearSelection();
   };
 
   const longPressChat = (chat: Chat) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(chat.name, "Choose action", [
-      { text: chat.isPinned ? "Unpin" : "Pin", onPress: () => pinChat(chat.id) },
-      { text: chat.isMuted ? "Unmute" : "Mute", onPress: () => muteChat(chat.id) },
-      { text: "Archive", style: "destructive", onPress: () => archiveChat(chat.id) },
+    setSelectedIds((prev) => prev.includes(chat.id) ? prev : [...prev, chat.id]);
+  };
+
+  const applyBulkPin = () => {
+    const shouldPin = selectedChats.some((c) => !c.isPinned);
+    selectedChats.forEach((chat) => {
+      if (Boolean(chat.isPinned) !== shouldPin) pinChat(chat.id);
+    });
+    clearSelection();
+  };
+
+  const applyBulkMute = () => {
+    const shouldMute = selectedChats.some((c) => !c.isMuted);
+    selectedChats.forEach((chat) => {
+      if (Boolean(chat.isMuted) !== shouldMute) muteChat(chat.id);
+    });
+    clearSelection();
+  };
+
+  const applyBulkArchive = () => {
+    const shouldArchive = selectedChats.some((c) => !c.isArchived);
+    selectedChats.forEach((chat) => archiveChat(chat.id, shouldArchive));
+    if (shouldArchive) setShowArchived(false);
+    clearSelection();
+  };
+
+  const deleteSelectedFromList = () => {
+    if (selectedIds.length === 0) return;
+    Alert.alert(
+      "Delete chats?",
+      "Selected chats will be hidden from this chat list on this device.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            const next = Array.from(new Set([...hiddenIds, ...selectedIds]));
+            setHiddenIds(next);
+            AsyncStorage.setItem(HIDDEN_CHATS_KEY, JSON.stringify(next)).catch(() => {});
+            clearSelection();
+          },
+        },
+      ],
+    );
+  };
+
+  const addShortcutSelected = () => {
+    const next = Array.from(new Set([...shortcutIds, ...selectedIds]));
+    persistIds(CHAT_SHORTCUTS_KEY, setShortcutIds, next);
+    selectedChats.forEach((chat) => {
+      if (!chat.isPinned) pinChat(chat.id);
+    });
+    Alert.alert("Shortcut added", "Selected chats are marked as shortcuts and pinned at the top.");
+    clearSelection();
+  };
+
+  const viewSelectedContact = () => {
+    const only = selectedChats[0];
+    clearSelection();
+    if (only) openChatInfo(only);
+  };
+
+  const markSelectedUnread = () => {
+    const next = Array.from(new Set([...manualUnreadIds, ...selectedIds]));
+    persistIds(MANUAL_UNREAD_KEY, setManualUnreadIds, next);
+    clearSelection();
+  };
+
+  const selectAllVisible = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedIds(sorted.map((chat) => chat.id));
+    setSelectionMenuOpen(false);
+  };
+
+  const toggleLockSelected = () => {
+    const allLocked = selectedIds.every((id) => lockedIds.includes(id));
+    const next = allLocked
+      ? lockedIds.filter((id) => !selectedIds.includes(id))
+      : Array.from(new Set([...lockedIds, ...selectedIds]));
+    persistIds(LOCKED_CHATS_KEY, setLockedIds, next);
+    clearSelection();
+  };
+
+  const addToListSelected = () => {
+    const next = Array.from(new Set([...customListIds, ...selectedIds]));
+    persistIds(CUSTOM_LIST_KEY, setCustomListIds, next);
+    Alert.alert("Added to list", "Selected chats were added to your saved chat list.");
+    clearSelection();
+  };
+
+  const clearSelectedChats = () => {
+    Alert.alert("Clear chat?", "This clears the selected chats from your chat list on this device.", [
       { text: "Cancel", style: "cancel" },
+      { text: "Clear", style: "destructive", onPress: () => {
+        const next = Array.from(new Set([...hiddenIds, ...selectedIds]));
+        setHiddenIds(next);
+        AsyncStorage.setItem(HIDDEN_CHATS_KEY, JSON.stringify(next)).catch(() => {});
+        clearSelection();
+      } },
     ]);
   };
+
+  const blockSelectedChats = () => {
+    const directChats = selectedChats.filter((chat) => !chat.isGroup && chat.otherUserId);
+    if (directChats.length === 0) {
+      Alert.alert("Cannot block", "Select a direct contact chat to block.");
+      return;
+    }
+    Alert.alert("Block contacts?", "Selected contacts will no longer be able to call or message you.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Block",
+        style: "destructive",
+        onPress: () => {
+          directChats.forEach((chat) => {
+            if (chat.otherUserId) blockUser(chat.otherUserId).catch(() => {});
+          });
+          clearSelection();
+        },
+      },
+    ]);
+  };
+
   const openChatInfo = (chat: Chat) => {
     router.push({ pathname: "/chat-info/[id]", params: { id: chat.id } });
   };
@@ -81,23 +312,73 @@ export default function ChatsScreen() {
     { label: "Settings", icon: "settings-outline", onPress: () => router.push("/(tabs)/settings") },
   ];
 
+  const selectionMenuItems = [
+    { label: "Add chat shortcut", icon: "apps-outline", onPress: addShortcutSelected },
+    { label: selectedIds.length === 1 ? "View contact" : "View info", icon: "person-circle-outline", onPress: viewSelectedContact },
+    { label: "Mark as unread", icon: "mail-unread-outline", onPress: markSelectedUnread },
+    { label: "Select all", icon: "checkbox-outline", onPress: selectAllVisible },
+    { label: selectedIds.every((id) => lockedIds.includes(id)) ? "Unlock chat" : "Lock chat", icon: "lock-closed-outline", onPress: toggleLockSelected },
+    { label: selectedChats.every((c) => favoriteIds.includes(c.id)) ? "Remove from Favourites" : "Add to Favourites", icon: "heart-outline", onPress: toggleFavoriteSelected },
+    { label: "Add to list", icon: "list-outline", onPress: addToListSelected },
+    { label: "Clear chat", icon: "close-circle-outline", onPress: clearSelectedChats },
+    { label: "Block", icon: "ban-outline", onPress: blockSelectedChats },
+  ];
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
-        <Text style={styles.headerTitle}>Videh</Text>
+      <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
+        {isSelectionMode ? (
+          <View style={styles.selectionHeaderLeft}>
+            <TouchableOpacity onPress={clearSelection} style={styles.archivedBackBtn}>
+              <Ionicons name="arrow-back" size={23} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>{selectedIds.length}</Text>
+          </View>
+        ) : showArchived ? (
+          <View style={styles.archivedHeaderTitleRow}>
+            <TouchableOpacity onPress={() => setShowArchived(false)} style={styles.archivedBackBtn}>
+              <Ionicons name="arrow-back" size={23} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Archived</Text>
+          </View>
+        ) : (
+          <Text style={styles.headerTitle}>Videh</Text>
+        )}
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/contacts")}>
-            <Ionicons name="person-add-outline" size={22} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.headerBtn}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMenuOpen(true); }}
-          >
-            <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
-          </TouchableOpacity>
+          {isSelectionMode ? (
+            <>
+              <TouchableOpacity style={styles.headerBtn} onPress={applyBulkPin}>
+                <Ionicons name="pin-outline" size={21} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.headerBtn} onPress={deleteSelectedFromList}>
+                <Ionicons name="trash-outline" size={21} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.headerBtn} onPress={applyBulkMute}>
+                <Ionicons name={selectedChats.every((c) => c.isMuted) ? "notifications-outline" : "notifications-off-outline"} size={21} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.headerBtn} onPress={applyBulkArchive}>
+                <Ionicons name={selectedChats.every((c) => c.isArchived) ? "archive" : "archive-outline"} size={21} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.headerBtn} onPress={() => setSelectionMenuOpen(true)}>
+                <Ionicons name="ellipsis-vertical" size={21} color="#fff" />
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/contacts")}>
+                <Ionicons name="person-add-outline" size={22} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMenuOpen(true); }}
+              >
+                <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+              </TouchableOpacity>
+            </>
+          )}
         </View>
-      </View>
+      </ThemedHeader>
 
       {/* WhatsApp-style dropdown */}
       <DropdownMenu
@@ -106,9 +387,29 @@ export default function ChatsScreen() {
         items={menuItems}
         topOffset={topPad + 46}
       />
+      <DropdownMenu
+        visible={selectionMenuOpen}
+        onClose={() => setSelectionMenuOpen(false)}
+        items={selectionMenuItems}
+        topOffset={topPad + 46}
+      />
 
       {/* Search */}
-      <View style={[styles.searchBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      {!showArchived && !isSelectionMode && archivedChats.length > 0 ? (
+        <TouchableOpacity
+          style={[styles.archivedRow, { borderBottomColor: colors.border }]}
+          onPress={() => setShowArchived(true)}
+          activeOpacity={0.82}
+        >
+          <View style={styles.archivedRowLeft}>
+            <Ionicons name="archive-outline" size={22} color={colors.primary} />
+            <Text style={[styles.archivedRowText, { color: colors.foreground }]}>Archived</Text>
+          </View>
+          <Text style={[styles.archivedCount, { color: colors.primary }]}>{archivedChats.length}</Text>
+        </TouchableOpacity>
+      ) : null}
+
+      {!isSelectionMode ? <View style={[styles.searchBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Ionicons name="search" size={16} color={colors.mutedForeground} />
         <TextInput
           style={[styles.searchInput, { color: colors.foreground }]}
@@ -122,19 +423,39 @@ export default function ChatsScreen() {
             <Ionicons name="close-circle" size={16} color={colors.mutedForeground} />
           </TouchableOpacity>
         ) : null}
-      </View>
+      </View> : null}
 
       {/* Filter tabs */}
-      <View style={[styles.tabs, { borderBottomColor: colors.border }]}>
-        {(["all", "unread", "groups"] as const).map((t) => (
-          <TouchableOpacity key={t} onPress={() => setTab(t)} style={styles.tabBtn}>
-            <Text style={[styles.tabText, { color: tab === t ? colors.primary : colors.mutedForeground }]}>
-              {t.charAt(0).toUpperCase() + t.slice(1)}
+      {!isSelectionMode ? <View style={styles.filterChips}>
+        {([
+          { id: "all", label: "All" },
+          { id: "unread", label: `Unread ${visibleBase.reduce((acc, c) => acc + (getUnreadCount(c) > 0 ? 1 : 0), 0)}` },
+          { id: "favorites", label: "Favorites" },
+          { id: "groups", label: "Groups" },
+        ] as const).map((t) => (
+          <TouchableOpacity
+            key={t.id}
+            onPress={() => setTab(t.id)}
+            style={[
+              styles.filterChip,
+              {
+                backgroundColor: tab === t.id ? colors.primary + "20" : colors.card,
+                borderColor: tab === t.id ? colors.primary + "55" : colors.border,
+              },
+            ]}
+          >
+            <Text style={[styles.filterChipText, { color: tab === t.id ? colors.primary : colors.mutedForeground }]}>
+              {t.label}
             </Text>
-            {tab === t && <View style={[styles.tabLine, { backgroundColor: colors.primary }]} />}
           </TouchableOpacity>
         ))}
-      </View>
+        <TouchableOpacity
+          style={[styles.filterChipPlus, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => Alert.alert("Custom filters", "Favorites, Unread and Groups filters are ready. More filters can be added later.")}
+        >
+          <Ionicons name="add" size={17} color={colors.mutedForeground} />
+        </TouchableOpacity>
+      </View> : null}
 
       <FlatList
         data={sorted}
@@ -145,7 +466,12 @@ export default function ChatsScreen() {
             colors={colors}
             onPress={() => openChat(item)}
             onLongPress={() => longPressChat(item)}
-            onAvatarPress={() => setPreviewChat(item)}
+            onAvatarPress={() => isSelectionMode ? toggleSelect(item.id) : setPreviewChat(item)}
+            selected={selectedIds.includes(item.id)}
+            isFavorite={favoriteIds.includes(item.id)}
+            isLocked={lockedIds.includes(item.id)}
+            isShortcut={shortcutIds.includes(item.id)}
+            unreadCount={getUnreadCount(item)}
           />
         )}
         ListEmptyComponent={
@@ -157,20 +483,24 @@ export default function ChatsScreen() {
           ) : (
             <View style={styles.emptyFull}>
               <View style={[styles.emptyIconCircle, { backgroundColor: colors.primary + "18" }]}>
-                <Ionicons name="chatbubbles-outline" size={56} color={colors.primary} />
+                <Ionicons name={showArchived ? "archive-outline" : "chatbubbles-outline"} size={56} color={colors.primary} />
               </View>
-              <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No chats yet</Text>
+              <Text style={[styles.emptyTitle, { color: colors.foreground }]}>{showArchived ? "No archived chats" : "No chats yet"}</Text>
               <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
-                Start a conversation with your contacts.{"\n"}Your messages are end-to-end encrypted.
+                {showArchived
+                  ? "Archived chats will appear here."
+                  : "Start a conversation with your contacts.\nYour messages are end-to-end encrypted."}
               </Text>
-              <TouchableOpacity
-                style={[styles.emptyBtn, { backgroundColor: colors.primary }]}
-                onPress={() => router.push("/contacts")}
-                activeOpacity={0.85}
-              >
-                <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
-                <Text style={styles.emptyBtnText}>Start a chat</Text>
-              </TouchableOpacity>
+              {!showArchived ? (
+                <TouchableOpacity
+                  style={[styles.emptyBtn, { backgroundColor: colors.primary }]}
+                  onPress={() => router.push("/contacts")}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
+                  <Text style={styles.emptyBtnText}>Start a chat</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           )
         }
@@ -179,13 +509,13 @@ export default function ChatsScreen() {
       />
 
       {/* FAB */}
-      <TouchableOpacity
+      {!isSelectionMode ? <TouchableOpacity
         style={[styles.fab, { backgroundColor: colors.primary }]}
         onPress={() => router.push("/contacts")}
         activeOpacity={0.8}
       >
         <Ionicons name="chatbubble-ellipses" size={26} color="#fff" />
-      </TouchableOpacity>
+      </TouchableOpacity> : null}
 
       <Modal visible={!!previewChat} transparent animationType="fade" onRequestClose={() => setPreviewChat(null)}>
         <View style={styles.previewOverlay}>
@@ -240,12 +570,22 @@ function ChatRow({
   onPress,
   onLongPress,
   onAvatarPress,
+  selected,
+  isFavorite,
+  isLocked,
+  isShortcut,
+  unreadCount,
 }: {
   chat: Chat;
   colors: any;
   onPress: () => void;
   onLongPress: () => void;
   onAvatarPress: () => void;
+  selected: boolean;
+  isFavorite: boolean;
+  isLocked: boolean;
+  isShortcut: boolean;
+  unreadCount: number;
 }) {
   const { statuses } = useApp();
   const initials = chat.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
@@ -254,7 +594,7 @@ function ChatRow({
   const statusRing = useMemo(() => getContactStatusRingState(chat, statuses), [chat, statuses]);
 
   return (
-    <View style={[styles.row, { borderBottomColor: colors.border }]}>
+    <View style={[styles.row, { borderBottomColor: colors.border }, selected && { backgroundColor: colors.primary + "1F" }]}>
       <TouchableOpacity
         style={statusRing ? styles.avatarRingTouchable : [styles.avatarWrap, { backgroundColor: avatarBg }]}
         onPress={onAvatarPress}
@@ -292,6 +632,11 @@ function ChatRow({
         {!chat.isGroup && chat.isOnline && (
           <View style={[styles.onlineDot, { backgroundColor: colors.onlineGreen }]} />
         )}
+        {selected ? (
+          <View style={[styles.selectedBadge, { backgroundColor: colors.primary }]}>
+            <Ionicons name="checkmark" size={14} color="#fff" />
+          </View>
+        ) : null}
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.rowContent} onPress={onPress} onLongPress={onLongPress} activeOpacity={0.7}>
@@ -299,9 +644,12 @@ function ChatRow({
           <View style={styles.nameRow}>
             {chat.isPinned && <Ionicons name="pin" size={12} color={colors.mutedForeground} style={{ marginRight: 4, transform: [{ rotate: "45deg" }] }} />}
             {chat.isMuted && <Ionicons name="volume-mute" size={12} color={colors.mutedForeground} style={{ marginRight: 4 }} />}
+            {isLocked && <Ionicons name="lock-closed" size={12} color={colors.mutedForeground} style={{ marginRight: 4 }} />}
+            {isShortcut && <Ionicons name="apps" size={12} color={colors.mutedForeground} style={{ marginRight: 4 }} />}
+            {isFavorite && <Ionicons name="heart" size={12} color={colors.primary} style={{ marginRight: 4 }} />}
             <Text style={[styles.name, { color: colors.foreground }]} numberOfLines={1}>{chat.name}</Text>
           </View>
-          <Text style={[styles.time, { color: chat.unreadCount > 0 ? colors.primary : colors.mutedForeground }]}>
+          <Text style={[styles.time, { color: unreadCount > 0 ? colors.primary : colors.mutedForeground }]}>
             {chat.lastMessageTime ? formatTime(chat.lastMessageTime) : ""}
           </Text>
         </View>
@@ -309,14 +657,14 @@ function ChatRow({
           <Text style={[styles.lastMsg, { color: colors.mutedForeground }]} numberOfLines={1}>
             {chat.lastMessage ?? "No messages yet"}
           </Text>
-          {chat.unreadCount > 0 && !chat.isMuted && (
+          {unreadCount > 0 && !chat.isMuted && (
             <View style={[styles.badge, { backgroundColor: colors.primary }]}>
-              <Text style={styles.badgeText}>{chat.unreadCount > 99 ? "99+" : chat.unreadCount}</Text>
+              <Text style={styles.badgeText}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
             </View>
           )}
-          {chat.unreadCount > 0 && chat.isMuted && (
+          {unreadCount > 0 && chat.isMuted && (
             <View style={[styles.badge, { backgroundColor: colors.mutedForeground }]}>
-              <Text style={styles.badgeText}>{chat.unreadCount}</Text>
+              <Text style={styles.badgeText}>{unreadCount}</Text>
             </View>
           )}
         </View>
@@ -329,14 +677,25 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 10 },
   headerTitle: { color: "#fff", fontSize: 22, fontFamily: "Inter_700Bold" },
-  headerRight: { flexDirection: "row", gap: 4 },
+  archivedHeaderTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  selectionHeaderLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  archivedBackBtn: { paddingRight: 4, paddingVertical: 4 },
+  headerRight: { flexDirection: "row", gap: 3, alignItems: "center" },
   headerBtn: { padding: 6 },
+  archivedRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  archivedRowLeft: { flexDirection: "row", alignItems: "center", gap: 18 },
+  archivedRowText: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
+  archivedCount: { fontSize: 13, fontFamily: "Inter_700Bold" },
   searchBar: { flexDirection: "row", alignItems: "center", marginHorizontal: 12, marginVertical: 8, borderRadius: 24, paddingHorizontal: 12, paddingVertical: 8, gap: 8, borderWidth: 1 },
   searchInput: { flex: 1, fontSize: 15, fontFamily: "Inter_400Regular" },
   tabs: { flexDirection: "row", borderBottomWidth: 0.5, marginHorizontal: 16 },
   tabBtn: { flex: 1, alignItems: "center", paddingVertical: 10, position: "relative" },
   tabText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   tabLine: { position: "absolute", bottom: 0, height: 2, width: "80%", borderRadius: 1 },
+  filterChips: { flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 12, paddingBottom: 8 },
+  filterChip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
+  filterChipText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  filterChipPlus: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 0.5 },
   avatarWrap: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", marginRight: 12, position: "relative", overflow: "hidden" },
   avatarRingTouchable: {
@@ -374,6 +733,7 @@ const styles = StyleSheet.create({
   avatarImg: { width: 52, height: 52 },
   avatarText: { color: "#fff", fontSize: 18, fontFamily: "Inter_700Bold" },
   onlineDot: { width: 14, height: 14, borderRadius: 7, position: "absolute", bottom: 1, right: 1, borderWidth: 2, borderColor: "#fff" },
+  selectedBadge: { position: "absolute", right: -2, bottom: -2, width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#fff" },
   rowContent: { flex: 1 },
   rowTop: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
   nameRow: { flexDirection: "row", alignItems: "center", flex: 1, marginRight: 8 },

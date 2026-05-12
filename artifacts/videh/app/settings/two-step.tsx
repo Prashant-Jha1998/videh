@@ -40,7 +40,9 @@ export default function TwoStepScreen() {
     const checkStatus = async () => {
       if (!user?.dbId) return;
       try {
-        const r = await fetch(`${API_URL}/users/${user.dbId}/two-step-status`);
+        const r = await fetch(`${API_URL}/users/${user.dbId}/two-step-status`, {
+          headers: user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : undefined,
+        });
         const text = await r.text();
         let d: { success?: boolean; enabled?: boolean };
         try {
@@ -71,7 +73,10 @@ export default function TwoStepScreen() {
     try {
       const r = await fetch(`${API_URL}/users/${user?.dbId}/two-step-pin`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+        },
         body: JSON.stringify({ pin }),
       });
       const d = await r.json();
@@ -88,7 +93,10 @@ export default function TwoStepScreen() {
     try {
       const r = await fetch(`${API_URL}/users/${user?.dbId}/two-step-pin`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+        },
         body: JSON.stringify({ pin: checkPin }),
       });
       const d = await r.json();

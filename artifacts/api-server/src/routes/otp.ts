@@ -1,19 +1,13 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { query } from "../lib/db";
+import { issueSessionToken } from "../lib/auth";
+import { stateDelete, stateGetJson, stateSetJson } from "../lib/sharedState";
 
 const router = Router();
 
-// In-memory OTP store: phone -> { otp, expiresAt }
-const otpStore = new Map<string, { otp: string; expiresAt: number }>();
-
-// Clean up expired OTPs every 10 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [phone, entry] of otpStore.entries()) {
-    if (entry.expiresAt < now) otpStore.delete(phone);
-  }
-}, 10 * 60 * 1000);
+const OTP_TTL_MS = 10 * 60 * 1000;
+const otpKey = (phone: string) => `otp:${phone}`;
 
 router.post("/send", async (req: Request, res: Response) => {
   const { phone } = req.body as { phone?: string };
@@ -29,8 +23,7 @@ router.post("/send", async (req: Request, res: Response) => {
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-  // Store OTP with 10 minute expiry
-  otpStore.set(phone, { otp, expiresAt: Date.now() + 10 * 60 * 1000 });
+  await stateSetJson(otpKey(phone), { otp, expiresAt: Date.now() + OTP_TTL_MS }, OTP_TTL_MS);
 
   try {
     const url = `https://www.fast2sms.com/dev/bulkV2?authorization=${apiKey}&sender_id=${senderId}&message=${messageId}&variables_values=${otp}&route=dlt&numbers=${phone}`;
@@ -61,7 +54,7 @@ router.post("/verify", async (req: Request, res: Response) => {
     return;
   }
 
-  const entry = otpStore.get(phone);
+  const entry = await stateGetJson<{ otp: string; expiresAt: number }>(otpKey(phone));
 
   if (!entry) {
     res.status(400).json({ success: false, message: "OTP expired or not found. Please request a new one." });
@@ -69,7 +62,7 @@ router.post("/verify", async (req: Request, res: Response) => {
   }
 
   if (Date.now() > entry.expiresAt) {
-    otpStore.delete(phone);
+    await stateDelete(otpKey(phone));
     res.status(400).json({ success: false, message: "OTP has expired. Please request a new one." });
     return;
   }
@@ -80,7 +73,7 @@ router.post("/verify", async (req: Request, res: Response) => {
   }
 
   // OTP verified — remove it
-  otpStore.delete(phone);
+  await stateDelete(otpKey(phone));
 
   // Upsert user in DB
   try {
@@ -112,15 +105,16 @@ router.post("/verify", async (req: Request, res: Response) => {
       success: true,
       message: "OTP verified",
       dbId: dbUser.id,
+      sessionToken: issueSessionToken(dbUser.id),
       isNew: !existing.rows.length,
       twoStepRequired,
       name: dbUser.name ?? null,
       about: dbUser.about ?? null,
       avatarUrl: dbUser.avatar_url ?? null,
     });
-  } catch (_err) {
-    // DB unavailable – still let user in
-    res.json({ success: true, message: "OTP verified" });
+  } catch (err) {
+    req.log.error({ err }, "OTP verify database error");
+    res.status(500).json({ success: false, message: "Could not complete login. Please try again." });
   }
 });
 

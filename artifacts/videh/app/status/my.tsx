@@ -42,8 +42,9 @@ type RazorpayCheckoutModule = {
 function getRazorpayCheckout(): RazorpayCheckoutModule | null {
   if (Platform.OS === "web") return null;
   try {
-    const loadModule = eval("require") as (name: string) => { default?: RazorpayCheckoutModule; open?: RazorpayCheckoutModule["open"] };
-    const mod = loadModule("react-native-razorpay");
+    // Static require is important so Metro includes the native module in APK builds.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require("react-native-razorpay") as { default?: RazorpayCheckoutModule; open?: RazorpayCheckoutModule["open"] };
     return (mod.default ?? mod) as RazorpayCheckoutModule;
   } catch {
     return null;
@@ -109,7 +110,10 @@ export default function MyStatusScreen() {
     try {
       const orderRes = await fetch(`${getApiUrl()}/api/statuses/${boostTarget.id}/boost/order`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+        },
         body: JSON.stringify({
           userId: user.dbId,
           durationDays: boostPlan.durationDays,
@@ -152,7 +156,10 @@ export default function MyStatusScreen() {
 
       const verifyRes = await fetch(`${getApiUrl()}/api/statuses/${boostTarget.id}/boost`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+        },
         body: JSON.stringify({
           userId: user.dbId,
           amountInr: boostPlan.amountInr,
@@ -181,7 +188,9 @@ export default function MyStatusScreen() {
   const showBoostAnalytics = async (status: Status) => {
     if (!user?.dbId) return;
     try {
-      const res = await fetch(`${getApiUrl()}/api/statuses/${status.id}/boost/analytics?ownerId=${user.dbId}`);
+      const res = await fetch(`${getApiUrl()}/api/statuses/${status.id}/boost/analytics?ownerId=${user.dbId}`, {
+        headers: user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : undefined,
+      });
       const data = await res.json() as { success?: boolean; boostedViewCount?: number; viewers?: Array<{ name: string }> };
       if (!data.success) throw new Error("No analytics");
       const names = (data.viewers ?? []).slice(0, 20).map((v) => `• ${v.name}`).join("\n");

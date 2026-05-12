@@ -11,6 +11,7 @@ import * as Location from "expo-location";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
 import { DismissibleModal } from "@/components/DismissibleModal";
+import { safeJsonParse } from "@/lib/safeJson";
 
 const BASE_URL = getApiUrl();
 const MAX_SOS_CONTACTS = 5;
@@ -63,7 +64,7 @@ export default function SosScreen() {
 
   const queueRetryPayload = useCallback(async (payload: { latitude?: number; longitude?: number; createdAt: number }) => {
     const existingRaw = await AsyncStorage.getItem(retryQueueKey);
-    const existing = existingRaw ? JSON.parse(existingRaw) as any[] : [];
+    const existing = safeJsonParse<any[]>(existingRaw, []);
     const next = [...existing, payload].slice(-20);
     await AsyncStorage.setItem(retryQueueKey, JSON.stringify(next));
   }, [retryQueueKey]);
@@ -71,7 +72,7 @@ export default function SosScreen() {
   const processRetryQueue = useCallback(async () => {
     if (!user?.dbId) return;
     const raw = await AsyncStorage.getItem(retryQueueKey);
-    const queue = raw ? JSON.parse(raw) as Array<{ latitude?: number; longitude?: number; createdAt: number }> : [];
+    const queue = safeJsonParse<Array<{ latitude?: number; longitude?: number; createdAt: number }>>(raw, []);
     if (!queue.length) return;
     const remaining: typeof queue = [];
     for (const item of queue) {
@@ -94,7 +95,7 @@ export default function SosScreen() {
     load();
     if (user?.dbId) {
       AsyncStorage.getItem(verifiedKey).then((raw) => {
-        const parsed = raw ? JSON.parse(raw) as number[] : [];
+        const parsed = safeJsonParse<number[]>(raw, []);
         setVerifiedContactIds(parsed);
       }).catch(() => {});
       processRetryQueue();
@@ -342,7 +343,7 @@ export default function SosScreen() {
           <>
             <Ionicons name="warning" size={40} color="#fff" />
             <Text style={styles.sosBtnTxt}>SEND SOS</Text>
-            <Text style={styles.sosBtnSub}>Press and hold to trigger alert</Text>
+            <Text style={styles.sosBtnSub} numberOfLines={2}>Press and hold to trigger alert</Text>
           </>
         )}
       </Pressable>
@@ -471,9 +472,9 @@ const styles = StyleSheet.create({
   infoCard: { backgroundColor: "#1F2C34", margin: 16, borderRadius: 14, padding: 20, alignItems: "center", gap: 10 },
   infoTitle: { color: "#E9EEF0", fontSize: 16, fontWeight: "700", textAlign: "center" },
   infoText: { color: "#8696A0", fontSize: 14, textAlign: "center", lineHeight: 20 },
-  sosButton: { backgroundColor: "#E74C3C", marginHorizontal: 32, borderRadius: 100, aspectRatio: 1, alignItems: "center", justifyContent: "center", gap: 6, maxHeight: 180, alignSelf: "center", width: 180 },
+  sosButton: { backgroundColor: "#E74C3C", marginHorizontal: 32, borderRadius: 100, aspectRatio: 1, alignItems: "center", justifyContent: "center", gap: 5, maxHeight: 180, alignSelf: "center", width: 180, paddingHorizontal: 18 },
   sosBtnTxt: { color: "#fff", fontSize: 22, fontWeight: "900", letterSpacing: 2 },
-  sosBtnSub: { color: "rgba(255,255,255,0.7)", fontSize: 11 },
+  sosBtnSub: { color: "rgba(255,255,255,0.82)", fontSize: 10, lineHeight: 13, textAlign: "center", width: "100%", paddingHorizontal: 8 },
   section: { margin: 16, marginTop: 24 },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
   sectionTitle: { color: "#E9EEF0", fontSize: 16, fontWeight: "700" },

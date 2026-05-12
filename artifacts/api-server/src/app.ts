@@ -10,8 +10,10 @@ import { fileURLToPath } from "node:url";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { query } from "./lib/db";
+import { stateAcquireLock, stateDelete } from "./lib/sharedState";
 
 const app: Express = express();
+app.set("trust proxy", 1);
 
 app.use(
   pinoHttp({
@@ -40,10 +42,14 @@ app.use(express.urlencoded({ extended: true, limit: "80mb" }));
 const currentFilePath = fileURLToPath(import.meta.url);
 const currentDir = path.dirname(currentFilePath);
 const apiServerDir = path.resolve(currentDir, "..");
+const uploadsDir = path.resolve(apiServerDir, "uploads");
 const videhWebDistDir = path.resolve(apiServerDir, "../videh-web/dist/public");
 const videhWebIndexPath = path.join(videhWebDistDir, "index.html");
 const adminWebDistDir = path.resolve(apiServerDir, "../admin-web/dist/public");
 const adminWebIndexPath = path.join(adminWebDistDir, "index.html");
+
+fs.mkdirSync(uploadsDir, { recursive: true });
+app.use("/uploads", express.static(uploadsDir));
 
 if (fs.existsSync(adminWebIndexPath)) {
   app.use(
@@ -95,6 +101,8 @@ app.use("/api", router);
 // Cron: every minute — check for due scheduled messages and send them
 cron.schedule("* * * * *", async () => {
   try {
+    const lockKey = "jobs:scheduled-messages:lock";
+    if (!(await stateAcquireLock(lockKey, 55_000))) return;
     const due = await query(
       `SELECT sm.*, u.name as sender_name, u.push_token as sender_token
        FROM scheduled_messages sm
@@ -135,7 +143,9 @@ cron.schedule("* * * * *", async () => {
       }
       logger.info({ scheduledId: sm.id }, "Scheduled message sent");
     }
+    await stateDelete("jobs:scheduled-messages:lock");
   } catch (err) {
+    await stateDelete("jobs:scheduled-messages:lock").catch(() => {});
     logger.error({ err }, "Scheduled message cron error");
   }
 });

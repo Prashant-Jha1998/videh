@@ -6,20 +6,31 @@ import * as Location from "expo-location";
 import { getApiUrl } from "@/lib/api";
 import { registerExpoPushTokenWithServer } from "@/lib/pushNotifications";
 import { encodeLocationPayload, mapsUrl as buildMapsUrl } from "@/lib/locationMessage";
+import { safeJsonParse } from "@/lib/safeJson";
 
 const BASE_URL = getApiUrl();
 const STATUS_LIFETIME_MS = 24 * 60 * 60 * 1000;
+let authSessionToken: string | null = null;
 
 const getStatusExpiryTime = (status: Status) => status.expiresAt ?? status.timestamp + STATUS_LIFETIME_MS;
 const isStatusActive = (status: Status) => getStatusExpiryTime(status) > Date.now();
 
 const api = async (path: string, options?: RequestInit) => {
   const res = await fetch(`${BASE_URL}/api${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(authSessionToken ? { Authorization: `Bearer ${authSessionToken}` } : {}),
+      ...(options?.headers ?? {}),
+    },
   });
   return res.json();
 };
+
+const authHeaders = (extra?: Record<string, string>) => ({
+  ...(authSessionToken ? { Authorization: `Bearer ${authSessionToken}` } : {}),
+  ...(extra ?? {}),
+});
 
 export interface UserProfile {
   id: string;
@@ -28,6 +39,7 @@ export interface UserProfile {
   phone: string;
   about: string;
   avatar?: string;
+  sessionToken?: string;
 }
 
 export interface MessageReaction {
@@ -71,6 +83,7 @@ export interface Chat {
   messages: Message[];
   isPinned?: boolean;
   isMuted?: boolean;
+  isArchived?: boolean;
   otherUserId?: number;
 }
 
@@ -152,7 +165,7 @@ interface AppContextType {
   deleteMessage: (chatId: string, messageId: string) => void;
   pinChat: (chatId: string) => void;
   muteChat: (chatId: string) => void;
-  archiveChat: (chatId: string) => void;
+  archiveChat: (chatId: string, archived?: boolean) => void;
   starMessage: (chatId: string, messageId: string) => void;
   forwardMessage: (chatId: string, messageId: string, targetChatId: string) => void;
   starredMessages: Message[];
@@ -190,6 +203,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
   const userRef = useRef<UserProfile | null>(null);
   userRef.current = user;
+  const refreshInFlightRef = useRef({ chats: false, statuses: false, calls: false });
+  const liveLocationTickingRef = useRef(false);
 
   const mapDbChats = (rows: any[]): Chat[] =>
     rows.map((c: any) => {
@@ -211,6 +226,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         messages: [],
         isPinned: c.is_pinned ?? false,
         isMuted: c.is_muted ?? false,
+        isArchived: c.is_archived ?? false,
         otherUserId: otherUser?.id,
       };
     });
@@ -229,9 +245,69 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return fallback;
   };
 
-  const toShareableMediaUri = useCallback(async (uri: string, fallbackMime: string): Promise<string> => {
+  const uploadStatusMedia = useCallback(async (uri: string, fallbackMime: string): Promise<string> => {
+    if (!uri || uri.startsWith("http://") || uri.startsWith("https://") || uri.startsWith("data:")) return uri;
+    const mime = getMimeTypeFromUri(uri, fallbackMime);
+    const ext = mime.includes("video")
+      ? mime.includes("quicktime") ? "mov" : "mp4"
+      : mime.includes("audio")
+        ? mime.includes("mpeg") ? "mp3" : "m4a"
+        : mime.includes("png") ? "png" : "jpg";
+    const form = new FormData();
+    form.append("file", {
+      uri,
+      name: `status_${Date.now()}.${ext}`,
+      type: mime,
+    } as any);
+    const res = await fetch(`${BASE_URL}/api/statuses/media`, {
+      method: "POST",
+      body: form,
+    });
+    const data = await res.json().catch(() => ({})) as { success?: boolean; url?: string; message?: string };
+    if (!res.ok || !data.success || !data.url) {
+      throw new Error(data.message ?? "Could not upload story media.");
+    }
+    return data.url;
+  }, []);
+
+  const uploadChatMedia = useCallback(async (uri: string, fallbackMime: string): Promise<string> => {
     if (!uri) return uri;
     if (uri.startsWith("data:") || uri.startsWith("http://") || uri.startsWith("https://")) return uri;
+    const mime = getMimeTypeFromUri(uri, fallbackMime);
+    const ext = mime.includes("video")
+      ? mime.includes("quicktime") ? "mov" : "mp4"
+      : mime.includes("audio")
+        ? mime.includes("mpeg") ? "mp3" : "m4a"
+        : mime.includes("pdf") ? "pdf"
+          : mime.includes("png") ? "png" : "jpg";
+    const form = new FormData();
+    form.append("file", {
+      uri,
+      name: `chat_${Date.now()}.${ext}`,
+      type: mime,
+    } as any);
+    const res = await fetch(`${BASE_URL}/api/chats/media`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: form,
+    });
+    const data = await res.json().catch(() => ({})) as { success?: boolean; url?: string; message?: string };
+    if (!res.ok || !data.success || !data.url) {
+      throw new Error(data.message ?? "Could not upload media.");
+    }
+    return data.url;
+  }, []);
+
+  const toShareableMediaUri = useCallback(async (uri: string, fallbackMime: string): Promise<string> => {
+    if (!uri) return uri;
+    if (!uri.startsWith("data:")) {
+      try {
+        return await uploadChatMedia(uri, fallbackMime);
+      } catch {
+        return uri;
+      }
+    }
+    if (uri.startsWith("http://") || uri.startsWith("https://")) return uri;
     try {
       const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
       const mime = getMimeTypeFromUri(uri, fallbackMime);
@@ -253,7 +329,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return uri;
       }
     }
-  }, []);
+  }, [uploadChatMedia]);
 
   const loadChats = useCallback(async (dbUserId: number) => {
     try {
@@ -264,7 +340,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // Preserve existing messages — only update metadata
         return mapped.map((newChat) => {
           const old = prev.find((c) => c.id === newChat.id);
-          return old ? { ...newChat, messages: old.messages, isPinned: newChat.isPinned ?? old.isPinned, isMuted: newChat.isMuted ?? old.isMuted } : newChat;
+          return old ? { ...newChat, messages: old.messages, isPinned: newChat.isPinned ?? old.isPinned, isMuted: newChat.isMuted ?? old.isMuted, isArchived: newChat.isArchived ?? old.isArchived } : newChat;
         });
       });
     } catch {}
@@ -328,7 +404,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try {
         const stored = await AsyncStorage.getItem("videh_user");
         if (stored) {
-          const parsed = JSON.parse(stored) as UserProfile;
+          const parsed = safeJsonParse<UserProfile | null>(stored, null);
+          if (!parsed?.id) return;
+          authSessionToken = parsed.sessionToken ?? null;
           setUserState(parsed);
           setIsAuthenticated(true);
           if (parsed.dbId) {
@@ -352,19 +430,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const u = userRef.current;
     if (!u?.dbId) return;
-    const chatTimer = setInterval(() => {
+    const runChats = () => {
       const uid = userRef.current?.dbId;
-      if (uid) loadChats(uid);
-    }, 7000);
-    const statusTimer = setInterval(() => {
+      if (!uid || refreshInFlightRef.current.chats) return;
+      refreshInFlightRef.current.chats = true;
+      loadChats(uid).finally(() => { refreshInFlightRef.current.chats = false; });
+    };
+    const runStatuses = () => {
       const uid = userRef.current?.dbId;
-      if (uid) loadStatuses(uid);
-    }, 12000);
-    const callTimer = setInterval(() => {
+      if (!uid || refreshInFlightRef.current.statuses) return;
+      refreshInFlightRef.current.statuses = true;
+      loadStatuses(uid).finally(() => { refreshInFlightRef.current.statuses = false; });
+    };
+    const runCalls = () => {
       const uid = userRef.current?.dbId;
-      if (uid) loadCallLogs(uid);
-    }, 30000);
-    return () => { clearInterval(chatTimer); clearInterval(statusTimer); clearInterval(callTimer); };
+      if (!uid || refreshInFlightRef.current.calls) return;
+      refreshInFlightRef.current.calls = true;
+      loadCallLogs(uid).finally(() => { refreshInFlightRef.current.calls = false; });
+    };
+    const EventSourceCtor = (globalThis as any).EventSource as undefined | (new (url: string, init?: any) => {
+      addEventListener: (type: string, listener: () => void) => void;
+      close: () => void;
+    });
+    const eventToken = authSessionToken ? `?token=${encodeURIComponent(authSessionToken)}` : "";
+    const eventSource = EventSourceCtor
+      ? new EventSourceCtor(`${BASE_URL}/api/chats/user/${u.dbId}/events${eventToken}`)
+      : null;
+    eventSource?.addEventListener("message", runChats);
+    const chatTimer = eventSource ? null : setInterval(runChats, 7000);
+    const statusTimer = setInterval(runStatuses, 12000);
+    const callTimer = setInterval(runCalls, 30000);
+    return () => {
+      if (chatTimer) clearInterval(chatTimer);
+      eventSource?.close();
+      clearInterval(statusTimer);
+      clearInterval(callTimer);
+    };
   }, [isAuthenticated]);
 
   // WhatsApp-like expiry: hide status locally as soon as the 24-hour window ends.
@@ -394,6 +495,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [isAuthenticated]);
 
   const setUser = useCallback(async (u: UserProfile) => {
+    authSessionToken = u.sessionToken ?? null;
     setUserState(u);
     setIsAuthenticated(true);
     await AsyncStorage.setItem("videh_user", JSON.stringify(u));
@@ -454,6 +556,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try { await api(`/users/${u.dbId}/offline`, { method: "POST" }); } catch {}
     }
     setUserState(null);
+    authSessionToken = null;
     setIsAuthenticated(false);
     setChats([]);
     await AsyncStorage.removeItem("videh_user");
@@ -566,7 +669,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       void (async () => {
         const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             senderId: u.dbId,
             content: text,
@@ -642,7 +745,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (u?.dbId) {
       const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           senderId: u.dbId,
           content: text,
@@ -695,7 +798,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (u?.dbId) {
       const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ senderId: u.dbId, content: text, type: "audio", mediaUrl: shareableAudioUri }),
       });
       const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
@@ -841,20 +944,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (u.dbId) {
       try {
-        const shareableMediaUrl = mediaUrl
-          ? await toShareableMediaUri(mediaUrl, type === "video" ? "video/mp4" : "image/jpeg")
+        const uploadedMediaUrl = mediaUrl
+          ? await uploadStatusMedia(mediaUrl, type === "video" ? "video/mp4" : "image/jpeg")
+          : null;
+        const uploadedEditorData = editorData
+          ? {
+              ...editorData,
+              musicUri: editorData.musicUri
+                ? await uploadStatusMedia(editorData.musicUri, "audio/mpeg")
+                : undefined,
+            }
           : null;
         const res = await fetch(`${BASE_URL}/api/statuses`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             userId: u.dbId,
             content,
             type,
             backgroundColor: bg ?? "#00A884",
-            mediaUrl: shareableMediaUrl,
+            mediaUrl: uploadedMediaUrl,
             videoDurationMs: type === "video" ? videoDurationMs ?? null : undefined,
-            editorData: editorData ?? null,
+            editorData: uploadedEditorData,
           }),
         });
         const data = await res.json().catch(() => ({})) as { success?: boolean; message?: string };
@@ -867,7 +978,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         throw err;
       }
     }
-  }, [loadStatuses, toShareableMediaUri]);
+  }, [loadStatuses, uploadStatusMedia]);
 
   const markStatusViewedLocally = useCallback((statusId: string) => {
     setStatuses((prev) =>
@@ -915,8 +1026,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, isMuted: !c.isMuted } : c));
   }, []);
 
-  const archiveChat = useCallback((chatId: string) => {
-    setChats((prev) => prev.filter((c) => c.id !== chatId));
+  const archiveChat = useCallback((chatId: string, archived = true) => {
+    setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, isArchived: archived } : c));
+    const u = userRef.current;
+    if (u?.dbId) {
+      api(`/chats/${chatId}/archive`, {
+        method: "PATCH",
+        body: JSON.stringify({ userId: u.dbId, archived }),
+      }).catch(() => {});
+    }
   }, []);
 
   const starMessage = useCallback((chatId: string, messageId: string) => {
@@ -959,7 +1077,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     void (async () => {
       const res = await fetch(`${BASE_URL}/api/chats/${targetChatId}/messages`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           senderId: u.dbId,
           content: msg.text,
@@ -1060,7 +1178,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!u?.dbId) return;
     await fetch(`${BASE_URL}/api/chats/${chatId}/messages/${messageId}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ userId: u.dbId, ...body }),
     }).catch(() => {});
     await loadMessages(chatId);
@@ -1070,6 +1188,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!liveLocationSession) return;
     const sess = { ...liveLocationSession };
     const tick = async () => {
+      if (liveLocationTickingRef.current) return;
       if (Date.now() > sess.untilMs) {
         if (liveTickRef.current) {
           clearInterval(liveTickRef.current);
@@ -1080,6 +1199,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       const u = userRef.current;
       if (!u?.dbId) return;
+      liveLocationTickingRef.current = true;
       try {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         const { latitude, longitude } = loc.coords;
@@ -1094,7 +1214,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
         await fetch(`${BASE_URL}/api/chats/${sess.chatId}/messages/${sess.messageId}`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             userId: u.dbId,
             content,
@@ -1104,6 +1224,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await loadMessages(sess.chatId);
       } catch {
         /* ignore */
+      } finally {
+        liveLocationTickingRef.current = false;
       }
     };
     void tick();

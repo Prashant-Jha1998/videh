@@ -155,7 +155,9 @@ export default function ViewStatusScreen() {
       setShowReactions(false);
     }
     if (isMyStatus) {
-      fetch(`${BASE_URL}/api/statuses/${currentStatus.id}/viewers?ownerId=${user.dbId}`)
+      fetch(`${BASE_URL}/api/statuses/${currentStatus.id}/viewers?ownerId=${user.dbId}`, {
+        headers: user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : undefined,
+      })
         .then((r) => r.json())
         .then((data) => { if (data.success) { setViewCount(data.viewCount ?? 0); setReactionSummary(data.reactions ?? {}); } })
         .catch(() => {});
@@ -241,10 +243,14 @@ export default function ViewStatusScreen() {
     setMyReaction(isSame ? null : emoji);
     setShowReactions(false);
     const endpoint = `${BASE_URL}/api/statuses/${currentStatus.id}/react`;
+    const headers = {
+      "Content-Type": "application/json",
+      ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+    };
     if (isSame) {
-      fetch(endpoint, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: user.dbId }) }).catch(() => {});
+      fetch(endpoint, { method: "DELETE", headers, body: JSON.stringify({ userId: user.dbId }) }).catch(() => {});
     } else {
-      fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: user.dbId, emoji }) }).catch(() => {});
+      fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ userId: user.dbId, emoji }) }).catch(() => {});
     }
   };
 

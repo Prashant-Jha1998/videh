@@ -102,6 +102,7 @@ export default function OtpScreen() {
         success: boolean; message?: string;
         dbId?: number; isNew?: boolean;
         twoStepRequired?: boolean;
+        sessionToken?: string;
         name?: string | null; about?: string | null; avatarUrl?: string | null;
       };
 
@@ -115,6 +116,7 @@ export default function OtpScreen() {
               phone: phone ?? "",
               dbId: String(data.dbId),
               ret: isReturning ? "1" : "0",
+              sessionToken: data.sessionToken ?? "",
             },
           } as unknown as Href);
           setLoading(false);
@@ -128,6 +130,7 @@ export default function OtpScreen() {
           phone: phone ?? "",
           about: data.about ?? "Hey there! I am using Videh.",
           avatar: data.avatarUrl ?? undefined,
+          sessionToken: data.sessionToken,
         });
         // Returning user with a name → go straight to main app
         router.replace(isReturning ? "/(tabs)/chats" : "/auth/profile");

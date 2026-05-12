@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, Status } from "@/context/AppContext";
 import { formatTime } from "@/utils/time";
+import { ThemedHeader } from "@/components/ThemedHeader";
 
 interface StatusGroup {
   userId: string;
@@ -94,7 +95,7 @@ export default function StatusScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
+      <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
         <Text style={styles.headerTitle}>Status</Text>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerBtn}>
@@ -104,7 +105,7 @@ export default function StatusScreen() {
             <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
           </TouchableOpacity>
         </View>
-      </View>
+      </ThemedHeader>
 
       <FlatList
         data={[]}

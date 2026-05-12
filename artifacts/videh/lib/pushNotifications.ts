@@ -1,7 +1,9 @@
 import Constants from "expo-constants";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { getApiUrl } from "@/lib/api";
+import { safeJsonParse } from "@/lib/safeJson";
 
 /** Same id as `artifacts/api-server/src/lib/expoPush.ts` `EXPO_ANDROID_CHANNEL_ID`. */
 export const VIDEH_PUSH_CHANNEL_ID = "messages";
@@ -35,9 +37,17 @@ export async function registerExpoPushTokenWithServer(dbId: number): Promise<voi
   const projectId = getExpoProjectId();
   const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {});
   const base = getApiUrl();
-  await fetch(`${base}/api/users/${dbId}/push-token`, {
+  const stored = await AsyncStorage.getItem("videh_user");
+  const sessionToken = safeJsonParse<{ sessionToken?: string } | null>(stored, null)?.sessionToken;
+  const res = await fetch(`${base}/api/users/${dbId}/push-token`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+    },
     body: JSON.stringify({ token: tokenData.data }),
   });
+  if (!res.ok) {
+    throw new Error(`Push token registration failed: ${res.status}`);
+  }
 }

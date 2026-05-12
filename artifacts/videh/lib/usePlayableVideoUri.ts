@@ -14,6 +14,7 @@ export function usePlayableVideoUri(uri: string | undefined): {
 
   useEffect(() => {
     let cancelled = false;
+    let tempFile: string | null = null;
     if (!uri) {
       setPlayableUri(null);
       setFailed(false);
@@ -30,6 +31,7 @@ export function usePlayableVideoUri(uri: string | undefined): {
         if (!cacheDir) throw new Error("No writable cache directory");
         const ext = uri.includes("video/quicktime") ? "mov" : "mp4";
         const target = `${cacheDir}video_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+        tempFile = target;
         const base64 = uri.replace(/^data:[^;]+;base64,/, "");
         await FileSystem.writeAsStringAsync(target, base64, { encoding: FileSystem.EncodingType.Base64 });
         if (!cancelled) {
@@ -46,6 +48,9 @@ export function usePlayableVideoUri(uri: string | undefined): {
     void prepare();
     return () => {
       cancelled = true;
+      if (tempFile) {
+        FileSystem.deleteAsync(tempFile, { idempotent: true }).catch(() => {});
+      }
     };
   }, [uri]);
 

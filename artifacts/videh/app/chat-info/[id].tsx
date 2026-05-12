@@ -128,6 +128,10 @@ export default function ChatInfoScreen() {
   const router = useRouter();
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
   const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, reportUser, setChatDisappear, createDirectChat } = useApp();
+  const authedJsonHeaders = useCallback(() => ({
+    "Content-Type": "application/json",
+    ...(user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+  }), [user?.sessionToken]);
 
   const chat = chats.find((c) => c.id === id);
   const isGroup = chat?.isGroup ?? false;
@@ -138,6 +142,7 @@ export default function ChatInfoScreen() {
   const [groupDesc, setGroupDesc] = useState<string>("");
   const [editingDesc, setEditingDesc] = useState(false);
   const [descInput, setDescInput] = useState("");
+  const [descSaving, setDescSaving] = useState(false);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
@@ -307,7 +312,7 @@ export default function ChatInfoScreen() {
   const doArchive = () => {
     Alert.alert("Archive chat?", "", [
       { text: "Cancel", style: "cancel" },
-      { text: "Archive", onPress: () => { archiveChat(id!); router.replace("/(tabs)/chats"); } },
+      { text: "Archive", onPress: () => { archiveChat(id!, true); router.replace("/(tabs)/chats"); } },
     ]);
   };
 
@@ -392,7 +397,7 @@ export default function ChatInfoScreen() {
     try {
       const res = await fetch(`${BASE_URL}/api/chats/${id}/group-messaging-policy`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: authedJsonHeaders(),
         body: JSON.stringify({
           requesterId: user?.dbId,
           policy,
@@ -441,7 +446,7 @@ export default function ChatInfoScreen() {
     try {
       const res = await fetch(`${BASE_URL}/api/chats/${id}/members/${member.id}/send-permission`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: authedJsonHeaders(),
         body: JSON.stringify({ requesterId: user?.dbId, canSendMessages: allow }),
       });
       const data = await res.json();
@@ -457,14 +462,32 @@ export default function ChatInfoScreen() {
   };
 
   const saveGroupDesc = async () => {
+    if (!id || !user?.dbId || descSaving) return;
+    const next = descInput.trim();
+    if (next.length > 512) {
+      Alert.alert("Too long", "Group description must be 512 characters or less.");
+      return;
+    }
+    setDescSaving(true);
     try {
-      await fetch(`${BASE_URL}/api/chats/${id}/description`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: descInput, requesterId: user?.dbId }),
+      const res = await fetch(`${BASE_URL}/api/chats/${id}/description`, {
+        method: "PUT", headers: authedJsonHeaders(),
+        body: JSON.stringify({ description: next, requesterId: user.dbId }),
       });
-      setGroupDesc(descInput);
+      const data = await res.json().catch(() => ({})) as { success?: boolean; message?: string; groupDescription?: string };
+      if (!res.ok || !data.success) {
+        Alert.alert("Could not save", data.message ?? "Please try again.");
+        return;
+      }
+      const saved = data.groupDescription ?? next;
+      setGroupDesc(saved);
+      setDescInput(saved);
       setEditingDesc(false);
-    } catch { setEditingDesc(false); }
+    } catch {
+      Alert.alert("Network error", "Could not save group description.");
+    } finally {
+      setDescSaving(false);
+    }
   };
 
   const shareGroupInviteLink = async () => {
@@ -497,7 +520,7 @@ export default function ChatInfoScreen() {
   const addMember = async (memberId: number) => {
     try {
       const res = await fetch(`${BASE_URL}/api/chats/${id}/members`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: authedJsonHeaders(),
         body: JSON.stringify({ userId: memberId, requesterId: user?.dbId }),
       });
       const data = await res.json();
@@ -548,7 +571,7 @@ export default function ChatInfoScreen() {
         text: "Remove", style: "destructive", onPress: async () => {
           try {
             await fetch(`${BASE_URL}/api/chats/${id}/members/${member.id}`, {
-              method: "DELETE", headers: { "Content-Type": "application/json" },
+              method: "DELETE", headers: authedJsonHeaders(),
               body: JSON.stringify({ requesterId: user?.dbId }),
             });
             fetchMembers();
@@ -567,7 +590,7 @@ export default function ChatInfoScreen() {
           text: member.is_admin ? "Remove admin" : "Make admin", onPress: async () => {
             try {
               await fetch(`${BASE_URL}/api/chats/${id}/members/${member.id}/admin`, {
-                method: "PUT", headers: { "Content-Type": "application/json" },
+                method: "PUT", headers: authedJsonHeaders(),
                 body: JSON.stringify({ requesterId: user?.dbId, isAdmin: !member.is_admin }),
               });
               fetchMembers();
@@ -698,13 +721,29 @@ export default function ChatInfoScreen() {
                   placeholder="Add group description..."
                   placeholderTextColor={colors.mutedForeground}
                   autoFocus
+                  maxLength={512}
                 />
                 <View style={styles.descBtns}>
-                  <TouchableOpacity onPress={() => { setEditingDesc(false); setDescInput(groupDesc); }} style={styles.descBtn}>
+                  <Text style={[styles.descCounter, { color: colors.mutedForeground }]}>
+                    {descInput.trim().length}/512
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => { setEditingDesc(false); setDescInput(groupDesc); }}
+                    style={styles.descBtn}
+                    disabled={descSaving}
+                  >
                     <Text style={{ color: colors.mutedForeground }}>Cancel</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={saveGroupDesc} style={[styles.descBtn, { backgroundColor: colors.primary }]}>
-                    <Text style={{ color: "#fff" }}>Save</Text>
+                  <TouchableOpacity
+                    onPress={saveGroupDesc}
+                    style={[styles.descBtn, { backgroundColor: colors.primary, opacity: descSaving ? 0.65 : 1 }]}
+                    disabled={descSaving}
+                  >
+                    {descSaving ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={{ color: "#fff" }}>Save</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
               </View>
@@ -884,7 +923,7 @@ export default function ChatInfoScreen() {
                 { text: "Leave", style: "destructive", onPress: async () => {
                   if (!user?.dbId || !id) return;
                   await fetch(`${BASE_URL}/api/chats/${id}/members/${user.dbId}`, {
-                    method: "DELETE", headers: { "Content-Type": "application/json" },
+                    method: "DELETE", headers: authedJsonHeaders(),
                     body: JSON.stringify({ requesterId: user.dbId }),
                   }).catch(() => {});
                   router.replace("/(tabs)/chats");
@@ -1144,7 +1183,8 @@ const styles = StyleSheet.create({
   sectionValue: { fontSize: 15 },
   descHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   descInput: { borderWidth: 1, borderRadius: 8, padding: 10, fontSize: 15, marginTop: 4, minHeight: 64 },
-  descBtns: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 8 },
+  descBtns: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 8, marginTop: 8 },
+  descCounter: { marginRight: "auto", fontSize: 11 },
   inviteLinkRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, alignSelf: "flex-start" },
   inviteLinkText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   descBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },

@@ -21,7 +21,7 @@ export default function TwoStepLoginScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { phone, dbId, ret } = useLocalSearchParams<{ phone: string; dbId: string; ret?: string }>();
+  const { phone, dbId, ret, sessionToken } = useLocalSearchParams<{ phone: string; dbId: string; ret?: string; sessionToken?: string }>();
   const { setUser } = useApp();
   const { t } = useUiPreferences();
 
@@ -51,6 +51,7 @@ export default function TwoStepLoginScreen() {
           name?: string | null;
           about?: string | null;
           avatarUrl?: string | null;
+          sessionToken?: string;
           message?: string;
         };
         if (res.ok && data.success) {
@@ -63,6 +64,7 @@ export default function TwoStepLoginScreen() {
             phone: phone ?? "",
             about: data.about ?? "Hey there! I am using Videh.",
             avatar: data.avatarUrl ?? undefined,
+            sessionToken: data.sessionToken ?? sessionToken,
           });
           router.replace(isReturning ? "/(tabs)/chats" : "/auth/profile");
         } else {
@@ -79,7 +81,7 @@ export default function TwoStepLoginScreen() {
       }
       setLoading(false);
     },
-    [dbId, phone, ret, router, setUser, t],
+    [dbId, phone, ret, router, sessionToken, setUser, t],
   );
 
   const handleChange = (text: string, idx: number) => {

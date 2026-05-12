@@ -7,7 +7,8 @@
     "dev": "node --env-file=.env --env-file=../../.env ./build.mjs && node --env-file=.env --env-file=../../.env --enable-source-maps ./dist/index.mjs",
     "build": "node ./build.mjs && pnpm --dir ../videh-web run build && pnpm --dir ../admin-web run build",
     "start": "node --enable-source-maps ./dist/index.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "load:smoke": "node ./scripts/load-smoke.mjs"
   },
   "dependencies": {
     "@types/multer": "^2.1.0",

@@ -1,10 +1,10 @@
 import { Router, type Request, type Response } from "express";
 import { EXPO_ANDROID_CHANNEL_ID, isExpoPushToken, sendExpoPush } from "../lib/expoPush";
 import { query } from "../lib/db";
+import { stateGetJson, stateSetJson } from "../lib/sharedState";
 
 const router = Router();
 const MAX_SOS_CONTACTS = 5;
-const locationUpdateThrottle = new Map<string, number>();
 
 function normalizePhone(raw: string): string {
   return raw.replace(/[^\d+]/g, "").trim();
@@ -177,9 +177,9 @@ router.post("/:userId/location-update", async (req: Request, res: Response) => {
     return;
   }
 
-  const throttleKey = String(userId);
+  const throttleKey = `sos:location-throttle:${userId}`;
   const now = Date.now();
-  const lastSent = locationUpdateThrottle.get(throttleKey) ?? 0;
+  const lastSent = await stateGetJson<number>(throttleKey) ?? 0;
   if (now - lastSent < 45_000) {
     res.json({ success: true, skipped: true });
     return;
@@ -203,7 +203,7 @@ router.post("/:userId/location-update", async (req: Request, res: Response) => {
       const chatId = await findOrCreateDirectChat(userId, contact.contact_user_id);
       await query("INSERT INTO messages (chat_id, sender_id, content, type) VALUES ($1,$2,$3,'text')", [chatId, userId, msg]);
     }
-    locationUpdateThrottle.set(throttleKey, now);
+    await stateSetJson(throttleKey, now, 45_000);
     res.json({ success: true, sentTo: contacts.rows.length });
   } catch (err) {
     req.log.error({ err }, "sos location update error");
