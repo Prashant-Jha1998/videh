@@ -48,5 +48,14 @@ jobs:
           sudo nginx -t
           sudo systemctl reload nginx
 
-          curl --fail --silent --show-error https://videh.co.in/api/readyz
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error https://videh.co.in/api/readyz; then
+              exit 0
+            fi
+            echo "Health check failed on attempt ${attempt}; retrying..."
+            sleep 5
+          done
+
+          pm2 logs videh-api --lines 80 --nostream
+          exit 1
           EOF
