@@ -225,7 +225,7 @@ async function sendMessageForWeb(req: Request, res: Response, chatId: string | n
 
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const token = randomBytes(16).toString("hex");
+    const token = randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     const ua = req.headers["user-agent"] ?? "";
     const platform = detectPlatform(ua);

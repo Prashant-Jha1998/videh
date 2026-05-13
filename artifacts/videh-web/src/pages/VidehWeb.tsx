@@ -134,7 +134,7 @@ export default function VidehWeb() {
       setError(null);
       const data = await webApi.createSession();
       setToken(data.token);
-      setQrData(`videh://scan?token=${data.token}`);
+      setQrData(`videh://scan?token=${data.token}&host=${encodeURIComponent(window.location.origin)}`);
       setStatus("pending");
       return data.token;
     } catch (err) {
@@ -350,7 +350,7 @@ export default function VidehWeb() {
           </section>
           <section className="vw-qr-box">
             {status === "loading" && <div className="vw-spinner" />}
-            {(status === "pending" || status === "scanning") && qrData && <QRCodeSVG value={qrData} size={230} level="L" includeMargin />}
+            {(status === "pending" || status === "scanning") && qrData && <QRCodeSVG value={qrData} size={230} level="M" />}
             {status === "expired" && <p>QR code expired.</p>}
             {status === "error" && <p>{error || "Connection error. Please reload."}</p>}
             <button onClick={() => { stopPoll(); setStatus("loading"); createSession().then((tok) => { if (tok) pollRef.current = setInterval(() => pollStatus(tok), 2000); }); }}>
