@@ -1,3 +1,32 @@
+const fs = require("fs");
+const path = require("path");
+const { withDangerousMod } = require("expo/config-plugins");
+
+const ADI_REGISTRATION_TOKEN = "DWT6ACRQC3JDUAAAAAAAAAAAAA";
+
+function withGooglePlayAdiRegistration(config) {
+  return withDangerousMod(config, [
+    "android",
+    async (config) => {
+      const assetsDir = path.join(
+        config.modRequest.platformProjectRoot,
+        "app",
+        "src",
+        "main",
+        "assets",
+      );
+
+      fs.mkdirSync(assetsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(assetsDir, "adi-registration.properties"),
+        `${ADI_REGISTRATION_TOKEN}\n`,
+      );
+
+      return config;
+    },
+  ]);
+}
+
 /**
  * EAS: set VIDEOH_SLIM_ANDROID=1 in eas.json (preview / apkRelease / production) for a much
  * smaller APK/AAB: only arm64-v8a + compressed JS bundle. Omits 32-bit ARM and x86 emulators.
@@ -25,5 +54,5 @@ module.exports = ({ config }) => {
     ];
   });
 
-  return { ...config, plugins };
+  return withGooglePlayAdiRegistration({ ...config, plugins });
 };
