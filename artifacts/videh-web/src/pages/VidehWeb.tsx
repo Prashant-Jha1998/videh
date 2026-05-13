@@ -1,194 +1,127 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { eventsUrl, type ChatDetails, type ChatEntry, type Message, type SessionStatus, type WebUser, webApi } from "@/lib/webApi";
 
-const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "🎉"];
+const API = "";
 
-function formatTime(iso?: string): string {
-  if (!iso) return "";
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+interface WebUser {
+  id: number;
+  name: string;
+  phone: string;
+  about: string;
+  avatarUrl?: string;
 }
 
-function formatChatTime(iso?: string): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  if (diff < 86_400_000) return formatTime(iso);
-  if (diff < 172_800_000) return "Yesterday";
-  return d.toLocaleDateString();
+interface ChatEntry {
+  id: number;
+  is_group: boolean;
+  group_name?: string;
+  other_members?: { id: number; name: string; avatar_url?: string; is_online: boolean }[];
+  last_message?: { content: string; created_at: string; is_deleted: boolean; sender_id: number };
+  unread_count: number;
+  is_pinned?: boolean;
+  is_muted?: boolean;
 }
 
-function initials(name?: string): string {
-  return (name || "V").split(" ").map((part) => part[0]).join("").toUpperCase().slice(0, 2);
+interface Msg {
+  id: number;
+  chat_id: number;
+  sender_id: number;
+  content: string;
+  type: string;
+  is_deleted: boolean;
+  created_at: string;
+  sender_name?: string;
 }
 
-function hue(name?: string): number {
-  return (name || "V").charCodeAt(0) * 37 % 360;
-}
-
-function chatName(chat?: ChatEntry): string {
-  if (!chat) return "Videh";
-  return chat.is_group ? (chat.group_name || "Group") : (chat.other_members?.[0]?.name || "Unknown");
-}
-
-function chatAvatar(chat?: ChatEntry): string | undefined {
-  if (!chat) return undefined;
-  return chat.is_group ? chat.group_avatar_url : chat.other_members?.[0]?.avatar_url;
-}
-
-function messagePreview(chat: ChatEntry): string {
-  const msg = chat.last_message;
-  if (!msg) return "No messages yet";
-  if (msg.is_deleted) return "This message was deleted";
-  if (msg.media_url) {
-    if (msg.type === "image") return "Photo";
-    if (msg.type === "video") return "Video";
-    if (msg.type === "audio") return "Audio";
-    return "Document";
-  }
-  return msg.content;
-}
-
-function mediaTypeFromFile(file: File): string {
-  if (file.type.startsWith("image/")) return "image";
-  if (file.type.startsWith("video/")) return "video";
-  if (file.type.startsWith("audio/")) return "audio";
-  return "document";
-}
-
-function Avatar({ name, src, size = 40 }: { name?: string; src?: string; size?: number }) {
-  if (src) {
-    return <img className="vw-avatar" src={src} alt={name || "Avatar"} style={{ width: size, height: size }} />;
-  }
-  return (
-    <div className="vw-avatar vw-avatar-fallback" style={{ width: size, height: size, backgroundColor: `hsl(${hue(name)},50%,45%)` }}>
-      {initials(name)}
-    </div>
-  );
-}
-
-function Tick({ status }: { status?: Message["delivery_status"] }) {
-  if (status === "read") return <span className="vw-tick read">✓✓</span>;
-  if (status === "delivered") return <span className="vw-tick">✓✓</span>;
-  return <span className="vw-tick">✓</span>;
-}
-
-function MediaPreview({ msg }: { msg: Message }) {
-  if (!msg.media_url || msg.is_deleted) return null;
-  if (msg.type === "image") return <img className="vw-media" src={msg.media_url} alt={msg.content || "Image"} />;
-  if (msg.type === "video") return <video className="vw-media" src={msg.media_url} controls />;
-  if (msg.type === "audio") return <audio className="vw-audio" src={msg.media_url} controls />;
-  return (
-    <a className="vw-doc" href={msg.media_url} target="_blank" rel="noreferrer">
-      <span>📄</span>
-      <span>{msg.content || "Open document"}</span>
-    </a>
-  );
-}
+type SessionStatus = "loading" | "pending" | "scanning" | "linked" | "expired" | "error";
 
 export default function VidehWeb() {
   const [status, setStatus] = useState<SessionStatus>("loading");
   const [token, setToken] = useState<string | null>(null);
-  const [qrData, setQrData] = useState("");
+  const [qrData, setQrData] = useState<string>("");
   const [user, setUser] = useState<WebUser | null>(null);
   const [chats, setChats] = useState<ChatEntry[]>([]);
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Msg[]>([]);
   const [msgText, setMsgText] = useState("");
-  const [chatSearch, setChatSearch] = useState("");
-  const [messageSearch, setMessageSearch] = useState("");
-  const [typingNames, setTypingNames] = useState<string[]>([]);
-  const [emojiOpen, setEmojiOpen] = useState(false);
-  const [infoOpen, setInfoOpen] = useState(false);
-  const [details, setDetails] = useState<ChatDetails | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId), [chats, activeChatId]);
+  const getApiUrl = (path: string) => `${API}/api${path}`;
 
-  const filteredChats = useMemo(() => {
-    const q = chatSearch.trim().toLowerCase();
-    if (!q) return chats;
-    return chats.filter((chat) => chatName(chat).toLowerCase().includes(q) || messagePreview(chat).toLowerCase().includes(q));
-  }, [chats, chatSearch]);
-
-  const visibleMessages = useMemo(() => {
-    const q = messageSearch.trim().toLowerCase();
-    if (!q) return messages;
-    return messages.filter((msg) => msg.content.toLowerCase().includes(q) || msg.sender_name?.toLowerCase().includes(q));
-  }, [messages, messageSearch]);
-
-  const stopPoll = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
-
+  // Create a new session on mount
   const createSession = useCallback(async () => {
     try {
-      setError(null);
-      const data = await webApi.createSession();
-      setToken(data.token);
-      setQrData(`videh://scan?token=${data.token}&host=${encodeURIComponent(window.location.origin)}`);
-      setStatus("pending");
-      return data.token;
-    } catch (err) {
+      const res = await fetch(getApiUrl("/web-session"), { method: "POST", headers: { "Content-Type": "application/json" } });
+      const data = await res.json();
+      if (data.success) {
+        setToken(data.token);
+        // QR data encodes the session token + domain
+        const domain = window.location.origin;
+        setQrData(`videh://scan?token=${data.token}&host=${encodeURIComponent(domain)}`);
+        setStatus("pending");
+        return data.token;
+      }
+    } catch {
       setStatus("error");
-      setError(err instanceof Error ? err.message : "Could not create web session.");
-      return null;
     }
+    return null;
   }, []);
 
-  const loadChats = useCallback(async (tok = token) => {
-    if (!tok) return;
-    const data = await webApi.chats(tok);
-    setChats(data.chats || []);
-  }, [token]);
-
-  const loadMessages = useCallback(async (chatId = activeChatId, tok = token) => {
-    if (!tok || !chatId) return;
-    const data = await webApi.messages(tok, chatId);
-    setMessages(data.messages || []);
-  }, [activeChatId, token]);
-
-  const loadTyping = useCallback(async (chatId = activeChatId, tok = token) => {
-    if (!tok || !chatId) return;
-    const data = await webApi.getTyping(tok, chatId);
-    setTypingNames((data.typing || []).map((member) => member.name).filter(Boolean));
-  }, [activeChatId, token]);
-
-  const loadDetails = useCallback(async (chatId = activeChatId, tok = token) => {
-    if (!tok || !chatId) return;
-    const data = await webApi.details(tok, chatId);
-    setDetails({ chat: data.chat, members: data.members || [] });
-  }, [activeChatId, token]);
-
+  // Poll session status
   const pollStatus = useCallback(async (tok: string) => {
     try {
-      const data = await webApi.sessionStatus(tok);
-      if (data.status === "expired") {
-        setStatus("expired");
-        stopPoll();
-        localStorage.removeItem("videh_web_token");
-        return;
-      }
+      const res = await fetch(getApiUrl(`/web-session/${tok}/status`));
+      const data = await res.json();
+      if (!data.success) return;
+      if (data.status === "expired") { setStatus("expired"); stopPoll(); localStorage.removeItem("videh_web_token"); return; }
       if (data.status === "linked" && data.user) {
-        setToken(tok);
         setUser(data.user);
         setStatus("linked");
         stopPoll();
         localStorage.setItem("videh_web_token", tok);
-        await loadChats(tok);
+        loadChats(tok);
       }
-    } catch {
-      localStorage.removeItem("videh_web_token");
-    }
-  }, [loadChats, stopPoll]);
+    } catch {}
+  }, []);
+
+  const stopPoll = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  };
+
+  const loadChats = useCallback(async (tok: string) => {
+    try {
+      const res = await fetch(getApiUrl(`/web-session/${tok}/chats`));
+      const data = await res.json();
+      if (data.success) setChats(data.chats ?? []);
+    } catch {}
+  }, []);
+
+  const loadMessages = useCallback(async (chatId: number) => {
+    if (!token) return;
+    try {
+      const res = await fetch(getApiUrl(`/web-session/${token}/chats/${chatId}/messages`));
+      const data = await res.json();
+      if (data.success) setMessages(data.messages ?? []);
+    } catch {}
+  }, [token]);
+
+  const sendMessage = useCallback(async () => {
+    if (!token || !activeChatId || !msgText.trim()) return;
+    const text = msgText.trim();
+    setMsgText("");
+    try {
+      await fetch(getApiUrl(`/web-session/${token}/messages`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: String(activeChatId), content: text }),
+      });
+      await loadMessages(activeChatId);
+      if (token) loadChats(token);
+    } catch {}
+  }, [token, activeChatId, msgText, loadMessages, loadChats]);
 
   useEffect(() => {
     const startNewSession = () => {
@@ -196,11 +129,13 @@ export default function VidehWeb() {
         if (tok) pollRef.current = setInterval(() => pollStatus(tok), 2000);
       });
     };
+
     const savedToken = localStorage.getItem("videh_web_token");
     if (savedToken) {
-      webApi.sessionStatus(savedToken)
+      fetch(getApiUrl(`/web-session/${savedToken}/status`))
+        .then((r) => r.json())
         .then((data) => {
-          if (data.status === "linked" && data.user) {
+          if (data.success && data.status === "linked" && data.user) {
             setToken(savedToken);
             setUser(data.user);
             setStatus("linked");
@@ -210,379 +145,404 @@ export default function VidehWeb() {
             startNewSession();
           }
         })
-        .catch(() => {
-          localStorage.removeItem("videh_web_token");
-          startNewSession();
-        });
+        .catch(() => { localStorage.removeItem("videh_web_token"); startNewSession(); });
     } else {
       startNewSession();
     }
     return () => stopPoll();
-  }, [createSession, loadChats, pollStatus, stopPoll]);
+  }, []);
 
   useEffect(() => {
-    if (!token || status !== "linked") return;
-    const source = new EventSource(eventsUrl(token));
-    const refresh = () => {
-      loadChats().catch(() => {});
-      if (activeChatId) {
-        loadMessages(activeChatId).catch(() => {});
-        loadTyping(activeChatId).catch(() => {});
-      }
-    };
-    source.addEventListener("message", refresh);
-    source.addEventListener("read", refresh);
-    source.addEventListener("archive", refresh);
-    source.addEventListener("typing", refresh);
-    source.onerror = () => {
-      source.close();
-    };
-    return () => source.close();
-  }, [activeChatId, loadChats, loadMessages, loadTyping, status, token]);
-
-  useEffect(() => {
-    if (!activeChatId || !token) return;
-    loadMessages(activeChatId);
-    webApi.markRead(token, activeChatId).then(() => loadChats()).catch(() => {});
-    loadTyping(activeChatId);
-    if (infoOpen) loadDetails(activeChatId);
-  }, [activeChatId, infoOpen, loadChats, loadDetails, loadMessages, loadTyping, token]);
+    if (activeChatId) loadMessages(activeChatId);
+  }, [activeChatId]);
 
   useEffect(() => {
     msgsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Refresh messages periodically when chat is open
   useEffect(() => {
-    if (status !== "linked" || !token) return;
-    const fallback = setInterval(() => {
-      loadChats().catch(() => {});
-      if (activeChatId) {
-        loadMessages(activeChatId).catch(() => {});
-        loadTyping(activeChatId).catch(() => {});
-      }
-    }, 12_000);
-    return () => clearInterval(fallback);
-  }, [activeChatId, loadChats, loadMessages, loadTyping, status, token]);
+    if (!activeChatId || !token) return;
+    const t = setInterval(() => loadMessages(activeChatId), 5000);
+    return () => clearInterval(t);
+  }, [activeChatId, token]);
 
-  const sendMessage = useCallback(async () => {
-    if (!token || !activeChatId || !msgText.trim()) return;
-    const text = msgText.trim();
-    setMsgText("");
-    setEmojiOpen(false);
-    try {
-      await webApi.sendMessage(token, activeChatId, { content: text, type: "text" });
-      await Promise.all([loadMessages(activeChatId), loadChats()]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send message.");
-      setMsgText(text);
-    }
-  }, [activeChatId, loadChats, loadMessages, msgText, token]);
-
-  const handleTextChange = (value: string) => {
-    setMsgText(value);
-    if (!token || !activeChatId) return;
-    webApi.setTyping(token, activeChatId, true).catch(() => {});
-    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-    typingTimerRef.current = setTimeout(() => {
-      webApi.setTyping(token, activeChatId, false).catch(() => {});
-    }, 1600);
+  const formatTime = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
-  const handleUpload = async (file?: File) => {
-    if (!file || !token || !activeChatId) return;
-    setUploading(true);
-    try {
-      const uploaded = await webApi.uploadMedia(token, file);
-      await webApi.sendMessage(token, activeChatId, {
-        content: file.name,
-        type: mediaTypeFromFile(file),
-        mediaUrl: uploaded.url,
-      });
-      await Promise.all([loadMessages(activeChatId), loadChats()]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not upload media.");
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
+  const formatChatTime = (iso?: string) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const now = new Date();
+    const diff = now.getTime() - d.getTime();
+    if (diff < 86400000) return formatTime(iso);
+    if (diff < 172800000) return "Yesterday";
+    return d.toLocaleDateString();
   };
 
-  const react = async (messageId: number, emoji: string) => {
-    if (!token || !activeChatId) return;
-    await webApi.reactMessage(token, activeChatId, messageId, emoji);
-    await loadMessages(activeChatId);
-  };
+  const getChatName = (c: ChatEntry) => c.is_group ? (c.group_name ?? "Group") : (c.other_members?.[0]?.name ?? "Unknown");
+  const getChatAvatar = (c: ChatEntry) => c.is_group ? undefined : c.other_members?.[0]?.avatar_url;
+  const initials = (name: string) => name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
+  const hue = (name: string) => name.charCodeAt(0) * 37 % 360;
 
-  const star = async (messageId: number) => {
-    if (!token || !activeChatId) return;
-    await webApi.starMessage(token, activeChatId, messageId);
-    await loadMessages(activeChatId);
-  };
+  const filteredChats = chats.filter((c) => getChatName(c).toLowerCase().includes(search.toLowerCase()));
+  const activeChat = chats.find((c) => c.id === activeChatId);
 
-  const remove = async (messageId: number) => {
-    if (!token || !activeChatId) return;
-    await webApi.deleteMessage(token, activeChatId, messageId);
-    await Promise.all([loadMessages(activeChatId), loadChats()]);
-  };
-
-  const logout = async () => {
-    if (token) await webApi.logout(token).catch(() => {});
-    localStorage.removeItem("videh_web_token");
-    window.location.reload();
-  };
-
+  // ─── QR LANDING ───────────────────────────────────────────────────────────
   if (status !== "linked") {
     return (
-      <div className="vw-landing">
-        <div className="vw-topbar">
-          <img src={`${import.meta.env.BASE_URL}videh-logo.png`} alt="Videh" />
-          <span>Videh Web</span>
+      <div style={{ minHeight: "100vh", backgroundColor: "#f0f2f5", display: "flex", flexDirection: "column" }}>
+        {/* Top bar */}
+        <div style={{ backgroundColor: "#00a884", padding: "12px 24px", display: "flex", alignItems: "center", gap: 10 }}>
+          <img src={`${import.meta.env.BASE_URL}videh-logo.png`} alt="Videh" style={{ width: 48, height: 48, objectFit: "contain", filter: "brightness(0) invert(1)" }} />
+          <span style={{ color: "white", fontWeight: 700, fontSize: 18 }}>Videh Web</span>
         </div>
-        <main className="vw-qr-card">
-          <section>
-            <h1>Use Videh on your computer</h1>
-            <ol>
-              <li>Open Videh on your phone</li>
-              <li>Go to Settings → Linked Devices → Link a Device</li>
-              <li>Scan this QR code from your phone</li>
-            </ol>
-            <p className="vw-tip">Keep your phone and browser connected while the session is linking.</p>
-          </section>
-          <section className="vw-qr-box">
-            {status === "loading" && <div className="vw-spinner" />}
-            {(status === "pending" || status === "scanning") && qrData && <QRCodeSVG value={qrData} size={230} level="M" />}
-            {status === "expired" && <p>QR code expired.</p>}
-            {status === "error" && <p>{error || "Connection error. Please reload."}</p>}
-            <button onClick={() => { stopPoll(); setStatus("loading"); createSession().then((tok) => { if (tok) pollRef.current = setInterval(() => pollStatus(tok), 2000); }); }}>
-              Refresh QR code
-            </button>
-          </section>
-        </main>
-        <WebStyles />
+
+        {/* Main landing */}
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div style={{ display: "flex", gap: 80, alignItems: "center", maxWidth: 900, width: "100%" }}>
+            {/* Left: Instructions */}
+            <div style={{ flex: 1 }}>
+              <h1 style={{ fontSize: 28, fontWeight: 300, color: "#41525d", marginBottom: 8, lineHeight: 1.3 }}>
+                Use Videh on your computer
+              </h1>
+              <div style={{ width: 64, height: 3, backgroundColor: "#00a884", marginBottom: 32, borderRadius: 2 }} />
+
+              {[
+                { n: 1, text: "Open Videh on your phone" },
+                { n: 2, text: 'Go to Settings → Linked Devices → "Link a Device"' },
+                { n: 3, text: "Point your phone camera at this screen to scan the QR code" },
+              ].map((step) => (
+                <div key={step.n} style={{ display: "flex", gap: 16, marginBottom: 24, alignItems: "flex-start" }}>
+                  <div style={{ width: 32, height: 32, borderRadius: "50%", backgroundColor: "#00a884", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <span style={{ color: "white", fontWeight: 700, fontSize: 14 }}>{step.n}</span>
+                  </div>
+                  <p style={{ margin: 0, color: "#667781", fontSize: 15, lineHeight: 1.5, paddingTop: 4 }}>{step.text}</p>
+                </div>
+              ))}
+
+              <div style={{ marginTop: 32, padding: "16px 20px", backgroundColor: "#fff", borderRadius: 12, border: "1px solid #e9edef" }}>
+                <p style={{ margin: 0, color: "#667781", fontSize: 13, lineHeight: 1.6 }}>
+                  💡 <strong>Tip:</strong> Keep your phone connected to the internet while using Videh Web. Your messages will sync in real time.
+                </p>
+              </div>
+            </div>
+
+            {/* Right: QR code */}
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
+              <div style={{
+                padding: 24,
+                backgroundColor: "white",
+                borderRadius: 20,
+                boxShadow: "0 4px 24px rgba(0,0,0,0.1)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 16,
+              }}>
+                {status === "loading" && (
+                  <div style={{ width: 220, height: 220, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
+                    <div style={{ width: 40, height: 40, border: "3px solid #00a884", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+                    <p style={{ margin: 0, color: "#667781", fontSize: 13 }}>Generating QR code...</p>
+                  </div>
+                )}
+                {status === "expired" && (
+                  <div style={{ width: 220, height: 220, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
+                    <div style={{ fontSize: 48 }}>⏰</div>
+                    <p style={{ margin: 0, color: "#667781", fontSize: 14, textAlign: "center" }}>QR code expired</p>
+                    <button
+                      onClick={() => { setStatus("loading"); createSession().then((tok) => { if (tok) { pollRef.current = setInterval(() => pollStatus(tok), 2000); } }); }}
+                      style={{ padding: "10px 20px", backgroundColor: "#00a884", color: "white", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}
+                    >
+                      Get new code
+                    </button>
+                  </div>
+                )}
+                {(status === "pending" || status === "scanning") && qrData && (
+                  <>
+                    <div style={{ position: "relative" }}>
+                      <QRCodeSVG
+                        value={qrData}
+                        size={220}
+                        level="M"
+                        includeMargin={false}
+                        fgColor="#122"
+                      />
+                      {/* Videh logo overlay on QR */}
+                      <div style={{
+                        position: "absolute",
+                        top: "50%",
+                        left: "50%",
+                        transform: "translate(-50%, -50%)",
+                        width: 44,
+                        height: 44,
+                        backgroundColor: "#ffffff",
+                        borderRadius: 8,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: 3,
+                      }}>
+                        <img src={`${import.meta.env.BASE_URL}videh-logo.png`} alt="Videh" style={{ width: 38, height: 38, objectFit: "contain" }} />
+                      </div>
+                    </div>
+                    <p style={{ margin: 0, color: "#667781", fontSize: 13, textAlign: "center", maxWidth: 200, lineHeight: 1.5 }}>
+                      Scan this code with the Videh app on your phone
+                    </p>
+                  </>
+                )}
+                {status === "error" && (
+                  <div style={{ width: 220, height: 220, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
+                    <div style={{ fontSize: 40 }}>❌</div>
+                    <p style={{ margin: 0, color: "#e53e3e", fontSize: 14, textAlign: "center" }}>Connection error. Please reload.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Refresh button */}
+              {(status === "pending" || status === "scanning") && (
+                <button
+                  onClick={() => { stopPoll(); setStatus("loading"); createSession().then((tok) => { if (tok) { pollRef.current = setInterval(() => pollStatus(tok), 2000); } }); }}
+                  style={{ background: "none", border: "none", color: "#00a884", cursor: "pointer", fontSize: 14, textDecoration: "underline" }}
+                >
+                  Refresh QR code
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <style>{`
+          @keyframes spin { to { transform: rotate(360deg); } }
+        `}</style>
       </div>
     );
   }
 
+  // ─── CHAT INTERFACE ────────────────────────────────────────────────────────
   return (
-    <div className="vw-shell">
-      <aside className="vw-sidebar">
-        <header className="vw-sidebar-header">
-          <div className="vw-user">
-            <Avatar name={user?.name} src={user?.avatarUrl} />
-            <strong>{user?.name || "Videh"}</strong>
+    <div style={{ display: "flex", height: "100vh", fontFamily: "Segoe UI, sans-serif", overflow: "hidden" }}>
+
+      {/* Sidebar */}
+      <div style={{ width: 380, display: "flex", flexDirection: "column", borderRight: "1px solid #e9edef", backgroundColor: "white", flexShrink: 0 }}>
+
+        {/* Sidebar header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", backgroundColor: "#f0f2f5", height: 60 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {user?.avatarUrl ? (
+              <img src={user.avatarUrl} alt={user.name} style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover" }} />
+            ) : (
+              <div style={{ width: 40, height: 40, borderRadius: "50%", backgroundColor: `hsl(${hue(user?.name ?? "V")},50%,45%)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{initials(user?.name ?? "V")}</span>
+              </div>
+            )}
+            <span style={{ fontWeight: 600, color: "#111b21", fontSize: 16 }}>{user?.name}</span>
           </div>
-          <button className="vw-icon-btn" onClick={logout} title="Log out this device">Log out</button>
-        </header>
-        <div className="vw-search">
-          <input value={chatSearch} onChange={(e) => setChatSearch(e.target.value)} placeholder="Search or start new chat" />
+          <div style={{ display: "flex", gap: 8, color: "#54656f" }}>
+            <button title="New chat" style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}>
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M19.005 3.175H4.674C3.642 3.175 3 3.789 3 4.821V21.02l3.544-3.514h12.461c1.033 0 2.064-1.06 2.064-2.093V4.821c-.001-1.032-1.032-1.646-2.064-1.646zm-4.989 9.869H7.041V11.1h6.975v1.944zm3-4H7.041V7.1h9.975v1.944z"/></svg>
+            </button>
+            <button title="Videh Web" style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}>
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z"/></svg>
+            </button>
+          </div>
         </div>
-        <div className="vw-chat-list">
-          {filteredChats.length === 0 && <p className="vw-empty">{chatSearch ? "No chats found" : "No chats yet"}</p>}
+
+        {/* Search */}
+        <div style={{ padding: "8px 12px", backgroundColor: "white" }}>
+          <div style={{ display: "flex", alignItems: "center", backgroundColor: "#f0f2f5", borderRadius: 8, padding: "8px 12px", gap: 8 }}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="#54656f"><path d="M15.009 13.805h-.636l-.22-.219a5.184 5.184 0 0 0 1.256-3.386 5.207 5.207 0 1 0-5.207 5.208 5.183 5.183 0 0 0 3.385-1.255l.221.22v.635l4.004 3.999 1.194-1.195-3.997-4.007zm-4.808 0a3.605 3.605 0 1 1 0-7.21 3.605 3.605 0 0 1 0 7.21z"/></svg>
+            <input
+              placeholder="Search or start new chat"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ border: "none", background: "none", outline: "none", flex: 1, fontSize: 14, color: "#111b21" }}
+            />
+          </div>
+        </div>
+
+        {/* Chat list */}
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {filteredChats.length === 0 && (
+            <div style={{ padding: 40, textAlign: "center", color: "#667781" }}>
+              <p style={{ margin: 0 }}>{search ? `No results for "${search}"` : "No chats yet"}</p>
+            </div>
+          )}
           {filteredChats.map((chat) => {
-            const name = chatName(chat);
-            const active = chat.id === activeChatId;
+            const chatName = getChatName(chat);
+            const av = getChatAvatar(chat);
+            const isActive = chat.id === activeChatId;
+            const lastMsgText = chat.last_message
+              ? chat.last_message.is_deleted
+                ? "This message was deleted"
+                : chat.last_message.content
+              : "No messages yet";
+
             return (
-              <button key={chat.id} className={`vw-chat-row ${active ? "active" : ""}`} onClick={() => { setActiveChatId(chat.id); setInfoOpen(false); setDetails(null); }}>
-                <Avatar name={name} src={chatAvatar(chat)} size={49} />
-                <span className="vw-chat-main">
-                  <span className="vw-chat-title">
-                    <strong>{name}</strong>
-                    <small>{formatChatTime(chat.last_message?.created_at)}</small>
-                  </span>
-                  <span className="vw-chat-preview">
-                    <span>{messagePreview(chat)}</span>
-                    {chat.unread_count > 0 && <b>{chat.unread_count}</b>}
-                  </span>
-                </span>
-              </button>
+              <div
+                key={chat.id}
+                onClick={() => setActiveChatId(chat.id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "12px 16px",
+                  gap: 12,
+                  cursor: "pointer",
+                  backgroundColor: isActive ? "#f0f2f5" : "white",
+                  borderBottom: "1px solid #f0f2f5",
+                  transition: "background 0.1s",
+                }}
+                onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLDivElement).style.backgroundColor = "#f5f6f6"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.backgroundColor = isActive ? "#f0f2f5" : "white"; }}
+              >
+                {av ? (
+                  <img src={av} alt={chatName} style={{ width: 49, height: 49, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+                ) : (
+                  <div style={{ width: 49, height: 49, borderRadius: "50%", backgroundColor: `hsl(${hue(chatName)},50%,45%)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <span style={{ color: "white", fontWeight: 700, fontSize: 18 }}>{initials(chatName)}</span>
+                  </div>
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                    <span style={{ fontWeight: 600, color: "#111b21", fontSize: 16 }}>{chatName}</span>
+                    <span style={{ fontSize: 12, color: chat.unread_count > 0 ? "#00a884" : "#667781", flexShrink: 0, marginLeft: 8 }}>
+                      {chat.last_message ? formatChatTime(chat.last_message.created_at) : ""}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <p style={{ margin: 0, color: "#667781", fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                      {lastMsgText}
+                    </p>
+                    {chat.unread_count > 0 && (
+                      <span style={{ marginLeft: 8, backgroundColor: "#00a884", color: "white", borderRadius: 10, padding: "2px 6px", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+                        {chat.unread_count}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
             );
           })}
         </div>
-      </aside>
+      </div>
 
-      {activeChat ? (
-        <main className="vw-chat">
-          <header className="vw-chat-header">
-            <button className="vw-header-person" onClick={() => { setInfoOpen(true); loadDetails(activeChat.id); }}>
-              <Avatar name={chatName(activeChat)} src={chatAvatar(activeChat)} />
-              <span>
-                <strong>{chatName(activeChat)}</strong>
-                <small>{typingNames.length > 0 ? `${typingNames.join(", ")} typing...` : activeChat.is_group ? `${details?.members.length || activeChat.other_members?.length || 0} members` : activeChat.other_members?.[0]?.is_online ? "online" : ""}</small>
-              </span>
-            </button>
-            <div className="vw-header-actions">
-              <input value={messageSearch} onChange={(e) => setMessageSearch(e.target.value)} placeholder="Search in chat" />
-              <button className="vw-icon-btn" onClick={() => { setInfoOpen(!infoOpen); if (!infoOpen) loadDetails(activeChat.id); }}>Info</button>
+      {/* Right panel */}
+      {activeChatId && activeChat ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", backgroundColor: "#efeae2", backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c8c8c8' fill-opacity='0.15'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }}>
+
+          {/* Chat header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", backgroundColor: "#f0f2f5", height: 60, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+            {(() => {
+              const av = getChatAvatar(activeChat);
+              const chatName = getChatName(activeChat);
+              return av ? (
+                <img src={av} alt={chatName} style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover" }} />
+              ) : (
+                <div style={{ width: 40, height: 40, borderRadius: "50%", backgroundColor: `hsl(${hue(chatName)},50%,45%)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{initials(chatName)}</span>
+                </div>
+              );
+            })()}
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, color: "#111b21", fontSize: 16 }}>{getChatName(activeChat)}</div>
+              <div style={{ fontSize: 13, color: "#667781" }}>
+                {activeChat.is_group ? "Group" : activeChat.other_members?.[0]?.is_online ? "online" : ""}
+              </div>
             </div>
-          </header>
+            <div style={{ display: "flex", gap: 8, color: "#54656f" }}>
+              <button style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}>
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M15.9 14.3H15l-.3-.3c1-1.1 1.6-2.7 1.6-4.3 0-3.7-3-6.7-6.7-6.7S2.9 6 2.9 9.7s3 6.7 6.7 6.7c1.6 0 3.2-.6 4.3-1.6l.3.3v.8l5.1 5.1 1.5-1.5-4.9-5.2zm-6.2 0C7.1 14.3 4 11.3 4 7.6S7 .9 9.7.9s5.7 3 5.7 5.7-2.5 7.7-5.5 7.7z"/></svg>
+              </button>
+              <button style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}>
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z"/></svg>
+              </button>
+            </div>
+          </div>
 
-          {error && <div className="vw-error" onClick={() => setError(null)}>{error}</div>}
-
-          <section className="vw-messages">
-            {visibleMessages.length === 0 && <p className="vw-empty">{messageSearch ? "No matching messages" : "No messages yet. Say hello!"}</p>}
-            {visibleMessages.map((msg) => {
-              const mine = msg.sender_id === user?.id;
-              const reactions = msg.reactions || [];
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "20px 8% 8px" }}>
+            {messages.length === 0 && (
+              <div style={{ textAlign: "center", color: "#667781", marginTop: 40 }}>
+                <p style={{ margin: 0, fontSize: 14 }}>No messages yet. Say hello! 👋</p>
+              </div>
+            )}
+            {messages.map((msg) => {
+              const isMe = msg.sender_id === user?.id;
+              const isDeleted = msg.is_deleted;
               return (
-                <div key={msg.id} className={`vw-bubble-row ${mine ? "mine" : ""}`}>
-                  <div className={`vw-bubble ${mine ? "mine" : ""} ${msg.is_deleted ? "deleted" : ""}`}>
-                    {!mine && activeChat.is_group && <strong className="vw-sender">{msg.sender_name}</strong>}
-                    <MediaPreview msg={msg} />
-                    <p>{msg.is_deleted ? "This message was deleted" : msg.content}</p>
-                    {reactions.length > 0 && (
-                      <div className="vw-reactions">{reactions.map((reaction) => <span key={`${reaction.user_id}-${reaction.emoji}`}>{reaction.emoji}</span>)}</div>
+                <div key={msg.id} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", marginBottom: 4 }}>
+                  <div style={{
+                    maxWidth: "70%",
+                    backgroundColor: isMe ? "#d9fdd3" : "white",
+                    borderRadius: isMe ? "8px 8px 2px 8px" : "8px 8px 8px 2px",
+                    padding: "7px 12px",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                    opacity: isDeleted ? 0.6 : 1,
+                  }}>
+                    {!isMe && !activeChat.is_group && msg.sender_name && (
+                      <div style={{ fontSize: 12, fontWeight: 600, color: `hsl(${hue(msg.sender_name)},60%,40%)`, marginBottom: 2 }}>{msg.sender_name}</div>
                     )}
-                    <div className="vw-meta">
-                      {msg.is_starred && <span>★</span>}
-                      <span>{formatTime(msg.created_at)}</span>
-                      {mine && <Tick status={msg.delivery_status} />}
+                    <p style={{ margin: 0, fontSize: 14.5, color: "#111b21", lineHeight: 1.4, fontStyle: isDeleted ? "italic" : "normal" }}>
+                      {isDeleted ? "🚫 This message was deleted" : msg.content}
+                    </p>
+                    <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 4, marginTop: 3 }}>
+                      <span style={{ fontSize: 11, color: "#667781" }}>{formatTime(msg.created_at)}</span>
+                      {isMe && (
+                        <svg viewBox="0 0 16 11" width="16" height="11" fill="#53bdeb"><path d="M11.071.653a.45.45 0 0 0-.641 0L4.5 6.582 1.571 3.653a.45.45 0 0 0-.641.642l3.25 3.25a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/><path d="M15.071.653a.45.45 0 0 0-.641 0L8.5 6.582 7.071 5.153a.45.45 0 0 0-.641.642l1.75 1.75a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/></svg>
+                      )}
                     </div>
-                    {!msg.is_deleted && (
-                      <div className="vw-message-actions">
-                        {EMOJIS.slice(0, 4).map((emoji) => <button key={emoji} onClick={() => react(msg.id, emoji)}>{emoji}</button>)}
-                        <button onClick={() => star(msg.id)}>{msg.is_starred ? "Unstar" : "Star"}</button>
-                        {mine && <button onClick={() => remove(msg.id)}>Delete</button>}
-                      </div>
-                    )}
                   </div>
                 </div>
               );
             })}
             <div ref={msgsEndRef} />
-          </section>
+          </div>
 
-          <footer className="vw-composer">
-            {emojiOpen && (
-              <div className="vw-emoji-panel">
-                {EMOJIS.map((emoji) => <button key={emoji} onClick={() => handleTextChange(`${msgText}${emoji}`)}>{emoji}</button>)}
-              </div>
-            )}
-            <button className="vw-icon-btn" onClick={() => setEmojiOpen(!emojiOpen)}>Emoji</button>
-            <button className="vw-icon-btn" onClick={() => fileRef.current?.click()} disabled={uploading}>{uploading ? "Uploading" : "Attach"}</button>
-            <input ref={fileRef} type="file" hidden onChange={(e) => handleUpload(e.target.files?.[0])} />
-            <textarea
-              value={msgText}
-              onChange={(e) => handleTextChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
-              placeholder="Type a message"
-              rows={1}
-            />
-            <button className="vw-send" onClick={sendMessage} disabled={!msgText.trim()}>Send</button>
-          </footer>
-        </main>
-      ) : (
-        <main className="vw-empty-panel">
-          <h2>Videh Web</h2>
-          <p>Select a chat to start messaging</p>
-        </main>
-      )}
-
-      {infoOpen && activeChat && (
-        <aside className="vw-info">
-          <button className="vw-close" onClick={() => setInfoOpen(false)}>Close</button>
-          <Avatar name={chatName(activeChat)} src={chatAvatar(activeChat)} size={92} />
-          <h2>{chatName(activeChat)}</h2>
-          <p>{activeChat.is_group ? details?.chat?.group_description || "Group" : activeChat.other_members?.[0]?.about || activeChat.other_members?.[0]?.phone}</p>
-          <div className="vw-info-actions">
-            <button onClick={async () => { if (token) { const data = await webApi.mute(token, activeChat.id, !activeChat.is_muted); setChats((prev) => prev.map((chat) => chat.id === activeChat.id ? { ...chat, is_muted: data.isMuted } : chat)); } }}>
-              {activeChat.is_muted ? "Unmute" : "Mute"}
+          {/* Input bar */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", backgroundColor: "#f0f2f5" }}>
+            <button style={{ background: "none", border: "none", cursor: "pointer", color: "#54656f", padding: 6 }}>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M9.153 11.603c.795 0 1.439-.879 1.439-1.962s-.644-1.962-1.439-1.962-1.439.879-1.439 1.962.644 1.962 1.439 1.962zm-3.204 1.362c-.026-.307-.131 5.218 6.063 5.551 6.066-.25 6.066-5.551 6.066-5.551-6.078 1.416-12.129 0-12.129 0zm11.363 1.108s-.669 1.959-5.051 1.959c-3.505 0-5.388-1.164-5.607-1.959 0 0 5.912 1.055 10.658 0zM11.804 1.011C5.609 1.011.978 6.033.978 12.228s4.826 10.761 11.021 10.761S23.02 18.423 23.02 12.228c.001-6.195-5.021-11.217-11.216-11.217zM12 21.354c-5.273 0-9.381-4.085-9.381-9.381 0-5.295 3.942-9.424 9.215-9.424 5.273 0 9.381 4.129 9.381 9.424-.001 5.297-3.942 9.381-9.215 9.381z"/></svg>
             </button>
-            <button onClick={async () => { if (token) { await webApi.archive(token, activeChat.id, true); await loadChats(); } }}>Archive</button>
+            <button style={{ background: "none", border: "none", cursor: "pointer", color: "#54656f", padding: 6 }}>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M1.816 15.556v.002c0 1.502.584 2.912 1.646 3.972s2.472 1.647 3.974 1.647a5.58 5.58 0 0 0 3.972-1.645l9.547-9.548c.769-.768 1.147-1.767 1.058-2.817-.079-.968-.548-1.927-1.319-2.698-1.594-1.592-4.068-1.711-5.517-.262l-7.916 7.915c-.881.881-.792 2.25.214 3.261.959.958 2.423 1.053 3.263.215l5.511-5.512c.28-.28.267-.722.053-.936l-.244-.244c-.191-.191-.567-.349-.957.04l-5.506 5.506c-.18.18-.635.127-.976-.214-.098-.097-.576-.613-.213-.973l7.915-7.917c.818-.817 2.267-.699 3.23.262.5.501.802 1.1.849 1.685.051.573-.156 1.111-.589 1.543l-9.547 9.549a3.97 3.97 0 0 1-2.829 1.171 3.975 3.975 0 0 1-2.83-1.173 3.973 3.973 0 0 1-1.172-2.828c0-1.071.415-2.076 1.172-2.83l7.209-7.211c.157-.157.264-.579.028-.814L11.5 4.36a.572.572 0 0 0-.834.018L3.456 11.59a5.58 5.58 0 0 0-1.64 3.966z"/></svg>
+            </button>
+            <input
+              ref={inputRef}
+              value={msgText}
+              onChange={(e) => setMsgText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+              placeholder="Type a message"
+              style={{ flex: 1, padding: "10px 16px", border: "none", borderRadius: 8, backgroundColor: "white", fontSize: 15, outline: "none", color: "#111b21" }}
+            />
+            <button
+              onClick={sendMessage}
+              disabled={!msgText.trim()}
+              style={{ width: 44, height: 44, borderRadius: "50%", backgroundColor: "#00a884", border: "none", cursor: msgText.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", opacity: msgText.trim() ? 1 : 0.5, transition: "opacity 0.2s" }}
+            >
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="white"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
+            </button>
           </div>
-          <h3>{activeChat.is_group ? "Members" : "Contact"}</h3>
-          <div className="vw-members">
-            {(details?.members?.length ? details.members : activeChat.other_members || []).map((member) => (
-              <div key={member.id} className="vw-member">
-                <Avatar name={member.name} src={member.avatar_url} />
-                <span>
-                  <strong>{member.name}</strong>
-                  <small>{member.is_admin ? "Admin" : member.is_online ? "online" : member.phone}</small>
-                </span>
-              </div>
-            ))}
+        </div>
+      ) : (
+        /* Empty state */
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#f0f2f5", gap: 20 }}>
+          <div style={{ width: 220, height: 220, backgroundColor: "#e9edef", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg viewBox="0 0 303 172" width="180" fill="#bfc6cb"><path d="M229.565 160.229c32.647-10.984 57.366-41.988 57.366-79.8C286.931 34.963 249.286 0 203.445 0c-34.47 0-64.395 20.467-79.441 50.353A101.733 101.733 0 0 0 100.606 44C45.086 44 0 86.91 0 139.752c0 16.037 4.166 31.13 11.42 44.228H229.565v-23.751z"/></svg>
           </div>
-        </aside>
+          <div style={{ textAlign: "center" }}>
+            <h2 style={{ margin: "0 0 8px", fontSize: 24, fontWeight: 300, color: "#41525d" }}>Videh Web</h2>
+            <p style={{ margin: 0, color: "#667781", fontSize: 14 }}>
+              Select a chat to start messaging
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#667781", fontSize: 13 }}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="#667781"><path d="M2.213 10.35a9.681 9.681 0 0 1 9.55-8.35 9.863 9.863 0 0 1 9.861 9.861 9.863 9.863 0 0 1-9.861 9.862 9.681 9.681 0 0 1-8.35-4.769L2.1 22.8l5.937-1.313A9.9 9.9 0 0 0 11.763 22.4a10.863 10.863 0 1 0 0-21.725A10.682 10.682 0 0 0 1.1 9.875L2.213 10.35z"/></svg>
+            End-to-end encrypted
+          </div>
+        </div>
       )}
-      <WebStyles />
     </div>
-  );
-}
-
-function WebStyles() {
-  return (
-    <style>{`
-      .vw-shell{display:flex;height:100vh;overflow:hidden;font-family:Segoe UI,Arial,sans-serif;background:#f0f2f5;color:#111b21}
-      .vw-sidebar{width:380px;min-width:300px;background:#fff;border-right:1px solid #e9edef;display:flex;flex-direction:column}
-      .vw-sidebar-header,.vw-chat-header{height:60px;background:#f0f2f5;display:flex;align-items:center;justify-content:space-between;padding:0 14px;gap:12px}
-      .vw-user,.vw-header-person,.vw-member{display:flex;align-items:center;gap:12px}
-      .vw-header-person{border:0;background:transparent;cursor:pointer;text-align:left;flex:1;color:inherit}
-      .vw-header-person span,.vw-member span{display:flex;flex-direction:column}
-      .vw-header-person small,.vw-member small{font-size:12px;color:#667781}
-      .vw-avatar{border-radius:50%;object-fit:cover;flex-shrink:0}
-      .vw-avatar-fallback{display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700}
-      .vw-icon-btn,.vw-send,.vw-close,.vw-info-actions button,.vw-qr-box button{border:0;border-radius:18px;padding:8px 12px;background:#00a884;color:#fff;cursor:pointer;font-weight:600}
-      .vw-icon-btn{background:transparent;color:#54656f}
-      .vw-icon-btn:hover{background:#e9edef}
-      .vw-icon-btn:disabled,.vw-send:disabled{opacity:.5;cursor:default}
-      .vw-search{padding:8px 12px;background:#fff}
-      .vw-search input,.vw-header-actions input{width:100%;box-sizing:border-box;border:0;outline:0;border-radius:8px;background:#f0f2f5;padding:10px 12px;color:#111b21}
-      .vw-chat-list{overflow-y:auto;flex:1}
-      .vw-chat-row{width:100%;display:flex;gap:12px;padding:12px 16px;border:0;border-bottom:1px solid #f0f2f5;background:#fff;text-align:left;cursor:pointer;color:inherit}
-      .vw-chat-row:hover,.vw-chat-row.active{background:#f0f2f5}
-      .vw-chat-main{min-width:0;flex:1}
-      .vw-chat-title,.vw-chat-preview{display:flex;justify-content:space-between;gap:8px;align-items:center}
-      .vw-chat-title strong,.vw-chat-preview span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .vw-chat-title small{font-size:12px;color:#667781}
-      .vw-chat-preview{margin-top:4px;color:#667781;font-size:14px}
-      .vw-chat-preview b{background:#00a884;color:#fff;border-radius:10px;padding:2px 7px;font-size:11px}
-      .vw-chat{flex:1;display:flex;flex-direction:column;background:#efeae2;background-image:radial-gradient(#d1d7db 1px,transparent 1px);background-size:22px 22px}
-      .vw-header-actions{display:flex;gap:8px;align-items:center}
-      .vw-header-actions input{width:190px;background:#fff}
-      .vw-error{background:#ffd6d6;color:#7a1f1f;padding:8px 16px;text-align:center;cursor:pointer}
-      .vw-messages{flex:1;overflow-y:auto;padding:20px 8% 10px}
-      .vw-bubble-row{display:flex;margin-bottom:7px}
-      .vw-bubble-row.mine{justify-content:flex-end}
-      .vw-bubble{position:relative;max-width:min(620px,72%);background:#fff;border-radius:8px 8px 8px 2px;padding:7px 10px;box-shadow:0 1px 2px rgba(0,0,0,.1)}
-      .vw-bubble.mine{background:#d9fdd3;border-radius:8px 8px 2px 8px}
-      .vw-bubble.deleted{opacity:.65;font-style:italic}
-      .vw-bubble p{margin:4px 0;white-space:pre-wrap;word-break:break-word;line-height:1.4}
-      .vw-sender{display:block;font-size:12px;color:#008069;margin-bottom:2px}
-      .vw-media{display:block;max-width:360px;max-height:320px;border-radius:8px;margin-bottom:6px}
-      .vw-audio{width:280px;max-width:100%}
-      .vw-doc{display:flex;gap:10px;align-items:center;background:rgba(0,0,0,.06);border-radius:8px;padding:10px;color:#111b21;text-decoration:none;margin-bottom:5px}
-      .vw-reactions{display:flex;gap:2px;margin-top:4px}
-      .vw-reactions span{background:#fff;border-radius:10px;padding:1px 5px;font-size:12px}
-      .vw-meta{display:flex;justify-content:flex-end;align-items:center;gap:4px;color:#667781;font-size:11px}
-      .vw-tick{color:#667781;font-size:12px}.vw-tick.read{color:#53bdeb}
-      .vw-message-actions{display:none;position:absolute;right:4px;top:-28px;background:#fff;border:1px solid #e9edef;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,.16);padding:3px;gap:2px;z-index:2}
-      .vw-bubble:hover .vw-message-actions{display:flex}
-      .vw-message-actions button{border:0;background:transparent;border-radius:10px;padding:4px 6px;cursor:pointer;color:#111b21}
-      .vw-message-actions button:hover{background:#f0f2f5}
-      .vw-composer{position:relative;display:flex;align-items:flex-end;gap:8px;background:#f0f2f5;padding:10px 16px}
-      .vw-composer textarea{flex:1;resize:none;border:0;border-radius:8px;background:#fff;outline:0;padding:11px 14px;font:inherit;max-height:120px;color:#111b21}
-      .vw-emoji-panel{position:absolute;left:14px;bottom:62px;background:#fff;border:1px solid #e9edef;border-radius:16px;padding:8px;box-shadow:0 3px 18px rgba(0,0,0,.18);display:flex;gap:5px}
-      .vw-emoji-panel button{border:0;background:#f7f8fa;border-radius:10px;padding:8px;font-size:20px;cursor:pointer}
-      .vw-empty,.vw-empty-panel{color:#667781;text-align:center}
-      .vw-empty-panel{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;background:#f0f2f5}
-      .vw-info{width:330px;background:#fff;border-left:1px solid #e9edef;display:flex;flex-direction:column;align-items:center;padding:18px;overflow-y:auto}
-      .vw-info h2{margin:12px 0 4px}.vw-info p{color:#667781;text-align:center;margin:0 0 16px}
-      .vw-info-actions{display:flex;gap:8px;margin-bottom:20px}
-      .vw-members{width:100%;display:flex;flex-direction:column;gap:10px}
-      .vw-member{padding:8px;border-radius:10px}.vw-member:hover{background:#f0f2f5}
-      .vw-landing{min-height:100vh;background:#f0f2f5;display:flex;flex-direction:column}
-      .vw-topbar{height:72px;background:#00a884;display:flex;align-items:center;gap:12px;padding:0 28px;color:#fff;font-weight:700;font-size:18px}
-      .vw-topbar img{width:44px;height:44px;object-fit:contain;filter:brightness(0) invert(1)}
-      .vw-qr-card{flex:1;display:flex;align-items:center;justify-content:center;gap:70px;padding:30px}
-      .vw-qr-card h1{font-weight:300;color:#41525d}.vw-qr-card li{margin-bottom:14px;color:#667781}.vw-tip{color:#667781;background:#fff;border-radius:12px;padding:14px}
-      .vw-qr-box{background:#fff;border-radius:18px;padding:28px;box-shadow:0 4px 24px rgba(0,0,0,.1);display:flex;align-items:center;gap:18px;flex-direction:column;min-width:290px}
-      .vw-spinner{width:42px;height:42px;border:3px solid #00a884;border-top-color:transparent;border-radius:50%;animation:vw-spin 1s linear infinite}
-      @keyframes vw-spin{to{transform:rotate(360deg)}}
-      @media(max-width:900px){.vw-sidebar{width:310px}.vw-info{display:none}.vw-messages{padding:14px}.vw-header-actions input{display:none}}
-    `}</style>
   );
 }
