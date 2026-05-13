@@ -1,4 +1,4 @@
-const DEFAULT_DOMAIN = "videh.onrender.com";
+const DEFAULT_DOMAIN = "videh.co.in";
 
 function toBaseUrl(domain: string): string {
   return /^https?:\/\//.test(domain) ? domain : `https://${domain}`;

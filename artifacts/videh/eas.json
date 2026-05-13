@@ -14,6 +14,7 @@
     "preview": {
       "distribution": "internal",
       "env": {
+        "EXPO_PUBLIC_DOMAIN": "videh.co.in",
         "VIDEOH_SLIM_ANDROID": "1"
       },
       "android": {
@@ -23,6 +24,7 @@
     "apkRelease": {
       "distribution": "internal",
       "env": {
+        "EXPO_PUBLIC_DOMAIN": "videh.co.in",
         "VIDEOH_SLIM_ANDROID": "1"
       },
       "android": {
@@ -31,6 +33,7 @@
     },
     "production": {
       "env": {
+        "EXPO_PUBLIC_DOMAIN": "videh.co.in",
         "VIDEOH_SLIM_ANDROID": "1"
       },
       "android": {

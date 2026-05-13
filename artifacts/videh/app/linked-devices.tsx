@@ -78,7 +78,7 @@ export default function LinkedDevicesScreen() {
   const handleBarcode = async ({ data }: { data: string }) => {
     if (hasScannedRef.current || linking) return;
     if (!data.startsWith("videh://scan")) {
-      Alert.alert("Invalid QR", "This QR code is not for Videh Web. Open videh.app and scan the QR shown there.");
+      Alert.alert("Invalid QR", "This QR code is not for Videh Web. Open web.videh.co.in and scan the QR shown there.");
       return;
     }
 
@@ -186,12 +186,12 @@ export default function LinkedDevicesScreen() {
 
           <Text style={[styles.guideTitle, { color: colors.text }]}>Use Videh on your computer</Text>
           <Text style={[styles.guideSubtitle, { color: colors.mutedForeground }]}>
-            Open <Text style={{ color: colors.primary }}>videh.app</Text> in your browser, then tap the button below to scan the QR code shown on screen.
+            Open <Text style={{ color: colors.primary }}>web.videh.co.in</Text> in your browser, then tap the button below to scan the QR code shown on screen.
           </Text>
 
           {/* 3 steps */}
           {[
-            { icon: "globe-outline" as const, text: "Go to videh.app in any browser" },
+            { icon: "globe-outline" as const, text: "Go to web.videh.co.in in any browser" },
             { icon: "qr-code-outline" as const, text: "A QR code will appear on screen" },
             { icon: "phone-portrait-outline" as const, text: "Tap the button below to scan it" },
           ].map((step, i) => (
