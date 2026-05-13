@@ -1,0 +1,52 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-aws-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy EC2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/videh_ec2_key
+          chmod 600 ~/.ssh/videh_ec2_key
+
+      - name: Deploy on EC2
+        run: |
+          ssh -i ~/.ssh/videh_ec2_key \
+            -o StrictHostKeyChecking=no \
+            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" <<'EOF'
+          set -euo pipefail
+
+          cd /var/www/videh
+          git fetch origin main
+          git reset --hard origin/main
+
+          corepack enable
+          pnpm install --frozen-lockfile
+
+          pnpm --filter @workspace/api-server build
+          BASE_PATH=/ pnpm --filter @workspace/admin-web build
+          BASE_PATH=/ pnpm --filter @workspace/videh-web build
+
+          pm2 restart videh-api --update-env || (
+            cd /var/www/videh/artifacts/api-server
+            pm2 start dist/index.mjs --name videh-api --interpreter node --node-args="--env-file=/var/www/videh/artifacts/api-server/.env --enable-source-maps"
+          )
+          pm2 save
+
+          sudo nginx -t
+          sudo systemctl reload nginx
+
+          curl --fail --silent --show-error https://videh.co.in/api/readyz
+          EOF

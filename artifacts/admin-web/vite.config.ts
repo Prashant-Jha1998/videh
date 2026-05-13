@@ -3,9 +3,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 const apiTarget = process.env.VITE_API_PROXY ?? "http://127.0.0.1:5000";
+const basePath = process.env.BASE_PATH ?? "/admin/";
 
 export default defineConfig({
-  base: "/admin/",
+  base: basePath,
   plugins: [react()],
   resolve: {
     alias: { "@": path.resolve(import.meta.dirname, "src") },

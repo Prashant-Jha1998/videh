@@ -67,7 +67,7 @@ export default function PhoneScreen() {
       <View style={[styles.inner, { paddingTop: topPad, paddingBottom: insets.bottom + 20 }]}>
         <View style={styles.logoWrap}>
           <Image
-            source={require("@/assets/images/videh_logo.png")}
+            source={require("@/assets/images/videh_icon_foreground.png")}
             style={[styles.logo, { tintColor: colors.primary }]}
             resizeMode="contain"
           />

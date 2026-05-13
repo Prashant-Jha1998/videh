@@ -179,7 +179,7 @@ export default function OtpScreen() {
       <View style={styles.content}>
         <View style={styles.logoWrap}>
           <Image
-            source={require("@/assets/images/videh_logo.png")}
+            source={require("@/assets/images/videh_icon_foreground.png")}
             style={[styles.logo, { tintColor: colors.primary }]}
             resizeMode="contain"
           />

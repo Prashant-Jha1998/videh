@@ -379,6 +379,7 @@ export default function App() {
   if (ready === "loading") {
     return (
       <div className="login-wrap">
+        <img src="/videh-logo.png" alt="Videh" className="brand-logo" />
         <p className="muted">Loading…</p>
       </div>
     );
@@ -387,6 +388,7 @@ export default function App() {
   if (ready === "need2fa") {
     return (
       <div className="login-wrap">
+        <img src="/videh-logo.png" alt="Videh" className="brand-logo" />
         <h2>Two-factor authentication</h2>
         <p className="muted">Open your authenticator app and enter the 6-digit code for Videh Admin.</p>
         <form onSubmit={onTotpSubmit}>
@@ -419,6 +421,7 @@ export default function App() {
   if (ready === "guest") {
     return (
       <div className="login-wrap">
+        <img src="/videh-logo.png" alt="Videh" className="brand-logo" />
         <h2>Videh Admin</h2>
         <p className="muted">
           Sign in with email and password, then enter a code from your authenticator app (TOTP). Server must set
@@ -470,7 +473,10 @@ export default function App() {
   return (
     <div className="layout">
       <aside className="sidebar">
-        <h1>Videh Admin</h1>
+        <div className="sidebar-brand">
+          <img src="/videh-logo.png" alt="Videh" />
+          <h1>Videh Admin</h1>
+        </div>
         {nav("overview", "Overview")}
         {nav("users", "Users")}
         {nav("chats", "Chats")}

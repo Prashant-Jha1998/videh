@@ -41,9 +41,20 @@ textarea {
 }
 .sidebar h1 {
   font-size: 1rem;
-  margin: 0 0 16px 8px;
+  margin: 0;
   color: var(--accent);
   letter-spacing: 0.02em;
+}
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 18px 8px;
+}
+.sidebar-brand img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
 }
 .nav-btn {
   display: block;
@@ -122,6 +133,13 @@ th {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 14px;
+}
+.brand-logo {
+  display: block;
+  width: 76px;
+  height: 76px;
+  object-fit: contain;
+  margin: 0 auto 18px;
 }
 .login-wrap h2 {
   margin-top: 0;

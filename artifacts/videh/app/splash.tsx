@@ -22,7 +22,7 @@ export default function SplashAnimScreen({ onDone }: { onDone?: () => void }) {
     <View style={styles.container}>
       <Animated.View style={{ transform: [{ scale }], opacity }}>
         <Image
-          source={require("@/assets/images/videh_logo.png")}
+          source={require("@/assets/images/videh_icon_foreground.png")}
           style={styles.logo}
           resizeMode="contain"
         />
