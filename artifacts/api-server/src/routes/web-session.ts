@@ -19,10 +19,6 @@ type LinkedSession = {
   userId: number;
 };
 
-function routeParam(value: string | string[] | undefined): string {
-  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
-}
-
 function detectPlatform(ua: string): string {
   if (/windows/i.test(ua)) return "Windows";
   if (/macintosh|mac os x/i.test(ua)) return "macOS";
@@ -115,7 +111,7 @@ async function getLinkedSession(token: string): Promise<LinkedSession | null> {
 }
 
 async function requireLinkedSession(req: Request, res: Response): Promise<LinkedSession | null> {
-  const session = await getLinkedSession(routeParam(req.params.token));
+  const session = await getLinkedSession(req.params.token);
   if (!session) {
     res.status(401).json({ success: false, message: "Unauthorized" });
     return null;
@@ -225,7 +221,7 @@ async function sendMessageForWeb(req: Request, res: Response, chatId: string | n
 
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const token = randomBytes(16).toString("hex");
+    const token = randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     const ua = req.headers["user-agent"] ?? "";
     const platform = detectPlatform(ua);
@@ -245,7 +241,7 @@ router.post("/", async (req: Request, res: Response) => {
 });
 
 router.post("/:token/link", async (req: Request, res: Response) => {
-  const token = routeParam(req.params.token);
+  const { token } = req.params;
   const { userId } = req.body as { userId?: number };
   if (!userId) {
     res.status(400).json({ success: false, message: "userId required" });
@@ -275,7 +271,7 @@ router.post("/:token/link", async (req: Request, res: Response) => {
 });
 
 router.get("/:token/status", async (req: Request, res: Response) => {
-  const token = routeParam(req.params.token);
+  const { token } = req.params;
   try {
     const sessionResult = await query(
       `SELECT ws.status, ws.expires_at, ws.user_id,
@@ -317,7 +313,7 @@ router.get("/:token/status", async (req: Request, res: Response) => {
 
 router.get("/:token/events", async (req: Request, res: Response) => {
   try {
-    const session = await getLinkedSession(routeParam(req.params.token));
+    const session = await getLinkedSession(req.params.token);
     if (!session) {
       res.status(401).json({ success: false, message: "Unauthorized" });
       return;
@@ -400,7 +396,7 @@ router.post("/:token/media", chatMediaUpload.single("file"), async (req: Request
 });
 
 router.get("/:token/chats/:chatId/messages", async (req: Request, res: Response) => {
-  const chatId = routeParam(req.params.chatId);
+  const { chatId } = req.params;
   try {
     const session = await requireLinkedSession(req, res);
     if (!session || !(await requireChatMember(session.userId, chatId, res))) return;
@@ -454,11 +450,11 @@ router.post("/:token/messages", async (req: Request, res: Response) => {
 router.post("/:token/chats/:chatId/messages", async (req: Request, res: Response) => {
   const session = await requireLinkedSession(req, res);
   if (!session) return;
-  await sendMessageForWeb(req, res, routeParam(req.params.chatId), session.userId);
+  await sendMessageForWeb(req, res, req.params.chatId, session.userId);
 });
 
 router.post("/:token/chats/:chatId/read", async (req: Request, res: Response) => {
-  const chatId = routeParam(req.params.chatId);
+  const { chatId } = req.params;
   try {
     const session = await requireLinkedSession(req, res);
     if (!session || !(await requireChatMember(session.userId, chatId, res))) return;
@@ -480,7 +476,7 @@ router.post("/:token/chats/:chatId/read", async (req: Request, res: Response) =>
 });
 
 router.post("/:token/chats/:chatId/typing", async (req: Request, res: Response) => {
-  const chatId = routeParam(req.params.chatId);
+  const { chatId } = req.params;
   try {
     const session = await requireLinkedSession(req, res);
     if (!session || !(await requireChatMember(session.userId, chatId, res))) return;
@@ -499,7 +495,7 @@ router.post("/:token/chats/:chatId/typing", async (req: Request, res: Response) 
 });
 
 router.delete("/:token/chats/:chatId/typing", async (req: Request, res: Response) => {
-  const chatId = routeParam(req.params.chatId);
+  const { chatId } = req.params;
   try {
     const session = await requireLinkedSession(req, res);
     if (!session || !(await requireChatMember(session.userId, chatId, res))) return;
@@ -513,7 +509,7 @@ router.delete("/:token/chats/:chatId/typing", async (req: Request, res: Response
 });
 
 router.get("/:token/chats/:chatId/typing", async (req: Request, res: Response) => {
-  const chatId = routeParam(req.params.chatId);
+  const { chatId } = req.params;
   try {
     const session = await requireLinkedSession(req, res);
     if (!session || !(await requireChatMember(session.userId, chatId, res))) return;
@@ -532,8 +528,7 @@ router.get("/:token/chats/:chatId/typing", async (req: Request, res: Response) =
 });
 
 router.delete("/:token/chats/:chatId/messages/:messageId", async (req: Request, res: Response) => {
-  const chatId = routeParam(req.params.chatId);
-  const messageId = routeParam(req.params.messageId);
+  const { chatId, messageId } = req.params;
   try {
     const session = await requireLinkedSession(req, res);
     if (!session || !(await requireChatMember(session.userId, chatId, res))) return;
@@ -554,8 +549,7 @@ router.delete("/:token/chats/:chatId/messages/:messageId", async (req: Request, 
 });
 
 router.post("/:token/chats/:chatId/messages/:messageId/star", async (req: Request, res: Response) => {
-  const chatId = routeParam(req.params.chatId);
-  const messageId = routeParam(req.params.messageId);
+  const { chatId, messageId } = req.params;
   try {
     const session = await requireLinkedSession(req, res);
     if (!session || !(await requireChatMember(session.userId, chatId, res))) return;
@@ -576,8 +570,7 @@ router.post("/:token/chats/:chatId/messages/:messageId/star", async (req: Reques
 });
 
 router.post("/:token/chats/:chatId/messages/:messageId/react", async (req: Request, res: Response) => {
-  const chatId = routeParam(req.params.chatId);
-  const messageId = routeParam(req.params.messageId);
+  const { chatId, messageId } = req.params;
   const { emoji } = req.body as { emoji?: string };
   if (!emoji) {
     res.status(400).json({ success: false, message: "emoji is required" });
@@ -606,7 +599,7 @@ router.post("/:token/chats/:chatId/messages/:messageId/react", async (req: Reque
 });
 
 router.get("/:token/chats/:chatId/details", async (req: Request, res: Response) => {
-  const chatId = routeParam(req.params.chatId);
+  const { chatId } = req.params;
   try {
     const session = await requireLinkedSession(req, res);
     if (!session || !(await requireChatMember(session.userId, chatId, res))) return;
@@ -633,7 +626,7 @@ router.get("/:token/chats/:chatId/details", async (req: Request, res: Response) 
 });
 
 router.patch("/:token/chats/:chatId/mute", async (req: Request, res: Response) => {
-  const chatId = routeParam(req.params.chatId);
+  const { chatId } = req.params;
   const { muted } = req.body as { muted?: boolean };
   if (typeof muted !== "boolean") {
     res.status(400).json({ success: false, message: "muted is required" });
@@ -654,7 +647,7 @@ router.patch("/:token/chats/:chatId/mute", async (req: Request, res: Response) =
 });
 
 router.patch("/:token/chats/:chatId/archive", async (req: Request, res: Response) => {
-  const chatId = routeParam(req.params.chatId);
+  const { chatId } = req.params;
   const { archived } = req.body as { archived?: boolean };
   try {
     const session = await requireLinkedSession(req, res);
@@ -697,7 +690,7 @@ router.get("/user/:userId/devices", async (req: Request, res: Response) => {
 
 router.delete("/:token", async (req: Request, res: Response) => {
   try {
-    await query("UPDATE web_sessions SET status = 'expired' WHERE token = $1", [routeParam(req.params.token)]);
+    await query("UPDATE web_sessions SET status = 'expired' WHERE token = $1", [req.params.token]);
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "delete device error");
@@ -706,7 +699,7 @@ router.delete("/:token", async (req: Request, res: Response) => {
 });
 
 router.patch("/:token/name", async (req: Request, res: Response) => {
-  const token = routeParam(req.params.token);
+  const { token } = req.params;
   const { name } = req.body as { name?: string };
   if (!name?.trim()) {
     res.status(400).json({ success: false, message: "name required" });
