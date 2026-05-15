@@ -3,14 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Videh — Secure Messaging</title>
+    <title>Videh — India's Secure Messaging App</title>
     <meta
       name="description"
-      content="Videh is a secure messaging app for chat, calls, status, and linked devices on web and mobile."
+      content="Videh is a fast, secure messaging app with chat, calls, status, broadcasts, group ledger, SOS safety, scheduled messages, and Videh Web."
     />
     <style>
       :root {
         --brand: #00a884;
+        --brand-dark: #008f6f;
         --text: #111b21;
         --muted: #667781;
         --bg: #f0f2f5;
@@ -27,58 +28,131 @@
         line-height: 1.6;
       }
       header {
-        background: var(--brand);
+        background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%);
         color: #fff;
-        padding: 48px 20px;
+        padding: 56px 20px 48px;
         text-align: center;
       }
       header h1 {
-        margin: 0 0 8px;
-        font-size: 2.4rem;
-        font-weight: 700;
-      }
-      header p {
-        margin: 0;
-        opacity: 0.95;
-        font-size: 1.05rem;
-      }
-      main {
-        max-width: 920px;
-        margin: 0 auto;
-        padding: 32px 20px 56px;
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 18px;
-      }
-      .card {
-        background: var(--card);
-        border-radius: 16px;
-        padding: 22px;
-        box-shadow: 0 8px 24px rgba(17, 27, 33, 0.08);
-      }
-      .card h2 {
         margin: 0 0 10px;
+        font-size: 2.6rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+      header .tagline {
+        margin: 0 auto;
+        max-width: 640px;
         font-size: 1.1rem;
+        opacity: 0.96;
+      }
+      .wrap {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 0 20px;
+      }
+      section {
+        padding: 40px 0;
+      }
+      .section-title {
+        margin: 0 0 8px;
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: var(--text);
+      }
+      .section-sub {
+        margin: 0 0 28px;
+        color: var(--muted);
+        font-size: 1rem;
+      }
+      .features {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 16px;
+      }
+      .feature {
+        background: var(--card);
+        border-radius: 14px;
+        padding: 20px 22px;
+        box-shadow: 0 4px 16px rgba(17, 27, 33, 0.06);
+        border-left: 4px solid var(--brand);
+      }
+      .feature h3 {
+        margin: 0 0 8px;
+        font-size: 1.05rem;
         color: var(--brand);
       }
-      .card p {
-        margin: 0 0 14px;
+      .feature p {
+        margin: 0;
         color: var(--muted);
+        font-size: 0.92rem;
+        line-height: 1.55;
+      }
+      .owner-card {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 32px;
+        background: var(--card);
+        border-radius: 20px;
+        padding: 32px;
+        box-shadow: 0 10px 32px rgba(17, 27, 33, 0.08);
+      }
+      .owner-photo {
+        width: 180px;
+        height: 180px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 4px solid var(--brand);
+        flex-shrink: 0;
+      }
+      .owner-info h2 {
+        margin: 0 0 6px;
+        font-size: 1.6rem;
+        color: var(--text);
+      }
+      .owner-role {
+        margin: 0 0 14px;
+        color: var(--brand);
+        font-weight: 600;
         font-size: 0.95rem;
+      }
+      .owner-info p {
+        margin: 0;
+        color: var(--muted);
+        max-width: 520px;
+      }
+      .links {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+      }
+      .link-card {
+        background: var(--card);
+        border-radius: 14px;
+        padding: 20px;
+        box-shadow: 0 4px 16px rgba(17, 27, 33, 0.06);
+      }
+      .link-card h3 {
+        margin: 0 0 8px;
+        font-size: 1rem;
+        color: var(--brand);
+      }
+      .link-card p {
+        margin: 0 0 12px;
+        color: var(--muted);
+        font-size: 0.9rem;
       }
       a.btn {
         display: inline-block;
         background: var(--brand);
         color: #fff;
         text-decoration: none;
-        padding: 10px 16px;
+        padding: 10px 18px;
         border-radius: 999px;
         font-weight: 600;
-        font-size: 0.92rem;
+        font-size: 0.9rem;
       }
-      a.link {
+      a.text-link {
         color: var(--brand);
         font-weight: 600;
         text-decoration: none;
@@ -86,49 +160,175 @@
       footer {
         text-align: center;
         color: var(--muted);
-        font-size: 0.9rem;
-        padding: 0 20px 40px;
+        font-size: 0.88rem;
+        padding: 24px 20px 48px;
+        border-top: 1px solid #e9edef;
+      }
+      footer a {
+        color: var(--brand);
+        text-decoration: none;
+      }
+      @media (max-width: 640px) {
+        .owner-card {
+          flex-direction: column;
+          text-align: center;
+        }
+        .owner-info p {
+          max-width: none;
+        }
       }
     </style>
   </head>
   <body>
     <header>
-      <h1>Videh</h1>
-      <p>Fast, secure messaging for chat, calls, status, and Videh Web.</p>
+      <div class="wrap">
+        <h1>Videh</h1>
+        <p class="tagline">
+          India's fast, secure messaging app — chat, voice &amp; video calls, status stories,
+          broadcasts, group ledger, SOS safety, and more.
+        </p>
+      </div>
     </header>
 
-    <main>
-      <div class="grid">
-        <section class="card">
-          <h2>Videh Web</h2>
-          <p>Use Videh on your computer by linking your phone with a QR code.</p>
-          <a class="btn" href="https://web.videh.co.in/">Open Videh Web</a>
-        </section>
+    <main class="wrap">
+      <section>
+        <h2 class="section-title">About Videh</h2>
+        <p class="section-sub">
+          Videh helps you stay connected with friends, family, and teams through private messaging,
+          real-time calls, and powerful tools built for everyday communication in India.
+        </p>
+      </section>
 
-        <section class="card">
-          <h2>Privacy Policy</h2>
-          <p>Learn how Videh collects, uses, and protects your information.</p>
-          <a class="link" href="https://web.videh.co.in/privacy-policy/">View Privacy Policy</a>
-        </section>
+      <section>
+        <h2 class="section-title">Features</h2>
+        <p class="section-sub">Everything you need in one secure messenger.</p>
+        <div class="features">
+          <article class="feature">
+            <h3>Private &amp; Group Chat</h3>
+            <p>Send text, photos, videos, documents, and voice notes in one-to-one and group conversations with delivery and read receipts.</p>
+          </article>
+          <article class="feature">
+            <h3>Voice &amp; Video Calls</h3>
+            <p>Make high-quality voice and video calls directly from chats. Stay connected wherever you are.</p>
+          </article>
+          <article class="feature">
+            <h3>Status (Stories)</h3>
+            <p>Share photo and video status updates that disappear after 24 hours. View who watched and reacted to your status.</p>
+          </article>
+          <article class="feature">
+            <h3>Videh Web</h3>
+            <p>Use Videh on your computer. Link your phone with a QR code and sync messages on web.videh.co.in.</p>
+          </article>
+          <article class="feature">
+            <h3>Broadcast Lists</h3>
+            <p>Send the same message to many contacts at once without creating a group — perfect for announcements.</p>
+          </article>
+          <article class="feature">
+            <h3>Group Ledger (Khata)</h3>
+            <p>Track shared expenses and balances inside group chats — split costs and settle up with your group.</p>
+          </article>
+          <article class="feature">
+            <h3>SOS Safety</h3>
+            <p>Quick emergency alert feature to notify trusted contacts when you need help.</p>
+          </article>
+          <article class="feature">
+            <h3>Scheduled Messages</h3>
+            <p>Schedule messages to be sent later — never forget birthdays, reminders, or important updates.</p>
+          </article>
+          <article class="feature">
+            <h3>Real-time Translation</h3>
+            <p>Break language barriers with in-chat translation so you can talk to anyone, anywhere.</p>
+          </article>
+          <article class="feature">
+            <h3>Two-Step Verification</h3>
+            <p>Add an extra PIN layer to protect your account from unauthorized access.</p>
+          </article>
+          <article class="feature">
+            <h3>Linked Devices</h3>
+            <p>See and manage devices linked to your account. Log out remotely from unknown sessions.</p>
+          </article>
+          <article class="feature">
+            <h3>Starred Messages</h3>
+            <p>Bookmark important messages and find them quickly when you need them.</p>
+          </article>
+          <article class="feature">
+            <h3>Location Sharing</h3>
+            <p>Share your live or static location in chat so friends can find you easily.</p>
+          </article>
+          <article class="feature">
+            <h3>Contacts &amp; Privacy Controls</h3>
+            <p>Find friends on Videh, control last seen, profile photo visibility, and who can contact you.</p>
+          </article>
+          <article class="feature">
+            <h3>Secure by Design</h3>
+            <p>Encrypted connections, OTP login, and privacy-focused design. Your data is not sold for advertising.</p>
+          </article>
+          <article class="feature">
+            <h3>Themes &amp; Accessibility</h3>
+            <p>Light and dark themes, notification controls, and settings tuned for comfortable daily use.</p>
+          </article>
+        </div>
+      </section>
 
-        <section class="card">
-          <h2>Delete Your Data</h2>
-          <p>Request account or data deletion from the app or by email.</p>
-          <a class="link" href="https://web.videh.co.in/data-deletion/">Data Deletion Request</a>
-        </section>
+      <section>
+        <h2 class="section-title">Owner</h2>
+        <p class="section-sub">Built with care in India.</p>
+        <div class="owner-card">
+          <img
+            class="owner-photo"
+            src="/images/prashant-kumar.png"
+            alt="Prashant Kumar — Founder of Videh"
+            width="180"
+            height="180"
+          />
+          <div class="owner-info">
+            <h2>Prashant Kumar</h2>
+            <p class="owner-role">Founder &amp; Owner · Videh</p>
+            <p>
+              Videh is founded by Prashant Kumar with a vision to bring a fast, reliable, and
+              privacy-respecting messaging experience to users across India — combining chat,
+              calls, status, and practical tools like group ledger and SOS in one app.
+            </p>
+          </div>
+        </div>
+      </section>
 
-        <section class="card">
-          <h2>Contact</h2>
-          <p>For support, privacy, and account requests:</p>
-          <a class="link" href="mailto:pjhawithu@gmail.com">pjhawithu@gmail.com</a>
-        </section>
-      </div>
+      <section>
+        <h2 class="section-title">Quick Links</h2>
+        <div class="links">
+          <div class="link-card">
+            <h3>Videh Web</h3>
+            <p>Link your phone and use Videh on desktop.</p>
+            <a class="btn" href="https://web.videh.co.in/">Open Videh Web</a>
+          </div>
+          <div class="link-card">
+            <h3>Admin</h3>
+            <p>Administrator dashboard for Videh services.</p>
+            <a class="text-link" href="https://admin.videh.co.in/">admin.videh.co.in</a>
+          </div>
+          <div class="link-card">
+            <h3>Privacy Policy</h3>
+            <p>How we collect, use, and protect your data.</p>
+            <a class="text-link" href="https://web.videh.co.in/privacy-policy/">View Privacy Policy</a>
+          </div>
+          <div class="link-card">
+            <h3>Delete Your Data</h3>
+            <p>Request account or data deletion.</p>
+            <a class="text-link" href="https://web.videh.co.in/data-deletion/">Data Deletion Request</a>
+          </div>
+          <div class="link-card">
+            <h3>Contact</h3>
+            <p>Support, privacy, and account requests.</p>
+            <a class="text-link" href="mailto:pjhawithu@gmail.com">pjhawithu@gmail.com</a>
+          </div>
+        </div>
+      </section>
     </main>
 
     <footer>
-      © Videh · New Delhi, India ·
-      <a class="link" href="https://web.videh.co.in/privacy-policy/">Privacy</a> ·
-      <a class="link" href="https://web.videh.co.in/data-deletion/">Data deletion</a>
+      © Videh · New Delhi, India · Founded by Prashant Kumar ·
+      <a href="https://web.videh.co.in/privacy-policy/">Privacy</a> ·
+      <a href="https://web.videh.co.in/data-deletion/">Data deletion</a>
     </footer>
   </body>
 </html>

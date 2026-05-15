@@ -114,7 +114,7 @@ EOF
 
 echo "Syncing Videh landing page (videh.co.in only)..."
 sudo mkdir -p "${SITE_ROOT}"
-sudo rsync -a "${REPO}/deploy/videh-co-in/index.html" "${SITE_ROOT}/index.html"
+sudo rsync -a --delete "${REPO}/deploy/videh-co-in/" "${SITE_ROOT}/"
 
 echo "Disabling default nginx welcome page..."
 for default_conf in \
