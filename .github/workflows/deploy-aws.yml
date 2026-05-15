@@ -45,14 +45,11 @@ jobs:
           )
           pm2 save
 
-          sudo mkdir -p /var/www/videh-site
-          sudo rsync -a --delete /var/www/videh/deploy/videh-co-in/ /var/www/videh-site/
-
-          sudo nginx -t
-          sudo systemctl reload nginx
+          sudo bash /var/www/videh/deploy/nginx/apply-videh-site.sh
 
           for attempt in 1 2 3 4 5; do
-            if curl --fail --silent --show-error https://videh.co.in/api/readyz; then
+            if curl --fail --silent --show-error https://videh.co.in/api/readyz \
+              && curl --fail --silent --show-error https://videh.co.in/ | grep -q "Videh"; then
               exit 0
             fi
             echo "Health check failed on attempt ${attempt}; retrying..."
