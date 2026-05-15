@@ -45,6 +45,9 @@ jobs:
           )
           pm2 save
 
+          sudo mkdir -p /var/www/videh-site
+          sudo rsync -a --delete /var/www/videh/deploy/videh-co-in/ /var/www/videh-site/
+
           sudo nginx -t
           sudo systemctl reload nginx
 

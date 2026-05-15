@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Videh — Secure Messaging</title>
+    <meta
+      name="description"
+      content="Videh is a secure messaging app for chat, calls, status, and linked devices on web and mobile."
+    />
+    <style>
+      :root {
+        --brand: #00a884;
+        --text: #111b21;
+        --muted: #667781;
+        --bg: #f0f2f5;
+        --card: #ffffff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: Inter, "Segoe UI", Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+      }
+      header {
+        background: var(--brand);
+        color: #fff;
+        padding: 48px 20px;
+        text-align: center;
+      }
+      header h1 {
+        margin: 0 0 8px;
+        font-size: 2.4rem;
+        font-weight: 700;
+      }
+      header p {
+        margin: 0;
+        opacity: 0.95;
+        font-size: 1.05rem;
+      }
+      main {
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 32px 20px 56px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 18px;
+      }
+      .card {
+        background: var(--card);
+        border-radius: 16px;
+        padding: 22px;
+        box-shadow: 0 8px 24px rgba(17, 27, 33, 0.08);
+      }
+      .card h2 {
+        margin: 0 0 10px;
+        font-size: 1.1rem;
+        color: var(--brand);
+      }
+      .card p {
+        margin: 0 0 14px;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      a.btn {
+        display: inline-block;
+        background: var(--brand);
+        color: #fff;
+        text-decoration: none;
+        padding: 10px 16px;
+        border-radius: 999px;
+        font-weight: 600;
+        font-size: 0.92rem;
+      }
+      a.link {
+        color: var(--brand);
+        font-weight: 600;
+        text-decoration: none;
+      }
+      footer {
+        text-align: center;
+        color: var(--muted);
+        font-size: 0.9rem;
+        padding: 0 20px 40px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Videh</h1>
+      <p>Fast, secure messaging for chat, calls, status, and Videh Web.</p>
+    </header>
+
+    <main>
+      <div class="grid">
+        <section class="card">
+          <h2>Videh Web</h2>
+          <p>Use Videh on your computer by linking your phone with a QR code.</p>
+          <a class="btn" href="https://web.videh.co.in/">Open Videh Web</a>
+        </section>
+
+        <section class="card">
+          <h2>Privacy Policy</h2>
+          <p>Learn how Videh collects, uses, and protects your information.</p>
+          <a class="link" href="/privacy-policy/">View Privacy Policy</a>
+        </section>
+
+        <section class="card">
+          <h2>Delete Your Data</h2>
+          <p>Request account or data deletion from the app or by email.</p>
+          <a class="link" href="/data-deletion/">Data Deletion Request</a>
+        </section>
+
+        <section class="card">
+          <h2>Contact</h2>
+          <p>For support, privacy, and account requests:</p>
+          <a class="link" href="mailto:pjhawithu@gmail.com">pjhawithu@gmail.com</a>
+        </section>
+      </motion>
+    </main>
+
+    <footer>
+      © Videh · New Delhi, India ·
+      <a class="link" href="/privacy-policy/">Privacy</a> ·
+      <a class="link" href="/data-deletion/">Data deletion</a>
+    </footer>
+  </body>
+</html>

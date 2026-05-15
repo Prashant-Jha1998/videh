@@ -28,7 +28,7 @@ const SECTIONS = [
   },
   {
     title: "6. Your Rights",
-    body: `Under applicable data protection laws, you have the following rights:\n\n• **Access**: Request a copy of the data we hold about you\n• **Correction**: Update or correct inaccurate personal information\n• **Deletion**: Request deletion of your personal data\n• **Portability**: Request your data in a portable format\n• **Objection**: Object to certain processing of your data\n\nTo exercise any of these rights, contact us at privacy@videh.app or through the in-app Settings → Help → Contact Us.`,
+    body: `Under applicable data protection laws, you have the following rights:\n\n• **Access**: Request a copy of the data we hold about you\n• **Correction**: Update or correct inaccurate personal information\n• **Deletion**: Request deletion of your personal data\n• **Portability**: Request your data in a portable format\n• **Objection**: Object to certain processing of your data\n\nTo exercise any of these rights, contact us at pjhawithu@gmail.com or through the in-app Settings → Help → Contact Us.`,
   },
   {
     title: "7. Data Security",
@@ -36,7 +36,7 @@ const SECTIONS = [
   },
   {
     title: "8. Children's Privacy",
-    body: `Videh is not directed at children under the age of 13. We do not knowingly collect personal information from children under 13. If we become aware that a child under 13 has provided us with personal information, we will promptly delete such data.\n\nIf you are a parent or guardian and believe your child has used Videh in violation of our Terms, please contact us immediately at privacy@videh.app.`,
+    body: `Videh is not directed at children under the age of 13. We do not knowingly collect personal information from children under 13. If we become aware that a child under 13 has provided us with personal information, we will promptly delete such data.\n\nIf you are a parent or guardian and believe your child has used Videh in violation of our Terms, please contact us immediately at pjhawithu@gmail.com.`,
   },
   {
     title: "9. Cookies & Tracking",
@@ -52,7 +52,7 @@ const SECTIONS = [
   },
   {
     title: "12. Contact Us",
-    body: `If you have questions, concerns, or requests regarding this Privacy Policy or how we handle your data, please contact our Data Protection Officer:\n\nVideh Technologies\nPrivacy Team\nEmail: privacy@videh.app\nAddress: New Delhi, India\nPhone: Available through in-app support\n\nLast updated: April 2026`,
+    body: `If you have questions, concerns, or requests regarding this Privacy Policy or how we handle your data, please contact our Data Protection Officer:\n\nVideh Technologies\nPrivacy Team\nEmail: pjhawithu@gmail.com\nAddress: New Delhi, India\nPhone: Available through in-app support\n\nLast updated: April 2026`,
   },
 ];
 

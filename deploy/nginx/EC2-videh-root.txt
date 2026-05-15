@@ -1,0 +1,14 @@
+One-time on EC2 (after deploy), inside the HTTPS server block for videh.co.in add:
+
+    root /var/www/videh-site;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+Keep the existing location /api/ { ... } block as-is.
+
+Then run:
+  sudo nginx -t
+  sudo systemctl reload nginx
