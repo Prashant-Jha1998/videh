@@ -1,0 +1,56 @@
+name: Build Android AAB
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-aab:
+    name: Production AAB (EAS local)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli@18.13.0
+
+      - name: Verify Expo token
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: eas whoami
+
+      - name: Build signed AAB
+        working-directory: artifacts/videh
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_DOMAIN: videh.co.in
+          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
+        run: |
+          mkdir -p build
+          eas build \
+            --platform android \
+            --profile production \
+            --local \
+            --non-interactive \
+            --output ./build/videh-release.aab
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: videh-android-aab-v${{ github.run_number }}
+          path: artifacts/videh/build/videh-release.aab
+          if-no-files-found: error
