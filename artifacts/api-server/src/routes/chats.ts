@@ -627,11 +627,12 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     // Send push notifications (fire and forget)
     const senderRow = await query("SELECT name FROM users WHERE id = $1", [senderId]);
     const senderName = senderRow.rows[0]?.name ?? "Videh";
-    const tokens = members.rows
-      .filter((m: any) => !m.is_muted)
+    const notifyMembers = members.rows.filter((m: any) => !m.is_muted);
+    const recipientUserIds = notifyMembers.map((m: any) => Number(m.user_id)).filter(Boolean);
+    const tokens = notifyMembers
       .map((m: any) => m.push_token)
       .filter((t: unknown): t is string => isValidPushToken(t));
-    if (tokens.length > 0) {
+    if (recipientUserIds.length > 0 || tokens.length > 0) {
       const preview = (content ?? "").length > 60 ? content!.slice(0, 60) + "..." : (content ?? "");
       await sendChatPush(
         tokens,
@@ -646,7 +647,11 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
           type: "message",
           notificationKind: "chat_message",
         },
-        { categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID, threadId: `chat-${chatId}` },
+        {
+          categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID,
+          threadId: `chat-${chatId}`,
+          userIds: recipientUserIds,
+        },
       );
     }
     publishChatEvent({

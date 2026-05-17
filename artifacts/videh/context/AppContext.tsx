@@ -5,6 +5,7 @@ import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
 import * as Location from "expo-location";
 import { getApiUrl } from "@/lib/api";
 import { registerPushTokenWithServer } from "@/lib/pushNotifications";
+import { oneSignalLogout } from "@/lib/oneSignal";
 import { encodeLocationPayload, mapsUrl as buildMapsUrl } from "@/lib/locationMessage";
 import { safeJsonParse } from "@/lib/safeJson";
 
@@ -556,6 +557,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (u?.dbId) {
       try { await api(`/users/${u.dbId}/offline`, { method: "POST" }); } catch {}
     }
+    oneSignalLogout();
     setUserState(null);
     authSessionToken = null;
     setIsAuthenticated(false);

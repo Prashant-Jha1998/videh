@@ -122,19 +122,20 @@ cron.schedule("* * * * *", async () => {
 
       // Push to all chat members
       const members = await query(
-        `SELECT u.push_token FROM chat_members cm
+        `SELECT u.id AS user_id, u.push_token FROM chat_members cm
          JOIN users u ON u.id = cm.user_id
          WHERE cm.chat_id = $1 AND cm.user_id != $2`,
         [sm.chat_id, sm.sender_id]
       );
-      const tokens = members.rows.map((r: any) => r.push_token).filter((t: unknown) => isValidPushToken(t));
-      if (tokens.length > 0) {
+      const rows = members.rows as { user_id: number; push_token: string | null }[];
+      if (rows.length > 0) {
         await sendPushBatch(
-          tokens.map((token: string) => ({
-            token,
+          rows.map((r) => ({
+            userId: Number(r.user_id),
+            token: isValidPushToken(r.push_token) ? r.push_token! : undefined,
             title: sm.sender_name ?? "Videh",
             body: sm.content.slice(0, 100),
-            data: { chatId: String(sm.chat_id) },
+            data: { chatId: String(sm.chat_id), type: "message" },
           })),
         );
       }

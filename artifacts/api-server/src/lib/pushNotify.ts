@@ -1,17 +1,21 @@
-import { sendFcmChatPush, isFcmConfigured } from "./fcmPush";
+import { sendOneSignalPush, isOneSignalConfigured } from "./oneSignalPush";
 import { sendExpoChatPush, sendExpoPush } from "./expoPush";
-import { isExpoPushToken, splitPushTokens } from "./pushTokens";
+import { isExpoPushToken, isValidPushToken, splitPushTokens } from "./pushTokens";
 
 export { isExpoPushToken, isFcmPushToken, isValidPushToken } from "./pushTokens";
-export { isFcmConfigured } from "./fcmPush";
+export { isOneSignalConfigured } from "./oneSignalPush";
 
 type ChatPushOptions = {
   categoryId?: string;
   threadId?: string;
   isCall?: boolean;
+  /** Videh user ids — used with OneSignal (free, no Firebase). */
+  userIds?: number[];
 };
 
-/** Send chat/call notification via FCM (preferred) and/or Expo push relay. */
+/**
+ * Send push: OneSignal (by user id, free) first, then Expo token relay as fallback.
+ */
 export async function sendChatPush(
   to: string | string[],
   title: string,
@@ -19,50 +23,46 @@ export async function sendChatPush(
   data: Record<string, unknown>,
   options?: ChatPushOptions,
 ): Promise<void> {
-  const tokens = (Array.isArray(to) ? to : [to]).filter((t): t is string => typeof t === "string" && t.length > 0);
-  if (tokens.length === 0) return;
+  const tokens = (Array.isArray(to) ? to : [to]).filter((t): t is string => isValidPushToken(t));
+  const userIds = (options?.userIds ?? []).filter((id) => Number.isFinite(id) && id > 0);
 
-  const { expo, fcm } = splitPushTokens(tokens);
   const tasks: Promise<void>[] = [];
 
-  if (fcm.length > 0) {
-    if (isFcmConfigured()) {
-      tasks.push(sendFcmChatPush(fcm, title, body, data, { isCall: options?.isCall }));
-    } else {
-      console.warn("FCM tokens present but FIREBASE_SERVICE_ACCOUNT_JSON is not set; skipping FCM delivery");
-    }
+  if (userIds.length > 0 && isOneSignalConfigured()) {
+    tasks.push(sendOneSignalPush(userIds, title, body, data, { isCall: options?.isCall }));
   }
 
-  if (expo.length > 0) {
-    sendExpoChatPush(expo, title, body, data, options);
+  if (tokens.length > 0) {
+    const { expo } = splitPushTokens(tokens);
+    if (expo.length > 0) {
+      sendExpoChatPush(expo, title, body, data, options);
+    }
   }
 
   await Promise.all(tasks);
 }
 
-/** Low-level batch send (scheduled messages) — routes each token to FCM or Expo. */
 export async function sendPushBatch(
   messages: Array<{
-    token: string;
+    token?: string;
+    userId?: number;
     title: string;
     body: string;
     data: Record<string, unknown>;
     isCall?: boolean;
   }>,
 ): Promise<void> {
-  const byExpo = messages.filter((m) => isExpoPushToken(m.token));
-  const byFcm = messages.filter((m) => !isExpoPushToken(m.token));
-
-  if (byFcm.length > 0 && isFcmConfigured()) {
-    await Promise.all(
-      byFcm.map((m) => sendFcmChatPush(m.token, m.title, m.body, m.data, { isCall: m.isCall })),
-    );
+  const userIds = messages.map((m) => m.userId).filter((id): id is number => Number.isFinite(id) && id! > 0);
+  if (userIds.length > 0 && isOneSignalConfigured()) {
+    const first = messages[0];
+    await sendOneSignalPush(userIds, first.title, first.body, first.data, { isCall: first.isCall });
   }
 
-  if (byExpo.length > 0) {
+  const expoMessages = messages.filter((m) => m.token && isExpoPushToken(m.token));
+  if (expoMessages.length > 0) {
     sendExpoPush(
-      byExpo.map((m) => ({
-        to: m.token,
+      expoMessages.map((m) => ({
+        to: m.token!,
         title: m.title,
         body: m.body,
         data: m.data,

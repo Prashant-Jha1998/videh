@@ -147,12 +147,14 @@ router.post("/:userId/trigger", async (req: Request, res: Response) => {
       );
 
       // Push notification if they have a push token
-      if (isValidPushToken(contact.push_token)) {
+      const contactUserId = Number(contact.linked_id);
+      if (contactUserId || isValidPushToken(contact.push_token)) {
         await sendChatPush(
-          contact.push_token,
+          contact.push_token ?? [],
           `🚨 SOS — ${sender.name ?? sender.phone}`,
           locationText || "Emergency! Please help!",
           { chatId: String(chatId), sos: "true", notificationKind: "sos" },
+          { userIds: contactUserId ? [contactUserId] : [] },
         );
       }
       sentCount++;

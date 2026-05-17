@@ -166,7 +166,7 @@ router.post("/calls", async (req: Request, res: Response) => {
       .filter((row: any) => callableParticipantIds.includes(Number(row.user_id)))
       .map((row: any) => row.push_token)
       .filter((t: unknown): t is string => isValidPushToken(t));
-    if (pushTokens.length > 0) {
+    if (callableParticipantIds.length > 0 || pushTokens.length > 0) {
       await sendChatPush(
         pushTokens,
         body.type === "video" ? "Video call" : "Voice call",
@@ -180,7 +180,12 @@ router.post("/calls", async (req: Request, res: Response) => {
           kind: "call",
           notificationKind: "incoming_call",
         },
-        { categoryId: EXPO_INCOMING_CALL_CATEGORY_ID, threadId: `call-${callId}`, isCall: true },
+        {
+          categoryId: EXPO_INCOMING_CALL_CATEGORY_ID,
+          threadId: `call-${callId}`,
+          isCall: true,
+          userIds: callableParticipantIds,
+        },
       );
     }
     res.json({ success: true, call: serializeIncoming(invite, callerId), participantIds: callableParticipantIds });

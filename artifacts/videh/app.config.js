@@ -33,6 +33,7 @@ function withGooglePlayAdiRegistration(config) {
  * Dev client builds leave this unset so x86_64 emulators still work.
  */
 module.exports = ({ config }) => {
+  const oneSignalAppId = process.env.EXPO_PUBLIC_ONESIGNAL_APP_ID?.trim() ?? "";
   const slim = process.env.VIDEOH_SLIM_ANDROID === "1";
   const buildArchs = slim
     ? ["arm64-v8a"]
@@ -66,15 +67,18 @@ module.exports = ({ config }) => {
     (p) => Array.isArray(p) && p[0] === "@config-plugins/react-native-webrtc",
   );
 
-  const googleServicesPath = path.join(__dirname, "google-services.json");
-  const android = {
-    ...config.android,
-    ...(fs.existsSync(googleServicesPath) ? { googleServicesFile: "./google-services.json" } : {}),
-  };
+  const oneSignalPlugin = oneSignalAppId
+    ? [["onesignal-expo-plugin", { mode: "production" }]]
+    : [];
+
+  const basePlugins = hasWebRtcPlugin ? plugins : [...plugins, withWebRtc];
 
   return withGooglePlayAdiRegistration({
     ...config,
-    android,
-    plugins: hasWebRtcPlugin ? plugins : [...plugins, withWebRtc],
+    extra: {
+      ...config.extra,
+      ...(oneSignalAppId ? { oneSignalAppId } : {}),
+    },
+    plugins: [...oneSignalPlugin, ...basePlugins],
   });
 };

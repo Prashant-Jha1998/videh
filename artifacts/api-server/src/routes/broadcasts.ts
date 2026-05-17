@@ -134,8 +134,15 @@ router.post("/:listId/send", async (req: Request, res: Response) => {
         "INSERT INTO messages (chat_id, sender_id, content, type, media_url) VALUES ($1,$2,$3,$4,$5)",
         [chatId, senderId, content, type, mediaUrl ?? null]
       );
-      if (isValidPushToken(r.push_token)) {
-        await sendChatPush(r.push_token, senderName, content.slice(0, 100), { chatId: String(chatId), type: "message" });
+      const recipientId = Number(r.user_id);
+      if (recipientId || isValidPushToken(r.push_token)) {
+        await sendChatPush(
+          r.push_token ?? [],
+          senderName,
+          content.slice(0, 100),
+          { chatId: String(chatId), type: "message" },
+          { userIds: recipientId ? [recipientId] : [] },
+        );
       }
       sentCount++;
     }

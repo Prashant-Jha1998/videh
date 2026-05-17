@@ -15,7 +15,8 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_DOMAIN": "videh.co.in",
-        "VIDEOH_SLIM_ANDROID": "1"
+        "VIDEOH_SLIM_ANDROID": "1",
+        "EXPO_PUBLIC_ONESIGNAL_APP_ID": ""
       },
       "android": {
         "buildType": "apk"
@@ -25,7 +26,8 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_DOMAIN": "videh.co.in",
-        "VIDEOH_SLIM_ANDROID": "1"
+        "VIDEOH_SLIM_ANDROID": "1",
+        "EXPO_PUBLIC_ONESIGNAL_APP_ID": ""
       },
       "android": {
         "buildType": "apk"
@@ -35,7 +37,8 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_DOMAIN": "videh.co.in",
-        "VIDEOH_SLIM_ANDROID": "1"
+        "VIDEOH_SLIM_ANDROID": "1",
+        "EXPO_PUBLIC_ONESIGNAL_APP_ID": ""
       },
       "android": {
         "buildType": "app-bundle"
