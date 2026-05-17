@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { EXPO_ANDROID_CHANNEL_ID, isExpoPushToken, sendExpoPush } from "../lib/expoPush";
+import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { query } from "../lib/db";
 import { stateGetJson, stateSetJson } from "../lib/sharedState";
 
@@ -147,16 +147,13 @@ router.post("/:userId/trigger", async (req: Request, res: Response) => {
       );
 
       // Push notification if they have a push token
-      if (isExpoPushToken(contact.push_token)) {
-        sendExpoPush({
-          to: contact.push_token,
-          title: `🚨 SOS — ${sender.name ?? sender.phone}`,
-          body: locationText || "Emergency! Please help!",
-          data: { chatId, sos: true },
-          priority: "high",
-          channelId: EXPO_ANDROID_CHANNEL_ID,
-          sound: "default",
-        });
+      if (isValidPushToken(contact.push_token)) {
+        await sendChatPush(
+          contact.push_token,
+          `🚨 SOS — ${sender.name ?? sender.phone}`,
+          locationText || "Emergency! Please help!",
+          { chatId: String(chatId), sos: "true", notificationKind: "sos" },
+        );
       }
       sentCount++;
     }

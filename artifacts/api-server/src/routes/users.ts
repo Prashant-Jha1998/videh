@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { query } from "../lib/db";
-import { EXPO_CHAT_MESSAGE_CATEGORY_ID, isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
+import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
+import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { assertSameUser, issueSessionToken } from "../lib/auth";
 
 const router = Router();
@@ -356,10 +357,10 @@ router.get("/:id/storage-stats", async (req: Request, res: Response) => {
 
 // Save push token
 router.put("/:id/push-token", async (req: Request, res: Response) => {
-  const { token } = req.body as { token?: string };
+  const { token, provider } = req.body as { token?: string; provider?: string };
   if (!assertSameUser(req, res, req.params.id)) return;
-  if (!isExpoPushToken(token)) {
-    res.status(400).json({ success: false, message: "Invalid Expo push token" });
+  if (!isValidPushToken(token)) {
+    res.status(400).json({ success: false, message: "Invalid push token (FCM or Expo required)" });
     return;
   }
   try {
@@ -368,7 +369,8 @@ router.put("/:id/push-token", async (req: Request, res: Response) => {
       res.status(404).json({ success: false, message: "User not found" });
       return;
     }
-    res.json({ success: true, hasPush: true });
+    req.log.info({ userId: req.params.id, provider: provider ?? "auto" }, "push token saved");
+    res.json({ success: true, hasPush: true, provider: provider ?? "auto" });
   } catch (err) {
     req.log.error({ err }, "save push token");
     res.status(500).json({ success: false });
@@ -379,11 +381,11 @@ router.post("/:id/test-push", async (req: Request, res: Response) => {
   try {
     const r = await query("SELECT push_token FROM users WHERE id = $1", [req.params.id]);
     const token = r.rows[0]?.push_token;
-    if (!isExpoPushToken(token)) {
+    if (!isValidPushToken(token)) {
       res.status(404).json({ success: false, message: "No valid push token saved for this user." });
       return;
     }
-    sendExpoChatPush(
+    await sendChatPush(
       token,
       "Videh test notification",
       "Push notifications are working.",

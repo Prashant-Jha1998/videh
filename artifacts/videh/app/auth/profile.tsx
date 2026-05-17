@@ -7,9 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  KeyboardAvoidingView,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -17,8 +15,10 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { registerPushTokenWithServer } from "@/lib/pushNotifications";
 
 export default function ProfileSetupScreen() {
   const colors = useColors();
@@ -110,6 +110,13 @@ export default function ProfileSetupScreen() {
       about: about.trim(),
       avatar: user.avatar ?? avatarUri,
     });
+    if (user.dbId && Platform.OS !== "web") {
+      try {
+        await registerPushTokenWithServer(user.dbId);
+      } catch {
+        // permission denied — user can enable later in settings
+      }
+    }
     setLoading(false);
     router.replace("/(tabs)/chats");
   };
@@ -119,18 +126,16 @@ export default function ProfileSetupScreen() {
     : "?";
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareScrollViewCompat
       style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      contentContainerStyle={[
+        styles.scroll,
+        { paddingTop: insets.top + (Platform.OS === "web" ? 67 : 40), paddingBottom: insets.bottom + 40 },
+      ]}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      bottomOffset={Platform.OS === "ios" ? 20 : 12}
     >
-      <ScrollView
-        contentContainerStyle={[
-          styles.scroll,
-          { paddingTop: insets.top + (Platform.OS === "web" ? 67 : 40), paddingBottom: insets.bottom + 40 },
-        ]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
         {/* Page Header */}
         <Text style={[styles.pageTitle, { color: colors.foreground }]}>Profile Info</Text>
         <Text style={[styles.pageSub, { color: colors.mutedForeground }]}>
@@ -174,8 +179,9 @@ export default function ProfileSetupScreen() {
               onFocus={() => setNameFocused(true)}
               onBlur={() => setNameFocused(false)}
               maxLength={25}
-              autoFocus
+              autoFocus={Platform.OS !== "android"}
               returnKeyType="next"
+              blurOnSubmit={false}
             />
             <Text style={[styles.charCount, { color: colors.mutedForeground }]}>{name.length}/25</Text>
           </View>
@@ -226,8 +232,7 @@ export default function ProfileSetupScreen() {
         <Text style={[styles.helpText, { color: colors.mutedForeground }]}>
           Your profile name is visible to all Videh users who have your number.
         </Text>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAwareScrollViewCompat>
   );
 }
 

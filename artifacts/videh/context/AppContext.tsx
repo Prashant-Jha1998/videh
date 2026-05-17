@@ -4,7 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
 import * as Location from "expo-location";
 import { getApiUrl } from "@/lib/api";
-import { registerExpoPushTokenWithServer } from "@/lib/pushNotifications";
+import { registerPushTokenWithServer } from "@/lib/pushNotifications";
 import { encodeLocationPayload, mapsUrl as buildMapsUrl } from "@/lib/locationMessage";
 import { safeJsonParse } from "@/lib/safeJson";
 
@@ -415,7 +415,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             loadCallLogs(parsed.dbId);
             loadStatuses(parsed.dbId);
             if (Platform.OS !== "web") {
-              registerExpoPushTokenWithServer(parsed.dbId).catch(() => {});
+              registerPushTokenWithServer(parsed.dbId).catch(() => {});
             }
           }
         }
@@ -485,7 +485,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (nextState === "active") {
         api(`/users/${uid}/online`, { method: "POST" }).catch(() => {});
         if (Platform.OS !== "web") {
-          registerExpoPushTokenWithServer(uid).catch(() => {});
+          registerPushTokenWithServer(uid).catch(() => {});
         }
       } else if (nextState === "background" || nextState === "inactive") {
         api(`/users/${uid}/offline`, { method: "POST" }).catch(() => {});
@@ -514,7 +514,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       if (Platform.OS !== "web") {
         try {
-          await registerExpoPushTokenWithServer(u.dbId);
+          await registerPushTokenWithServer(u.dbId);
         } catch {}
       }
     }

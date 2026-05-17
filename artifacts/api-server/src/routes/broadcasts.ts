@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
+import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { query } from "../lib/db";
 import { enforceModerationForActivity } from "../lib/moderation";
 
@@ -134,8 +134,8 @@ router.post("/:listId/send", async (req: Request, res: Response) => {
         "INSERT INTO messages (chat_id, sender_id, content, type, media_url) VALUES ($1,$2,$3,$4,$5)",
         [chatId, senderId, content, type, mediaUrl ?? null]
       );
-      if (isExpoPushToken(r.push_token)) {
-        sendExpoChatPush(r.push_token, senderName, content.slice(0, 100), { chatId });
+      if (isValidPushToken(r.push_token)) {
+        await sendChatPush(r.push_token, senderName, content.slice(0, 100), { chatId: String(chatId), type: "message" });
       }
       sentCount++;
     }

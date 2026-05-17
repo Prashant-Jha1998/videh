@@ -5,10 +5,7 @@ export const EXPO_CHAT_MESSAGE_CATEGORY_ID = "chat_message";
 export const EXPO_INCOMING_CALL_CATEGORY_ID = "incoming_call";
 const EXPO_PUSH_CHUNK_SIZE = 100;
 
-export function isExpoPushToken(token: unknown): token is string {
-  if (typeof token !== "string" || token.length < 12) return false;
-  return token.startsWith("ExponentPushToken[") || token.startsWith("ExpoPushToken[");
-}
+export { isExpoPushToken } from "./pushTokens";
 
 type ExpoPushSendBody = Record<string, unknown>;
 

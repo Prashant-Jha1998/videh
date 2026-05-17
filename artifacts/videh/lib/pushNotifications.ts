@@ -72,19 +72,45 @@ function getExpoProjectId(): string | undefined {
   return extra?.eas?.projectId ?? Constants.easConfig?.projectId;
 }
 
-/** Registers or refreshes the Expo push token on the server (native only). */
-export async function registerExpoPushTokenWithServer(dbId: number): Promise<void> {
+export type PushProvider = "fcm" | "expo";
+
+/** Prefer native FCM/APNs device token (Firebase). Fall back to Expo push relay. */
+export async function registerPushTokenWithServer(dbId: number): Promise<void> {
   if (Platform.OS === "web" || !dbId) return;
   await ensureVidehNotificationSetup();
+
   const { status: existing } = await Notifications.getPermissionsAsync();
   let finalStatus = existing;
   if (existing !== "granted") {
     const { status } = await Notifications.requestPermissionsAsync();
     finalStatus = status;
   }
-  if (finalStatus !== "granted") return;
-  const projectId = getExpoProjectId();
-  const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {});
+  if (finalStatus !== "granted") {
+    throw new Error("Notification permission not granted");
+  }
+
+  let token: string | null = null;
+  let provider: PushProvider = "expo";
+
+  if (Platform.OS === "android" || Platform.OS === "ios") {
+    try {
+      const device = await Notifications.getDevicePushTokenAsync();
+      if (device?.data && device.data.length >= 20) {
+        token = device.data;
+        provider = "fcm";
+      }
+    } catch {
+      // google-services.json / APNs may be missing — fall back to Expo token
+    }
+  }
+
+  if (!token) {
+    const projectId = getExpoProjectId();
+    const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {});
+    token = tokenData.data;
+    provider = "expo";
+  }
+
   const base = getApiUrl();
   const stored = await AsyncStorage.getItem("videh_user");
   const sessionToken = safeJsonParse<{ sessionToken?: string } | null>(stored, null)?.sessionToken;
@@ -94,9 +120,13 @@ export async function registerExpoPushTokenWithServer(dbId: number): Promise<voi
       "Content-Type": "application/json",
       ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
     },
-    body: JSON.stringify({ token: tokenData.data }),
+    body: JSON.stringify({ token, provider }),
   });
   if (!res.ok) {
-    throw new Error(`Push token registration failed: ${res.status}`);
+    const body = await res.text().catch(() => "");
+    throw new Error(`Push token registration failed: ${res.status} ${body}`);
   }
 }
+
+/** @deprecated Use registerPushTokenWithServer */
+export const registerExpoPushTokenWithServer = registerPushTokenWithServer;

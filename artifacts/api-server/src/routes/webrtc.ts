@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { query } from "../lib/db";
-import { EXPO_INCOMING_CALL_CATEGORY_ID, isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
+import { EXPO_INCOMING_CALL_CATEGORY_ID } from "../lib/expoPush";
+import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { stateDelete, stateGetJson, stateKeys, stateSetJson } from "../lib/sharedState";
 
 type Role = "caller" | "callee";
@@ -164,13 +165,21 @@ router.post("/calls", async (req: Request, res: Response) => {
     const pushTokens = members.rows
       .filter((row: any) => callableParticipantIds.includes(Number(row.user_id)))
       .map((row: any) => row.push_token)
-      .filter(isExpoPushToken);
+      .filter((t: unknown): t is string => isValidPushToken(t));
     if (pushTokens.length > 0) {
-      sendExpoChatPush(
+      await sendChatPush(
         pushTokens,
         body.type === "video" ? "Video call" : "Voice call",
         `${caller.name ?? "Videh user"} is calling`,
-        { callId, chatId, type: invite.type, channel, callerName: caller.name ?? "Videh user", kind: "call", notificationKind: "incoming_call" },
+        {
+          callId,
+          chatId: String(chatId),
+          type: invite.type,
+          channel,
+          callerName: caller.name ?? "Videh user",
+          kind: "call",
+          notificationKind: "incoming_call",
+        },
         { categoryId: EXPO_INCOMING_CALL_CATEGORY_ID, threadId: `call-${callId}`, isCall: true },
       );
     }

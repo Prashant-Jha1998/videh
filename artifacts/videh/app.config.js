@@ -66,8 +66,15 @@ module.exports = ({ config }) => {
     (p) => Array.isArray(p) && p[0] === "@config-plugins/react-native-webrtc",
   );
 
+  const googleServicesPath = path.join(__dirname, "google-services.json");
+  const android = {
+    ...config.android,
+    ...(fs.existsSync(googleServicesPath) ? { googleServicesFile: "./google-services.json" } : {}),
+  };
+
   return withGooglePlayAdiRegistration({
     ...config,
+    android,
     plugins: hasWebRtcPlugin ? plugins : [...plugins, withWebRtc],
   });
 };

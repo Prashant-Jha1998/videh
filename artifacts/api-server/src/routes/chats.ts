@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { query } from "../lib/db";
-import { EXPO_CHAT_MESSAGE_CATEGORY_ID, isExpoPushToken, sendExpoChatPush } from "../lib/expoPush";
+import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
+import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { enforceModerationForActivity } from "../lib/moderation";
 import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
 import { assertSameUser, requireAuth } from "../lib/auth";
@@ -629,17 +630,17 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     const tokens = members.rows
       .filter((m: any) => !m.is_muted)
       .map((m: any) => m.push_token)
-      .filter(isExpoPushToken);
+      .filter((t: unknown): t is string => isValidPushToken(t));
     if (tokens.length > 0) {
       const preview = (content ?? "").length > 60 ? content!.slice(0, 60) + "..." : (content ?? "");
-      sendExpoChatPush(
+      await sendChatPush(
         tokens,
         senderName,
         preview,
         {
-          chatId,
-          messageId: result.rows[0].id,
-          senderId,
+          chatId: String(chatId),
+          messageId: String(result.rows[0].id),
+          senderId: String(senderId),
           senderName,
           messageType: type ?? "text",
           type: "message",
