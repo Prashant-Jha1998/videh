@@ -1,5 +1,6 @@
-const { withDangerousMod } = require("expo/config-plugins");
+const fs = require("fs");
 const path = require("path");
+const { withDangerousMod } = require("expo/config-plugins");
 
 const ADI_REGISTRATION_TOKEN = "DWT6ACRQC3JDUAAAAAAAAAAAAA";
 
@@ -15,7 +16,6 @@ function withGooglePlayAdiRegistration(config) {
         "assets",
       );
 
-      const fs = require("fs");
       fs.mkdirSync(assetsDir, { recursive: true });
       fs.writeFileSync(
         path.join(assetsDir, "adi-registration.properties"),
@@ -63,9 +63,14 @@ module.exports = ({ config }) => {
   );
 
   const basePlugins = hasWebRtcPlugin ? plugins : [...plugins, withWebRtc];
+  const googleServicesPath = path.join(__dirname, "google-services.json");
 
   return withGooglePlayAdiRegistration({
     ...config,
+    android: {
+      ...config.android,
+      ...(fs.existsSync(googleServicesPath) ? { googleServicesFile: "./google-services.json" } : {}),
+    },
     web: {
       ...config.web,
       ...(vapidPublicKey ? { notification: { vapidPublicKey } } : {}),

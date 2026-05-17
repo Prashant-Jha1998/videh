@@ -479,16 +479,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Online presence tracking via AppState
   useEffect(() => {
+    const uid = userRef.current?.dbId;
+    if (uid && AppState.currentState === "active") {
+      api(`/users/${uid}/online`, { method: "POST" }).catch(() => {});
+    }
     const handleAppStateChange = (nextState: AppStateStatus) => {
-      const uid = userRef.current?.dbId;
-      if (!uid) return;
+      const activeUid = userRef.current?.dbId;
+      if (!activeUid) return;
       if (nextState === "active") {
-        api(`/users/${uid}/online`, { method: "POST" }).catch(() => {});
+        api(`/users/${activeUid}/online`, { method: "POST" }).catch(() => {});
         if (Platform.OS !== "web") {
           registerPushTokenWithServer(uid).catch(() => {});
         }
       } else if (nextState === "background" || nextState === "inactive") {
-        api(`/users/${uid}/offline`, { method: "POST" }).catch(() => {});
+        api(`/users/${activeUid}/offline`, { method: "POST" }).catch(() => {});
       }
     };
     const sub = AppState.addEventListener("change", handleAppStateChange);
@@ -505,6 +509,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       loadChats(u.dbId);
       loadCallLogs(u.dbId);
       loadStatuses(u.dbId);
+      api(`/users/${u.dbId}/online`, { method: "POST" }).catch(() => {});
       try {
         await api(`/users/${u.dbId}`, {
           method: "PUT",
@@ -1078,9 +1083,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const u = userRef.current;
     const sourceChat = chats.find((c) => c.id === chatId);
     const msg = sourceChat?.messages.find((m) => m.id === messageId);
-    if (!msg || !targetChatId || !u?.dbId) return;
+    if (!msg || !targetChatId || !u?.dbId || targetChatId === chatId) return;
+    if (msg.type === "deleted" || msg.isViewOnce) {
+      Alert.alert("Cannot forward", "This message cannot be forwarded inside Videh.");
+      return;
+    }
     const newForwardCount = (msg.forwardCount ?? 0) + 1;
     const tempId = "tmp_fwd_" + Date.now().toString();
+    const preview = msg.type === "image" ? "Photo" : msg.type === "video" ? "Video" : msg.text;
     const fwdMsg: Message = {
       id: tempId, text: msg.text, timestamp: Date.now(), senderId: "me",
       type: msg.type, status: "sent", mediaUrl: msg.mediaUrl,
@@ -1089,26 +1099,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setChats((prev) =>
       prev.map((c) =>
         c.id === targetChatId
-          ? { ...c, messages: [...c.messages, fwdMsg], lastMessage: msg.text, lastMessageTime: Date.now() }
+          ? { ...c, messages: [...c.messages, fwdMsg], lastMessage: preview, lastMessageTime: Date.now() }
           : c
       )
     );
     void (async () => {
-      const res = await fetch(`${BASE_URL}/api/chats/${targetChatId}/messages`, {
+      const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages/${messageId}/forward`, {
         method: "POST",
         headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           senderId: u.dbId,
-          content: msg.text,
-          type: msg.type,
-          mediaUrl: msg.mediaUrl ?? null,
-          isForwarded: true,
-          forwardCount: newForwardCount,
+          targetChatId: Number(targetChatId) || targetChatId,
         }),
       });
       const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
-      if (res.status === 403) {
-        const msg403 = typeof data.message === "string" ? data.message : "You are not allowed to send messages in this chat.";
+      if (!res.ok || !data.success) {
+        const msg403 = typeof data.message === "string"
+          ? data.message
+          : "Could not forward. Choose a Videh chat you can message.";
         Alert.alert("Cannot forward", msg403);
         setChats((prev) =>
           prev.map((c) =>
@@ -1117,7 +1125,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
         return;
       }
-      if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
+      if (data.message && typeof data.message === "object" && "id" in data.message) {
         const mid = data.message.id;
         setChats((prev) =>
           prev.map((c) =>
@@ -1127,7 +1135,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ),
         );
       }
-    })().catch(() => {});
+    })().catch(() => {
+      Alert.alert("Cannot forward", "Network error. Message was not forwarded.");
+    });
   }, [chats]);
 
   const starredMessages = chats.flatMap((c) => c.messages.filter((m) => m.isStarred));

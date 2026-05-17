@@ -2,7 +2,15 @@ import { Router, type Request, type Response } from "express";
 import { query } from "../lib/db";
 import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
-import { assertSameUser, issueSessionToken } from "../lib/auth";
+import { assertSameUser, getAuthUserId, issueSessionToken } from "../lib/auth";
+import {
+  ensurePrivacyColumns,
+  getPresenceForViewer,
+  getUserPrivacy,
+  privacyLabels,
+  type LastSeenPrivacy,
+  type OnlinePrivacy,
+} from "../lib/presencePrivacy";
 
 const router = Router();
 
@@ -58,12 +66,94 @@ router.get("/check-phone", async (req: Request, res: Response) => {
   } catch { res.status(500).json({ success: false }); }
 });
 
+// Privacy settings (must be before /:id)
+router.get("/:id/privacy", async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
+  try {
+    await ensurePrivacyColumns();
+    const privacy = await getUserPrivacy(Number(req.params.id));
+    if (!privacy) { res.status(404).json({ success: false }); return; }
+    const labels = privacyLabels(privacy.last_seen_privacy, privacy.online_privacy);
+    res.json({
+      success: true,
+      lastSeenPrivacy: privacy.last_seen_privacy,
+      onlinePrivacy: privacy.online_privacy,
+      lastSeenExceptIds: privacy.last_seen_except_ids,
+      lastSeenLabel: labels.lastSeenLabel,
+      onlineLabel: labels.onlineLabel,
+    });
+  } catch (err) {
+    req.log.error({ err }, "get privacy");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.patch("/:id/privacy", async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
+  const body = req.body as {
+    lastSeenPrivacy?: LastSeenPrivacy;
+    onlinePrivacy?: OnlinePrivacy;
+    lastSeenExceptIds?: number[];
+  };
+  try {
+    await ensurePrivacyColumns();
+    const current = await getUserPrivacy(Number(req.params.id));
+    if (!current) { res.status(404).json({ success: false }); return; }
+    const lastSeen = body.lastSeenPrivacy ?? current.last_seen_privacy;
+    const online = body.onlinePrivacy ?? current.online_privacy;
+    const exceptIds = Array.isArray(body.lastSeenExceptIds)
+      ? body.lastSeenExceptIds.map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0)
+      : current.last_seen_except_ids;
+    await query(
+      `UPDATE users SET last_seen_privacy = $1, online_privacy = $2, last_seen_except_ids = $3::jsonb, updated_at = NOW() WHERE id = $4`,
+      [lastSeen, online, JSON.stringify(exceptIds), req.params.id],
+    );
+    const labels = privacyLabels(lastSeen, online);
+    res.json({
+      success: true,
+      lastSeenPrivacy: lastSeen,
+      onlinePrivacy: online,
+      lastSeenExceptIds: exceptIds,
+      lastSeenLabel: labels.lastSeenLabel,
+      onlineLabel: labels.onlineLabel,
+    });
+  } catch (err) {
+    req.log.error({ err }, "patch privacy");
+    res.status(500).json({ success: false });
+  }
+});
+
+// Presence for chat header (authenticated viewer)
+router.get("/:id/presence", async (req: Request, res: Response) => {
+  const viewerId = getAuthUserId(req);
+  if (!viewerId) { res.status(401).json({ success: false, message: "Authentication required" }); return; }
+  const targetId = Number(req.params.id);
+  if (!targetId) { res.status(400).json({ success: false }); return; }
+  try {
+    const presence = await getPresenceForViewer(viewerId, targetId);
+    res.json({ success: true, presence });
+  } catch (err) {
+    req.log.error({ err }, "get presence");
+    res.status(500).json({ success: false });
+  }
+});
+
 // Get user profile
 router.get("/:id", async (req: Request, res: Response) => {
   try {
     const result = await query("SELECT id, phone, name, about, avatar_url, is_online, last_seen FROM users WHERE id = $1", [req.params.id]);
     if (result.rows.length === 0) { res.status(404).json({ success: false, message: "User not found" }); return; }
-    res.json({ success: true, user: result.rows[0] });
+    const viewerId = getAuthUserId(req);
+    let user = result.rows[0];
+    if (viewerId && viewerId !== Number(req.params.id)) {
+      const presence = await getPresenceForViewer(viewerId, Number(req.params.id));
+      user = {
+        ...user,
+        is_online: presence.canSee ? presence.isOnline : false,
+        last_seen: presence.canSee ? presence.lastSeen : null,
+      };
+    }
+    res.json({ success: true, user });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
   }
@@ -360,7 +450,7 @@ router.put("/:id/push-token", async (req: Request, res: Response) => {
   const { token, provider } = req.body as { token?: string; provider?: string };
   if (!assertSameUser(req, res, req.params.id)) return;
   if (!isValidPushToken(token)) {
-    res.status(400).json({ success: false, message: "Invalid push token (FCM or Expo required)" });
+    res.status(400).json({ success: false, message: "Invalid push token (FCM, Expo, or Web Push required)" });
     return;
   }
   try {

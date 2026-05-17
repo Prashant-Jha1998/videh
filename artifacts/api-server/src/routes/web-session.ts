@@ -196,6 +196,13 @@ async function sendMessageForWeb(req: Request, res: Response, chatId: string | n
     res.status(400).json({ success: false, message: "Message content or media is required." });
     return;
   }
+  if (isForwarded) {
+    res.status(400).json({
+      success: false,
+      message: "Forward messages only inside the Videh app using the forward action.",
+    });
+    return;
+  }
   const permission = await canSendToChat(chatId, userId);
   if (!permission.ok) {
     res.status(403).json({ success: false, message: permission.message });

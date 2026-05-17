@@ -39,3 +39,7 @@ yarn-error.*
 .vercel
 
 .env
+
+# Firebase (download from console; do not commit)
+google-services.json
+GoogleService-Info.plist

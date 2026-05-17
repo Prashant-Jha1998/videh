@@ -1,8 +1,10 @@
+import { sendFcmChatPush, isFcmConfigured } from "./fcmPush";
 import { sendWebPushChatPush, isWebPushConfigured } from "./webPush";
 import { sendExpoChatPush, sendExpoPush } from "./expoPush";
-import { isExpoPushToken, isValidPushToken, splitPushTokens } from "./pushTokens";
+import { isValidPushToken, splitPushTokens } from "./pushTokens";
 
-export { isExpoPushToken, isWebPushToken, isValidPushToken } from "./pushTokens";
+export { isExpoPushToken, isFcmPushToken, isWebPushToken, isValidPushToken } from "./pushTokens";
+export { isFcmConfigured } from "./fcmPush";
 export { isWebPushConfigured } from "./webPush";
 
 type ChatPushOptions = {
@@ -11,7 +13,7 @@ type ChatPushOptions = {
   isCall?: boolean;
 };
 
-/** VAPID Web Push (your keys) first; Expo push relay as fallback for mobile. */
+/** FCM (WhatsApp-style on Android) → Web Push (web) → Expo relay fallback. */
 export async function sendChatPush(
   to: string | string[],
   title: string,
@@ -22,15 +24,19 @@ export async function sendChatPush(
   const tokens = (Array.isArray(to) ? to : [to]).filter((t): t is string => isValidPushToken(t));
   if (tokens.length === 0) return;
 
-  const { webpush, expo } = splitPushTokens(tokens);
+  const { fcm, webpush, expo } = splitPushTokens(tokens);
   const tasks: Promise<void>[] = [];
 
-  if (webpush.length > 0) {
-    if (isWebPushConfigured()) {
-      tasks.push(sendWebPushChatPush(webpush, title, body, data));
+  if (fcm.length > 0) {
+    if (isFcmConfigured()) {
+      tasks.push(sendFcmChatPush(fcm, title, body, data, { isCall: options?.isCall }));
     } else {
-      console.warn("Web push tokens present but VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY not set on server");
+      console.warn("FCM tokens present but FIREBASE_SERVICE_ACCOUNT_JSON is not set on server");
     }
+  }
+
+  if (webpush.length > 0 && isWebPushConfigured()) {
+    tasks.push(sendWebPushChatPush(webpush, title, body, data));
   }
 
   if (expo.length > 0) {
@@ -49,25 +55,33 @@ export async function sendPushBatch(
     isCall?: boolean;
   }>,
 ): Promise<void> {
-  const webpush = messages.filter((m) => m.token && !isExpoPushToken(m.token)).map((m) => m.token!);
-  const expo = messages.filter((m) => m.token && isExpoPushToken(m.token));
+  const tokens = messages.map((m) => m.token).filter((t): t is string => Boolean(t && isValidPushToken(t)));
+  if (tokens.length === 0) return;
+
+  const { fcm, webpush, expo } = splitPushTokens(tokens);
+  const first = messages[0];
+
+  if (fcm.length > 0 && isFcmConfigured()) {
+    await sendFcmChatPush(fcm, first.title, first.body, first.data, { isCall: first.isCall });
+  }
 
   if (webpush.length > 0 && isWebPushConfigured()) {
-    const first = messages.find((m) => m.token && !isExpoPushToken(m.token))!;
     await sendWebPushChatPush(webpush, first.title, first.body, first.data);
   }
 
   if (expo.length > 0) {
     sendExpoPush(
-      expo.map((m) => ({
-        to: m.token!,
-        title: m.title,
-        body: m.body,
-        data: m.data,
-        sound: "default",
-        priority: "high",
-        channelId: m.isCall ? "calls" : "messages",
-      })),
+      messages
+        .filter((m) => m.token && splitPushTokens([m.token]).expo.length > 0)
+        .map((m) => ({
+          to: m.token!,
+          title: m.title,
+          body: m.body,
+          data: m.data,
+          sound: "default",
+          priority: "high",
+          channelId: m.isCall ? "calls" : "messages",
+        })),
     );
   }
 }

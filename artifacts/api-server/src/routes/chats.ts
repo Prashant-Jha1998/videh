@@ -9,9 +9,10 @@ import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { enforceModerationForActivity } from "../lib/moderation";
 import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
-import { assertSameUser, requireAuth } from "../lib/auth";
+import { assertSameUser, getAuthUserId, requireAuth } from "../lib/auth";
 import { publicMediaUrl } from "../lib/mediaStorage";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
+import { getPresenceForViewer } from "../lib/presencePrivacy";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -204,7 +205,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
       LEFT JOIN LATERAL (
         SELECT json_agg(json_build_object(
             'id', u.id, 'name', u.name, 'phone', u.phone,
-            'avatar_url', u.avatar_url, 'is_online', u.is_online
+            'avatar_url', u.avatar_url, 'is_online', u.is_online, 'last_seen', u.last_seen
           )) AS members
         FROM chat_members cm2
         JOIN users u ON u.id = cm2.user_id
@@ -213,7 +214,17 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
       ORDER BY last_msg.last_created_at DESC NULLS LAST
     `, [userId]);
 
-    res.json({ success: true, chats: result.rows });
+    const viewerId = Number(userId);
+    const chats = result.rows;
+    for (const chat of chats) {
+      if (chat.is_group || !chat.other_members?.[0]) continue;
+      const other = chat.other_members[0];
+      const presence = await getPresenceForViewer(viewerId, Number(other.id));
+      other.is_online = presence.canSee && presence.isOnline;
+      other.last_seen = presence.canSee ? presence.lastSeen : null;
+    }
+
+    res.json({ success: true, chats });
   } catch (err) {
     req.log.error({ err }, "get chats error");
     res.status(500).json({ success: false, message: "Server error" });
@@ -553,6 +564,13 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
   };
   if (!senderId || !content) { res.status(400).json({ success: false }); return; }
   if (!assertSameUser(req, res, senderId)) return;
+  if (isForwarded) {
+    res.status(400).json({
+      success: false,
+      message: "Use POST /chats/:chatId/messages/:messageId/forward to forward inside Videh only.",
+    });
+    return;
+  }
   try {
     const activityType = type === "video" ? "video_share" : type === "contact" ? "contact_share" : "chat_message";
     const mod = await enforceModerationForActivity(senderId, activityType, {
@@ -660,6 +678,147 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     res.json({ success: true, message: result.rows[0] });
   } catch (err) {
     req.log.error({ err }, "send message error");
+    res.status(500).json({ success: false });
+  }
+});
+
+/** Forward message to another Videh chat only (no external apps). */
+router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Response) => {
+  const { chatId: sourceChatId, messageId } = req.params;
+  const { senderId, targetChatId } = req.body as { senderId?: number; targetChatId?: number | string };
+  if (!senderId || !targetChatId) {
+    res.status(400).json({ success: false, message: "senderId and targetChatId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, senderId)) return;
+  const targetId = String(targetChatId);
+  if (targetId === String(sourceChatId)) {
+    res.status(400).json({ success: false, message: "Choose a different Videh chat to forward to." });
+    return;
+  }
+
+  try {
+    const sourcePerm = await evaluateGroupSendPermission(sourceChatId, senderId);
+    const targetPerm = await evaluateGroupSendPermission(targetId, senderId);
+    if (!sourcePerm || !targetPerm) {
+      res.status(403).json({ success: false, message: "You are not a member of one of these chats." });
+      return;
+    }
+    if (!targetPerm.ok) {
+      res.status(403).json({
+        success: false,
+        message: targetPerm.code === "admins_only"
+          ? "Only group admins can send messages in that group."
+          : "You cannot forward to that group.",
+      });
+      return;
+    }
+    if (!targetPerm.isGroup && await directChatBlocked(targetId, senderId)) {
+      res.status(403).json({ success: false, message: "You cannot forward to this contact." });
+      return;
+    }
+
+    const src = await query(
+      `SELECT id, content, type, media_url, is_deleted, is_view_once, forward_count
+       FROM messages WHERE id = $1 AND chat_id = $2`,
+      [messageId, sourceChatId],
+    );
+    const original = src.rows[0];
+    if (!original) {
+      res.status(404).json({ success: false, message: "Message not found" });
+      return;
+    }
+    if (original.is_deleted) {
+      res.status(400).json({ success: false, message: "Deleted messages cannot be forwarded." });
+      return;
+    }
+    if (original.is_view_once) {
+      res.status(400).json({ success: false, message: "View-once messages cannot be forwarded." });
+      return;
+    }
+
+    const newForwardCount = Number(original.forward_count ?? 0) + 1;
+    const content = String(original.content ?? "");
+    const messageType = String(original.type ?? "text");
+    const mediaUrl = original.media_url ?? null;
+
+    const mod = await enforceModerationForActivity(senderId, "chat_message", {
+      content,
+      mediaUrl,
+      type: messageType,
+    });
+    if (!mod.allowed) {
+      res.status(403).json({
+        success: false,
+        code: mod.code,
+        message: mod.message,
+        suspendedUntil: mod.suspendedUntil ?? null,
+        alert: mod.alert,
+        strikeCount: mod.strikeCount,
+      });
+      return;
+    }
+
+    const result = await query(
+      `INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once)
+       VALUES ($1, $2, $3, $4, NULL, $5, TRUE, $6, FALSE)
+       RETURNING *`,
+      [targetId, senderId, content, messageType, mediaUrl, newForwardCount],
+    );
+
+    const members = await query(
+      `SELECT u.id AS user_id, u.push_token, u.name, cm.is_muted
+       FROM chat_members cm
+       JOIN users u ON u.id = cm.user_id
+       WHERE cm.chat_id = $1 AND cm.user_id != $2`,
+      [targetId, senderId],
+    );
+    const recipientIds = members.rows.map((member: { user_id: number }) => Number(member.user_id)).filter(Boolean);
+    if (recipientIds.length > 0) {
+      await query(
+        `INSERT INTO message_status (message_id, user_id, status)
+         SELECT $1, unnest($2::int[]), 'delivered'
+         ON CONFLICT (message_id, user_id)
+         DO UPDATE SET status = 'delivered', updated_at = NOW()`,
+        [result.rows[0].id, recipientIds],
+      );
+    }
+
+    const senderRow = await query("SELECT name FROM users WHERE id = $1", [senderId]);
+    const senderName = senderRow.rows[0]?.name ?? "Videh";
+    const notifyMembers = members.rows.filter((m: { is_muted: boolean }) => !m.is_muted);
+    const tokens = notifyMembers
+      .map((m: { push_token: string | null }) => m.push_token)
+      .filter((t: unknown): t is string => isValidPushToken(t));
+    if (tokens.length > 0) {
+      const preview = content.length > 60 ? `${content.slice(0, 60)}...` : content;
+      await sendChatPush(
+        tokens,
+        senderName,
+        preview || "Forwarded message",
+        {
+          chatId: targetId,
+          messageId: String(result.rows[0].id),
+          senderId: String(senderId),
+          senderName,
+          messageType,
+          type: "message",
+          notificationKind: "chat_message",
+        },
+        { categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID, threadId: `chat-${targetId}` },
+      );
+    }
+
+    publishChatEvent({
+      type: "message",
+      chatId: targetId,
+      userIds: [senderId, ...recipientIds],
+      payload: { messageId: result.rows[0].id },
+    });
+
+    res.json({ success: true, message: result.rows[0], targetChatId: targetId });
+  } catch (err) {
+    req.log.error({ err }, "forward message error");
     res.status(500).json({ success: false });
   }
 });
@@ -881,6 +1040,7 @@ router.get("/:chatId/details", async (req: Request, res: Response) => {
 // Get group members (with real data)
 router.get("/:chatId/members", async (req: Request, res: Response) => {
   const { chatId } = req.params;
+  const viewerId = getAuthUserId(req) ?? Number((req.query as { userId?: string }).userId);
   try {
     const result = await query(`
       SELECT u.id, u.name, u.phone, u.avatar_url, u.about, u.is_online, u.last_seen,
@@ -889,7 +1049,16 @@ router.get("/:chatId/members", async (req: Request, res: Response) => {
       WHERE cm.chat_id = $1
       ORDER BY cm.is_admin DESC, u.name ASC
     `, [chatId]);
-    res.json({ success: true, members: result.rows });
+    const members = result.rows;
+    if (viewerId) {
+      for (const m of members) {
+        if (Number(m.id) === viewerId) continue;
+        const presence = await getPresenceForViewer(viewerId, Number(m.id));
+        m.is_online = presence.canSee && presence.isOnline;
+        m.last_seen = presence.canSee ? presence.lastSeen : null;
+      }
+    }
+    res.json({ success: true, members });
   } catch { res.status(500).json({ success: false }); }
 });
 

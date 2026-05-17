@@ -29,6 +29,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { formatTime } from "@/utils/time";
+import { formatPresenceSubtitle } from "@/lib/presence";
 import { getApiUrl } from "@/lib/api";
 
 const BASE_URL = getApiUrl();
@@ -614,18 +615,12 @@ export default function ChatInfoScreen() {
     router.push({ pathname: "/chat/[id]", params: { id: chatId, name: member.name } });
   };
 
-  const getLastSeenText = (m: GroupMember) => {
-    if (m.is_online) return "online";
-    if (!m.last_seen) return "last seen recently";
-    const d = new Date(m.last_seen);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffHrs = diffMs / 3600000;
-    if (diffHrs < 1) return `last seen ${Math.round(diffMs / 60000)} min ago`;
-    if (diffHrs < 24) return `last seen today at ${formatTime(new Date(m.last_seen).getTime())}`;
-    if (diffHrs < 48) return `last seen yesterday at ${formatTime(new Date(m.last_seen).getTime())}`;
-    return `last seen ${d.toLocaleDateString()}`;
-  };
+  const getLastSeenText = (m: GroupMember) =>
+    formatPresenceSubtitle({
+      canSee: true,
+      isOnline: m.is_online,
+      lastSeen: m.last_seen ?? null,
+    }) || "last seen recently";
 
   const chatLastSeen = members.find(m => m.id !== user?.dbId);
 

@@ -19,6 +19,13 @@ import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
 
 const VISIBILITY_OPTIONS = ["Everyone", "My contacts", "Nobody"];
+
+const LAST_SEEN_LABELS: Record<string, string> = {
+  everyone: "Everyone",
+  contacts: "My contacts",
+  contacts_except: "My contacts except...",
+  nobody: "Nobody",
+};
 const BASE_URL = getApiUrl();
 
 function VisibilityChooser({ label, value, onChange, colors }: { label: string; value: string; onChange: (v: string) => void; colors: any }) {
@@ -44,6 +51,7 @@ export default function PrivacySettingsScreen() {
   const { user, unblockUser } = useApp();
 
   const [lastSeen, setLastSeen] = useState("My contacts");
+  const [onlinePrivacy, setOnlinePrivacy] = useState("Same as last seen");
   const [profilePhoto, setProfilePhoto] = useState("My contacts");
   const [about, setAbout] = useState("My contacts");
   const [status, setStatus] = useState("My contacts");
@@ -66,6 +74,30 @@ export default function PrivacySettingsScreen() {
   useEffect(() => {
     void loadBlocked();
   }, [loadBlocked]);
+
+  const loadPrivacy = useCallback(async () => {
+    if (!user?.dbId) return;
+    try {
+      const stored = await import("@react-native-async-storage/async-storage").then((m) =>
+        m.default.getItem("videh_user"),
+      );
+      const token = stored ? JSON.parse(stored).sessionToken : undefined;
+      const res = await fetch(`${BASE_URL}/api/users/${user.dbId}/privacy`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json();
+      if (data.success) {
+        setLastSeen(data.lastSeenLabel ?? LAST_SEEN_LABELS[data.lastSeenPrivacy] ?? "My contacts");
+        setOnlinePrivacy(data.onlineLabel ?? "Same as last seen");
+      }
+    } catch {
+      // keep defaults
+    }
+  }, [user?.dbId]);
+
+  useEffect(() => {
+    void loadPrivacy();
+  }, [loadPrivacy]);
 
   const openBlocked = async () => {
     await loadBlocked();
@@ -101,7 +133,19 @@ export default function PrivacySettingsScreen() {
         {/* Who can see info */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Who can see my personal info</Text>
-          <VisibilityChooser label="Last seen" value={lastSeen} onChange={setLastSeen} colors={colors} />
+          <TouchableOpacity
+            style={[styles.privacyRow, { borderBottomColor: colors.border }]}
+            onPress={() => router.push("/settings/last-seen-online")}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.privacyLabel, { color: colors.foreground }]}>Last seen and online</Text>
+            <View style={styles.privacyRight}>
+              <Text style={[styles.privacyValue, { color: colors.mutedForeground }]} numberOfLines={1}>
+                {lastSeen === "Nobody" ? "Nobody" : onlinePrivacy === "Everyone" ? "Everyone" : lastSeen}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+            </View>
+          </TouchableOpacity>
           <VisibilityChooser label="Profile photo" value={profilePhoto} onChange={setProfilePhoto} colors={colors} />
           <VisibilityChooser label="About" value={about} onChange={setAbout} colors={colors} />
           <VisibilityChooser label="Status" value={status} onChange={setStatus} colors={colors} />

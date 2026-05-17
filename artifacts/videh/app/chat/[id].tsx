@@ -51,6 +51,9 @@ import {
   staticMapImageUrl,
 } from "@/lib/locationMessage";
 import { loadEnterIsSend } from "@/lib/chatSettings";
+import { formatPresenceSubtitle, type PresenceView } from "@/lib/presence";
+import { safeJsonParse } from "@/lib/safeJson";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Svg, { Path } from "react-native-svg";
 
 const BASE_URL = getApiUrl();
@@ -715,6 +718,7 @@ export default function ChatScreen() {
   const [initializing, setInitializing] = useState(rawId?.startsWith("new_") ?? false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [typingNames, setTypingNames] = useState<string[]>([]);
+  const [peerPresence, setPeerPresence] = useState<PresenceView | null>(null);
 
   // Search
   const [searching, setSearching] = useState(false);
@@ -732,6 +736,7 @@ export default function ChatScreen() {
 
   // Forward modal
   const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
+  const [forwardSearch, setForwardSearch] = useState("");
 
   // Share contact — full-screen picker (Alert.alert only fits ~3 buttons on Android)
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
@@ -796,8 +801,34 @@ export default function ChatScreen() {
           typingPollInFlightRef.current = false;
         }
       }, 3000);
-      return () => { clearInterval(msgTimer); clearInterval(typingTimer); };
-    }, [chatId, user?.dbId])
+      const peerId = chats.find((c) => c.id === chatId)?.otherUserId;
+      const isGroupChat = chats.find((c) => c.id === chatId)?.isGroup;
+      const loadPresence = async () => {
+        if (!peerId || isGroupChat) {
+          setPeerPresence(null);
+          return;
+        }
+        try {
+          const stored = await AsyncStorage.getItem("videh_user");
+          const token = safeJsonParse<{ sessionToken?: string } | null>(stored, null)?.sessionToken;
+          const res = await fetch(`${BASE_URL}/api/users/${peerId}/presence`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          const data = await res.json() as { success?: boolean; presence?: PresenceView };
+          if (data.success && data.presence) setPeerPresence(data.presence);
+        } catch {
+          // keep previous
+        }
+      };
+      void loadPresence();
+      const presenceTimer = !isGroupChat && peerId ? setInterval(loadPresence, 5000) : null;
+
+      return () => {
+        clearInterval(msgTimer);
+        clearInterval(typingTimer);
+        if (presenceTimer) clearInterval(presenceTimer);
+      };
+    }, [chatId, user?.dbId, chats])
   );
 
   const webEnterSend = Platform.OS === "web" && enterIsSend;
@@ -818,6 +849,25 @@ export default function ChatScreen() {
   const listRows = useMemo(() => messagesWithDateRows(messages), [messages]);
 
   const peerNameForVideo = name ?? chat?.name ?? "Chat";
+
+  const videhForwardTargets = useMemo(() => {
+    const q = forwardSearch.trim().toLowerCase();
+    return chats.filter((c) => {
+      if (!c.id || c.id.startsWith("new_") || c.id === chatId) return false;
+      if (!q) return true;
+      return c.name.toLowerCase().includes(q);
+    });
+  }, [chats, chatId, forwardSearch]);
+
+  const headerStatusText = useMemo(() => {
+    if (typingNames.length > 0) return "typing...";
+    if (chat?.isGroup) return `${chat.members?.length ?? ""} members`;
+    if (initializing) return "connecting...";
+    const fromPresence = formatPresenceSubtitle(peerPresence ?? undefined);
+    if (fromPresence) return fromPresence;
+    if (chat?.isOnline) return "online";
+    return "";
+  }, [typingNames, chat?.isGroup, chat?.members?.length, chat?.isOnline, initializing, peerPresence]);
 
   const [groupSendPermission, setGroupSendPermission] = useState<{ canSend: boolean; policy: string } | null>(null);
   const [blockState, setBlockState] = useState<{ iBlockedThem: boolean; theyBlockedMe: boolean }>({ iBlockedThem: false, theyBlockedMe: false });
@@ -1381,7 +1431,7 @@ export default function ChatScreen() {
       { text: "↩ Reply", onPress: () => { setReplyTo({ id: msg.id, text: msg.text, senderId: msg.senderId, senderName: msg.senderName }); inputRef.current?.focus(); } },
       { text: "📋 Copy", onPress: () => { Clipboard.setString(msg.text); } },
       { text: "😊 React", onPress: () => setReactionTarget(msg) },
-      { text: "↗ Forward", onPress: () => setForwardMsg(msg) },
+      ...(!msg.isViewOnce ? [{ text: "↗ Forward to Videh chat", onPress: () => { setForwardSearch(""); setForwardMsg(msg); } }] : []),
       { text: "⭐ Star", onPress: () => { if (chatId) starMessage(chatId, msg.id); } },
       { text: "🌐 Translate", onPress: () => Alert.alert("Translate to:", "", [
           { text: "हिंदी (Hindi)", onPress: () => translateMsg(msg, "hi") },
@@ -1962,7 +2012,8 @@ export default function ChatScreen() {
                   style={styles.headerBtn}
                   onPress={() => {
                     const m = allMessages.find((x) => x.id === selectedIds[0]);
-                    if (!m || m.type === "deleted") return;
+                    if (!m || m.type === "deleted" || m.isViewOnce) return;
+                    setForwardSearch("");
                     setForwardMsg(m);
                     clearSelection();
                   }}
@@ -2020,11 +2071,7 @@ export default function ChatScreen() {
           >
             <Text style={styles.headerName} numberOfLines={1}>{displayName}</Text>
             <Text style={[styles.headerStatus, typingNames.length > 0 && { color: "#a7f3d0" }]}>
-              {typingNames.length > 0
-                ? "typing..."
-                : chat?.isGroup
-                  ? `${chat.members?.length ?? ""} members`
-                  : initializing ? "connecting..." : chat?.isOnline ? "online" : "tap for info"}
+              {headerStatusText}
             </Text>
           </TouchableOpacity>
 
@@ -2556,23 +2603,43 @@ export default function ChatScreen() {
       </Modal>
 
       {/* Forward modal */}
-      <DismissibleModal visible={!!forwardMsg} onClose={() => setForwardMsg(null)} animationType="slide">
+      <DismissibleModal visible={!!forwardMsg} onClose={() => { setForwardMsg(null); setForwardSearch(""); }} animationType="slide">
         <View style={styles.forwardModalWrap}>
           <View style={[styles.forwardSheet, { backgroundColor: colors.card }]}>
-            <Text style={[styles.attachTitle, { color: colors.foreground }]}>Forward to</Text>
-            <ScrollView>
-              {chats.map((c) => (
+            <Text style={[styles.attachTitle, { color: colors.foreground }]}>Forward to Videh chat</Text>
+            <Text style={[styles.forwardHint, { color: colors.mutedForeground }]}>
+              Only your Videh contacts and groups. Not shared to WhatsApp or other apps.
+            </Text>
+            <TextInput
+              value={forwardSearch}
+              onChangeText={setForwardSearch}
+              placeholder="Search chats"
+              placeholderTextColor={colors.mutedForeground}
+              style={[styles.forwardSearchInput, { color: colors.foreground, borderColor: colors.border }]}
+            />
+            <ScrollView keyboardShouldPersistTaps="handled">
+              {videhForwardTargets.length === 0 ? (
+                <Text style={[styles.forwardEmpty, { color: colors.mutedForeground }]}>
+                  No other Videh chats found.
+                </Text>
+              ) : videhForwardTargets.map((c) => (
                 <TouchableOpacity key={c.id} style={styles.forwardRow} onPress={() => {
                   if (chatId && forwardMsg) { forwardMessage(chatId, forwardMsg.id, c.id); }
                   setForwardMsg(null);
-                  Alert.alert("Forwarded", `Message forwarded to ${c.name}`);
+                  setForwardSearch("");
+                  Alert.alert("Forwarded", `Sent to ${c.name} on Videh`);
                 }}>
                   <View style={[styles.forwardAvatar, { backgroundColor: `hsl(${(c.name.charCodeAt(0) * 37) % 360},50%,40%)` }]}>
                     {c.avatar ? <Image source={{ uri: c.avatar }} style={{ width: 40, height: 40, borderRadius: 20 }} contentFit="cover" /> : (
                       <Text style={{ color: "#fff", fontFamily: "Inter_700Bold" }}>{c.name[0]?.toUpperCase()}</Text>
                     )}
                   </View>
-                  <Text style={[styles.forwardName, { color: colors.foreground }]}>{c.name}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.forwardName, { color: colors.foreground }]}>{c.name}</Text>
+                    <Text style={[styles.forwardSub, { color: colors.mutedForeground }]}>
+                      {c.isGroup ? "Group" : "Videh contact"}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -2971,8 +3038,20 @@ const styles = StyleSheet.create({
   deleteAction: { paddingVertical: 10 },
   deleteActionText: { fontSize: 17, color: "#0f9d7a", fontFamily: "Inter_500Medium", textAlign: "center" },
   deleteCancelText: { fontSize: 17, color: "#64748b", fontFamily: "Inter_500Medium", textAlign: "center" },
-  forwardSheet: { borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, maxHeight: "60%" },
+  forwardSheet: { borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, maxHeight: "70%" },
+  forwardHint: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18, marginBottom: 10 },
+  forwardSearchInput: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === "ios" ? 10 : 8,
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+    marginBottom: 8,
+  },
+  forwardEmpty: { textAlign: "center", paddingVertical: 24, fontFamily: "Inter_400Regular", fontSize: 14 },
   forwardRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 12 },
+  forwardSub: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
   forwardAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   forwardName: { fontSize: 15, fontFamily: "Inter_500Medium", flex: 1 },
   mediaPreviewModal: { flex: 1, backgroundColor: "rgba(0,0,0,0.98)" },

@@ -16,13 +16,6 @@ export const NOTIFICATION_ACTION_MUTE = "mute_chat";
 export const NOTIFICATION_ACTION_ACCEPT_CALL = "accept_call";
 export const NOTIFICATION_ACTION_DECLINE_CALL = "decline_call";
 
-export function getVapidPublicKey(): string | undefined {
-  const extra = Constants.expoConfig?.extra as { vapidPublicKey?: string } | undefined;
-  return extra?.vapidPublicKey?.trim()
-    || process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY?.trim()
-    || undefined;
-}
-
 export async function ensureVidehNotificationSetup(): Promise<void> {
   if (Platform.OS === "web") return;
   await Notifications.setNotificationCategoryAsync(VIDEH_CHAT_MESSAGE_CATEGORY_ID, [
@@ -79,35 +72,60 @@ function getExpoProjectId(): string | undefined {
   return extra?.eas?.projectId ?? Constants.easConfig?.projectId;
 }
 
-export type PushProvider = "webpush" | "expo";
+function getVapidPublicKey(): string | undefined {
+  const extra = Constants.expoConfig?.extra as { vapidPublicKey?: string } | undefined;
+  return extra?.vapidPublicKey?.trim() || process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY?.trim();
+}
+
+export type PushProvider = "fcm" | "expo" | "webpush";
+
+async function requestNotificationPermission(): Promise<boolean> {
+  const { status: existing } = await Notifications.getPermissionsAsync();
+  if (existing === "granted") return true;
+  const { status } = await Notifications.requestPermissionsAsync();
+  return status === "granted";
+}
 
 /**
- * Registers VAPID Web Push subscription (web) or Expo push token (native APK fallback).
+ * Native: FCM device token (WhatsApp-style on Android).
+ * Web: optional VAPID subscription.
+ * Expo Go fallback: Expo push token.
  */
 export async function registerPushTokenWithServer(dbId: number): Promise<void> {
   if (!dbId) return;
   await ensureVidehNotificationSetup();
 
+  if (!(await requestNotificationPermission())) {
+    throw new Error("Notification permission not granted");
+  }
+
   let token: string | null = null;
-  let provider: PushProvider = "expo";
+  let provider: PushProvider = "fcm";
 
   if (Platform.OS === "web") {
     const vapidPublicKey = getVapidPublicKey();
-    if (!vapidPublicKey) throw new Error("EXPO_PUBLIC_VAPID_PUBLIC_KEY is not configured");
-    const subscription = await getWebPushSubscriptionJson(vapidPublicKey);
-    if (!subscription) throw new Error("Could not subscribe to Web Push (VAPID)");
-    token = encodeWebPushToken(subscription);
-    provider = "webpush";
-  } else {
-    const { status: existing } = await Notifications.getPermissionsAsync();
-    let finalStatus = existing;
-    if (existing !== "granted") {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
+    if (vapidPublicKey) {
+      const subscription = await getWebPushSubscriptionJson(vapidPublicKey);
+      if (subscription) {
+        token = encodeWebPushToken(subscription);
+        provider = "webpush";
+      }
     }
-    if (finalStatus !== "granted") {
-      throw new Error("Notification permission not granted");
+  }
+
+  if (!token && Platform.OS !== "web") {
+    try {
+      const device = await Notifications.getDevicePushTokenAsync();
+      if (device?.data && device.data.length >= 20) {
+        token = device.data;
+        provider = "fcm";
+      }
+    } catch {
+      // google-services.json missing or Expo Go
     }
+  }
+
+  if (!token) {
     const projectId = getExpoProjectId();
     const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {});
     token = tokenData.data;

@@ -87,40 +87,6 @@
         font-size: 0.92rem;
         line-height: 1.55;
       }
-      .owner-card {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 32px;
-        background: var(--card);
-        border-radius: 20px;
-        padding: 32px;
-        box-shadow: 0 10px 32px rgba(17, 27, 33, 0.08);
-      }
-      .owner-photo {
-        width: 180px;
-        height: 180px;
-        border-radius: 50%;
-        object-fit: cover;
-        border: 4px solid var(--brand);
-        flex-shrink: 0;
-      }
-      .owner-info h2 {
-        margin: 0 0 6px;
-        font-size: 1.6rem;
-        color: var(--text);
-      }
-      .owner-role {
-        margin: 0 0 14px;
-        color: var(--brand);
-        font-weight: 600;
-        font-size: 0.95rem;
-      }
-      .owner-info p {
-        margin: 0;
-        color: var(--muted);
-        max-width: 520px;
-      }
       .links {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -167,15 +133,6 @@
       footer a {
         color: var(--brand);
         text-decoration: none;
-      }
-      @media (max-width: 640px) {
-        .owner-card {
-          flex-direction: column;
-          text-align: center;
-        }
-        .owner-info p {
-          max-width: none;
-        }
       }
     </style>
   </head>
@@ -271,29 +228,6 @@
       </section>
 
       <section>
-        <h2 class="section-title">Owner</h2>
-        <p class="section-sub">Built with care in India.</p>
-        <div class="owner-card">
-          <img
-            class="owner-photo"
-            src="/images/prashant-kumar.png"
-            alt="Prashant Kumar — Founder of Videh"
-            width="180"
-            height="180"
-          />
-          <div class="owner-info">
-            <h2>Prashant Kumar</h2>
-            <p class="owner-role">Founder &amp; Owner · Videh</p>
-            <p>
-              Videh is founded by Prashant Kumar with a vision to bring a fast, reliable, and
-              privacy-respecting messaging experience to users across India — combining chat,
-              calls, status, and practical tools like group ledger and SOS in one app.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section>
         <h2 class="section-title">Quick Links</h2>
         <div class="links">
           <div class="link-card">
@@ -326,7 +260,7 @@
     </main>
 
     <footer>
-      © Videh · New Delhi, India · Founded by Prashant Kumar ·
+      © Videh · New Delhi, India ·
       <a href="https://web.videh.co.in/privacy-policy/">Privacy</a> ·
       <a href="https://web.videh.co.in/data-deletion/">Data deletion</a>
     </footer>
