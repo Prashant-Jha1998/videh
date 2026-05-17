@@ -139,6 +139,26 @@ export const webApi = {
       body: JSON.stringify({ archived }),
     }),
   logout: (token: string) => request<{ success: true }>(`/web-session/${token}`, { method: "DELETE" }),
+  searchUsers: (token: string, q: string) =>
+    request<{ success: true; users: ChatMember[] }>(`/web-session/${token}/users/search?q=${encodeURIComponent(q)}`),
+  createDirectChat: (token: string, otherUserId: number) =>
+    request<{ success: true; chatId: number }>(`/web-session/${token}/chats/direct`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ otherUserId }),
+    }),
+  createGroup: (token: string, name: string, memberIds: number[]) =>
+    request<{ success: true; chatId: number }>(`/web-session/${token}/groups`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, memberIds }),
+    }),
+  updateProfile: (token: string, payload: { name?: string; about?: string }) =>
+    request<{ success: true; user: WebUser }>(`/web-session/${token}/profile`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
 };
 
 export function eventsUrl(token: string): string {

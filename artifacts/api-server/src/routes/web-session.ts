@@ -7,6 +7,7 @@ import multer from "multer";
 import { query } from "../lib/db";
 import { publicMediaUrl } from "../lib/mediaStorage";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
+import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -708,6 +709,151 @@ router.delete("/:token", async (req: Request, res: Response) => {
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "delete device error");
+    res.status(500).json({ success: false });
+  }
+});
+
+let groupMetadataEnsured = false;
+async function ensureGroupMetadataColumns(): Promise<void> {
+  if (groupMetadataEnsured) return;
+  await query("ALTER TABLE chats ADD COLUMN IF NOT EXISTS group_description TEXT");
+  await query("ALTER TABLE chats ADD COLUMN IF NOT EXISTS group_messaging_policy TEXT NOT NULL DEFAULT 'everyone'");
+  groupMetadataEnsured = true;
+}
+
+router.get("/:token/users/search", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const q = String(req.query.q ?? "").trim();
+  if (q.length < 1) {
+    res.json({ success: true, users: [] });
+    return;
+  }
+  try {
+    const result = await query(
+      `SELECT id, phone, name, avatar_url FROM users
+       WHERE id != $1 AND (phone LIKE $2 OR COALESCE(name, '') ILIKE $2)
+       ORDER BY name NULLS LAST
+       LIMIT 25`,
+      [session.userId, `%${q}%`],
+    );
+    res.json({ success: true, users: result.rows });
+  } catch (err) {
+    req.log.error({ err }, "web user search");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:token/chats/direct", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const { otherUserId } = req.body as { otherUserId?: number };
+  if (!otherUserId) {
+    res.status(400).json({ success: false, message: "otherUserId required" });
+    return;
+  }
+  try {
+    const block = await query(
+      `SELECT EXISTS(
+        SELECT 1 FROM blocked_users
+        WHERE (blocker_id = $1 AND blocked_id = $2)
+           OR (blocker_id = $2 AND blocked_id = $1)
+      ) AS blocked`,
+      [session.userId, otherUserId],
+    );
+    if (block.rows[0]?.blocked) {
+      res.status(403).json({ success: false, message: "You cannot start a chat with this contact." });
+      return;
+    }
+    const existing = await query(
+      `SELECT c.id FROM chats c
+       JOIN chat_members cm1 ON cm1.chat_id = c.id AND cm1.user_id = $1
+       JOIN chat_members cm2 ON cm2.chat_id = c.id AND cm2.user_id = $2
+       WHERE c.is_group = FALSE LIMIT 1`,
+      [session.userId, otherUserId],
+    );
+    if (existing.rows.length > 0) {
+      res.json({ success: true, chatId: existing.rows[0].id });
+      return;
+    }
+    const chat = await query("INSERT INTO chats (is_group) VALUES (FALSE) RETURNING id", []);
+    const chatId = chat.rows[0].id;
+    await query(
+      "INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2), ($1, $3)",
+      [chatId, session.userId, otherUserId],
+    );
+    res.json({ success: true, chatId });
+  } catch (err) {
+    req.log.error({ err }, "web direct chat");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:token/groups", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const { name, memberIds } = req.body as { name?: string; memberIds?: number[] };
+  const trimmedName = name?.trim() ?? "";
+  if (trimmedName.length < 3) {
+    res.status(400).json({ success: false, message: "Group name must be at least 3 characters" });
+    return;
+  }
+  if (!memberIds?.length) {
+    res.status(400).json({ success: false, message: "Add at least one member" });
+    return;
+  }
+  try {
+    await ensureGroupMetadataColumns();
+    const policy = await enforceGroupCreationPolicy(session.userId);
+    if (!policy.allowed) {
+      res.status(403).json({ success: false, message: policy.message });
+      return;
+    }
+    const chat = await query(
+      "INSERT INTO chats (is_group, group_name, created_by) VALUES (TRUE, $1, $2) RETURNING id",
+      [trimmedName, session.userId],
+    );
+    const chatId = chat.rows[0].id;
+    const allMembers = Array.from(new Set([session.userId, ...memberIds]));
+    for (const memberId of allMembers) {
+      await query(
+        "INSERT INTO chat_members (chat_id, user_id, is_admin, can_send_messages) VALUES ($1, $2, $3, TRUE)",
+        [chatId, memberId, memberId === session.userId],
+      );
+    }
+    res.json({ success: true, chatId });
+  } catch (err) {
+    req.log.error({ err }, "web create group");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.patch("/:token/profile", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const { name, about } = req.body as { name?: string; about?: string };
+  try {
+    const result = await query(
+      "UPDATE users SET name = COALESCE($1, name), about = COALESCE($2, about), updated_at = NOW() WHERE id = $3 RETURNING id, name, phone, about, avatar_url",
+      [name?.trim() ?? null, about?.trim() ?? null, session.userId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      res.status(404).json({ success: false });
+      return;
+    }
+    res.json({
+      success: true,
+      user: {
+        id: row.id,
+        name: row.name ?? "Videh User",
+        phone: row.phone,
+        about: row.about ?? "",
+        avatarUrl: row.avatar_url ?? undefined,
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "web profile update");
     res.status(500).json({ success: false });
   }
 });

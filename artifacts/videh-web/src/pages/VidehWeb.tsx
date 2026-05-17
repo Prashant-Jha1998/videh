@@ -1,15 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { webApi, type WebUser } from "../lib/webApi";
+import { DropdownMenu, EmojiPicker, ProfileModal, NewChatModal, useClickOutside } from "../components/web/WebOverlays";
 
 const API = "";
-
-interface WebUser {
-  id: number;
-  name: string;
-  phone: string;
-  about: string;
-  avatarUrl?: string;
-}
 
 interface ChatEntry {
   id: number;
@@ -28,6 +22,7 @@ interface Msg {
   sender_id: number;
   content: string;
   type: string;
+  media_url?: string;
   is_deleted: boolean;
   created_at: string;
   sender_name?: string;
@@ -45,9 +40,21 @@ export default function VidehWeb() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [msgText, setMsgText] = useState("");
   const [search, setSearch] = useState("");
+  const [sidebarMenuOpen, setSidebarMenuOpen] = useState(false);
+  const [chatMenuOpen, setChatMenuOpen] = useState(false);
+  const [newChatMode, setNewChatMode] = useState<"direct" | "group" | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState("");
+  const [uploading, setUploading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const sidebarMenuBtnRef = useRef<HTMLButtonElement>(null);
+  const chatMenuBtnRef = useRef<HTMLButtonElement>(null);
+  const emojiWrapRef = useRef<HTMLDivElement>(null);
 
   const getApiUrl = (path: string) => `${API}/api${path}`;
 
@@ -112,16 +119,72 @@ export default function VidehWeb() {
     if (!token || !activeChatId || !msgText.trim()) return;
     const text = msgText.trim();
     setMsgText("");
+    setEmojiOpen(false);
     try {
-      await fetch(getApiUrl(`/web-session/${token}/messages`), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId: String(activeChatId), content: text }),
-      });
+      await webApi.sendMessage(token, activeChatId, { content: text, type: "text" });
       await loadMessages(activeChatId);
       if (token) loadChats(token);
     } catch {}
   }, [token, activeChatId, msgText, loadMessages, loadChats]);
+
+  const handleLogout = useCallback(async () => {
+    if (!token) return;
+    try {
+      await webApi.logout(token);
+    } catch {}
+    localStorage.removeItem("videh_web_token");
+    stopPoll();
+    setToken(null);
+    setUser(null);
+    setChats([]);
+    setActiveChatId(null);
+    setStatus("loading");
+    const tok = await createSession();
+    if (tok) pollRef.current = setInterval(() => pollStatus(tok), 2000);
+  }, [token, createSession, pollStatus]);
+
+  const openChatById = useCallback(async (chatId: number) => {
+    if (token) await loadChats(token);
+    setActiveChatId(chatId);
+    setNewChatMode(null);
+    setSearch("");
+  }, [token, loadChats]);
+
+  const handleAttachment = useCallback(async (file: File) => {
+    if (!token || !activeChatId) return;
+    setUploading(true);
+    try {
+      const { url, mimeType } = await webApi.uploadMedia(token, file);
+      const type = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("video/") ? "video" : "document";
+      await webApi.sendMessage(token, activeChatId, { type, mediaUrl: url, content: file.name || "Attachment" });
+      await loadMessages(activeChatId);
+      loadChats(token);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }, [token, activeChatId, loadMessages, loadChats]);
+
+  const toggleMute = useCallback(async () => {
+    if (!token || !activeChatId) return;
+    const chat = chats.find((c) => c.id === activeChatId);
+    if (!chat) return;
+    try {
+      const muted = !chat.is_muted;
+      await webApi.mute(token, activeChatId, muted);
+      setChats((prev) => prev.map((c) => (c.id === activeChatId ? { ...c, is_muted: muted } : c)));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not update mute");
+    }
+  }, [token, activeChatId, chats]);
+
+  const saveProfile = useCallback(async (name: string, about: string) => {
+    if (!token) return;
+    const res = await webApi.updateProfile(token, { name, about });
+    setUser(res.user);
+    setProfileOpen(false);
+  }, [token]);
 
   useEffect(() => {
     const startNewSession = () => {
@@ -154,7 +217,13 @@ export default function VidehWeb() {
 
   useEffect(() => {
     if (activeChatId) loadMessages(activeChatId);
+    setChatSearchOpen(false);
+    setChatSearchQuery("");
+    setChatMenuOpen(false);
+    setEmojiOpen(false);
   }, [activeChatId]);
+
+  useClickOutside(emojiWrapRef, () => setEmojiOpen(false), emojiOpen);
 
   useEffect(() => {
     msgsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -189,6 +258,9 @@ export default function VidehWeb() {
 
   const filteredChats = chats.filter((c) => getChatName(c).toLowerCase().includes(search.toLowerCase()));
   const activeChat = chats.find((c) => c.id === activeChatId);
+  const displayMessages = chatSearchQuery.trim()
+    ? messages.filter((m) => !m.is_deleted && m.content.toLowerCase().includes(chatSearchQuery.toLowerCase()))
+    : messages;
 
   // ─── QR LANDING ───────────────────────────────────────────────────────────
   if (status !== "linked") {
@@ -330,7 +402,13 @@ export default function VidehWeb() {
 
         {/* Sidebar header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", backgroundColor: "#f0f2f5", height: 60 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setProfileOpen(true)}
+            onKeyDown={(e) => { if (e.key === "Enter") setProfileOpen(true); }}
+            style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", flex: 1, minWidth: 0 }}
+          >
             {user?.avatarUrl ? (
               <img src={user.avatarUrl} alt={user.name} style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover" }} />
             ) : (
@@ -338,15 +416,36 @@ export default function VidehWeb() {
                 <span style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{initials(user?.name ?? "V")}</span>
               </div>
             )}
-            <span style={{ fontWeight: 600, color: "#111b21", fontSize: 16 }}>{user?.name}</span>
+            <span style={{ fontWeight: 600, color: "#111b21", fontSize: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.name}</span>
           </div>
-          <div style={{ display: "flex", gap: 8, color: "#54656f" }}>
-            <button title="New chat" style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}>
+          <div style={{ display: "flex", gap: 8, color: "#54656f", position: "relative" }}>
+            <button
+              type="button"
+              title="New chat"
+              onClick={() => { setSidebarMenuOpen(false); setNewChatMode("direct"); }}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}
+            >
               <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M19.005 3.175H4.674C3.642 3.175 3 3.789 3 4.821V21.02l3.544-3.514h12.461c1.033 0 2.064-1.06 2.064-2.093V4.821c-.001-1.032-1.032-1.646-2.064-1.646zm-4.989 9.869H7.041V11.1h6.975v1.944zm3-4H7.041V7.1h9.975v1.944z"/></svg>
             </button>
-            <button title="Videh Web" style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}>
+            <button
+              ref={sidebarMenuBtnRef}
+              type="button"
+              title="Menu"
+              onClick={() => setSidebarMenuOpen((o) => !o)}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}
+            >
               <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z"/></svg>
             </button>
+            <DropdownMenu
+              open={sidebarMenuOpen}
+              onClose={() => setSidebarMenuOpen(false)}
+              anchorRef={sidebarMenuBtnRef}
+              items={[
+                { label: "New group", onClick: () => setNewChatMode("group") },
+                { label: "Refresh chats", onClick: () => token && loadChats(token) },
+                { label: "Log out", onClick: handleLogout, danger: true },
+              ]}
+            />
           </div>
         </div>
 
@@ -451,24 +550,57 @@ export default function VidehWeb() {
                 {activeChat.is_group ? "Group" : activeChat.other_members?.[0]?.is_online ? "online" : ""}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, color: "#54656f" }}>
-              <button style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}>
+            <div style={{ display: "flex", gap: 8, color: "#54656f", position: "relative", alignItems: "center" }}>
+              <button
+                type="button"
+                title="Search in chat"
+                onClick={() => setChatSearchOpen((o) => !o)}
+                style={{ background: chatSearchOpen ? "#e9edef" : "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}
+              >
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M15.9 14.3H15l-.3-.3c1-1.1 1.6-2.7 1.6-4.3 0-3.7-3-6.7-6.7-6.7S2.9 6 2.9 9.7s3 6.7 6.7 6.7c1.6 0 3.2-.6 4.3-1.6l.3.3v.8l5.1 5.1 1.5-1.5-4.9-5.2zm-6.2 0C7.1 14.3 4 11.3 4 7.6S7 .9 9.7.9s5.7 3 5.7 5.7-2.5 7.7-5.5 7.7z"/></svg>
               </button>
-              <button style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}>
+              <button
+                ref={chatMenuBtnRef}
+                type="button"
+                title="Chat menu"
+                onClick={() => setChatMenuOpen((o) => !o)}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}
+              >
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z"/></svg>
               </button>
+              <DropdownMenu
+                open={chatMenuOpen}
+                onClose={() => setChatMenuOpen(false)}
+                anchorRef={chatMenuBtnRef}
+                items={[
+                  { label: chatSearchOpen ? "Close search" : "Search messages", onClick: () => setChatSearchOpen((o) => !o) },
+                  { label: activeChat.is_muted ? "Unmute notifications" : "Mute notifications", onClick: toggleMute },
+                  { label: "Contact info", onClick: () => alert(`${getChatName(activeChat)}\n${activeChat.is_group ? "Group chat" : "Direct chat"}`) },
+                ]}
+              />
             </div>
           </div>
 
+          {chatSearchOpen && (
+            <div style={{ padding: "8px 16px", backgroundColor: "#f0f2f5", borderBottom: "1px solid #e9edef" }}>
+              <input
+                value={chatSearchQuery}
+                onChange={(e) => setChatSearchQuery(e.target.value)}
+                placeholder="Search in this chat"
+                autoFocus
+                style={{ width: "100%", padding: "8px 12px", border: "none", borderRadius: 8, fontSize: 14, outline: "none" }}
+              />
+            </div>
+          )}
+
           {/* Messages */}
           <div style={{ flex: 1, overflowY: "auto", padding: "20px 8% 8px" }}>
-            {messages.length === 0 && (
+            {displayMessages.length === 0 && messages.length === 0 && (
               <div style={{ textAlign: "center", color: "#667781", marginTop: 40 }}>
                 <p style={{ margin: 0, fontSize: 14 }}>No messages yet. Say hello! 👋</p>
               </div>
             )}
-            {messages.map((msg) => {
+            {displayMessages.map((msg) => {
               const isMe = msg.sender_id === user?.id;
               const isDeleted = msg.is_deleted;
               return (
@@ -484,8 +616,11 @@ export default function VidehWeb() {
                     {!isMe && !activeChat.is_group && msg.sender_name && (
                       <div style={{ fontSize: 12, fontWeight: 600, color: `hsl(${hue(msg.sender_name)},60%,40%)`, marginBottom: 2 }}>{msg.sender_name}</div>
                     )}
+                    {!isDeleted && msg.type === "image" && msg.media_url ? (
+                      <img src={msg.media_url} alt="" style={{ maxWidth: "100%", borderRadius: 8, marginBottom: 4 }} />
+                    ) : null}
                     <p style={{ margin: 0, fontSize: 14.5, color: "#111b21", lineHeight: 1.4, fontStyle: isDeleted ? "italic" : "normal" }}>
-                      {isDeleted ? "🚫 This message was deleted" : msg.content}
+                      {isDeleted ? "🚫 This message was deleted" : (msg.type !== "image" || !msg.media_url ? msg.content : "")}
                     </p>
                     <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 4, marginTop: 3 }}>
                       <span style={{ fontSize: 11, color: "#667781" }}>{formatTime(msg.created_at)}</span>
@@ -501,11 +636,43 @@ export default function VidehWeb() {
           </div>
 
           {/* Input bar */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", backgroundColor: "#f0f2f5" }}>
-            <button style={{ background: "none", border: "none", cursor: "pointer", color: "#54656f", padding: 6 }}>
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M9.153 11.603c.795 0 1.439-.879 1.439-1.962s-.644-1.962-1.439-1.962-1.439.879-1.439 1.962.644 1.962 1.439 1.962zm-3.204 1.362c-.026-.307-.131 5.218 6.063 5.551 6.066-.25 6.066-5.551 6.066-5.551-6.078 1.416-12.129 0-12.129 0zm11.363 1.108s-.669 1.959-5.051 1.959c-3.505 0-5.388-1.164-5.607-1.959 0 0 5.912 1.055 10.658 0zM11.804 1.011C5.609 1.011.978 6.033.978 12.228s4.826 10.761 11.021 10.761S23.02 18.423 23.02 12.228c.001-6.195-5.021-11.217-11.216-11.217zM12 21.354c-5.273 0-9.381-4.085-9.381-9.381 0-5.295 3.942-9.424 9.215-9.424 5.273 0 9.381 4.129 9.381 9.424-.001 5.297-3.942 9.381-9.215 9.381z"/></svg>
-            </button>
-            <button style={{ background: "none", border: "none", cursor: "pointer", color: "#54656f", padding: 6 }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*,.pdf,.doc,.docx"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void handleAttachment(file);
+              e.target.value = "";
+            }}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", backgroundColor: "#f0f2f5", position: "relative" }}>
+            <div ref={emojiWrapRef} style={{ position: "relative" }}>
+              <button
+                type="button"
+                title="Emoji"
+                onClick={() => setEmojiOpen((o) => !o)}
+                style={{ background: emojiOpen ? "#e9edef" : "none", border: "none", cursor: "pointer", color: "#54656f", padding: 6 }}
+              >
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M9.153 11.603c.795 0 1.439-.879 1.439-1.962s-.644-1.962-1.439-1.962-1.439.879-1.439 1.962.644 1.962 1.439 1.962zm-3.204 1.362c-.026-.307-.131 5.218 6.063 5.551 6.066-.25 6.066-5.551 6.066-5.551-6.078 1.416-12.129 0-12.129 0zm11.363 1.108s-.669 1.959-5.051 1.959c-3.505 0-5.388-1.164-5.607-1.959 0 0 5.912 1.055 10.658 0zM11.804 1.011C5.609 1.011.978 6.033.978 12.228s4.826 10.761 11.021 10.761S23.02 18.423 23.02 12.228c.001-6.195-5.021-11.217-11.216-11.217zM12 21.354c-5.273 0-9.381-4.085-9.381-9.381 0-5.295 3.942-9.424 9.215-9.424 5.273 0 9.381 4.129 9.381 9.424-.001 5.297-3.942 9.381-9.215 9.381z"/></svg>
+              </button>
+              {emojiOpen && (
+                <EmojiPicker
+                  onPick={(e) => {
+                    setMsgText((t) => t + e);
+                    inputRef.current?.focus();
+                  }}
+                />
+              )}
+            </div>
+            <button
+              type="button"
+              title="Attach file"
+              disabled={uploading}
+              onClick={() => fileInputRef.current?.click()}
+              style={{ background: "none", border: "none", cursor: uploading ? "wait" : "pointer", color: "#54656f", padding: 6, opacity: uploading ? 0.5 : 1 }}
+            >
               <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M1.816 15.556v.002c0 1.502.584 2.912 1.646 3.972s2.472 1.647 3.974 1.647a5.58 5.58 0 0 0 3.972-1.645l9.547-9.548c.769-.768 1.147-1.767 1.058-2.817-.079-.968-.548-1.927-1.319-2.698-1.594-1.592-4.068-1.711-5.517-.262l-7.916 7.915c-.881.881-.792 2.25.214 3.261.959.958 2.423 1.053 3.263.215l5.511-5.512c.28-.28.267-.722.053-.936l-.244-.244c-.191-.191-.567-.349-.957.04l-5.506 5.506c-.18.18-.635.127-.976-.214-.098-.097-.576-.613-.213-.973l7.915-7.917c.818-.817 2.267-.699 3.23.262.5.501.802 1.1.849 1.685.051.573-.156 1.111-.589 1.543l-9.547 9.549a3.97 3.97 0 0 1-2.829 1.171 3.975 3.975 0 0 1-2.83-1.173 3.973 3.973 0 0 1-1.172-2.828c0-1.071.415-2.076 1.172-2.83l7.209-7.211c.157-.157.264-.579.028-.814L11.5 4.36a.572.572 0 0 0-.834.018L3.456 11.59a5.58 5.58 0 0 0-1.64 3.966z"/></svg>
             </button>
             <input
@@ -542,6 +709,18 @@ export default function VidehWeb() {
             End-to-end encrypted
           </div>
         </div>
+      )}
+
+      {profileOpen && user && (
+        <ProfileModal user={user} onClose={() => setProfileOpen(false)} onSave={saveProfile} />
+      )}
+      {newChatMode && token && (
+        <NewChatModal
+          token={token}
+          mode={newChatMode}
+          onClose={() => setNewChatMode(null)}
+          onChatOpened={openChatById}
+        />
       )}
     </div>
   );
