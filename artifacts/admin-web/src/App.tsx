@@ -1,6 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
+import { TrustSafetyTab } from "./tabs/TrustSafetyTab";
+import { ComplianceTab } from "./tabs/ComplianceTab";
+import { AnalyticsTab } from "./tabs/AnalyticsTab";
+import { AuditTab } from "./tabs/AuditTab";
+import { AdminsTab } from "./tabs/AdminsTab";
+import { User360Modal } from "./components/User360Modal";
 
-type Tab = "overview" | "users" | "chats" | "group-create" | "suspensions" | "boosts" | "scheduled" | "broadcasts" | "calls";
+type Tab =
+  | "overview"
+  | "trust"
+  | "compliance"
+  | "analytics"
+  | "audit"
+  | "admins"
+  | "users"
+  | "chats"
+  | "group-create"
+  | "suspensions"
+  | "boosts"
+  | "scheduled"
+  | "broadcasts"
+  | "calls";
 
 type Stats = {
   users: number;
@@ -17,6 +37,9 @@ type Stats = {
   status_boosts_pending: number;
   status_boost_revenue_inr: number;
   web_sessions_active: number;
+  open_reports?: number;
+  open_grievances?: number;
+  open_dsr?: number;
 };
 
 type StatusBoostRow = {
@@ -85,10 +108,13 @@ export default function App() {
   const [groupMembersRaw, setGroupMembersRaw] = useState("");
   const [groupAdminsRaw, setGroupAdminsRaw] = useState("");
   const [groupCreateResult, setGroupCreateResult] = useState<string | null>(null);
+  const [user360Id, setUser360Id] = useState<number | null>(null);
+  const [adminRole, setAdminRole] = useState<string>("super_admin");
 
   const refreshAuth = useCallback(async () => {
     try {
-      await api<{ success: boolean }>("/admin/me");
+      const me = await api<{ success: boolean; admin?: { role?: string } }>("/admin/me");
+      setAdminRole(me.admin && typeof me.admin === "object" ? String(me.admin.role ?? "super_admin") : "super_admin");
       setReady("authed");
       return;
     } catch {
@@ -478,6 +504,11 @@ export default function App() {
           <h1>Videh Admin</h1>
         </div>
         {nav("overview", "Overview")}
+        {nav("trust", "Trust & Safety")}
+        {nav("compliance", "Compliance")}
+        {nav("analytics", "Analytics")}
+        {nav("audit", "Audit")}
+        {adminRole === "super_admin" ? nav("admins", "Admins") : null}
         {nav("users", "Users")}
         {nav("chats", "Chats")}
         {nav("group-create", "Create Group")}
@@ -555,17 +586,36 @@ export default function App() {
                   <b>{stats.web_sessions_active}</b>
                   <span>Web sessions</span>
                 </div>
+                <div className="stat">
+                  <b>{stats.open_reports ?? 0}</b>
+                  <span>Open reports</span>
+                </div>
+                <div className="stat">
+                  <b>{stats.open_grievances ?? 0}</b>
+                  <span>Open grievances</span>
+                </div>
+                <div className="stat">
+                  <b>{stats.open_dsr ?? 0}</b>
+                  <span>DPDP requests</span>
+                </div>
               </div>
             ) : (
               <p className="muted">Loading stats…</p>
             )}
             <div className="card" style={{ marginTop: 20 }}>
               <p className="muted" style={{ margin: 0 }}>
-                API health: <a href="/api/healthz">/api/healthz</a> · User app: <a href="/videh-web/">/videh-web/</a>
+                Role: <strong>{adminRole}</strong> · <a href="/api/healthz">/api/healthz</a> ·{" "}
+                <a href="/videh-web/">/videh-web/</a> · <a href="/grievance">/grievance</a>
               </p>
             </div>
           </>
         )}
+
+        {tab === "trust" ? <TrustSafetyTab onErr={setErr} /> : null}
+        {tab === "compliance" ? <ComplianceTab onErr={setErr} /> : null}
+        {tab === "analytics" ? <AnalyticsTab onErr={setErr} /> : null}
+        {tab === "audit" ? <AuditTab onErr={setErr} /> : null}
+        {tab === "admins" ? <AdminsTab onErr={setErr} canManage={adminRole === "super_admin"} /> : null}
 
         {tab === "users" && (
           <>
@@ -599,6 +649,7 @@ export default function App() {
                     <th>Online</th>
                     <th>Push</th>
                     <th>Created</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -610,6 +661,15 @@ export default function App() {
                       <td>{u.is_online ? "yes" : "no"}</td>
                       <td>{u.has_push ? "yes" : "no"}</td>
                       <td>{u.created_at ? String(u.created_at).slice(0, 16) : "—"}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="link-btn"
+                          onClick={() => setUser360Id(Number(u.id))}
+                        >
+                          User 360
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -971,6 +1031,10 @@ export default function App() {
               {previewBoost.content ? <p className="muted">{previewBoost.content}</p> : null}
             </div>
           </div>
+        ) : null}
+
+        {user360Id ? (
+          <User360Modal userId={user360Id} onClose={() => setUser360Id(null)} onErr={setErr} />
         ) : null}
 
         {rejectBoost ? (

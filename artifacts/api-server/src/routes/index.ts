@@ -13,6 +13,7 @@ import translateRouter from "./translate";
 import sosRouter from "./sos";
 import broadcastsRouter from "./broadcasts";
 import adminRouter from "./admin";
+import grievanceRouter from "./grievance";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,6 @@ router.use("/translate", translateRouter);
 router.use("/sos", sosRouter);
 router.use("/broadcasts", broadcastsRouter);
 router.use("/admin", adminRouter);
+router.use("/grievance", grievanceRouter);
 
 export default router;

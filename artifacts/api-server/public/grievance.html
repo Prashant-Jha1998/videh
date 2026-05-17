@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Videh — Grievance Officer</title>
+    <style>
+      :root {
+        --bg: #0b141a;
+        --card: #1f2c34;
+        --text: #e9edef;
+        --muted: #8696a0;
+        --accent: #00a884;
+      }
+      body {
+        font-family: system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        margin: 0;
+        padding: 24px;
+      }
+      .wrap {
+        max-width: 520px;
+        margin: 0 auto;
+      }
+      .card {
+        background: var(--card);
+        border-radius: 12px;
+        padding: 24px;
+      }
+      h1 {
+        color: var(--accent);
+        font-size: 1.4rem;
+      }
+      label {
+        display: block;
+        margin: 12px 0 4px;
+        font-size: 0.9rem;
+      }
+      input,
+      textarea,
+      select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid #2a3942;
+        background: var(--bg);
+        color: var(--text);
+      }
+      button {
+        margin-top: 16px;
+        width: 100%;
+        padding: 12px;
+        border: none;
+        border-radius: 8px;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      .ok {
+        color: var(--accent);
+      }
+      .err {
+        color: #f15c6d;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>Videh Grievance Officer</h1>
+        <p class="muted">
+          As per IT Rules 2021, we acknowledge grievances within <strong>36 hours</strong> and aim to resolve within
+          <strong>15 days</strong>.
+        </p>
+        <form id="form">
+          <label for="name">Your name *</label>
+          <input id="name" name="complainantName" required minlength="2" />
+
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" />
+
+          <label for="phone">Phone</label>
+          <input id="phone" name="phone" type="tel" />
+
+          <label for="category">Category</label>
+          <select id="category" name="category">
+            <option value="it_rules_grievance">Content / safety grievance</option>
+            <option value="privacy">Privacy (DPDP)</option>
+            <option value="account">Account access</option>
+            <option value="general">Other</option>
+          </select>
+
+          <label for="desc">Description * (min 20 characters)</label>
+          <textarea id="desc" name="description" rows="5" required minlength="20"></textarea>
+
+          <button type="submit">Submit grievance</button>
+        </form>
+        <p id="msg" class="muted" style="margin-top: 16px"></p>
+      </div>
+    </div>
+    <script>
+      document.getElementById("form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById("msg");
+        msg.textContent = "Submitting…";
+        msg.className = "muted";
+        const fd = new FormData(e.target);
+        const body = Object.fromEntries(fd.entries());
+        try {
+          const res = await fetch("/api/grievance", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message || res.statusText);
+          msg.textContent = "Registered. Ticket: " + data.ticketNumber + " — " + data.message;
+          msg.className = "ok";
+          e.target.reset();
+        } catch (err) {
+          msg.textContent = err.message || "Failed";
+          msg.className = "err";
+        }
+      });
+    </script>
+  </body>
+</html>

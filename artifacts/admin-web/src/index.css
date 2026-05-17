@@ -288,3 +288,83 @@ th {
   font-size: 1.25rem;
   line-height: 1.5;
 }
+
+.badge-critical,
+.badge-high,
+.badge-medium,
+.badge-low {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.badge-critical {
+  background: rgba(241, 92, 109, 0.25);
+  color: #ff8a98;
+}
+.badge-high {
+  background: rgba(255, 165, 0, 0.2);
+  color: #ffc266;
+}
+.badge-medium {
+  background: rgba(83, 189, 235, 0.2);
+  color: #7dd3fc;
+}
+.badge-low {
+  background: rgba(134, 150, 160, 0.2);
+  color: var(--muted);
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+}
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+}
+.subnav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.subnav .nav-btn {
+  width: auto;
+  display: inline-block;
+}
+.user360-modal {
+  width: min(920px, 100%);
+}
+.user360-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.stat-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+.mini-chart {
+  width: 100%;
+  height: 48px;
+  margin-top: 8px;
+}
+.row-danger {
+  background: rgba(241, 92, 109, 0.08);
+}
+select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+}

@@ -11,6 +11,8 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { query } from "./lib/db";
 import { stateAcquireLock, stateDelete } from "./lib/sharedState";
+import { runAdminSlaEscalationJob } from "./lib/adminEscalation";
+import { ensureAdminUsersTable } from "./lib/adminUsers";
 
 const app: Express = express();
 app.set("trust proxy", 1);
@@ -87,12 +89,20 @@ if (fs.existsSync(videhWebIndexPath)) {
   logger.warn({ videhWebDistDir }, "videh-web build not found; /videh-web route disabled");
 }
 
+const grievanceFormPath = path.resolve(apiServerDir, "public/grievance.html");
+if (fs.existsSync(grievanceFormPath)) {
+  app.get("/grievance", (_req, res) => {
+    res.sendFile(grievanceFormPath);
+  });
+}
+
 app.get("/", (_req, res) => {
   res.json({
     status: "ok",
     apiHealth: "/api/healthz",
     videhWeb: "/videh-web/",
     adminPanel: fs.existsSync(adminWebIndexPath) ? "/admin/" : null,
+    publicGrievance: fs.existsSync(grievanceFormPath) ? "/grievance" : "/api/grievance",
   });
 });
 
@@ -145,6 +155,20 @@ cron.schedule("* * * * *", async () => {
   } catch (err) {
     await stateDelete("jobs:scheduled-messages:lock").catch(() => {});
     logger.error({ err }, "Scheduled message cron error");
+  }
+});
+
+void ensureAdminUsersTable().catch((err) => logger.error({ err }, "admin users bootstrap failed"));
+
+cron.schedule("*/15 * * * *", async () => {
+  try {
+    const lockKey = "jobs:admin-sla-escalation:lock";
+    if (!(await stateAcquireLock(lockKey, 14 * 60_000))) return;
+    await runAdminSlaEscalationJob();
+    await stateDelete(lockKey);
+  } catch (err) {
+    await stateDelete("jobs:admin-sla-escalation:lock").catch(() => {});
+    logger.error({ err }, "Admin SLA escalation cron error");
   }
 });
 

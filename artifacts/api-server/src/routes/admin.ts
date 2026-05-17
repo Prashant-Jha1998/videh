@@ -6,12 +6,18 @@ import {
   ADMIN_PREAUTH_COOKIE,
   issueAdminSessionToken,
   issuePreauthToken,
-  verifyAdminSessionToken,
-  verifyPreauthToken,
+  parseAdminSessionToken,
+  parsePreauthToken,
   adminSessionConfigured,
+  type AdminIdentity,
 } from "../lib/adminSession";
-import { adminTotpConfigured, verifyAdminTotpCode } from "../lib/adminTotp";
+import { adminTotpConfigured, verifyAdminTotpCode, verifyTotpWithSecret } from "../lib/adminTotp";
 import { logger } from "../lib/logger";
+import { registerAdminPlatformRoutes } from "./admin-platform";
+import { ensureAdminPlatformTables } from "../lib/adminPlatform";
+import { logAdminAction } from "../lib/adminAudit";
+import { ensureAdminUsersTable, verifyAdminCredentials, touchAdminLogin } from "../lib/adminUsers";
+import { registerAdminRbacRoutes, resolveTotpSecretForAdmin } from "./admin-rbac";
 
 const router = Router();
 const MAX_ADMIN_GROUP_MEMBERS = 10000;
@@ -106,35 +112,32 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
     return;
   }
   const token = req.cookies?.[ADMIN_COOKIE] as string | undefined;
-  if (!verifyAdminSessionToken(token)) {
+  const identity = parseAdminSessionToken(token);
+  if (!identity) {
     res.status(401).json({ success: false, message: "Unauthorized" });
     return;
   }
+  (req as Request & { admin?: AdminIdentity }).admin = identity;
   next();
 }
 
-router.get("/config", (req, res) => {
+router.get("/config", async (req, res) => {
+  await ensureAdminUsersTable();
+  const countRes = await query(`SELECT COUNT(*)::int AS c FROM admin_users WHERE is_active = TRUE`, []);
+  const dbAdmins = Number((countRes.rows[0] as { c: number })?.c ?? 0);
   const email = process.env["ADMIN_EMAIL"]?.trim();
   const pre = req.cookies?.[ADMIN_PREAUTH_COOKIE] as string | undefined;
   res.json({
     success: true,
-    loginEnabled: Boolean(email && process.env["ADMIN_PASSWORD"]),
+    loginEnabled: dbAdmins > 0 || Boolean(email && process.env["ADMIN_PASSWORD"]),
     sessionConfigured: adminSessionConfigured(),
     twoFactorConfigured: adminTotpConfigured(),
-    preauthPending: verifyPreauthToken(pre),
+    preauthPending: parsePreauthToken(pre) !== null,
+    multiAdmin: dbAdmins > 0,
   });
 });
 
-router.post("/login", (req: Request, res: Response) => {
-  const emailEnv = process.env["ADMIN_EMAIL"]?.trim();
-  const passEnv = process.env["ADMIN_PASSWORD"] ?? "";
-  if (!emailEnv || !passEnv) {
-    res.status(503).json({
-      success: false,
-      message: "Admin login is not configured. Set ADMIN_EMAIL and ADMIN_PASSWORD on the server.",
-    });
-    return;
-  }
+router.post("/login", async (req: Request, res: Response) => {
   if (!adminSessionConfigured()) {
     res.status(503).json({
       success: false,
@@ -142,24 +145,44 @@ router.post("/login", (req: Request, res: Response) => {
     });
     return;
   }
-  if (!adminTotpConfigured()) {
-    res.status(503).json({
-      success: false,
-      message:
-        "Two-factor authentication is required. Set ADMIN_TOTP_SECRET to a Base32 secret (e.g. from an authenticator app setup key) on the server.",
-    });
-    return;
-  }
 
   const email = normalizeEmail(String((req.body as { email?: string })?.email ?? ""));
   const password = String((req.body as { password?: string })?.password ?? "");
 
-  if (!timingSafeStringEqual(email, normalizeEmail(emailEnv)) || !timingSafeStringEqual(password, passEnv)) {
+  await ensureAdminUsersTable();
+
+  let identity: AdminIdentity | null = null;
+  const dbAdmin = await verifyAdminCredentials(email, password);
+  if (dbAdmin) {
+    identity = { adminId: dbAdmin.id, email: dbAdmin.email, role: dbAdmin.role };
+  } else {
+    const emailEnv = process.env["ADMIN_EMAIL"]?.trim();
+    const passEnv = process.env["ADMIN_PASSWORD"] ?? "";
+    if (
+      emailEnv &&
+      passEnv &&
+      timingSafeStringEqual(email, normalizeEmail(emailEnv)) &&
+      timingSafeStringEqual(password, passEnv)
+    ) {
+      identity = { adminId: null, email, role: "super_admin" };
+    }
+  }
+
+  if (!identity) {
     res.status(401).json({ success: false, message: "Invalid email or password" });
     return;
   }
 
-  const pre = issuePreauthToken();
+  const totpSecret = await resolveTotpSecretForAdmin(identity.adminId);
+  if (!totpSecret) {
+    res.status(503).json({
+      success: false,
+      message: "Two-factor authentication is required. Set ADMIN_TOTP_SECRET or per-admin totp_secret.",
+    });
+    return;
+  }
+
+  const pre = issuePreauthToken(identity);
   if (!pre) {
     res.status(500).json({ success: false, message: "Could not create pre-auth state" });
     return;
@@ -169,14 +192,15 @@ router.post("/login", (req: Request, res: Response) => {
   res.json({ success: true, needTwoFactor: true });
 });
 
-router.post("/login/totp", (req: Request, res: Response) => {
-  if (!adminSessionConfigured() || !adminTotpConfigured()) {
-    res.status(503).json({ success: false, message: "Admin or 2FA is not configured." });
+router.post("/login/totp", async (req: Request, res: Response) => {
+  if (!adminSessionConfigured()) {
+    res.status(503).json({ success: false, message: "Admin session is not configured." });
     return;
   }
 
   const pre = req.cookies?.[ADMIN_PREAUTH_COOKIE] as string | undefined;
-  if (!verifyPreauthToken(pre)) {
+  const identity = parsePreauthToken(pre);
+  if (!identity) {
     res.status(401).json({
       success: false,
       message: "Sign in with email and password first, or the step expired. Try again.",
@@ -185,12 +209,18 @@ router.post("/login/totp", (req: Request, res: Response) => {
   }
 
   const code = String((req.body as { code?: string })?.code ?? "").trim();
-  if (!verifyAdminTotpCode(code)) {
+  const totpSecret = await resolveTotpSecretForAdmin(identity.adminId);
+  const totpOk =
+    (totpSecret && verifyTotpWithSecret(totpSecret, code)) ||
+    (!totpSecret && verifyAdminTotpCode(code));
+  if (!totpOk) {
     res.status(401).json({ success: false, message: "Invalid authenticator code" });
     return;
   }
 
-  const token = issueAdminSessionToken();
+  if (identity.adminId) await touchAdminLogin(identity.adminId);
+
+  const token = issueAdminSessionToken(identity);
   if (!token) {
     res.status(500).json({ success: false, message: "Could not create session" });
     return;
@@ -198,7 +228,7 @@ router.post("/login/totp", (req: Request, res: Response) => {
 
   res.clearCookie(ADMIN_PREAUTH_COOKIE, { path: "/" });
   res.cookie(ADMIN_COOKIE, token, cookieOpts(12 * 60 * 60 * 1000));
-  res.json({ success: true });
+  res.json({ success: true, role: identity.role });
 });
 
 router.post("/login/cancel", (_req: Request, res: Response) => {
@@ -212,13 +242,15 @@ router.post("/logout", (_req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-router.get("/me", requireAdmin, (_req, res) => {
-  res.json({ success: true, admin: true });
+router.get("/me", requireAdmin, (req, res) => {
+  const admin = (req as Request & { admin?: AdminIdentity }).admin;
+  res.json({ success: true, admin: admin ?? true });
 });
 
 router.get("/stats", requireAdmin, async (_req, res) => {
   try {
     await ensureStatusBoostTables();
+    await ensureAdminPlatformTables();
     const r = await query(
       `SELECT
         (SELECT COUNT(*)::int FROM users) AS users,
@@ -234,7 +266,10 @@ router.get("/stats", requireAdmin, async (_req, res) => {
         (SELECT COUNT(*)::int FROM status_boosts WHERE status = 'active' AND ends_at > NOW()) AS status_boosts_active,
         (SELECT COUNT(*)::int FROM status_boosts WHERE status = 'pending_verification') AS status_boosts_pending,
         (SELECT COALESCE(SUM(amount_inr), 0)::int FROM status_boosts WHERE payment_status IN ('paid', 'captured')) AS status_boost_revenue_inr,
-        (SELECT COUNT(*)::int FROM web_sessions WHERE status = 'linked' AND expires_at > NOW()) AS web_sessions_active`,
+        (SELECT COUNT(*)::int FROM web_sessions WHERE status = 'linked' AND expires_at > NOW()) AS web_sessions_active,
+        (SELECT COUNT(*)::int FROM user_reports WHERE COALESCE(status, 'open') = 'open') AS open_reports,
+        (SELECT COUNT(*)::int FROM grievance_tickets WHERE status IN ('open', 'in_progress')) AS open_grievances,
+        (SELECT COUNT(*)::int FROM data_subject_requests WHERE status NOT IN ('completed', 'rejected')) AS open_dsr`,
       [],
     );
     const row = r.rows[0] as Record<string, number>;
@@ -284,6 +319,10 @@ router.post("/suspensions/:userId/revoke", requireAdmin, async (req, res) => {
       `INSERT INTO moderation_events (user_id, activity_type, reason, excerpt, severity, action_taken)
        VALUES ($1, 'admin_action', 'Admin manually revoked suspension', NULL, 'high', 'admin_revoke')`,
       [userId],
+    );
+    await logAdminAction(
+      { action: "suspension_revoke", entityType: "user", entityId: userId },
+      req,
     );
     res.json({ success: true, message: "Suspension revoked." });
   } catch (err) {
@@ -643,5 +682,8 @@ router.get("/broadcasts", requireAdmin, async (_req, res) => {
     res.status(500).json({ success: false, message: "Broadcasts query failed" });
   }
 });
+
+registerAdminPlatformRoutes(router, requireAdmin);
+registerAdminRbacRoutes(router, requireAdmin);
 
 export default router;

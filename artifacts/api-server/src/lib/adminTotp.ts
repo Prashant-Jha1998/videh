@@ -4,26 +4,25 @@ function normalizeBase32(raw: string): string {
   return raw.replace(/\s+/g, "").toUpperCase().replace(/=+$/, "");
 }
 
-export function adminTotpConfigured(): boolean {
-  const raw = process.env["ADMIN_TOTP_SECRET"]?.trim();
-  if (!raw) return false;
+function secretFromBase32(raw: string): Secret | null {
   try {
-    Secret.fromBase32(normalizeBase32(raw));
-    return normalizeBase32(raw).length >= 8;
+    const normalized = normalizeBase32(raw);
+    if (normalized.length < 8) return null;
+    return Secret.fromBase32(normalized);
   } catch {
-    return false;
+    return null;
   }
 }
 
-export function verifyAdminTotpCode(code: string): boolean {
+export function adminTotpConfigured(): boolean {
   const raw = process.env["ADMIN_TOTP_SECRET"]?.trim();
-  if (!raw) return false;
-  let secret: Secret;
-  try {
-    secret = Secret.fromBase32(normalizeBase32(raw));
-  } catch {
-    return false;
-  }
+  if (raw && secretFromBase32(raw)) return true;
+  return false;
+}
+
+export function verifyTotpWithSecret(secretRaw: string, code: string): boolean {
+  const secret = secretFromBase32(secretRaw);
+  if (!secret) return false;
   const digits = code.replace(/\D/g, "");
   if (digits.length !== 6) return false;
   const totp = new TOTP({
@@ -34,6 +33,12 @@ export function verifyAdminTotpCode(code: string): boolean {
     period: 30,
     secret,
   });
-  const delta = totp.validate({ token: digits, window: 1 });
-  return delta !== null;
+  return totp.validate({ token: digits, window: 1 }) !== null;
+}
+
+/** Env super-admin TOTP (legacy). */
+export function verifyAdminTotpCode(code: string): boolean {
+  const raw = process.env["ADMIN_TOTP_SECRET"]?.trim();
+  if (!raw) return false;
+  return verifyTotpWithSecret(raw, code);
 }

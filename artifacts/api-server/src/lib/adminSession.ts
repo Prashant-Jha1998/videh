@@ -1,7 +1,30 @@
 import crypto from "node:crypto";
+import type { AdminRole } from "./adminRbac";
 
 export const ADMIN_COOKIE = "videh_admin_session";
 export const ADMIN_PREAUTH_COOKIE = "videh_admin_preauth";
+
+export type AdminIdentity = {
+  adminId: number | null;
+  email: string;
+  role: AdminRole;
+};
+
+type SessionPayload = {
+  typ: "session";
+  exp: number;
+  adminId: number | null;
+  email: string;
+  role: AdminRole;
+};
+
+type PreauthPayload = {
+  typ: "preauth";
+  exp: number;
+  adminId: number | null;
+  email: string;
+  role: AdminRole;
+};
 
 function getSecret(): string {
   const s = process.env["ADMIN_SESSION_SECRET"]?.trim();
@@ -19,10 +42,10 @@ function signPayload(secret: string, payload: object): string {
   return `${b64}.${sig}`;
 }
 
-function verifySignedPayload(
+function verifySignedPayload<T extends Record<string, unknown>>(
   token: string | undefined,
-  expectedTyp: string | null,
-): { ok: true; payload: Record<string, unknown> } | { ok: false } {
+  expectedTyp: string,
+): { ok: true; payload: T } | { ok: false } {
   if (!token || !token.includes(".")) return { ok: false };
   const secret = getSecret();
   if (!secret) return { ok: false };
@@ -36,45 +59,68 @@ function verifySignedPayload(
   if (a.length !== b.length) return { ok: false };
   if (!crypto.timingSafeEqual(a, b)) return { ok: false };
   try {
-    const payload = JSON.parse(Buffer.from(b64, "base64url").toString("utf8")) as Record<string, unknown>;
+    const payload = JSON.parse(Buffer.from(b64, "base64url").toString("utf8")) as T;
     if (typeof payload["exp"] !== "number" || (payload["exp"] as number) < Date.now()) return { ok: false };
-    if (expectedTyp !== null) {
-      if (payload["typ"] !== expectedTyp) return { ok: false };
-    } else {
-      if (payload["typ"] !== undefined && payload["typ"] !== "session") return { ok: false };
-    }
+    if (payload["typ"] !== expectedTyp) return { ok: false };
     return { ok: true, payload };
   } catch {
     return { ok: false };
   }
 }
 
-export function issueAdminSessionToken(): string | null {
+export function issueAdminSessionToken(identity: AdminIdentity): string | null {
   const secret = getSecret();
   if (!secret) return null;
   const exp = Date.now() + 12 * 60 * 60 * 1000;
-  return signPayload(secret, { typ: "session", exp });
+  const payload: SessionPayload = {
+    typ: "session",
+    exp,
+    adminId: identity.adminId,
+    email: identity.email,
+    role: identity.role,
+  };
+  return signPayload(secret, payload);
+}
+
+export function parseAdminSessionToken(token: string | undefined): AdminIdentity | null {
+  const v = verifySignedPayload<SessionPayload>(token, "session");
+  if (v.ok) {
+    return { adminId: v.payload.adminId, email: v.payload.email, role: v.payload.role };
+  }
+  const legacy = verifySignedPayload<Record<string, unknown>>(token, "session");
+  if (legacy.ok && legacy.payload["typ"] === undefined) {
+    const email = process.env["ADMIN_EMAIL"]?.trim().toLowerCase() ?? "platform-admin";
+    return { adminId: null, email, role: "super_admin" };
+  }
+  return null;
 }
 
 export function verifyAdminSessionToken(token: string | undefined): boolean {
-  const v = verifySignedPayload(token, "session");
-  if (v.ok) return true;
-  const legacy = verifySignedPayload(token, null);
-  if (!legacy.ok) return false;
-  return legacy.payload["typ"] === undefined || legacy.payload["typ"] === "session";
+  return parseAdminSessionToken(token) !== null;
 }
 
-/** Short-lived cookie after password OK, before TOTP. */
-export function issuePreauthToken(): string | null {
+export function issuePreauthToken(identity: AdminIdentity): string | null {
   const secret = getSecret();
   if (!secret) return null;
   const exp = Date.now() + 5 * 60 * 1000;
-  return signPayload(secret, { typ: "preauth", exp });
+  const payload: PreauthPayload = {
+    typ: "preauth",
+    exp,
+    adminId: identity.adminId,
+    email: identity.email,
+    role: identity.role,
+  };
+  return signPayload(secret, payload);
+}
+
+export function parsePreauthToken(token: string | undefined): AdminIdentity | null {
+  const v = verifySignedPayload<PreauthPayload>(token, "preauth");
+  if (!v.ok) return null;
+  return { adminId: v.payload.adminId, email: v.payload.email, role: v.payload.role };
 }
 
 export function verifyPreauthToken(token: string | undefined): boolean {
-  const v = verifySignedPayload(token, "preauth");
-  return v.ok;
+  return parsePreauthToken(token) !== null;
 }
 
 export function adminSessionConfigured(): boolean {
