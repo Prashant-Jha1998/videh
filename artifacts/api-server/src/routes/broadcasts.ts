@@ -141,7 +141,6 @@ router.post("/:listId/send", async (req: Request, res: Response) => {
           senderName,
           content.slice(0, 100),
           { chatId: String(chatId), type: "message" },
-          { userIds: recipientId ? [recipientId] : [] },
         );
       }
       sentCount++;

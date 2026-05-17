@@ -1,6 +1,5 @@
-const fs = require("fs");
-const path = require("path");
 const { withDangerousMod } = require("expo/config-plugins");
+const path = require("path");
 
 const ADI_REGISTRATION_TOKEN = "DWT6ACRQC3JDUAAAAAAAAAAAAA";
 
@@ -16,6 +15,7 @@ function withGooglePlayAdiRegistration(config) {
         "assets",
       );
 
+      const fs = require("fs");
       fs.mkdirSync(assetsDir, { recursive: true });
       fs.writeFileSync(
         path.join(assetsDir, "adi-registration.properties"),
@@ -27,13 +27,8 @@ function withGooglePlayAdiRegistration(config) {
   ]);
 }
 
-/**
- * EAS: set VIDEOH_SLIM_ANDROID=1 in eas.json (preview / apkRelease / production) for a much
- * smaller APK/AAB: only arm64-v8a + compressed JS bundle. Omits 32-bit ARM and x86 emulators.
- * Dev client builds leave this unset so x86_64 emulators still work.
- */
 module.exports = ({ config }) => {
-  const oneSignalAppId = process.env.EXPO_PUBLIC_ONESIGNAL_APP_ID?.trim() ?? "";
+  const vapidPublicKey = process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY?.trim() ?? "";
   const slim = process.env.VIDEOH_SLIM_ANDROID === "1";
   const buildArchs = slim
     ? ["arm64-v8a"]
@@ -67,18 +62,18 @@ module.exports = ({ config }) => {
     (p) => Array.isArray(p) && p[0] === "@config-plugins/react-native-webrtc",
   );
 
-  const oneSignalPlugin = oneSignalAppId
-    ? [["onesignal-expo-plugin", { mode: "production" }]]
-    : [];
-
   const basePlugins = hasWebRtcPlugin ? plugins : [...plugins, withWebRtc];
 
   return withGooglePlayAdiRegistration({
     ...config,
+    web: {
+      ...config.web,
+      ...(vapidPublicKey ? { notification: { vapidPublicKey } } : {}),
+    },
     extra: {
       ...config.extra,
-      ...(oneSignalAppId ? { oneSignalAppId } : {}),
+      ...(vapidPublicKey ? { vapidPublicKey } : {}),
     },
-    plugins: [...oneSignalPlugin, ...basePlugins],
+    plugins: basePlugins,
   });
 };

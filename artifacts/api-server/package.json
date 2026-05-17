@@ -20,6 +20,7 @@
     "cors": "^2",
     "drizzle-orm": "catalog:",
     "express": "^5",
+    "web-push": "^3.6.7",
     "multer": "^2.1.1",
     "node-cron": "^4.2.1",
     "otpauth": "^9.3.6",

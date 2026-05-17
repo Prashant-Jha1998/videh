@@ -1,21 +1,17 @@
-import { sendOneSignalPush, isOneSignalConfigured } from "./oneSignalPush";
+import { sendWebPushChatPush, isWebPushConfigured } from "./webPush";
 import { sendExpoChatPush, sendExpoPush } from "./expoPush";
 import { isExpoPushToken, isValidPushToken, splitPushTokens } from "./pushTokens";
 
-export { isExpoPushToken, isFcmPushToken, isValidPushToken } from "./pushTokens";
-export { isOneSignalConfigured } from "./oneSignalPush";
+export { isExpoPushToken, isWebPushToken, isValidPushToken } from "./pushTokens";
+export { isWebPushConfigured } from "./webPush";
 
 type ChatPushOptions = {
   categoryId?: string;
   threadId?: string;
   isCall?: boolean;
-  /** Videh user ids — used with OneSignal (free, no Firebase). */
-  userIds?: number[];
 };
 
-/**
- * Send push: OneSignal (by user id, free) first, then Expo token relay as fallback.
- */
+/** VAPID Web Push (your keys) first; Expo push relay as fallback for mobile. */
 export async function sendChatPush(
   to: string | string[],
   title: string,
@@ -24,19 +20,21 @@ export async function sendChatPush(
   options?: ChatPushOptions,
 ): Promise<void> {
   const tokens = (Array.isArray(to) ? to : [to]).filter((t): t is string => isValidPushToken(t));
-  const userIds = (options?.userIds ?? []).filter((id) => Number.isFinite(id) && id > 0);
+  if (tokens.length === 0) return;
 
+  const { webpush, expo } = splitPushTokens(tokens);
   const tasks: Promise<void>[] = [];
 
-  if (userIds.length > 0 && isOneSignalConfigured()) {
-    tasks.push(sendOneSignalPush(userIds, title, body, data, { isCall: options?.isCall }));
+  if (webpush.length > 0) {
+    if (isWebPushConfigured()) {
+      tasks.push(sendWebPushChatPush(webpush, title, body, data));
+    } else {
+      console.warn("Web push tokens present but VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY not set on server");
+    }
   }
 
-  if (tokens.length > 0) {
-    const { expo } = splitPushTokens(tokens);
-    if (expo.length > 0) {
-      sendExpoChatPush(expo, title, body, data, options);
-    }
+  if (expo.length > 0) {
+    sendExpoChatPush(expo, title, body, data, options);
   }
 
   await Promise.all(tasks);
@@ -45,23 +43,23 @@ export async function sendChatPush(
 export async function sendPushBatch(
   messages: Array<{
     token?: string;
-    userId?: number;
     title: string;
     body: string;
     data: Record<string, unknown>;
     isCall?: boolean;
   }>,
 ): Promise<void> {
-  const userIds = messages.map((m) => m.userId).filter((id): id is number => Number.isFinite(id) && id! > 0);
-  if (userIds.length > 0 && isOneSignalConfigured()) {
-    const first = messages[0];
-    await sendOneSignalPush(userIds, first.title, first.body, first.data, { isCall: first.isCall });
+  const webpush = messages.filter((m) => m.token && !isExpoPushToken(m.token)).map((m) => m.token!);
+  const expo = messages.filter((m) => m.token && isExpoPushToken(m.token));
+
+  if (webpush.length > 0 && isWebPushConfigured()) {
+    const first = messages.find((m) => m.token && !isExpoPushToken(m.token))!;
+    await sendWebPushChatPush(webpush, first.title, first.body, first.data);
   }
 
-  const expoMessages = messages.filter((m) => m.token && isExpoPushToken(m.token));
-  if (expoMessages.length > 0) {
+  if (expo.length > 0) {
     sendExpoPush(
-      expoMessages.map((m) => ({
+      expo.map((m) => ({
         to: m.token!,
         title: m.title,
         body: m.body,

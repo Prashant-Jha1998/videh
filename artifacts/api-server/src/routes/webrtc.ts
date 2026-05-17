@@ -180,12 +180,7 @@ router.post("/calls", async (req: Request, res: Response) => {
           kind: "call",
           notificationKind: "incoming_call",
         },
-        {
-          categoryId: EXPO_INCOMING_CALL_CATEGORY_ID,
-          threadId: `call-${callId}`,
-          isCall: true,
-          userIds: callableParticipantIds,
-        },
+        { categoryId: EXPO_INCOMING_CALL_CATEGORY_ID, threadId: `call-${callId}`, isCall: true },
       );
     }
     res.json({ success: true, call: serializeIncoming(invite, callerId), participantIds: callableParticipantIds });

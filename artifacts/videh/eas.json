@@ -16,7 +16,7 @@
       "env": {
         "EXPO_PUBLIC_DOMAIN": "videh.co.in",
         "VIDEOH_SLIM_ANDROID": "1",
-        "EXPO_PUBLIC_ONESIGNAL_APP_ID": ""
+        "EXPO_PUBLIC_VAPID_PUBLIC_KEY": ""
       },
       "android": {
         "buildType": "apk"
@@ -27,7 +27,7 @@
       "env": {
         "EXPO_PUBLIC_DOMAIN": "videh.co.in",
         "VIDEOH_SLIM_ANDROID": "1",
-        "EXPO_PUBLIC_ONESIGNAL_APP_ID": ""
+        "EXPO_PUBLIC_VAPID_PUBLIC_KEY": ""
       },
       "android": {
         "buildType": "apk"
@@ -38,7 +38,7 @@
       "env": {
         "EXPO_PUBLIC_DOMAIN": "videh.co.in",
         "VIDEOH_SLIM_ANDROID": "1",
-        "EXPO_PUBLIC_ONESIGNAL_APP_ID": ""
+        "EXPO_PUBLIC_VAPID_PUBLIC_KEY": ""
       },
       "android": {
         "buildType": "app-bundle"

@@ -154,7 +154,6 @@ router.post("/:userId/trigger", async (req: Request, res: Response) => {
           `🚨 SOS — ${sender.name ?? sender.phone}`,
           locationText || "Emergency! Please help!",
           { chatId: String(chatId), sos: "true", notificationKind: "sos" },
-          { userIds: contactUserId ? [contactUserId] : [] },
         );
       }
       sentCount++;

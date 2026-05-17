@@ -129,15 +129,15 @@ cron.schedule("* * * * *", async () => {
       );
       const rows = members.rows as { user_id: number; push_token: string | null }[];
       if (rows.length > 0) {
-        await sendPushBatch(
-          rows.map((r) => ({
-            userId: Number(r.user_id),
-            token: isValidPushToken(r.push_token) ? r.push_token! : undefined,
+        const batch = rows
+          .filter((r) => isValidPushToken(r.push_token))
+          .map((r) => ({
+            token: r.push_token!,
             title: sm.sender_name ?? "Videh",
             body: sm.content.slice(0, 100),
             data: { chatId: String(sm.chat_id), type: "message" },
-          })),
-        );
+          }));
+        if (batch.length > 0) await sendPushBatch(batch);
       }
       logger.info({ scheduledId: sm.id }, "Scheduled message sent");
     }

@@ -647,11 +647,7 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
           type: "message",
           notificationKind: "chat_message",
         },
-        {
-          categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID,
-          threadId: `chat-${chatId}`,
-          userIds: recipientUserIds,
-        },
+        { categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID, threadId: `chat-${chatId}` },
       );
     }
     publishChatEvent({

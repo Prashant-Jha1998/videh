@@ -390,11 +390,7 @@ router.post("/:id/test-push", async (req: Request, res: Response) => {
       "Videh test notification",
       "Push notifications are working.",
       { type: "test", notificationKind: "chat_message" },
-      {
-        categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID,
-        threadId: "test-push",
-        userIds: [Number(req.params.id)],
-      },
+      { categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID, threadId: "test-push" },
     );
     res.json({ success: true });
   } catch (err) {

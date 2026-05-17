@@ -24,7 +24,6 @@ import {
   VIDEH_CALLS_CHANNEL_ID,
 } from "@/lib/pushNotifications";
 import { startCallRingtone, stopCallRingtone } from "@/lib/callRingtone";
-import { initOneSignal } from "@/lib/oneSignal";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -60,7 +59,6 @@ function RootLayoutNav() {
   // Navigate to chat when notification is tapped
   useEffect(() => {
     if (Platform.OS === "web") return;
-    initOneSignal();
     ensureVidehNotificationSetup().catch(() => {});
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as any;

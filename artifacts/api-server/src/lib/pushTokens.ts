@@ -1,22 +1,25 @@
+import { parseWebPushSubscription } from "./webPush";
+
 export function isExpoPushToken(token: unknown): token is string {
   if (typeof token !== "string" || token.length < 12) return false;
   return token.startsWith("ExponentPushToken[") || token.startsWith("ExpoPushToken[");
 }
 
-/** App registered via OneSignal external user id (no device token in DB). */
-export function isOneSignalLinkedToken(token: unknown): token is string {
-  return typeof token === "string" && token.startsWith("onesignal:");
-}
-
-export function isFcmPushToken(token: unknown): token is string {
-  if (typeof token !== "string" || isExpoPushToken(token) || isOneSignalLinkedToken(token)) return false;
-  return token.length >= 20 && /^[A-Za-z0-9_:/\-+=]+$/.test(token);
+export function isWebPushToken(token: unknown): token is string {
+  if (typeof token !== "string") return false;
+  return parseWebPushSubscription(token) !== null;
 }
 
 export function isValidPushToken(token: unknown): token is string {
-  return isExpoPushToken(token) || isOneSignalLinkedToken(token) || isFcmPushToken(token);
+  return isExpoPushToken(token) || isWebPushToken(token);
 }
 
-export function splitPushTokens(tokens: string[]): { expo: string[] } {
-  return { expo: tokens.filter(isExpoPushToken) };
+export function splitPushTokens(tokens: string[]): { webpush: string[]; expo: string[] } {
+  const webpush: string[] = [];
+  const expo: string[] = [];
+  for (const token of tokens) {
+    if (isExpoPushToken(token)) expo.push(token);
+    else if (isWebPushToken(token)) webpush.push(token);
+  }
+  return { webpush, expo };
 }
