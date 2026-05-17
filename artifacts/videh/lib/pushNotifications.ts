@@ -7,6 +7,7 @@ import { safeJsonParse } from "@/lib/safeJson";
 
 /** Same id as `artifacts/api-server/src/lib/expoPush.ts` `EXPO_ANDROID_CHANNEL_ID`. */
 export const VIDEH_PUSH_CHANNEL_ID = "messages";
+export const VIDEH_CALLS_CHANNEL_ID = "calls";
 export const VIDEH_CHAT_MESSAGE_CATEGORY_ID = "chat_message";
 export const VIDEH_INCOMING_CALL_CATEGORY_ID = "incoming_call";
 export const NOTIFICATION_ACTION_REPLY = "reply";
@@ -53,6 +54,14 @@ export async function ensureVidehNotificationSetup(): Promise<void> {
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
     sound: "default",
+  });
+  await Notifications.setNotificationChannelAsync(VIDEH_CALLS_CHANNEL_ID, {
+    name: "Calls",
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 800, 400, 800, 400, 800],
+    sound: "default",
+    bypassDnd: true,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });
 }
 

@@ -1,14 +1,7 @@
 import { StyleSheet, View } from "react-native";
 import React from "react";
 
-interface Props {
-  uid: number;
-  isLocal?: boolean;
-  style?: any;
-  nativeId?: string;
-}
-
-export function AgoraRemoteView({ style, nativeId }: { style?: any; nativeId?: string }) {
+export function VidehRemoteView({ style, nativeId }: { style?: any; nativeId?: string }) {
   return React.createElement("video", {
     id: nativeId,
     autoPlay: true,
@@ -17,7 +10,7 @@ export function AgoraRemoteView({ style, nativeId }: { style?: any; nativeId?: s
   });
 }
 
-export function AgoraLocalView({ style, nativeId }: { style?: any; nativeId?: string }) {
+export function VidehLocalView({ style, nativeId }: { style?: any; nativeId?: string }) {
   return React.createElement("video", {
     id: nativeId,
     autoPlay: true,

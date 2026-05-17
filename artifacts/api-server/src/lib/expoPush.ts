@@ -1,5 +1,6 @@
 /** Must match the channel created in the Videh app (`lib/pushNotifications.ts`). */
 export const EXPO_ANDROID_CHANNEL_ID = "messages";
+export const EXPO_ANDROID_CALLS_CHANNEL_ID = "calls";
 export const EXPO_CHAT_MESSAGE_CATEGORY_ID = "chat_message";
 export const EXPO_INCOMING_CALL_CATEGORY_ID = "incoming_call";
 const EXPO_PUSH_CHUNK_SIZE = 100;
@@ -45,17 +46,18 @@ export function sendExpoChatPush(
   title: string,
   body: string,
   data: Record<string, unknown>,
-  options?: { categoryId?: string; threadId?: string },
+  options?: { categoryId?: string; threadId?: string; isCall?: boolean },
 ): void {
   const tokens = Array.isArray(to) ? to : [to];
+  const isCall = options?.isCall === true;
   void sendExpoPush(tokens.map((token) => ({
     to: token,
     title,
     body,
     data,
     sound: "default",
-    priority: "high",
-    channelId: EXPO_ANDROID_CHANNEL_ID,
+    priority: isCall ? "high" : "high",
+    channelId: isCall ? EXPO_ANDROID_CALLS_CHANNEL_ID : EXPO_ANDROID_CHANNEL_ID,
     categoryId: options?.categoryId,
     threadId: options?.threadId,
   })));

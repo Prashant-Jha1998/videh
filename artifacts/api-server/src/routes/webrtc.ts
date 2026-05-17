@@ -171,7 +171,7 @@ router.post("/calls", async (req: Request, res: Response) => {
         body.type === "video" ? "Video call" : "Voice call",
         `${caller.name ?? "Videh user"} is calling`,
         { callId, chatId, type: invite.type, channel, callerName: caller.name ?? "Videh user", kind: "call", notificationKind: "incoming_call" },
-        { categoryId: EXPO_INCOMING_CALL_CATEGORY_ID, threadId: `call-${callId}` },
+        { categoryId: EXPO_INCOMING_CALL_CATEGORY_ID, threadId: `call-${callId}`, isCall: true },
       );
     }
     res.json({ success: true, call: serializeIncoming(invite, callerId), participantIds: callableParticipantIds });
@@ -221,6 +221,10 @@ router.get("/calls/:callId/status", async (req: Request, res: Response) => {
   const declinedCount = Object.values(call.statuses).filter((status) => status === "declined").length;
   const missedCount = Object.values(call.statuses).filter((status) => status === "missed").length;
   const ended = Object.values(call.statuses).every((status) => status === "ended" || status === "declined" || status === "missed");
+  const acceptedUserIds = Object.entries(call.statuses)
+    .filter(([, status]) => status === "accepted")
+    .map(([id]) => Number(id))
+    .filter((id) => Number.isFinite(id));
   res.json({
     success: true,
     call: serializeIncoming(call, userId || call.callerId),
@@ -230,6 +234,8 @@ router.get("/calls/:callId/status", async (req: Request, res: Response) => {
     missedCount,
     ended,
     statuses: call.statuses,
+    acceptedUserIds,
+    callerId: call.callerId,
   });
 });
 

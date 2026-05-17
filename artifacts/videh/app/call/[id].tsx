@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  PanResponder,
   Platform,
   StyleSheet,
   Text,
@@ -14,8 +15,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useVidehCall } from "@/hooks/useVidehCall";
 import { useApp } from "@/context/AppContext";
-import { AgoraLocalView, AgoraRemoteView } from "@/components/AgoraVideoView";
+import { VidehLocalView, VidehRemoteView } from "@/components/VidehVideoView";
 import { getApiUrl } from "@/lib/api";
+import { startCallRingtone, stopCallRingtone } from "@/lib/callRingtone";
 
 export default function CallScreen() {
   const insets = useSafeAreaInsets();
@@ -29,7 +31,19 @@ export default function CallScreen() {
   const [participantCount, setParticipantCount] = useState(1);
   const [acceptedCount, setAcceptedCount] = useState(1);
   const [ringingCount, setRingingCount] = useState(0);
+  const [acceptedUserIds, setAcceptedUserIds] = useState<number[]>([]);
+  const [callerId, setCallerId] = useState<number | null>(null);
   const numericUid = Math.abs((user?.dbId ?? 0) % 999999) || Math.floor(Math.random() * 99999) + 1;
+
+  const isOutgoingCaller = incoming !== "1";
+  const remotePeerIds = useMemo(() => {
+    if (!user?.dbId || !activeChannel || participantCount <= 2) return [];
+    if (isOutgoingCaller) {
+      return acceptedUserIds.filter((peerId) => peerId !== user.dbId);
+    }
+    if (callerId && callerId !== user.dbId) return [callerId];
+    return [];
+  }, [acceptedUserIds, callerId, user?.dbId, activeChannel, isOutgoingCaller, participantCount]);
 
   useEffect(() => {
     if (!id || !user?.dbId || incoming === "1" || channel) return;
@@ -65,22 +79,23 @@ export default function CallScreen() {
     toggleSpeaker,
     leave,
     ...rest
-  } = useVidehCall(activeChannel, numericUid, isVideo);
+  } = useVidehCall(activeChannel, numericUid, isVideo, remotePeerIds);
 
-  const remoteUid: number | null = (rest as any).remoteUid ?? null;
   const localStreamUrl = (rest as any).localStreamUrl as string | undefined;
   const remoteStreamUrl = (rest as any).remoteStreamUrl as string | undefined;
 
   const [duration, setDuration] = useState(0);
   const pulse = useRef(new Animated.Value(1)).current;
-  const needsDevBuild = error === "SELF_HOSTED_WEBRTC_NATIVE_REQUIRED";
-
   useEffect(() => {
-    if (incoming === "1" || joined || error) {
+    if (incoming === "1" || joined) {
       if (Platform.OS !== "web") Vibration.cancel();
+      void stopCallRingtone();
       return;
     }
-    if (Platform.OS !== "web") Vibration.vibrate([0, 450, 500], true);
+    if (Platform.OS !== "web") {
+      Vibration.vibrate([0, 450, 500], true);
+      void startCallRingtone();
+    }
     const timeout = setTimeout(() => {
       if (!joined) {
         if (activeCallId) fetch(`${getApiUrl()}/api/webrtc/calls/${activeCallId}/end`, { method: "POST" }).catch(() => {});
@@ -90,19 +105,30 @@ export default function CallScreen() {
     return () => {
       clearTimeout(timeout);
       if (Platform.OS !== "web") Vibration.cancel();
+      void stopCallRingtone();
     };
-  }, [incoming, joined, error, activeCallId]);
+  }, [incoming, joined, activeCallId]);
 
   useEffect(() => {
     if (!activeCallId || !user?.dbId) return;
     const timer = setInterval(() => {
       fetch(`${getApiUrl()}/api/webrtc/calls/${activeCallId}/status?userId=${user.dbId}`)
         .then((res) => res.json())
-        .then((data: { success?: boolean; acceptedCount?: number; ringingCount?: number; call?: { participantCount?: number }; ended?: boolean }) => {
+        .then((data: {
+          success?: boolean;
+          acceptedCount?: number;
+          ringingCount?: number;
+          call?: { participantCount?: number };
+          ended?: boolean;
+          acceptedUserIds?: number[];
+          callerId?: number;
+        }) => {
           if (!data.success) return;
           setAcceptedCount(data.acceptedCount ?? 1);
           setRingingCount(data.ringingCount ?? 0);
           setParticipantCount(data.call?.participantCount ?? participantCount);
+          if (Array.isArray(data.acceptedUserIds)) setAcceptedUserIds(data.acceptedUserIds);
+          if (typeof data.callerId === "number") setCallerId(data.callerId);
           if (data.ended) router.back();
         })
         .catch(() => {});
@@ -135,8 +161,22 @@ export default function CallScreen() {
     return `${m}:${sec}`;
   };
 
+  const pipOffset = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const pipResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        pipOffset.setOffset({ x: (pipOffset.x as any)._value, y: (pipOffset.y as any)._value });
+        pipOffset.setValue({ x: 0, y: 0 });
+      },
+      onPanResponderMove: Animated.event([null, { dx: pipOffset.x, dy: pipOffset.y }], { useNativeDriver: false }),
+      onPanResponderRelease: () => pipOffset.flattenOffset(),
+    }),
+  ).current;
+
   const endCall = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    await stopCallRingtone();
     await leave();
     if (activeCallId) {
       fetch(`${getApiUrl()}/api/webrtc/calls/${activeCallId}/end`, { method: "POST" }).catch(() => {});
@@ -149,10 +189,10 @@ export default function CallScreen() {
   const avatarBg = `hsl(${hue},50%,45%)`;
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const statusText = needsDevBuild
-    ? "Self-hosted call module required"
-    : error && !needsDevBuild
-    ? `Error: ${error}`
+  const statusText = error
+    ? error === "NATIVE_WEBRTC_UNAVAILABLE"
+      ? "Connecting..."
+      : `Error: ${error}`
     : joined
     ? remoteCount > 0
       ? formatDuration(duration)
@@ -163,14 +203,14 @@ export default function CallScreen() {
     ? `Ringing ${ringingCount} people...`
     : isVideo ? "Video calling..." : "Ringing...";
 
-  const showVideoUI = isVideo && !needsDevBuild && !error;
+  const showVideoUI = isVideo;
 
   return (
     <View style={[styles.container, { backgroundColor: isVideo ? "#0B141A" : "#1A1A2E", paddingTop: topPad, paddingBottom: insets.bottom + 30 }]}>
       <TouchableOpacity style={styles.backBtn} onPress={router.back}>
         <Ionicons name="chevron-down" size={28} color="rgba(255,255,255,0.8)" />
       </TouchableOpacity>
-      <Text style={styles.callTypeLabel}>{isVideo ? "Videh Self-hosted Video Call" : "Videh Self-hosted Voice Call"}</Text>
+      <Text style={styles.callTypeLabel}>{isVideo ? "Videh video call" : "Videh voice call"}</Text>
       {participantCount > 2 && (
         <View style={styles.conferencePill}>
           <Ionicons name="people" size={13} color="#d9fdd3" />
@@ -180,25 +220,10 @@ export default function CallScreen() {
         </View>
       )}
 
-      {needsDevBuild ? (
-        <View style={styles.center}>
-          <View style={styles.devCard}>
-            <Ionicons name="call" size={48} color="#00A884" />
-            <Text style={styles.devCardTitle}>Videh Calls</Text>
-            <Text style={styles.devCardText}>
-              Agora has been removed. Self-hosted calling uses Videh WebRTC signaling.
-              For native mobile builds, add the WebRTC native module in a development build.
-            </Text>
-            <View style={styles.devCardBadge}>
-              <Ionicons name="shield-checkmark" size={14} color="#a3e635" />
-              <Text style={styles.devCardBadgeText}>End-to-end encrypted</Text>
-            </View>
-          </View>
-        </View>
-      ) : showVideoUI ? (
+      {showVideoUI ? (
         <View style={styles.videoContainer}>
-          {(Platform.OS === "web" ? hasRemoteVideo : remoteUid !== null) ? (
-            <AgoraRemoteView uid={remoteUid ?? 0} nativeId={rest.remoteVideoId} streamUrl={remoteStreamUrl} style={styles.remoteVideo} />
+          {hasRemoteVideo || remoteStreamUrl ? (
+            <VidehRemoteView nativeId={rest.remoteVideoId} streamUrl={remoteStreamUrl} style={styles.remoteVideo} />
           ) : (
             <View style={[styles.remoteVideo, styles.videoPlaceholder]}>
               <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: !joined ? pulse : 1 }] }]}>
@@ -211,9 +236,12 @@ export default function CallScreen() {
             </View>
           )}
           {joined && !cameraOff && (
-            <View style={styles.localVideoWrapper}>
-              <AgoraLocalView nativeId={rest.localVideoId} streamUrl={localStreamUrl} style={styles.localVideoFill} />
-            </View>
+            <Animated.View
+              style={[styles.localVideoWrapper, { transform: pipOffset.getTranslateTransform() }]}
+              {...pipResponder.panHandlers}
+            >
+              <VidehLocalView nativeId={rest.localVideoId} streamUrl={localStreamUrl} style={styles.localVideoFill} />
+            </Animated.View>
           )}
         </View>
       ) : (
@@ -304,9 +332,4 @@ const styles = StyleSheet.create({
   ctrlActive: { backgroundColor: "rgba(255,255,255,0.9)" },
   ctrlLabel: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Inter_400Regular" },
   endBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: "#ef4444", alignItems: "center", justifyContent: "center" },
-  devCard: { backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 20, padding: 28, alignItems: "center", gap: 14, maxWidth: 340 },
-  devCardTitle: { color: "#00A884", fontSize: 22, fontFamily: "Inter_700Bold", textAlign: "center" },
-  devCardText: { color: "rgba(255,255,255,0.80)", fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 22 },
-  devCardBadge: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(0,0,0,0.35)", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, marginTop: 4 },
-  devCardBadgeText: { color: "#a3e635", fontSize: 13, fontFamily: "Inter_600SemiBold" },
 });

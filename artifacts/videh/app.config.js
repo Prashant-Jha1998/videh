@@ -54,5 +54,20 @@ module.exports = ({ config }) => {
     ];
   });
 
-  return withGooglePlayAdiRegistration({ ...config, plugins });
+  const withWebRtc = [
+    "@config-plugins/react-native-webrtc",
+    {
+      cameraPermission: "Videh needs camera access for video calls.",
+      microphonePermission: "Videh needs microphone access for voice and video calls.",
+    },
+  ];
+
+  const hasWebRtcPlugin = plugins.some(
+    (p) => Array.isArray(p) && p[0] === "@config-plugins/react-native-webrtc",
+  );
+
+  return withGooglePlayAdiRegistration({
+    ...config,
+    plugins: hasWebRtcPlugin ? plugins : [...plugins, withWebRtc],
+  });
 };

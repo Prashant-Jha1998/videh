@@ -21,7 +21,9 @@ import {
   NOTIFICATION_ACTION_MARK_READ,
   NOTIFICATION_ACTION_MUTE,
   NOTIFICATION_ACTION_REPLY,
+  VIDEH_CALLS_CHANNEL_ID,
 } from "@/lib/pushNotifications";
+import { startCallRingtone, stopCallRingtone } from "@/lib/callRingtone";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -141,19 +143,25 @@ function RootLayoutNav() {
         if (cancelled) return;
         const next = data.calls?.[0] ?? null;
         setIncomingCall((prev) => {
-          if (!next) return null;
+          if (!next) {
+            if (prev) void stopCallRingtone();
+            return null;
+          }
           if (prev?.callId === next.callId) return prev;
           if (Platform.OS !== "web") {
             Vibration.vibrate([0, 700, 450], true);
+            void startCallRingtone();
             Notifications.scheduleNotificationAsync({
               content: {
                 title: `${next.type === "video" ? "Video" : "Voice"} call`,
                 body: `${next.callerName ?? "Videh user"} is calling`,
                 sound: "default",
+                priority: Notifications.AndroidNotificationPriority.MAX,
                 data: { callId: next.callId, chatId: next.chatId, type: next.type, channel: next.channel, callerName: next.callerName },
                 categoryIdentifier: "incoming_call",
               },
               trigger: null,
+              ...(Platform.OS === "android" ? { channelId: VIDEH_CALLS_CHANNEL_ID } : {}),
             }).catch(() => {});
           }
           return next;
@@ -161,11 +169,12 @@ function RootLayoutNav() {
       } catch {}
     };
     void poll();
-    const timer = setInterval(poll, 3000);
+    const timer = setInterval(poll, 2000);
     return () => {
       cancelled = true;
       clearInterval(timer);
       if (Platform.OS !== "web") Vibration.cancel();
+      void stopCallRingtone();
     };
   }, [isAuthenticated, user?.dbId]);
 
@@ -173,7 +182,10 @@ function RootLayoutNav() {
     if (!incomingCall || !user?.dbId) return;
     const call = incomingCall;
     setIncomingCall(null);
-    if (Platform.OS !== "web") Vibration.cancel();
+    if (Platform.OS !== "web") {
+      Vibration.cancel();
+      await stopCallRingtone();
+    }
     await fetch(`${getApiUrl()}/api/webrtc/calls/${call.callId}/respond`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
