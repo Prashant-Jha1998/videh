@@ -157,9 +157,9 @@ router.post("/draft", async (req: Request, res: Response) => {
     const reference = referenceCode();
     const r = await query(
       `INSERT INTO developer_leads
-       (reference_code, company_name, contact_name, email, phone, status, plan_id, amount_inr,
+       (reference_code, company_name, entity_type, contact_name, email, phone, status, plan_id, amount_inr,
         wizard_step, approval_phase, source_ip)
-       VALUES ($1,'','','','', 'draft', $2, $3, 'plan', 'plan', $4)
+       VALUES ($1, '', 'pvt_ltd', '', '', '', 'draft', $2, $3, 'plan', 'plan', $4)
        RETURNING id, reference_code`,
       [reference, plan.id, plan.amountInr, ip],
     );
@@ -170,8 +170,13 @@ router.post("/draft", async (req: Request, res: Response) => {
       plan,
     });
   } catch (err) {
-    req.log.error({ err }, "developer draft");
-    res.status(500).json({ success: false, message: "Could not start application." });
+    logger.error({ err }, "developer draft");
+    const detail = err instanceof Error ? err.message : String(err);
+    res.status(500).json({
+      success: false,
+      message: "Could not start application. Please retry in a moment.",
+      detail: process.env.NODE_ENV === "production" ? undefined : detail,
+    });
   }
 });
 

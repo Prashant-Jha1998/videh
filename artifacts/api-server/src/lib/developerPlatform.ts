@@ -83,6 +83,20 @@ export async function ensureDeveloperPlatformTables(): Promise<void> {
   `);
 
   const alters = [
+    `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS entity_type TEXT`,
+    `ALTER TABLE developer_leads ALTER COLUMN entity_type SET DEFAULT 'pvt_ltd'`,
+    `UPDATE developer_leads SET entity_type = 'pvt_ltd' WHERE entity_type IS NULL OR entity_type = ''`,
+    `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS plan_id TEXT`,
+    `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS amount_inr INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'none'`,
+    `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT`,
+    `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS razorpay_payment_id TEXT`,
+    `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS payment_method TEXT`,
+    `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ`,
+    `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS admin_notes TEXT`,
+    `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS assigned_admin TEXT`,
+    `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
+    `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS approval_phase TEXT NOT NULL DEFAULT 'plan'`,
     `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS wizard_step TEXT NOT NULL DEFAULT 'plan'`,
     `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS display_name TEXT`,
     `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS business_category TEXT`,
@@ -94,8 +108,18 @@ export async function ensureDeveloperPlatformTables(): Promise<void> {
     `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS udyam TEXT`,
     `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
     `ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS payment_method_verified BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE developer_leads ALTER COLUMN company_name SET DEFAULT ''`,
+    `ALTER TABLE developer_leads ALTER COLUMN contact_name SET DEFAULT ''`,
+    `ALTER TABLE developer_leads ALTER COLUMN email SET DEFAULT ''`,
+    `ALTER TABLE developer_leads ALTER COLUMN phone SET DEFAULT ''`,
   ];
-  for (const sql of alters) await query(sql);
+  for (const sql of alters) {
+    try {
+      await query(sql);
+    } catch {
+      /* ignore benign alter races on legacy schemas */
+    }
+  }
 
   await query(`
     CREATE TABLE IF NOT EXISTS developer_lead_documents (

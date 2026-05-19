@@ -159,14 +159,24 @@ export function OnboardingWizard({ onClose }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ planId }),
       });
-      const d = (await r.json()) as { success?: boolean; leadId?: number; reference?: string; message?: string };
-      if (!r.ok || !d.success || !d.leadId) throw new Error(d.message ?? "Could not start");
+      const d = (await r.json()) as {
+        success?: boolean;
+        leadId?: number;
+        reference?: string;
+        message?: string;
+        detail?: string;
+      };
+      if (!r.ok || !d.success || !d.leadId) {
+        throw new Error(d.message ?? d.detail ?? "Could not start application");
+      }
       setLeadId(d.leadId);
       setReference(d.reference ?? "");
       localStorage.setItem(STORAGE_KEY, String(d.leadId));
       await patchLead({ wizardStep: "company", planId }, d.leadId);
       setStep("company");
     } catch (e) {
+      localStorage.removeItem(STORAGE_KEY);
+      setLeadId(null);
       setError(e instanceof Error ? e.message : "Failed");
     } finally {
       setBusy(false);
@@ -408,8 +418,20 @@ export function OnboardingWizard({ onClose }: Props) {
                 disabled={busy}
                 onClick={() => {
                   if (leadId) {
-                    setStep("company");
-                    void loadLead(leadId);
+                    void (async () => {
+                      setBusy(true);
+                      setError("");
+                      try {
+                        await patchLead({ wizardStep: "company", planId }, leadId);
+                        setStep("company");
+                      } catch (e) {
+                        localStorage.removeItem(STORAGE_KEY);
+                        setLeadId(null);
+                        setError(e instanceof Error ? e.message : "Could not resume application");
+                      } finally {
+                        setBusy(false);
+                      }
+                    })();
                   } else {
                     void startDraft();
                   }
