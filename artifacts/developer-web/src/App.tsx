@@ -118,24 +118,24 @@ const PLANS = [
 
 const FAQ = [
   {
-    q: "Kaun si companies apply kar sakti hain?",
-    a: "Registered Pvt Ltd, LLP, Partnership, ya legitimate Proprietorship with GST and verifiable website. Fake shell companies are rejected.",
+    q: "Which companies can apply?",
+    a: "Registered Pvt Ltd, LLP, partnership firms, or legitimate proprietorships with GST and a verifiable website. Fake shell companies are rejected.",
   },
   {
-    q: "Template message kya hota hai?",
-    a: "Pre-approved message format on Videh — image/video header, formatted body with variables like customer name, and buttons (URL, quick reply, call). Users must opt in for marketing.",
+    q: "What is a template message?",
+    a: "A pre-approved message format on Videh — image or video header, formatted body with variables such as the customer name, and buttons (URL, quick reply, call). Users must opt in for marketing.",
   },
   {
-    q: "Kitne din mein live ho jayega?",
-    a: "Document verification: 1–2 days. Videh business verification: 3–10 days. Template approval: 1–3 days per template. Sandbox access is faster — often same week.",
+    q: "How long until we go live?",
+    a: "Document verification: 1–2 days. Videh business verification: 3–10 days. Template approval: 1–3 days per template. Sandbox access is often available within the same week.",
   },
   {
-    q: "Kya main khud direct API bhi use kar sakta hoon?",
-    a: "Haan, par aapko technical team, compliance, aur billing khud setup karni padti hai. Videh partner onboarding, Indian support, aur faster troubleshooting deta hai.",
+    q: "Can I use the API directly on my own?",
+    a: "Yes, but you must set up your own technical team, compliance, and billing. Videh partner onboarding includes Indian support and faster troubleshooting.",
   },
   {
-    q: "Per conversation cost?",
-    a: "User-initiated ~₹0.35–0.58; business-initiated marketing ~₹0.78, utility/auth/service ~₹0.35. Pehle 100 user-initiated/month free. Payment method verify karna zaroori hai API se pehle.",
+    q: "What is the per-conversation cost?",
+    a: "User-initiated: ~₹0.35–0.58. Business-initiated marketing: ~₹0.78; utility, authentication, and service: ~₹0.35. The first 100 user-initiated conversations per month are free. Payment method verification is required before API access.",
   },
 ];
 

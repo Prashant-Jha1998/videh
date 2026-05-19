@@ -15,108 +15,109 @@ const PHASES = [
   {
     phase: "Phase 1",
     title: "Company & legal identity",
-    subtitle: "Fake / shell companies yahi reject ho jaati hain",
+    subtitle: "Fake and shell companies are rejected at this stage",
     items: [
       {
         icon: Building2,
         title: "Registered entity proof",
-        detail: "Pvt Ltd (CIN), LLP (LLPIN), Partnership deed, ya Proprietorship + trade proof.",
+        detail: "Pvt Ltd (CIN), LLP (LLPIN), partnership deed, or proprietorship with trade proof.",
       },
       {
         icon: FileCheck2,
         title: "Tax & identity",
-        detail: "GST certificate, business PAN, authorized signatory PAN + Aadhaar/passport.",
+        detail: "GST certificate, business PAN, and authorized signatory PAN + Aadhaar or passport.",
       },
       {
         icon: Globe,
         title: "Live brand presence",
-        detail: "Working website, privacy policy, contact page — brand name match hona chahiye.",
+        detail: "Working website, privacy policy, and contact page — brand name must match your application.",
       },
       {
         icon: Scale,
         title: "Use-case screening",
-        detail: "Spam, gambling, adult, crypto scams, political bulk — allowed nahi.",
+        detail: "Spam, gambling, adult content, crypto scams, and political bulk messaging are not allowed.",
       },
     ],
   },
   {
     phase: "Phase 2",
     title: "Business channel setup",
-    subtitle: "API tabhi milti hai jab channel verify ho",
+    subtitle: "API access is granted only after the channel is verified",
     items: [
       {
         icon: UserCheck,
         title: "Business manager account",
-        detail: "Company ka central dashboard — assets, users, billing sab yahi link.",
+        detail: "Your company’s central dashboard — assets, users, and billing are linked here.",
       },
       {
         icon: ShieldCheck,
         title: "Business verification (KYB)",
-        detail: "Documents upload → manual review → 3–10 din. Bina iske production limit nahi.",
+        detail: "Upload documents → manual review → typically 3–10 days. Production limits apply only after approval.",
       },
       {
         icon: MessageSquareText,
         title: "Display name approval",
-        detail: "Customer ko jo brand name dikhega — policy ke hisaab se approve hona zaroori.",
+        detail: "The brand name customers see must be approved according to policy.",
       },
       {
         icon: Phone,
         title: "Dedicated phone number",
-        detail: "Personal app wala number use nahi. Naya SIM/landline → OTP verify → channel pe register.",
+        detail: "Personal numbers are not used. New SIM or landline → OTP verification → register on the channel.",
       },
     ],
   },
   {
     phase: "Phase 3",
     title: "Templates, opt-in & compliance",
-    subtitle: "Har automated message pehle approve",
+    subtitle: "Every automated message is approved before use",
     items: [
       {
         icon: MessageSquareText,
         title: "Template submit & review",
-        detail: "Har marketing/utility message ka fixed format — text, header image, buttons. 24–72h review.",
+        detail: "Each marketing or utility message uses a fixed format — text, header image, buttons. Review takes 24–72 hours.",
       },
       {
         icon: FileCheck2,
         title: "Opt-in proof (marketing)",
-        detail: "Customer ne kab, kahan consent diya — website checkbox, invoice, SMS opt-in log.",
+        detail: "When and where the customer gave consent — website checkbox, invoice, or SMS opt-in log.",
       },
       {
         icon: Scale,
         title: "Policy-aligned content",
-        detail: "Misleading offers, fake urgency, banned categories — template reject ya account flag.",
+        detail: "Misleading offers, fake urgency, and banned categories lead to template rejection or account flags.",
       },
       {
         icon: ShieldCheck,
         title: "Quality rating watch",
-        detail: "Block/report zyada → quality drop → limit cut. Green maintain karna mandatory.",
+        detail: "High blocks or reports reduce quality and limits. Maintaining a green rating is mandatory.",
       },
     ],
   },
   {
     phase: "Phase 4",
     title: "Technical go-live",
-    subtitle: "Ab developer API access",
+    subtitle: "Developer API access",
     items: [
       {
         icon: KeyRound,
         title: "API credentials",
-        detail: "Permanent access token, phone number ID, business account ID — sandbox pehle, production baad.",
+        detail: "Permanent access token, phone number ID, and business account ID — sandbox first, then production.",
       },
       {
         icon: Webhook,
         title: "Webhook endpoint",
-        detail: "Inbound replies, delivery status, read receipts — HTTPS URL verify karna padta hai.",
+        detail: "Inbound replies, delivery status, and read receipts — HTTPS URL must be verified.",
       },
       {
         icon: FileCheck2,
         title: "Billing on file",
-        detail: "Per-conversation charges (India): user-initiated ₹0.35–0.58; business marketing/utility/auth/service alag rate. Pehle 100 user-initiated free/month.",
+        detail:
+          "Per-conversation charges (India): user-initiated ₹0.35–0.58; business marketing, utility, auth, and service at separate rates. First 100 user-initiated conversations per month are free.",
       },
       {
         icon: Globe,
         title: "Integration test",
-        detail: "Test numbers par template bhejna → deliver/read confirm → phir scale.",
+        detail: "Send templates to test numbers → confirm delivery and read status → then scale.",
       },
     ],
   },
@@ -139,18 +140,18 @@ export function OnboardingRequirements() {
           background:
             "radial-gradient(ellipse 70% 50% at 50% 0%, rgba(0,168,132,0.15), transparent)",
         }}
-      ></div>
+      />
       <div className="max-w-6xl mx-auto relative">
         <div className="text-center max-w-3xl mx-auto mb-14">
           <p className="text-[#00a884] text-sm font-semibold uppercase tracking-widest mb-3">
-            API dene se pehle
+            Before API access
           </p>
           <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-4">
-            Poora verification flow — enterprise grade
+            Full verification flow — enterprise grade
           </h2>
           <p className="text-white/65 text-lg leading-relaxed">
-            Serious messaging platforms API tabhi dete hain jab company real ho, number verify ho,
-            template approve ho, aur billing set ho. Videh bhi wahi rigor follow karta hai.
+            Serious messaging platforms issue API access only when the company is legitimate, the number is
+            verified, templates are approved, and billing is configured. Videh follows the same standard.
           </p>
         </div>
 
@@ -205,13 +206,13 @@ export function OnboardingRequirements() {
         </div>
 
         <div className="mt-12 rounded-2xl border border-[#00a884]/30 bg-[#00a884]/10 p-6 md:p-8 text-center">
-          <p className="text-lg font-semibold mb-2">Videh par yahi process — end-to-end</p>
+          <p className="text-lg font-semibold mb-2">The same process on Videh — end to end</p>
           <p className="text-white/70 text-sm max-w-2xl mx-auto mb-6">
-            Aap form bharoge → hum documents verify karenge → business channel + templates approve
-            → API keys + webhook. Bich mein koi step skip nahi hota.
+            You submit the application → we verify documents → business channel and templates are approved →
+            you receive API keys and webhooks. No step can be skipped.
           </p>
           <a
-            href="#apply"
+            href="#get-api"
             className="inline-flex items-center gap-2 bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold px-8 py-3 rounded-xl transition-colors"
           >
             Start verification
@@ -221,4 +222,3 @@ export function OnboardingRequirements() {
     </section>
   );
 }
-
