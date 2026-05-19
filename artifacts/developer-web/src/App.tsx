@@ -16,8 +16,10 @@ import {
 } from "lucide-react";
 import { TemplateMessagePreview } from "./components/TemplateMessagePreview";
 import { LeadForm } from "./components/LeadForm";
+import { OnboardingRequirements } from "./components/OnboardingRequirements";
 
 const NAV = [
+  { href: "#requirements", label: "Verification" },
   { href: "#features", label: "Features" },
   { href: "#how-it-works", label: "How it works" },
   { href: "#pricing", label: "Pricing" },
@@ -269,6 +271,8 @@ export default function App() {
           <span className="text-white/80">Support inbox</span>
         </div>
       </section>
+
+      <OnboardingRequirements />
 
       <section id="features" className="py-20 px-4">
         <div className="max-w-6xl mx-auto">
