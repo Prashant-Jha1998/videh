@@ -18,7 +18,7 @@ export function TemplateMessagePreview() {
 
       <div className="px-3 py-4 space-y-3 min-h-[380px]">
         <p className="text-center text-[11px] text-[#8696a0] bg-[#182229] rounded-lg px-3 py-1.5 mx-8">
-          This business uses a secure service from Meta to manage this chat.
+          This business uses a secure service from Videh to manage this chat.
         </p>
 
         <div className="bg-[#1f2c34] rounded-lg overflow-hidden max-w-[92%] shadow-md">

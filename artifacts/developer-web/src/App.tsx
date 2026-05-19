@@ -29,12 +29,12 @@ const FEATURES = [
   {
     icon: MessageSquare,
     title: "Template messages",
-    desc: "Image, video, document headers with body variables and CTA buttons — exactly like RazorpayX & GoDaddy.",
+    desc: "Image, video, document headers with body variables and CTA buttons — enterprise-grade marketing templates.",
   },
   {
     icon: BadgeCheck,
     title: "Verified Business profile",
-    desc: "Blue tick eligibility guidance, display name approval, and Meta Business verification support.",
+    desc: "Blue tick eligibility guidance, display name approval, and Videh business verification support.",
   },
   {
     icon: Webhook,
@@ -66,13 +66,13 @@ const STEPS = [
   },
   {
     n: "02",
-    title: "Meta Business Manager setup",
-    desc: "We create or link your Meta Business account, verified business channel, and phone number.",
+    title: "Videh Business Console setup",
+    desc: "We create or link your Videh business account, verified business channel, and phone number.",
   },
   {
     n: "03",
     title: "Template creation & approval",
-    desc: "Draft marketing or utility templates in Hindi/English. Meta reviews — typically 24–72 hours.",
+    desc: "Draft marketing or utility templates in Hindi/English. Videh reviews — typically 24–72 hours.",
   },
   {
     n: "04",
@@ -85,13 +85,13 @@ const PLANS = [
   {
     name: "Starter",
     price: "₹2,999",
-    period: "/month + Meta conversation charges",
+    period: "/month + Videh usage charges",
     highlights: ["1 channel · 1 phone number", "5,000 messages/mo included", "Email support", "Sandbox + docs"],
   },
   {
     name: "Growth",
     price: "₹9,999",
-    period: "/month + Meta conversation charges",
+    period: "/month + Videh usage charges",
     popular: true,
     highlights: [
       "3 channels · 5 numbers",
@@ -107,7 +107,7 @@ const PLANS = [
     highlights: [
       "Unlimited scale",
       "Dedicated account manager",
-      "SLA & priority Meta escalations",
+      "SLA & priority Videh escalations",
       "Multi-brand & reseller options",
     ],
   },
@@ -120,19 +120,19 @@ const FAQ = [
   },
   {
     q: "Template message kya hota hai?",
-    a: "Pre-approved message format from Meta — image/video header, formatted body with variables like customer name, and buttons (URL, quick reply, call). Users must opt in for marketing.",
+    a: "Pre-approved message format on Videh — image/video header, formatted body with variables like customer name, and buttons (URL, quick reply, call). Users must opt in for marketing.",
   },
   {
     q: "Kitne din mein live ho jayega?",
-    a: "Document verification: 1–2 days. Meta Business verification: 3–10 days. Template approval: 1–3 days per template. Sandbox access is faster — often same week.",
+    a: "Document verification: 1–2 days. Videh business verification: 3–10 days. Template approval: 1–3 days per template. Sandbox access is faster — often same week.",
   },
   {
-    q: "Kya main khud Meta se bhi le sakta hoon?",
-    a: "Haan, directly through Meta Cloud API — but you need technical team, compliance, and billing setup. Videh handles BSP onboarding, Indian support, and faster troubleshooting.",
+    q: "Kya main khud direct API bhi use kar sakta hoon?",
+    a: "Haan, par aapko technical team, compliance, aur billing khud setup karni padti hai. Videh partner onboarding, Indian support, aur faster troubleshooting deta hai.",
   },
   {
     q: "Per message cost?",
-    a: "Meta charges per conversation category (marketing, utility, authentication, service). Videh platform fee is in the plan above. Exact Meta rates depend on country and volume.",
+    a: "Videh per conversation category charge karta hai (marketing, utility, authentication, service). Platform fee upar plans mein hai. Exact rates volume aur country par depend karte hain.",
   },
 ];
 
@@ -213,14 +213,13 @@ export default function App() {
             </p>
             <h1 className="text-4xl md:text-5xl lg:text-[3.25rem] font-extrabold leading-[1.1] tracking-tight mb-5">
               Official business messaging API for{" "}
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#25d366] to-[#00a884]">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00c9a0] to-[#00a884]">
                 your company logo
               </span>
             </h1>
             <p className="text-lg text-white/75 leading-relaxed mb-8 max-w-xl">
               Pvt Ltd, LLP, Proprietorship — send automated template messages with images, buttons, and
-              verified business branding. Videh is your technology partner from Meta onboarding to production
-              API.
+              verified business branding. Videh is your technology partner from onboarding to production API.
             </p>
             <div className="flex flex-wrap gap-3">
               <a
@@ -240,7 +239,7 @@ export default function App() {
             </div>
             <div className="mt-10 flex flex-wrap gap-6 text-sm text-white/60">
               <span className="flex items-center gap-1.5">
-                <CheckCircle2 className="h-4 w-4 text-[#00a884]" /> Meta Cloud API
+                <CheckCircle2 className="h-4 w-4 text-[#00a884]" /> Videh Cloud API
               </span>
               <span className="flex items-center gap-1.5">
                 <CheckCircle2 className="h-4 w-4 text-[#00a884]" /> Template + Utility
@@ -326,8 +325,8 @@ export default function App() {
         <div className="max-w-6xl mx-auto">
           <h2 className="text-3xl font-bold text-[#111b21] mb-3 text-center">How onboarding works</h2>
           <p className="text-[#667781] text-center mb-12 max-w-xl mx-auto">
-            Meta requires real businesses — not fake shells. Videh verifies you first, then guides Meta
-            Business verification and template approval.
+            Videh requires real businesses — not fake shells. We verify you first, then guide business
+            verification and template approval.
           </p>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             {STEPS.map((s) => (
@@ -374,7 +373,7 @@ export default function App() {
         <div className="max-w-6xl mx-auto">
           <h2 className="text-3xl font-bold text-center mb-3">Transparent pricing</h2>
           <p className="text-white/60 text-center mb-12 max-w-lg mx-auto">
-            Platform fee + Meta conversation charges. No hidden setup fee on Growth plan.
+            Platform fee + Videh usage charges. No hidden setup fee on Growth plan.
           </p>
           <div className="grid md:grid-cols-3 gap-6">
             {PLANS.map((p) => (
@@ -427,7 +426,7 @@ export default function App() {
             We do not onboard fake companies
           </h3>
           <p className="text-sm text-amber-900/80 leading-relaxed">
-            Meta bans BSPs that enable spam. Videh verifies GST, company registration, website, and use case
+            Videh blocks partners that enable spam. We verify GST, company registration, website, and use case
             before submission. Shell companies, gambling, adult content, and unsolicited bulk marketing are
             rejected. This protects your number quality rating and keeps the platform sustainable.
           </p>
@@ -440,7 +439,7 @@ export default function App() {
             <h2 className="text-3xl font-bold text-[#111b21] mb-4">Apply for API access</h2>
             <p className="text-[#667781] leading-relaxed mb-6">
               Fill the form — our team will schedule a call, verify documents, and set up your sandbox. Production
-              goes live after Meta approves your business and templates.
+              goes live after Videh approves your business and templates.
             </p>
             <div className="space-y-4 text-sm">
               <p className="font-semibold text-[#111b21]">Documents typically required:</p>
@@ -487,8 +486,7 @@ export default function App() {
           </div>
         </div>
         <p className="max-w-6xl mx-auto mt-8 pt-8 border-t border-white/10 text-xs text-center">
-          © {new Date().getFullYear()} Videh. Third-party messaging platform names and marks belong to their
-          respective owners. Videh is an independent technology provider.
+          © {new Date().getFullYear()} Videh. Business messaging API by Videh — built in India.
         </p>
       </footer>
     </div>

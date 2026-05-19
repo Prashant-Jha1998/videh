@@ -81,7 +81,7 @@ export function LeadForm() {
         <h3 className="text-xl font-bold text-[#111b21] mb-2">Application received</h3>
         <p className="text-[#667781] max-w-md mx-auto">
           Our onboarding team will verify your company documents and contact you within 1–2 business days
-          with sandbox access and next steps for Meta Business verification.
+          with sandbox access and next steps for Videh business verification.
         </p>
         <button
           type="button"
@@ -255,7 +255,7 @@ export function LeadForm() {
       </button>
 
       <p className="text-[11px] text-[#667781] text-center leading-relaxed">
-        By applying you confirm your business is genuine and agree to Meta&apos;s business messaging policies.
+        By applying you confirm your business is genuine and agree to Videh&apos;s business messaging policies.
         Videh rejects fake entities, spam, and policy-violating use cases.
       </p>
     </form>
