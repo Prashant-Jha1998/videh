@@ -15,9 +15,18 @@ type PortalTemplate = {
   approved?: boolean;
 };
 
+type ChannelInfo = {
+  channel_phone?: string | null;
+  channel_status?: string;
+  phone_number_id?: string | null;
+  business_account_id?: string | null;
+};
+
 type PortalData = {
   lead: { reference_code: string; status: string; company_name: string };
-  account: { api_key_id: string; billing_status: string } | null;
+  account: { api_key_id: string; billing_status: string; videh_phone_number_id?: string; videh_business_account_id?: string } | null;
+  channel?: ChannelInfo;
+  credentials_hint?: ChannelInfo;
   templates: PortalTemplate[];
   approvedCount: number;
 };
@@ -48,6 +57,8 @@ export function DeveloperPortal() {
         message?: string;
         lead?: PortalData["lead"];
         account?: PortalData["account"];
+        channel?: ChannelInfo;
+        credentials_hint?: ChannelInfo;
       };
       const tpl = (await tplRes.json()) as { templates?: PortalTemplate[]; approvedCount?: number };
       if (!portalRes.ok || !portal.success) {
@@ -58,6 +69,8 @@ export function DeveloperPortal() {
       setData({
         lead: portal.lead!,
         account: portal.account ?? null,
+        channel: portal.channel,
+        credentials_hint: portal.credentials_hint,
         templates: tpl.templates ?? [],
         approvedCount: tpl.approvedCount ?? 0,
       });
@@ -143,9 +156,35 @@ export function DeveloperPortal() {
                   Billing: {data.account.billing_status}. Secret was shown once on approval — contact
                   developer@videh.co.in to rotate.
                 </p>
+                {(data.credentials_hint?.phone_number_id || data.channel?.phone_number_id) ? (
+                  <div className="mt-3 space-y-1 text-xs border-t border-gray-200 pt-3">
+                    <p>
+                      Phone Number ID:{" "}
+                      <code className="text-[#00a884]">
+                        {data.account?.videh_phone_number_id ?? data.credentials_hint?.phone_number_id ?? data.channel?.phone_number_id}
+                      </code>
+                    </p>
+                    <p>
+                      Business Account ID:{" "}
+                      <code className="text-[#00a884]">
+                        {data.account?.videh_business_account_id ?? data.credentials_hint?.business_account_id ?? data.channel?.business_account_id}
+                      </code>
+                    </p>
+                  </div>
+                ) : null}
                 <p className="mt-3 text-xs text-[#667781]">
-                  List templates: <code>GET https://api.videh.co.in/v1/templates</code> with{" "}
-                  <code>Authorization: Bearer vsec_...</code>
+                  <code>GET /v1/me</code> · <code>POST /v1/&#123;phone-number-id&#125;/messages</code>
+                </p>
+              </div>
+            ) : data.channel?.phone_number_id || data.credentials_hint?.phone_number_id ? (
+              <div className="rounded-xl bg-[#f0f2f5] p-4 text-sm">
+                <p className="font-semibold text-[#111b21] mb-2">Channel IDs (awaiting API approval)</p>
+                <p>
+                  Phone Number ID: <code>{data.channel?.phone_number_id ?? data.credentials_hint?.phone_number_id}</code>
+                </p>
+                <p className="mt-1">
+                  Business Account ID:{" "}
+                  <code>{data.channel?.business_account_id ?? data.credentials_hint?.business_account_id}</code>
                 </p>
               </div>
             ) : (

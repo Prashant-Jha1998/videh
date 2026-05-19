@@ -32,6 +32,10 @@ type Lead = {
   admin_notes?: string;
   assigned_admin?: string;
   created_at: string;
+  channel_phone?: string;
+  channel_status?: string;
+  videh_phone_number_id?: string;
+  videh_business_account_id?: string;
 };
 
 type LeadDoc = {
@@ -236,6 +240,20 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
       await loadDetail(leadId);
     } catch (err) {
       onErr(err instanceof Error ? err.message : "Could not create template");
+    }
+  };
+
+  const manualVerifyChannel = async (leadId: number) => {
+    const phone = window.prompt("Channel phone (10 digits)", "")?.trim();
+    if (!phone) return;
+    try {
+      await adminApi(`/admin/developer-leads/${leadId}/channel`, {
+        method: "PATCH",
+        body: JSON.stringify({ channelPhone: phone, manualVerify: true }),
+      });
+      await loadDetail(leadId);
+    } catch (err) {
+      onErr(err instanceof Error ? err.message : "Channel verify failed");
     }
   };
 
@@ -479,6 +497,36 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
               <li>Address: {detail.lead.business_address ?? "—"}</li>
               <li>Description: {detail.lead.business_description ?? "—"}</li>
             </ul>
+
+            <h4>Business channel (Phone Number ID)</h4>
+            <p style={{ fontSize: 13, marginBottom: 8 }}>
+              Status: <strong>{detail.lead.channel_status ?? "none"}</strong>
+              {detail.lead.channel_phone ? ` · Phone: ${detail.lead.channel_phone}` : ""}
+            </p>
+            {detail.lead.videh_phone_number_id ? (
+              <ul style={{ fontSize: 13, margin: "0 0 12px" }}>
+                <li>
+                  Phone Number ID: <code>{detail.lead.videh_phone_number_id}</code>
+                </li>
+                <li>
+                  Business Account ID: <code>{detail.lead.videh_business_account_id}</code>
+                </li>
+              </ul>
+            ) : (
+              <p className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+                Applicant must verify dedicated number via OTP in the application console.
+              </p>
+            )}
+            {detail.lead.channel_status !== "verified" ? (
+              <button
+                type="button"
+                className="btn"
+                style={{ width: "auto", marginBottom: 12 }}
+                onClick={() => void manualVerifyChannel(detail.lead.id)}
+              >
+                Admin: mark channel verified
+              </button>
+            ) : null}
 
             <h4>Documents</h4>
             <ul style={{ fontSize: 13 }}>

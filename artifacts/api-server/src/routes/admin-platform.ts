@@ -11,6 +11,12 @@ import crypto from "node:crypto";
 import { DEVELOPER_STATUSES, ensureDeveloperLeadsTable } from "./developer-leads";
 import { documentsForEntity } from "../lib/developerPlatform";
 import { ensureDeveloperTemplateTables, linkTemplatesToAccount } from "../lib/developerTemplates";
+import {
+  copyChannelToAccount,
+  ensureDeveloperChannelColumns,
+  generateBusinessAccountId,
+  generatePhoneNumberId,
+} from "../lib/developerChannel";
 
 function adminEmail(req: Request): string {
   const a = req.admin as AdminIdentity | undefined;
@@ -852,6 +858,13 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
           });
           return;
         }
+        if (row.channel_status !== "verified" || !row.videh_phone_number_id) {
+          res.status(400).json({
+            success: false,
+            message: "Cannot approve: business channel phone not verified. Applicant must complete dedicated number OTP.",
+          });
+          return;
+        }
         const existing = await query(`SELECT id FROM developer_api_accounts WHERE lead_id = $1`, [id]);
         if (!existing.rows[0]) {
           const apiKeyId = `vsk_${crypto.randomBytes(8).toString("hex")}`;
@@ -866,8 +879,10 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
           const ins = await query(
             `INSERT INTO developer_api_accounts
              (lead_id, reference_code, company_name, display_name, logo_url, api_key_id, api_key_secret_hash,
-              billing_status, plan_id, amount_inr_monthly, total_billed_inr, last_payment_at, next_billing_at, approved_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW() + INTERVAL '30 days', $13)
+              billing_status, plan_id, amount_inr_monthly, total_billed_inr, last_payment_at, next_billing_at, approved_by,
+              channel_phone, channel_status, channel_verified_at, videh_phone_number_id, videh_business_account_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW() + INTERVAL '30 days', $13,
+              $14,$15,$16,$17,$18)
              RETURNING id`,
             [
               id,
@@ -883,14 +898,21 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
               row.payment_status === "paid" ? row.amount_inr : 0,
               row.paid_at ?? null,
               adminEmail(req),
+              row.channel_phone,
+              row.channel_status,
+              row.channel_verified_at,
+              row.videh_phone_number_id,
+              row.videh_business_account_id,
             ],
           );
           const newAccountId = Number((ins.rows[0] as { id: number }).id);
           await linkTemplatesToAccount(id, newAccountId);
+          await copyChannelToAccount(id, newAccountId);
           apiSecretOnce = apiSecret;
         } else {
           const acct = existing.rows[0] as { id: number };
           await linkTemplatesToAccount(id, acct.id);
+          await copyChannelToAccount(id, acct.id);
         }
       }
 
@@ -1158,6 +1180,55 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
       } catch (err) {
         logger.error({ err }, "admin patch template");
         res.status(500).json({ success: false, message: "Update failed" });
+      }
+    },
+  );
+
+  router.patch(
+    "/developer-leads/:leadId/channel",
+    requireAdmin,
+    requirePermission("developer.manage"),
+    async (req, res) => {
+      const leadId = Number(req.params.leadId);
+      const body = req.body as { channelPhone?: string; channelStatus?: string; manualVerify?: boolean };
+      if (!leadId) {
+        res.status(400).json({ success: false, message: "Invalid lead id" });
+        return;
+      }
+      try {
+        await ensureDeveloperChannelColumns();
+        const lead = await query(`SELECT * FROM developer_leads WHERE id = $1`, [leadId]);
+        if (!lead.rows[0]) {
+          res.status(404).json({ success: false, message: "Lead not found" });
+          return;
+        }
+        const L = lead.rows[0] as Record<string, unknown>;
+        let vba = L.videh_business_account_id as string | null;
+        let vpn = L.videh_phone_number_id as string | null;
+        if (!vba) vba = generateBusinessAccountId();
+        if (body.manualVerify && !vpn) vpn = generatePhoneNumberId();
+        const phone = body.channelPhone?.trim() ? body.channelPhone : L.channel_phone;
+        const status = body.manualVerify ? "verified" : (body.channelStatus ?? L.channel_status);
+        await query(
+          `UPDATE developer_leads SET
+             channel_phone = COALESCE($1, channel_phone),
+             channel_status = $2,
+             channel_verified_at = CASE WHEN $2 = 'verified' THEN NOW() ELSE channel_verified_at END,
+             videh_business_account_id = COALESCE(videh_business_account_id, $3),
+             videh_phone_number_id = COALESCE(videh_phone_number_id, $4),
+             updated_at = NOW()
+           WHERE id = $5`,
+          [phone, status, vba, vpn, leadId],
+        );
+        const acct = await query(`SELECT id FROM developer_api_accounts WHERE lead_id = $1`, [leadId]);
+        if ((acct.rows[0] as { id?: number })?.id) {
+          await copyChannelToAccount(leadId, (acct.rows[0] as { id: number }).id);
+        }
+        const updated = await query(`SELECT * FROM developer_leads WHERE id = $1`, [leadId]);
+        res.json({ success: true, lead: updated.rows[0] });
+      } catch (err) {
+        logger.error({ err }, "admin channel patch");
+        res.status(500).json({ success: false, message: "Channel update failed" });
       }
     },
   );

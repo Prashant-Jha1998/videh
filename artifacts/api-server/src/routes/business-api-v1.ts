@@ -3,10 +3,11 @@ import crypto from "node:crypto";
 import { query } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireDeveloperApi } from "../lib/developerApiAuth";
-import { assertApiBillingActive, billConversation, type ConversationCategory } from "../lib/developerBilling";
+import { assertApiBillingActive } from "../lib/developerBilling";
+import { channelPublicFromRow, ensureDeveloperChannelColumns } from "../lib/developerChannel";
+import { sendBusinessMessage } from "../lib/developerApiSend";
 import {
   ensureDeveloperTemplateTables,
-  normalizePhone,
   templateToPublic,
   type MessageTemplateRow,
 } from "../lib/developerTemplates";
@@ -15,192 +16,159 @@ const router = Router();
 
 router.use(requireDeveloperApi);
 
-async function loadApprovedTemplate(
-  accountId: number,
-  idOrKey: string,
-): Promise<MessageTemplateRow | null> {
-  const isNumeric = /^\d+$/.test(idOrKey);
-  const r = await query(
-    isNumeric
-      ? `SELECT * FROM developer_message_templates
-         WHERE account_id = $1 AND id = $2 AND status = 'approved'`
-      : `SELECT * FROM developer_message_templates
-         WHERE account_id = $1 AND template_key = $2 AND status = 'approved'`,
-    isNumeric ? [accountId, Number(idOrKey)] : [accountId, idOrKey],
-  );
-  return (r.rows[0] as MessageTemplateRow) ?? null;
-}
+/** GET /v1/me — Meta-style app credentials overview */
+router.get("/me", async (req, res) => {
+  try {
+    await ensureDeveloperChannelColumns();
+    const account = req.developerAccount!;
+    const r = await query(
+      `SELECT a.*, l.email, l.status AS lead_status
+       FROM developer_api_accounts a
+       JOIN developer_leads l ON l.id = a.lead_id
+       WHERE a.id = $1`,
+      [account.id],
+    );
+    const row = r.rows[0] as Record<string, unknown> | undefined;
+    if (!row) {
+      res.status(404).json({ success: false, error: { code: "not_found", message: "Account not found" } });
+      return;
+    }
+    res.json({
+      success: true,
+      data: {
+        api_key_id: row.api_key_id,
+        reference_code: row.reference_code,
+        company_name: row.company_name,
+        display_name: row.display_name,
+        billing_status: row.billing_status,
+        lead_status: row.lead_status,
+        channel: channelPublicFromRow(row),
+        endpoints: {
+          templates: "/v1/templates",
+          send_message: `/v1/${row.videh_phone_number_id ?? "{phone-number-id}"}/messages`,
+          send_message_alt: "/v1/business-messages",
+          webhook_settings: "/v1/settings/webhook",
+        },
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, "v1 me");
+    res.status(500).json({ success: false, error: { code: "server_error", message: "Could not load account" } });
+  }
+});
 
-/** GET /v1/templates — list approved templates for API integration */
 router.get("/templates", async (req, res) => {
   try {
     await ensureDeveloperTemplateTables();
     const account = req.developerAccount!;
     const billing = await assertApiBillingActive(account.id);
     if (!billing.ok) {
-      res.status(402).json({
-        success: false,
-        error: { code: billing.reason, message: "API access restricted. Verify payment or contact Videh support." },
-      });
+      res.status(402).json({ success: false, error: { code: billing.reason, message: "API access restricted." } });
       return;
     }
-
     const r = await query(
-      `SELECT * FROM developer_message_templates
-       WHERE account_id = $1 AND status = 'approved'
-       ORDER BY template_key ASC`,
+      `SELECT * FROM developer_message_templates WHERE account_id = $1 AND status = 'approved' ORDER BY template_key ASC`,
       [account.id],
     );
-    res.json({
-      success: true,
-      data: (r.rows as MessageTemplateRow[]).map(templateToPublic),
-    });
+    res.json({ success: true, data: (r.rows as MessageTemplateRow[]).map(templateToPublic) });
   } catch (err) {
     logger.error({ err }, "v1 templates list");
     res.status(500).json({ success: false, error: { code: "server_error", message: "Could not load templates" } });
   }
 });
 
-/** GET /v1/templates/:idOrKey */
 router.get("/templates/:idOrKey", async (req, res) => {
   try {
     await ensureDeveloperTemplateTables();
     const account = req.developerAccount!;
     const billing = await assertApiBillingActive(account.id);
     if (!billing.ok) {
-      res.status(402).json({
-        success: false,
-        error: { code: billing.reason, message: "API access restricted." },
-      });
+      res.status(402).json({ success: false, error: { code: billing.reason, message: "API access restricted." } });
       return;
     }
-
-    const row = await loadApprovedTemplate(account.id, req.params.idOrKey);
-    if (!row) {
-      res.status(404).json({
-        success: false,
-        error: { code: "template_not_found", message: "Template not found or not approved" },
-      });
+    const isNumeric = /^\d+$/.test(req.params.idOrKey);
+    const r = await query(
+      isNumeric
+        ? `SELECT * FROM developer_message_templates WHERE account_id = $1 AND id = $2 AND status = 'approved'`
+        : `SELECT * FROM developer_message_templates WHERE account_id = $1 AND template_key = $2 AND status = 'approved'`,
+      isNumeric ? [account.id, Number(req.params.idOrKey)] : [account.id, req.params.idOrKey],
+    );
+    if (!r.rows[0]) {
+      res.status(404).json({ success: false, error: { code: "template_not_found", message: "Not found" } });
       return;
     }
-    res.json({ success: true, data: templateToPublic(row) });
+    res.json({ success: true, data: templateToPublic(r.rows[0] as MessageTemplateRow) });
   } catch (err) {
     logger.error({ err }, "v1 template get");
     res.status(500).json({ success: false, error: { code: "server_error", message: "Could not load template" } });
   }
 });
 
-type SendBody = {
-  to?: string;
-  template?: {
-    name?: string;
-    language?: { code?: string };
-    components?: unknown[];
-  };
-};
-
-/** POST /v1/business-messages — send using an approved template */
-router.post("/business-messages", async (req, res) => {
+/** POST /v1/settings/webhook — register delivery webhook (Meta-style) */
+router.post("/settings/webhook", async (req, res) => {
   try {
-    await ensureDeveloperTemplateTables();
+    await ensureDeveloperChannelColumns();
     const account = req.developerAccount!;
-    const billing = await assertApiBillingActive(account.id);
-    if (!billing.ok) {
-      res.status(402).json({
-        success: false,
-        error: { code: billing.reason, message: "API access restricted. Verify payment or contact Videh support." },
-      });
+    const body = req.body as { url?: string; verify_token?: string };
+    const url = String(body.url ?? "").trim();
+    if (!url || !url.startsWith("https://")) {
+      res.status(400).json({ success: false, error: { code: "invalid_url", message: "HTTPS webhook URL required" } });
       return;
     }
-
-    const body = req.body as SendBody;
-    const toRaw = String(body.to ?? "").trim();
-    const templateName = String(body.template?.name ?? "").trim();
-    const langCode = String(body.template?.language?.code ?? "en").trim() || "en";
-
-    if (!toRaw || !templateName) {
-      res.status(400).json({
-        success: false,
-        error: { code: "invalid_request", message: "Fields `to` and `template.name` are required" },
-      });
-      return;
-    }
-
-    const phone = normalizePhone(toRaw);
-    if (!phone) {
-      res.status(400).json({
-        success: false,
-        error: { code: "invalid_phone", message: "Invalid recipient phone. Use 10-digit Indian mobile or 91XXXXXXXXXX" },
-      });
-      return;
-    }
-
-    const tmpl = await loadApprovedTemplate(account.id, templateName);
-    if (!tmpl) {
-      res.status(400).json({
-        success: false,
-        error: {
-          code: "template_not_approved",
-          message: `Template "${templateName}" is not approved. List templates via GET /v1/templates`,
-        },
-      });
-      return;
-    }
-
-    if (tmpl.language !== langCode) {
-      res.status(400).json({
-        success: false,
-        error: {
-          code: "language_mismatch",
-          message: `Template language is "${tmpl.language}", requested "${langCode}"`,
-        },
-      });
-      return;
-    }
-
-    const category = (tmpl.category as ConversationCategory) || "utility";
-    const bill = await billConversation({
-      accountId: account.id,
-      initiator: "business",
-      category,
-      withinServiceWindow: false,
-    });
-
-    const externalId = `vmsg_${crypto.randomBytes(12).toString("hex")}`;
-    const amountPaise = Math.round(bill.amountInr * 100);
-
+    const verifyToken = body.verify_token?.trim() || `vwh_${crypto.randomBytes(12).toString("hex")}`;
+    const secret = `vws_${crypto.randomBytes(24).toString("hex")}`;
     await query(
-      `INSERT INTO developer_api_messages
-       (account_id, template_id, external_id, recipient_phone, template_key, language, payload_json, status, billing_amount_inr)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'queued',$8)`,
-      [
-        account.id,
-        tmpl.id,
-        externalId,
-        phone,
-        tmpl.template_key,
-        langCode,
-        JSON.stringify(body),
-        amountPaise,
-      ],
+      `UPDATE developer_api_accounts SET webhook_url = $1, webhook_verify_token = $2, webhook_secret = $3 WHERE id = $4`,
+      [url, verifyToken, secret, account.id],
     );
-
-    res.status(202).json({
+    res.json({
       success: true,
       data: {
-        id: externalId,
-        status: "queued",
-        to: phone,
-        template: { name: tmpl.template_key, language: { code: langCode } },
-        billing: {
-          charged: bill.charged,
-          amount_inr: bill.amountInr,
-          reason: bill.reason,
-        },
+        webhook_url: url,
+        verify_token: verifyToken,
+        webhook_secret: secret,
+        note: "Subscribe to message.status and message.inbound events. Verify token is sent on GET challenge.",
       },
     });
   } catch (err) {
-    logger.error({ err }, "v1 business-messages send");
+    logger.error({ err }, "v1 webhook settings");
+    res.status(500).json({ success: false, error: { code: "server_error", message: "Could not save webhook" } });
+  }
+});
+
+router.get("/settings/webhook", async (req, res) => {
+  const account = req.developerAccount!;
+  const r = await query(
+    `SELECT webhook_url, webhook_verify_token FROM developer_api_accounts WHERE id = $1`,
+    [account.id],
+  );
+  const row = r.rows[0] as { webhook_url?: string; webhook_verify_token?: string };
+  res.json({
+    success: true,
+    data: { webhook_url: row?.webhook_url ?? null, verify_token: row?.webhook_verify_token ?? null },
+  });
+});
+
+/** POST /v1/business-messages */
+router.post("/business-messages", async (req, res) => {
+  try {
+    const account = req.developerAccount!;
+    const result = await sendBusinessMessage(account.id, undefined, req.body);
+    res.status(result.status).json(result.body);
+  } catch (err) {
+    logger.error({ err }, "v1 business-messages");
+    res.status(500).json({ success: false, error: { code: "server_error", message: "Could not send message" } });
+  }
+});
+
+/** POST /v1/:phoneNumberId/messages — Meta Cloud API compatible path */
+router.post("/:phoneNumberId/messages", async (req, res) => {
+  try {
+    const account = req.developerAccount!;
+    const result = await sendBusinessMessage(account.id, req.params.phoneNumberId, req.body);
+    res.status(result.status).json(result.body);
+  } catch (err) {
+    logger.error({ err }, "v1 phone messages");
     res.status(500).json({ success: false, error: { code: "server_error", message: "Could not send message" } });
   }
 });

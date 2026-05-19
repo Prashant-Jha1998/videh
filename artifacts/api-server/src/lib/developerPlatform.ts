@@ -1,5 +1,6 @@
 import { query } from "./db";
 import { ensureDeveloperTemplateTables } from "./developerTemplates";
+import { ensureDeveloperChannelColumns } from "./developerChannel";
 
 export type EntityType = "pvt_ltd" | "llp" | "proprietorship" | "partnership" | "other";
 
@@ -39,7 +40,7 @@ export const DOCUMENT_REQUIREMENTS: Record<EntityType, DocRequirement[]> = {
   ],
 };
 
-export const WIZARD_STEPS = ["plan", "company", "documents", "profile", "payment", "done"] as const;
+export const WIZARD_STEPS = ["plan", "company", "documents", "profile", "channel", "payment", "done"] as const;
 
 export async function ensureDeveloperPlatformTables(): Promise<void> {
   await query(`
@@ -198,6 +199,7 @@ export async function ensureDeveloperPlatformTables(): Promise<void> {
   `);
 
   await ensureDeveloperTemplateTables();
+  await ensureDeveloperChannelColumns();
 }
 
 export function documentsForEntity(entityType: string): DocRequirement[] {

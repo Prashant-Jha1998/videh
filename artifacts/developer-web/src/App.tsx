@@ -141,10 +141,13 @@ const FAQ = [
   },
 ];
 
+const API_ME = `curl https://api.videh.co.in/v1/me \\
+  -H "Authorization: Bearer vsec_YOUR_SECRET"`;
+
 const API_LIST_TEMPLATES = `curl https://api.videh.co.in/v1/templates \\
   -H "Authorization: Bearer vsec_YOUR_SECRET"`;
 
-const API_SAMPLE = `curl -X POST https://api.videh.co.in/v1/business-messages \\
+const API_SAMPLE = `curl -X POST https://api.videh.co.in/v1/PHONE_NUMBER_ID/messages \\
   -H "Authorization: Bearer vsec_YOUR_SECRET" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -421,11 +424,15 @@ export default function App() {
             </ul>
           </div>
           <div className="space-y-4">
+            <p className="text-xs font-semibold text-[#667781] uppercase tracking-wide">Account &amp; channel IDs</p>
+            <pre className="code-block rounded-2xl bg-[#0b141a] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
+              <code>{API_ME}</code>
+            </pre>
             <p className="text-xs font-semibold text-[#667781] uppercase tracking-wide">List approved templates</p>
             <pre className="code-block rounded-2xl bg-[#0b141a] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
               <code>{API_LIST_TEMPLATES}</code>
             </pre>
-            <p className="text-xs font-semibold text-[#667781] uppercase tracking-wide">Send message</p>
+            <p className="text-xs font-semibold text-[#667781] uppercase tracking-wide">Send message (Meta-style path)</p>
             <pre className="code-block rounded-2xl bg-[#0b141a] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
               <code>{API_SAMPLE}</code>
             </pre>

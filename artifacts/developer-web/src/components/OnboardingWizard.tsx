@@ -9,6 +9,7 @@ import {
   ImagePlus,
   LayoutDashboard,
   Loader2,
+  Phone,
   Upload,
 } from "lucide-react";
 import { ConversationPricing } from "./ConversationPricing";
@@ -20,7 +21,7 @@ declare global {
   }
 }
 
-const STEPS = ["plan", "company", "documents", "profile", "payment", "done"] as const;
+const STEPS = ["plan", "company", "documents", "profile", "channel", "payment", "done"] as const;
 type Step = (typeof STEPS)[number];
 
 const MODULES: {
@@ -34,6 +35,7 @@ const MODULES: {
   { id: "company", label: "Business information", subtitle: "Legal entity & signatory", icon: Building2, section: "setup" },
   { id: "documents", label: "Compliance documents", subtitle: "GST, COI, KYC by entity", icon: FileText, section: "setup" },
   { id: "profile", label: "Business profile", subtitle: "Display name & logo", icon: ImagePlus, section: "setup" },
+  { id: "channel", label: "Phone & channel", subtitle: "Dedicated number + OTP", icon: Phone, section: "setup" },
   { id: "payment", label: "Payment verification", subtitle: "Card / UPI method check", icon: CreditCard, section: "setup" },
   { id: "done", label: "Application status", subtitle: "Review pipeline & next steps", icon: LayoutDashboard, section: "review" },
 ];
@@ -73,6 +75,12 @@ export function OnboardingWizard({ onClose }: Props) {
   const [error, setError] = useState("");
   const [maxReachedIndex, setMaxReachedIndex] = useState(0);
   const [leadStatus, setLeadStatus] = useState<string>("draft");
+  const [channelPhone, setChannelPhone] = useState("");
+  const [channelOtp, setChannelOtp] = useState("");
+  const [channelVerified, setChannelVerified] = useState(false);
+  const [phoneNumberId, setPhoneNumberId] = useState("");
+  const [businessAccountId, setBusinessAccountId] = useState("");
+  const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
 
   const [company, setCompany] = useState({
     companyName: "",
@@ -122,6 +130,11 @@ export function OnboardingWizard({ onClose }: Props) {
         setMaxReachedIndex(Math.max(STEPS.indexOf(ws as Step), STEPS.indexOf("plan")));
       }
       setLeadStatus(String(L.status ?? "draft"));
+      const chPhone = String(L.channel_phone ?? "");
+      setChannelPhone(chPhone.startsWith("91") ? chPhone.slice(2) : chPhone);
+      setChannelVerified(L.channel_status === "verified");
+      setPhoneNumberId(String(L.videh_phone_number_id ?? ""));
+      setBusinessAccountId(String(L.videh_business_account_id ?? ""));
       setLogoUrl(String(L.logo_url ?? ""));
       setCompany({
         companyName: String(L.company_name ?? ""),
@@ -271,9 +284,9 @@ export function OnboardingWizard({ onClose }: Props) {
         businessCategory: profile.businessCategory,
         businessDescription: profile.businessDescription,
         businessAddress: profile.businessAddress,
-        wizardStep: "payment",
+        wizardStep: "channel",
       });
-      setStep("payment");
+      setStep("channel");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -369,6 +382,54 @@ export function OnboardingWizard({ onClose }: Props) {
     }
   }
 
+  async function sendChannelOtpRequest() {
+    if (!leadId || !channelPhone.trim()) return;
+    setBusy(true);
+    setError("");
+    setDevOtpHint(null);
+    try {
+      const r = await fetch(`/api/developer-leads/${leadId}/channel/send-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelPhone: channelPhone.trim() }),
+      });
+      const d = (await r.json()) as { success?: boolean; message?: string; devOtp?: string };
+      if (!r.ok || !d.success) throw new Error(d.message ?? "Could not send OTP");
+      if (d.devOtp) setDevOtpHint(d.devOtp);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "OTP failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyChannelOtpRequest() {
+    if (!leadId) return;
+    setBusy(true);
+    setError("");
+    try {
+      const r = await fetch(`/api/developer-leads/${leadId}/channel/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelPhone: channelPhone.trim(), otp: channelOtp.trim() }),
+      });
+      const d = (await r.json()) as {
+        success?: boolean;
+        message?: string;
+        channel?: { phone_number_id?: string; business_account_id?: string };
+      };
+      if (!r.ok || !d.success) throw new Error(d.message ?? "Verification failed");
+      setChannelVerified(true);
+      setPhoneNumberId(d.channel?.phone_number_id ?? "");
+      setBusinessAccountId(d.channel?.business_account_id ?? "");
+      setStep("payment");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Verification failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const stepIndex = STEPS.indexOf(step);
   const requiredMissing = docs.filter((d) => d.required && !uploaded.has(d.key));
   const currentModule = MODULES.find((m) => m.id === step) ?? MODULES[0]!;
@@ -418,7 +479,7 @@ export function OnboardingWizard({ onClose }: Props) {
 
           {step === "plan" && (
             <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-6">
-              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 1 of 5</p>
+              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 1 of 6</p>
               <h2 className="text-2xl font-bold text-[#111b21]">Choose your plan</h2>
               <p className="text-sm text-[#667781]">
                 Monthly subscription is billed in your company name. If payment fails later, API access is
@@ -484,7 +545,7 @@ export function OnboardingWizard({ onClose }: Props) {
 
           {step === "company" && (
             <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-4">
-              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 2 of 5</p>
+              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 2 of 6</p>
               <h2 className="text-2xl font-bold text-[#111b21] flex items-center gap-2">
                 <Building2 className="h-6 w-6 text-[#00a884]" /> Company details
               </h2>
@@ -611,7 +672,7 @@ export function OnboardingWizard({ onClose }: Props) {
 
           {step === "documents" && (
             <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-4">
-              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 3 of 5</p>
+              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 3 of 6</p>
               <h2 className="text-2xl font-bold text-[#111b21]">Upload documents</h2>
               <p className="text-sm text-[#667781]">
                 Required documents for{" "}
@@ -670,7 +731,7 @@ export function OnboardingWizard({ onClose }: Props) {
 
           {step === "profile" && (
             <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-4">
-              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 4 of 5</p>
+              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 4 of 6</p>
               <h2 className="text-2xl font-bold text-[#111b21]">Business profile</h2>
               <p className="text-sm text-[#667781]">
                 Set how your company appears on Videh — display name and logo (verified business profile).
@@ -745,15 +806,107 @@ export function OnboardingWizard({ onClose }: Props) {
                   onClick={() => void saveProfile()}
                   className="flex-1 bg-[#00a884] text-white font-semibold py-2.5 rounded-xl disabled:opacity-60"
                 >
-                  Continue to payment
+                  Continue to phone verification
                 </button>
+              </div>
+            </section>
+          )}
+
+          {step === "channel" && (
+            <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-6">
+              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 5 of 6</p>
+              <h2 className="text-2xl font-bold text-[#111b21] flex items-center gap-2">
+                <Phone className="h-6 w-6 text-[#00a884]" /> Phone number verification
+              </h2>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
+                <p className="font-semibold">Dedicated business number (required)</p>
+                <ul className="list-disc pl-5 space-y-1 text-xs">
+                  <li>Must not be registered on any personal messaging app already</li>
+                  <li>New SIM or landline — OTP verification on that number</li>
+                  <li>Number is hard to migrate later — choose carefully</li>
+                </ul>
+              </div>
+              {!channelVerified ? (
+                <>
+                  <label className="block space-y-1">
+                    <span className="text-sm font-medium">Channel phone (10 digits) *</span>
+                    <input
+                      value={channelPhone}
+                      onChange={(e) => setChannelPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                      placeholder="9876543210"
+                      className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-mono"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busy || channelPhone.length !== 10}
+                    onClick={() => void sendChannelOtpRequest()}
+                    className="w-full border border-[#00a884] text-[#00a884] font-semibold py-2.5 rounded-xl disabled:opacity-50"
+                  >
+                    {busy ? "Sending…" : "Send OTP to this number"}
+                  </button>
+                  {devOtpHint ? (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      Dev mode OTP: <strong className="font-mono">{devOtpHint}</strong>
+                    </p>
+                  ) : null}
+                  <label className="block space-y-1">
+                    <span className="text-sm font-medium">Enter OTP *</span>
+                    <input
+                      value={channelOtp}
+                      onChange={(e) => setChannelOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="6-digit code"
+                      className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-mono tracking-widest"
+                    />
+                  </label>
+                </>
+              ) : (
+                <div className="rounded-xl bg-[#f0f2f5] p-4 space-y-3 text-sm">
+                  <p className="font-semibold text-[#111b21] flex items-center gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-[#00a884]" /> Channel verified
+                  </p>
+                  <p>
+                    <span className="text-[#667781]">Phone Number ID:</span>{" "}
+                    <code className="text-[#00a884]">{phoneNumberId}</code>
+                  </p>
+                  <p>
+                    <span className="text-[#667781]">Business Account ID:</span>{" "}
+                    <code className="text-[#00a884]">{businessAccountId}</code>
+                  </p>
+                  <p className="text-xs text-[#667781]">
+                    API: POST /v1/{phoneNumberId}/messages
+                  </p>
+                </div>
+              )}
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setStep("profile")} className="px-4 py-2 rounded-xl border text-sm">
+                  Back
+                </button>
+                {!channelVerified ? (
+                  <button
+                    type="button"
+                    disabled={busy || channelOtp.length !== 6}
+                    onClick={() => void verifyChannelOtpRequest()}
+                    className="flex-1 bg-[#00a884] text-white font-semibold py-2.5 rounded-xl disabled:opacity-60"
+                  >
+                    {busy ? <Loader2 className="h-5 w-5 animate-spin mx-auto" /> : "Verify OTP & continue"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setStep("payment")}
+                    className="flex-1 bg-[#00a884] text-white font-semibold py-2.5 rounded-xl"
+                  >
+                    Continue to payment
+                  </button>
+                )}
               </div>
             </section>
           )}
 
           {step === "payment" && (
             <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-6">
-              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 5 of 5</p>
+              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 6 of 6</p>
               <h2 className="text-2xl font-bold text-[#111b21] flex items-center gap-2">
                 <CreditCard className="h-6 w-6 text-[#00a884]" /> Payment method verification
               </h2>
@@ -778,12 +931,12 @@ export function OnboardingWizard({ onClose }: Props) {
                 </p>
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setStep("profile")} className="px-4 py-2 rounded-xl border text-sm">
+                <button type="button" onClick={() => setStep("channel")} className="px-4 py-2 rounded-xl border text-sm">
                   Back
                 </button>
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={busy || !channelVerified}
                   onClick={() => void startPayment()}
                   className="flex-1 flex items-center justify-center gap-2 bg-[#00a884] text-white font-semibold py-3 rounded-xl disabled:opacity-60"
                 >

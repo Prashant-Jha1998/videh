@@ -24,6 +24,12 @@ import {
   WIZARD_STEPS,
 } from "../lib/developerPlatform";
 import { ensureDeveloperTemplateTables, templateToPublic, type MessageTemplateRow } from "../lib/developerTemplates";
+import {
+  channelPublicFromRow,
+  ensureDeveloperChannelColumns,
+  sendChannelOtp,
+  verifyChannelOtp,
+} from "../lib/developerChannel";
 
 const router = Router();
 
@@ -494,6 +500,93 @@ router.post("/verify-payment", async (req: Request, res: Response) => {
   }
 });
 
+/** GET /api/developer-leads/:id/channel */
+router.get("/:id/channel", async (req, res) => {
+  const leadId = Number(req.params.id);
+  if (!leadId) {
+    res.status(400).json({ success: false, message: "Invalid id" });
+    return;
+  }
+  try {
+    await ensureDeveloperChannelColumns();
+    const r = await query(`SELECT * FROM developer_leads WHERE id = $1`, [leadId]);
+    if (!r.rows[0]) {
+      res.status(404).json({ success: false, message: "Not found" });
+      return;
+    }
+    res.json({ success: true, channel: channelPublicFromRow(r.rows[0] as Record<string, unknown>) });
+  } catch (err) {
+    logger.error({ err }, "channel get");
+    res.status(500).json({ success: false, message: "Could not load channel" });
+  }
+});
+
+/** POST /api/developer-leads/:id/channel/send-otp */
+router.post("/:id/channel/send-otp", async (req, res) => {
+  const leadId = Number(req.params.id);
+  const body = req.body as { channelPhone?: string };
+  if (!leadId) {
+    res.status(400).json({ success: false, message: "Invalid id" });
+    return;
+  }
+  try {
+    const r = await query(`SELECT phone FROM developer_leads WHERE id = $1`, [leadId]);
+    if (!r.rows[0]) {
+      res.status(404).json({ success: false, message: "Application not found" });
+      return;
+    }
+    const channelPhone = String(body.channelPhone ?? "").trim();
+    if (!channelPhone) {
+      res.status(400).json({ success: false, message: "channelPhone required" });
+      return;
+    }
+    const contactPhone = String((r.rows[0] as { phone?: string }).phone ?? "").replace(/\D/g, "");
+    const channelDigits = channelPhone.replace(/\D/g, "").slice(-10);
+    if (contactPhone.endsWith(channelDigits) && contactPhone.length >= 10) {
+      res.status(400).json({
+        success: false,
+        message: "Use a dedicated business number not already used as your signatory contact phone.",
+      });
+      return;
+    }
+    const result = await sendChannelOtp(leadId, channelPhone);
+    res.json({
+      success: true,
+      message: "OTP sent to your dedicated channel number.",
+      phone: result.phone,
+      devOtp: result.devOtp,
+    });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e instanceof Error ? e.message : "OTP send failed" });
+  }
+});
+
+/** POST /api/developer-leads/:id/channel/verify-otp */
+router.post("/:id/channel/verify-otp", async (req, res) => {
+  const leadId = Number(req.params.id);
+  const body = req.body as { channelPhone?: string; otp?: string };
+  if (!leadId || !body.otp) {
+    res.status(400).json({ success: false, message: "lead id, channelPhone, and otp required" });
+    return;
+  }
+  try {
+    const result = await verifyChannelOtp(leadId, String(body.channelPhone ?? ""), String(body.otp));
+    await query(`UPDATE developer_leads SET wizard_step = 'payment', updated_at = NOW() WHERE id = $1`, [leadId]);
+    res.json({
+      success: true,
+      message: "Phone number verified. Your channel IDs are ready.",
+      channel: {
+        channel_phone: result.phone,
+        phone_number_id: result.videh_phone_number_id,
+        business_account_id: result.videh_business_account_id,
+        channel_status: "verified",
+      },
+    });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e instanceof Error ? e.message : "Verification failed" });
+  }
+});
+
 function portalAuth(lead: { reference_code?: string }, reference: string): boolean {
   return Boolean(reference && lead.reference_code && lead.reference_code === reference);
 }
@@ -514,11 +607,7 @@ router.get("/:id/portal", async (req, res) => {
       res.status(404).json({ success: false, message: "Application not found" });
       return;
     }
-    const account = await query(
-      `SELECT id, api_key_id, billing_status, messages_sent_total, messages_sent_month, usage_billing_month_inr
-       FROM developer_api_accounts WHERE lead_id = $1`,
-      [leadId],
-    );
+    const account = await query(`SELECT * FROM developer_api_accounts WHERE lead_id = $1`, [leadId]);
     const acct = account.rows[0] as Record<string, unknown> | undefined;
     res.json({
       success: true,
@@ -539,7 +628,14 @@ router.get("/:id/portal", async (req, res) => {
             usage_billing_month_inr: acct.usage_billing_month_inr,
           }
         : null,
+      channel: channelPublicFromRow(row as Record<string, unknown>),
       apiBaseUrl: "/v1",
+      credentials_hint: acct
+        ? {
+            phone_number_id: (acct as { videh_phone_number_id?: string }).videh_phone_number_id,
+            business_account_id: (acct as { videh_business_account_id?: string }).videh_business_account_id,
+          }
+        : channelPublicFromRow(row as Record<string, unknown>),
     });
   } catch (err) {
     logger.error({ err }, "developer portal");
