@@ -18,6 +18,7 @@ import { ensureAdminPlatformTables } from "../lib/adminPlatform";
 import { logAdminAction } from "../lib/adminAudit";
 import { ensureAdminUsersTable, verifyAdminCredentials, touchAdminLogin } from "../lib/adminUsers";
 import { registerAdminRbacRoutes, resolveTotpSecretForAdmin } from "./admin-rbac";
+import { ensureDeveloperLeadsTable } from "./developer-leads";
 
 const router = Router();
 const MAX_ADMIN_GROUP_MEMBERS = 10000;
@@ -251,6 +252,7 @@ router.get("/stats", requireAdmin, async (_req, res) => {
   try {
     await ensureStatusBoostTables();
     await ensureAdminPlatformTables();
+    await ensureDeveloperLeadsTable();
     const r = await query(
       `SELECT
         (SELECT COUNT(*)::int FROM users) AS users,
@@ -269,7 +271,8 @@ router.get("/stats", requireAdmin, async (_req, res) => {
         (SELECT COUNT(*)::int FROM web_sessions WHERE status = 'linked' AND expires_at > NOW()) AS web_sessions_active,
         (SELECT COUNT(*)::int FROM user_reports WHERE COALESCE(status, 'open') = 'open') AS open_reports,
         (SELECT COUNT(*)::int FROM grievance_tickets WHERE status IN ('open', 'in_progress')) AS open_grievances,
-        (SELECT COUNT(*)::int FROM data_subject_requests WHERE status NOT IN ('completed', 'rejected')) AS open_dsr`,
+        (SELECT COUNT(*)::int FROM data_subject_requests WHERE status NOT IN ('completed', 'rejected')) AS open_dsr,
+        (SELECT COUNT(*)::int FROM developer_leads WHERE status NOT IN ('approved', 'rejected')) AS pending_developer_leads`,
       [],
     );
     const row = r.rows[0] as Record<string, number>;

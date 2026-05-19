@@ -21,7 +21,9 @@ export type AdminPermission =
   | "incidents.manage"
   | "boosts.manage"
   | "groups.create"
-  | "admins.manage";
+  | "admins.manage"
+  | "developer.read"
+  | "developer.manage";
 
 const ROLE_PERMISSIONS: Record<AdminRole, AdminPermission[]> = {
   super_admin: [
@@ -39,6 +41,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, AdminPermission[]> = {
     "boosts.manage",
     "groups.create",
     "admins.manage",
+    "developer.manage",
   ],
   moderator: [
     "stats.read",
@@ -50,6 +53,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, AdminPermission[]> = {
     "audit.read",
     "boosts.manage",
     "groups.create",
+    "developer.read",
   ],
   legal: [
     "stats.read",
@@ -70,6 +74,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, AdminPermission[]> = {
     "analytics.read",
     "audit.read",
     "incidents.read",
+    "developer.read",
   ],
 };
 

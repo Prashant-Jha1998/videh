@@ -1,5 +1,11 @@
-import { useState, type FormEvent } from "react";
-import { Building2, Loader2, Send } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { Building2, CreditCard, Loader2, Send } from "lucide-react";
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
+  }
+}
 
 const ENTITY_TYPES = [
   { value: "pvt_ltd", label: "Private Limited (Pvt Ltd)" },
@@ -16,6 +22,8 @@ const USE_CASES = [
   "All of the above",
 ] as const;
 
+type Plan = { id: string; name: string; amountInr: number };
+
 type FormState = {
   companyName: string;
   entityType: string;
@@ -27,6 +35,7 @@ type FormState = {
   monthlyVolume: string;
   useCase: string;
   message: string;
+  planId: string;
 };
 
 const initial: FormState = {
@@ -40,15 +49,85 @@ const initial: FormState = {
   monthlyVolume: "under_10k",
   useCase: USE_CASES[0],
   message: "",
+  planId: "starter",
 };
 
 export function LeadForm() {
   const [form, setForm] = useState<FormState>(initial);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [razorpayReady, setRazorpayReady] = useState(false);
   const [status, setStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  const [reference, setReference] = useState("");
 
   const set = (key: keyof FormState, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+
+  useEffect(() => {
+    fetch("/api/developer-leads")
+      .then((r) => r.json())
+      .then((d: { plans?: Plan[]; razorpayConfigured?: boolean }) => {
+        if (d.plans?.length) setPlans(d.plans);
+        setRazorpayReady(Boolean(d.razorpayConfigured && window.Razorpay));
+      })
+      .catch(() => {});
+  }, []);
+
+  const selectedPlan = plans.find((p) => p.id === form.planId) ?? { id: "starter", name: "Starter", amountInr: 2999 };
+
+  async function openRazorpayCheckout(args: {
+    leadId: number;
+    checkout: { orderId: string; amountInr: number; keyId: string; currency: string };
+  }) {
+    return new Promise<void>((resolve, reject) => {
+      if (!window.Razorpay) {
+        reject(new Error("Payment gateway not loaded. Refresh and try again."));
+        return;
+      }
+      const rzp = new window.Razorpay({
+        key: args.checkout.keyId,
+        amount: args.checkout.amountInr * 100,
+        currency: args.checkout.currency,
+        name: "Videh",
+        description: `${selectedPlan.name} plan — API onboarding`,
+        order_id: args.checkout.orderId,
+        prefill: {
+          name: form.contactName,
+          email: form.email,
+          contact: form.phone,
+        },
+        theme: { color: "#00a884" },
+        method: { card: true, upi: true, netbanking: true },
+        handler: async (response: {
+          razorpay_payment_id: string;
+          razorpay_order_id: string;
+          razorpay_signature: string;
+        }) => {
+          try {
+            const verify = await fetch("/api/developer-leads/verify-payment", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                leadId: args.leadId,
+                razorpayOrderId: response.razorpay_order_id,
+                razorpayPaymentId: response.razorpay_payment_id,
+                razorpaySignature: response.razorpay_signature,
+              }),
+            });
+            const data = (await verify.json()) as { success?: boolean; message?: string };
+            if (!verify.ok || !data.success) throw new Error(data.message ?? "Payment verification failed");
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        },
+        modal: {
+          ondismiss: () => reject(new Error("Payment cancelled")),
+        },
+      });
+      rzp.open();
+    });
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -60,10 +139,27 @@ export function LeadForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      const data = (await res.json()) as { success?: boolean; message?: string; reference?: string };
+      const data = (await res.json()) as {
+        success?: boolean;
+        message?: string;
+        reference?: string;
+        leadId?: number;
+        needsPayment?: boolean;
+        checkout?: { orderId: string; amountInr: number; keyId: string; currency: string };
+      };
       if (!res.ok || !data.success) {
         throw new Error(data.message ?? "Submission failed");
       }
+
+      setReference(data.reference ?? "");
+
+      if (data.needsPayment && data.checkout && data.leadId) {
+        if (!razorpayReady) {
+          throw new Error("Card payment is not available. Contact developer@videh.co.in");
+        }
+        await openRazorpayCheckout({ leadId: data.leadId, checkout: data.checkout });
+      }
+
       setStatus("ok");
       setForm(initial);
     } catch (err) {
@@ -78,10 +174,13 @@ export function LeadForm() {
         <div className="mx-auto h-14 w-14 rounded-full bg-[#00a884]/15 flex items-center justify-center text-[#00a884] mb-4">
           <Send className="h-7 w-7" />
         </div>
-        <h3 className="text-xl font-bold text-[#111b21] mb-2">Application received</h3>
+        <h3 className="text-xl font-bold text-[#111b21] mb-2">Application submitted</h3>
+        {reference ? (
+          <p className="text-sm font-mono text-[#00a884] mb-2">{reference}</p>
+        ) : null}
         <p className="text-[#667781] max-w-md mx-auto">
-          Our onboarding team will verify your company documents and contact you within 1–2 business days
-          with sandbox access and next steps for Videh business verification.
+          Payment verified. Your application is in the Videh admin queue for document review, channel
+          setup, and template approval. We will contact you within 1–2 business days.
         </p>
         <button
           type="button"
@@ -105,9 +204,41 @@ export function LeadForm() {
         </div>
         <div>
           <h3 className="font-bold text-lg text-[#111b21]">Apply for Videh Business Messaging API</h3>
-          <p className="text-sm text-[#667781]">Real businesses only — GST & company docs required</p>
+          <p className="text-sm text-[#667781]">Pay with debit/credit card · Admin approves each stage</p>
         </div>
       </div>
+
+      <label className="block space-y-1.5">
+        <span className="text-sm font-medium text-[#111b21]">Select plan *</span>
+        <select
+          required
+          value={form.planId}
+          onChange={(e) => set("planId", e.target.value)}
+          className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#00a884]/40"
+        >
+          {(plans.length ? plans : [
+            { id: "starter", name: "Starter", amountInr: 2999 },
+            { id: "growth", name: "Growth", amountInr: 9999 },
+            { id: "enterprise", name: "Enterprise", amountInr: 0 },
+          ]).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name} — {p.amountInr > 0 ? `₹${p.amountInr.toLocaleString("en-IN")}/mo` : "Custom pricing"}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {selectedPlan.amountInr > 0 ? (
+        <div className="flex items-center gap-2 text-sm text-[#667781] bg-[#f0f2f5] rounded-xl px-4 py-3">
+          <CreditCard className="h-4 w-4 text-[#00a884]" />
+          On submit you will pay <strong className="text-[#111b21]">₹{selectedPlan.amountInr.toLocaleString("en-IN")}</strong> via
+          debit/credit card (Razorpay). Then admin reviews your application.
+        </div>
+      ) : (
+        <p className="text-sm text-[#667781] bg-[#f0f2f5] rounded-xl px-4 py-3">
+          Enterprise plan — no online payment. Admin will contact you for custom agreement.
+        </p>
+      )}
 
       <div className="grid md:grid-cols-2 gap-4">
         <label className="block space-y-1.5 md:col-span-2">
@@ -244,19 +375,19 @@ export function LeadForm() {
         {status === "loading" ? (
           <>
             <Loader2 className="h-5 w-5 animate-spin" />
-            Submitting…
+            {selectedPlan.amountInr > 0 ? "Processing payment…" : "Submitting…"}
           </>
         ) : (
           <>
-            <Send className="h-5 w-5" />
-            Request API access
+            {selectedPlan.amountInr > 0 ? <CreditCard className="h-5 w-5" /> : <Send className="h-5 w-5" />}
+            {selectedPlan.amountInr > 0 ? "Pay & submit application" : "Submit application"}
           </>
         )}
       </button>
 
       <p className="text-[11px] text-[#667781] text-center leading-relaxed">
-        By applying you confirm your business is genuine and agree to Videh&apos;s business messaging policies.
-        Videh rejects fake entities, spam, and policy-violating use cases.
+        Payment via Razorpay (debit/credit card). After payment, Videh admin approves: documents → channel
+        → templates → API keys.
       </p>
     </form>
   );

@@ -7,6 +7,7 @@ import { computeReportPriority, priorityLabel } from "../lib/reportPriority";
 import { getUserRiskScore, suggestModerationAction } from "../lib/riskScoring";
 import type { AdminIdentity } from "../lib/adminSession";
 import { requirePermission, type RequireAdmin } from "./admin-rbac";
+import { DEVELOPER_STATUSES, ensureDeveloperLeadsTable } from "./developer-leads";
 
 function adminEmail(req: Request): string {
   const a = req.admin as AdminIdentity | undefined;
@@ -729,6 +730,86 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
       res.json({ success: true, incident: r.rows[0] });
     } catch (err) {
       logger.error({ err }, "admin patch incident");
+      res.status(500).json({ success: false, message: "Update failed" });
+    }
+  });
+
+  router.get("/developer-leads", requireAdmin, requirePermission("developer.read"), async (req, res) => {
+    const status = String(req.query["status"] ?? "pending");
+    try {
+      await ensureDeveloperLeadsTable();
+      const params: unknown[] = [];
+      let where = "1=1";
+      if (status === "pending") {
+        where = "status NOT IN ('approved', 'rejected')";
+      } else if (status !== "all") {
+        where = "status = $1";
+        params.push(status);
+      }
+      const r = await query(
+        `SELECT * FROM developer_leads
+         WHERE ${where}
+         ORDER BY
+           CASE WHEN status = 'paid' THEN 0 WHEN status = 'payment_pending' THEN 1 ELSE 2 END,
+           created_at DESC
+         LIMIT 200`,
+        params,
+      );
+      res.json({ success: true, leads: r.rows, statuses: DEVELOPER_STATUSES });
+    } catch (err) {
+      logger.error({ err }, "admin developer-leads list");
+      res.status(500).json({ success: false, message: "Could not load developer applications" });
+    }
+  });
+
+  router.patch("/developer-leads/:id", requireAdmin, requirePermission("developer.manage"), async (req, res) => {
+    const id = Number(req.params.id);
+    const body = req.body as { status?: string; adminNotes?: string; approvalPhase?: string };
+    if (!id) {
+      res.status(400).json({ success: false, message: "Invalid id" });
+      return;
+    }
+    if (body.status && !(DEVELOPER_STATUSES as readonly string[]).includes(body.status)) {
+      res.status(400).json({ success: false, message: "Invalid status" });
+      return;
+    }
+    try {
+      const updates: string[] = ["reviewed_at = NOW()", `assigned_admin = $1`];
+      const params: unknown[] = [adminEmail(req)];
+      let i = 2;
+      if (body.status) {
+        updates.push(`status = $${i++}`);
+        params.push(body.status);
+      }
+      if (body.approvalPhase) {
+        updates.push(`approval_phase = $${i++}`);
+        params.push(body.approvalPhase);
+      }
+      if (body.adminNotes !== undefined) {
+        updates.push(`admin_notes = $${i++}`);
+        params.push(body.adminNotes);
+      }
+      params.push(id);
+      const r = await query(
+        `UPDATE developer_leads SET ${updates.join(", ")} WHERE id = $${i} RETURNING *`,
+        params,
+      );
+      if (!r.rows[0]) {
+        res.status(404).json({ success: false, message: "Application not found" });
+        return;
+      }
+      await logAdminAction(
+        {
+          action: "developer_lead_update",
+          entityType: "developer_lead",
+          entityId: id,
+          metadata: { status: body.status, approvalPhase: body.approvalPhase },
+        },
+        req,
+      );
+      res.json({ success: true, lead: r.rows[0] });
+    } catch (err) {
+      logger.error({ err }, "admin developer-lead patch");
       res.status(500).json({ success: false, message: "Update failed" });
     }
   });
