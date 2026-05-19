@@ -18,6 +18,7 @@ import { TemplateMessagePreview } from "./components/TemplateMessagePreview";
 import { OnboardingRequirements } from "./components/OnboardingRequirements";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { ConversationPricing } from "./components/ConversationPricing";
+import { DeveloperPortal } from "./components/DeveloperPortal";
 
 const NAV = [
   { href: "#requirements", label: "Verification" },
@@ -25,6 +26,7 @@ const NAV = [
   { href: "#how-it-works", label: "How it works" },
   { href: "#pricing", label: "Pricing" },
   { href: "#api", label: "API" },
+  { href: "#portal", label: "My templates" },
   { href: "#get-api", label: "Apply", action: "apply" as const },
 ];
 
@@ -139,8 +141,11 @@ const FAQ = [
   },
 ];
 
+const API_LIST_TEMPLATES = `curl https://api.videh.co.in/v1/templates \\
+  -H "Authorization: Bearer vsec_YOUR_SECRET"`;
+
 const API_SAMPLE = `curl -X POST https://api.videh.co.in/v1/business-messages \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Authorization: Bearer vsec_YOUR_SECRET" \\
   -H "Content-Type: application/json" \\
   -d '{
     "to": "919876543210",
@@ -178,7 +183,7 @@ function FaqItem({ q, a }: { q: string; a: string }) {
 
 function openApplyWizard(e: MouseEvent) {
   e.preventDefault();
-  window.open(`${window.location.origin}${window.location.pathname}#apply`, "_blank", "noopener,noreferrer");
+  window.location.hash = "#apply";
 }
 
 export default function App() {
@@ -201,6 +206,8 @@ export default function App() {
   return (
     <div className="min-h-screen">
       {wizardOpen ? <OnboardingWizard onClose={closeWizard} /> : null}
+      {!wizardOpen ? (
+      <>
       <header className="fixed top-0 inset-x-0 z-50 glass border-b border-white/10">
         <div className="max-w-6xl mx-auto px-4 h-[4.5rem] md:h-20 flex items-center justify-between gap-3">
           <a href="#" className="flex items-center gap-3 text-white font-bold shrink-0 min-w-0">
@@ -413,11 +420,20 @@ export default function App() {
               ))}
             </ul>
           </div>
-          <pre className="code-block rounded-2xl bg-[#0b141a] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl">
-            <code>{API_SAMPLE}</code>
-          </pre>
+          <div className="space-y-4">
+            <p className="text-xs font-semibold text-[#667781] uppercase tracking-wide">List approved templates</p>
+            <pre className="code-block rounded-2xl bg-[#0b141a] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
+              <code>{API_LIST_TEMPLATES}</code>
+            </pre>
+            <p className="text-xs font-semibold text-[#667781] uppercase tracking-wide">Send message</p>
+            <pre className="code-block rounded-2xl bg-[#0b141a] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
+              <code>{API_SAMPLE}</code>
+            </pre>
+          </div>
         </div>
       </section>
+
+      <DeveloperPortal />
 
       <section id="pricing" className="py-20 px-4 bg-[#111b21] text-white">
         <div className="max-w-6xl mx-auto">
@@ -490,8 +506,8 @@ export default function App() {
           <div>
             <h2 className="text-3xl font-bold text-[#111b21] mb-4">Get API access</h2>
             <p className="text-[#667781] leading-relaxed mb-6">
-              Information page only — click the button to open a new tab with the full wizard: plan, company,
-              entity-specific documents, business profile (logo), and payment verification.
+              Opens the Videh Business API console — step-by-step modules for plan, company details, compliance
+              documents, business profile, and payment verification (same layout as enterprise messaging portals).
             </p>
             <div className="space-y-4 text-sm">
               <p className="font-semibold text-[#111b21]">Documents typically required:</p>
@@ -548,6 +564,8 @@ export default function App() {
           © {new Date().getFullYear()} Videh. Business messaging API by Videh — built in India.
         </p>
       </footer>
+      </>
+      ) : null}
     </div>
   );
 }

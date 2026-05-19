@@ -1,4 +1,5 @@
 import { query } from "./db";
+import { ensureDeveloperTemplateTables } from "./developerTemplates";
 
 export type EntityType = "pvt_ltd" | "llp" | "proprietorship" | "partnership" | "other";
 
@@ -195,6 +196,8 @@ export async function ensureDeveloperPlatformTables(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  await ensureDeveloperTemplateTables();
 }
 
 export function documentsForEntity(entityType: string): DocRequirement[] {

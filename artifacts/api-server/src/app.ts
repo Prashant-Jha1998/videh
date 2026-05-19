@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import router from "./routes";
+import businessApiV1Router from "./routes/business-api-v1";
 import { logger } from "./lib/logger";
 import { query } from "./lib/db";
 import { stateAcquireLock, stateDelete } from "./lib/sharedState";
@@ -106,6 +107,7 @@ app.get("/", (_req, res) => {
   });
 });
 
+app.use("/v1", businessApiV1Router);
 app.use("/api", router);
 
 // Cron: every minute — check for due scheduled messages and send them

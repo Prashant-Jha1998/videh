@@ -15,6 +15,7 @@ import broadcastsRouter from "./broadcasts";
 import adminRouter from "./admin";
 import grievanceRouter from "./grievance";
 import developerLeadsRouter from "./developer-leads";
+import developerBillingRouter from "./developer-billing";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,6 @@ router.use("/broadcasts", broadcastsRouter);
 router.use("/admin", adminRouter);
 router.use("/grievance", grievanceRouter);
 router.use("/developer-leads", developerLeadsRouter);
+router.use("/developer-billing", developerBillingRouter);
 
 export default router;

@@ -5,12 +5,14 @@ import {
   Building2,
   CheckCircle2,
   CreditCard,
+  FileText,
   ImagePlus,
+  LayoutDashboard,
   Loader2,
   Upload,
-  X,
 } from "lucide-react";
 import { ConversationPricing } from "./ConversationPricing";
+import { OnboardingConsoleLayout } from "./OnboardingConsoleLayout";
 
 declare global {
   interface Window {
@@ -20,6 +22,28 @@ declare global {
 
 const STEPS = ["plan", "company", "documents", "profile", "payment", "done"] as const;
 type Step = (typeof STEPS)[number];
+
+const MODULES: {
+  id: Step;
+  label: string;
+  subtitle: string;
+  icon: typeof Building2;
+  section: "setup" | "review";
+}[] = [
+  { id: "plan", label: "Plan & billing", subtitle: "Partner tier & usage model", icon: CreditCard, section: "setup" },
+  { id: "company", label: "Business information", subtitle: "Legal entity & signatory", icon: Building2, section: "setup" },
+  { id: "documents", label: "Compliance documents", subtitle: "GST, COI, KYC by entity", icon: FileText, section: "setup" },
+  { id: "profile", label: "Business profile", subtitle: "Display name & logo", icon: ImagePlus, section: "setup" },
+  { id: "payment", label: "Payment verification", subtitle: "Card / UPI method check", icon: CreditCard, section: "setup" },
+  { id: "done", label: "Application status", subtitle: "Review pipeline & next steps", icon: LayoutDashboard, section: "review" },
+];
+
+const REVIEW_PIPELINE = [
+  { key: "documents_review", label: "Document verification", desc: "GST, registration & director ID" },
+  { key: "channel_setup", label: "Business channel", desc: "Phone number & business account" },
+  { key: "templates_review", label: "Message templates", desc: "Utility / marketing template approval" },
+  { key: "approved", label: "API access", desc: "Production keys & webhooks" },
+] as const;
 
 const ENTITY_TYPES = [
   { value: "pvt_ltd", label: "Private Limited (Pvt Ltd)" },
@@ -47,6 +71,8 @@ export function OnboardingWizard({ onClose }: Props) {
   const [logoUrl, setLogoUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [maxReachedIndex, setMaxReachedIndex] = useState(0);
+  const [leadStatus, setLeadStatus] = useState<string>("draft");
 
   const [company, setCompany] = useState({
     companyName: "",
@@ -91,7 +117,11 @@ export function OnboardingWizard({ onClose }: Props) {
       setReference(String(L.reference_code ?? ""));
       setPlanId(String(L.plan_id ?? "starter"));
       const ws = String(L.wizard_step ?? "plan");
-      if (STEPS.includes(ws as Step)) setStep(ws as Step);
+      if (STEPS.includes(ws as Step)) {
+        setStep(ws as Step);
+        setMaxReachedIndex(Math.max(STEPS.indexOf(ws as Step), STEPS.indexOf("plan")));
+      }
+      setLeadStatus(String(L.status ?? "draft"));
       setLogoUrl(String(L.logo_url ?? ""));
       setCompany({
         companyName: String(L.company_name ?? ""),
@@ -330,6 +360,7 @@ export function OnboardingWizard({ onClose }: Props) {
         await openRazorpay(d.checkout);
       }
       localStorage.removeItem(STORAGE_KEY);
+      setLeadStatus("paid");
       setStep("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Payment failed");
@@ -340,48 +371,54 @@ export function OnboardingWizard({ onClose }: Props) {
 
   const stepIndex = STEPS.indexOf(step);
   const requiredMissing = docs.filter((d) => d.required && !uploaded.has(d.key));
+  const currentModule = MODULES.find((m) => m.id === step) ?? MODULES[0]!;
+
+  useEffect(() => {
+    if (stepIndex > maxReachedIndex) setMaxReachedIndex(stepIndex);
+  }, [stepIndex, maxReachedIndex]);
+
+  function canGoTo(target: Step): boolean {
+    if (target === "done") return step === "done" || maxReachedIndex >= STEPS.indexOf("payment");
+    return STEPS.indexOf(target) <= maxReachedIndex;
+  }
+
+  function goToModule(target: Step) {
+    if (!canGoTo(target)) return;
+    setStep(target);
+    setError("");
+  }
+
+  function moduleStatus(mod: (typeof MODULES)[number]): "current" | "done" | "available" | "locked" {
+    const idx = STEPS.indexOf(mod.id);
+    if (step === mod.id) return "current";
+    if (!canGoTo(mod.id)) return "locked";
+    if (idx < stepIndex) return "done";
+    return "available";
+  }
+
+  const statusOrder = ["draft", "payment_pending", "paid", "documents_review", "channel_setup", "templates_review", "approved"];
+  const statusIdx = statusOrder.indexOf(leadStatus);
 
   return (
-    <div className="fixed inset-0 z-[100] bg-[#0b141a]/95 overflow-y-auto">
-      <div className="min-h-screen flex flex-col">
-        <header className="sticky top-0 z-10 glass border-b border-white/10 px-4 py-4">
-          <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 text-white">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white p-1">
-                <img src="/videh_icon_foreground.png" alt="" className="h-full w-full object-contain" />
-              </span>
-              <div>
-                <p className="font-bold text-sm">Videh API onboarding</p>
-                {reference ? <p className="text-xs text-white/50 font-mono">{reference}</p> : null}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-white/70 hover:text-white p-2 rounded-lg hover:bg-white/10"
-              aria-label="Close"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </header>
-
-        <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-8">
-          <div className="flex gap-1 mb-8">
-            {STEPS.slice(0, -1).map((s, i) => (
-              <div
-                key={s}
-                className={`h-1 flex-1 rounded-full ${i <= stepIndex ? "bg-[#00a884]" : "bg-white/15"}`}
-              />
-            ))}
-          </div>
-
-          {error ? (
-            <p className="mb-4 text-sm text-red-300 bg-red-500/20 rounded-lg px-4 py-2">{error}</p>
-          ) : null}
+    <OnboardingConsoleLayout
+      reference={reference}
+      currentModule={currentModule}
+      modules={MODULES}
+      step={step}
+      canGoTo={(id) => canGoTo(id as Step)}
+      moduleStatus={(mod) => moduleStatus(mod as (typeof MODULES)[number])}
+      onGoTo={(id) => goToModule(id as Step)}
+      onClose={onClose}
+      progressSteps={[...STEPS.slice(0, -1)]}
+      stepIndex={stepIndex}
+    >
+      {error ? (
+        <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</p>
+      ) : null}
 
           {step === "plan" && (
-            <section className="rounded-2xl bg-white p-6 md:p-8 shadow-xl space-y-6">
+            <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-6">
+              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 1 of 5</p>
               <h2 className="text-2xl font-bold text-[#111b21]">Choose your plan</h2>
               <p className="text-sm text-[#667781]">
                 Monthly subscription is billed in your company name. If payment fails later, API access is
@@ -446,7 +483,8 @@ export function OnboardingWizard({ onClose }: Props) {
           )}
 
           {step === "company" && (
-            <section className="rounded-2xl bg-white p-6 md:p-8 shadow-xl space-y-4">
+            <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-4">
+              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 2 of 5</p>
               <h2 className="text-2xl font-bold text-[#111b21] flex items-center gap-2">
                 <Building2 className="h-6 w-6 text-[#00a884]" /> Company details
               </h2>
@@ -572,7 +610,8 @@ export function OnboardingWizard({ onClose }: Props) {
           )}
 
           {step === "documents" && (
-            <section className="rounded-2xl bg-white p-6 md:p-8 shadow-xl space-y-4">
+            <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-4">
+              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 3 of 5</p>
               <h2 className="text-2xl font-bold text-[#111b21]">Upload documents</h2>
               <p className="text-sm text-[#667781]">
                 Required documents for{" "}
@@ -630,7 +669,8 @@ export function OnboardingWizard({ onClose }: Props) {
           )}
 
           {step === "profile" && (
-            <section className="rounded-2xl bg-white p-6 md:p-8 shadow-xl space-y-4">
+            <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-4">
+              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 4 of 5</p>
               <h2 className="text-2xl font-bold text-[#111b21]">Business profile</h2>
               <p className="text-sm text-[#667781]">
                 Set how your company appears on Videh — display name and logo (verified business profile).
@@ -712,7 +752,8 @@ export function OnboardingWizard({ onClose }: Props) {
           )}
 
           {step === "payment" && (
-            <section className="rounded-2xl bg-white p-6 md:p-8 shadow-xl space-y-6">
+            <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-6">
+              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 5 of 5</p>
               <h2 className="text-2xl font-bold text-[#111b21] flex items-center gap-2">
                 <CreditCard className="h-6 w-6 text-[#00a884]" /> Payment method verification
               </h2>
@@ -753,21 +794,76 @@ export function OnboardingWizard({ onClose }: Props) {
           )}
 
           {step === "done" && (
-            <section className="rounded-2xl bg-white p-10 text-center shadow-xl">
-              <CheckCircle2 className="h-14 w-14 text-[#00a884] mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-[#111b21] mb-2">Application submitted</h2>
-              {reference ? <p className="font-mono text-[#00a884] mb-4">{reference}</p> : null}
-              <p className="text-[#667781] text-sm max-w-md mx-auto">
-                Admin will review documents, business profile, channel setup, and templates. You will receive API
-                keys after full approval.
-              </p>
-              <button type="button" onClick={onClose} className="mt-8 text-[#00a884] font-semibold hover:underline">
-                Back to developer home
+            <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-6">
+              <div className="text-center pb-4 border-b border-gray-100">
+                <CheckCircle2 className="h-12 w-12 text-[#00a884] mx-auto mb-3" />
+                <h2 className="text-2xl font-bold text-[#111b21]">Application submitted</h2>
+                {reference ? <p className="font-mono text-[#00a884] mt-2 text-sm">{reference}</p> : null}
+                <p className="text-[#667781] text-sm max-w-lg mx-auto mt-3">
+                  Your setup modules are complete. Videh will now run verification — similar to enterprise messaging
+                  API onboarding. Track progress below.
+                </p>
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-[#111b21] uppercase tracking-wide mb-4">Review pipeline</h3>
+                <ol className="space-y-0">
+                  {REVIEW_PIPELINE.map((phase, i) => {
+                    const phaseIdx = statusOrder.indexOf(phase.key);
+                    const done = statusIdx >= 0 && statusIdx >= phaseIdx;
+                    const active = leadStatus === phase.key || (statusIdx + 1 === phaseIdx && !done);
+                    return (
+                      <li key={phase.key} className="flex gap-4">
+                        <div className="flex flex-col items-center">
+                          <span
+                            className={`flex h-9 w-9 items-center justify-center rounded-full border-2 ${
+                              done
+                                ? "bg-[#00a884] border-[#00a884] text-white"
+                                : active
+                                  ? "border-[#00a884] text-[#00a884] bg-[#00a884]/10"
+                                  : "border-gray-200 text-gray-400"
+                            }`}
+                          >
+                            {done ? <CheckCircle2 className="h-5 w-5" /> : <span className="text-xs font-bold">{i + 1}</span>}
+                          </span>
+                          {i < REVIEW_PIPELINE.length - 1 ? (
+                            <span className={`w-0.5 flex-1 min-h-[32px] my-1 ${done ? "bg-[#00a884]" : "bg-gray-200"}`} />
+                          ) : null}
+                        </div>
+                        <div className="pb-8">
+                          <p className={`font-semibold text-sm ${active ? "text-[#00a884]" : "text-[#111b21]"}`}>{phase.label}</p>
+                          <p className="text-xs text-[#667781] mt-0.5">{phase.desc}</p>
+                          {active ? (
+                            <span className="inline-block mt-2 text-[10px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 px-2 py-0.5 rounded">
+                              In progress
+                            </span>
+                          ) : done ? (
+                            <span className="inline-block mt-2 text-[10px] font-bold uppercase tracking-wide text-[#00a884] bg-[#00a884]/10 px-2 py-0.5 rounded">
+                              Complete
+                            </span>
+                          ) : (
+                            <span className="inline-block mt-2 text-[10px] font-bold uppercase tracking-wide text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                              Pending
+                            </span>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+              <div className="rounded-xl bg-[#f0f2f5] p-4 text-sm text-[#667781]">
+                <p className="font-semibold text-[#111b21] mb-1">What happens next?</p>
+                <ul className="list-disc pl-5 space-y-1 text-xs">
+                  <li>Save your reference code — you will need it to track templates in the developer portal.</li>
+                  <li>After API approval, use GET /v1/templates to list approved template names for your website.</li>
+                  <li>Questions: developer@videh.co.in</li>
+                </ul>
+              </div>
+              <button type="button" onClick={onClose} className="w-full text-center text-[#00a884] font-semibold hover:underline py-2">
+                Exit to developer home
               </button>
             </section>
           )}
-        </main>
-      </div>
-    </div>
+    </OnboardingConsoleLayout>
   );
 }

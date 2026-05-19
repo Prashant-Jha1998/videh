@@ -10,6 +10,7 @@ import { requirePermission, type RequireAdmin } from "./admin-rbac";
 import crypto from "node:crypto";
 import { DEVELOPER_STATUSES, ensureDeveloperLeadsTable } from "./developer-leads";
 import { documentsForEntity } from "../lib/developerPlatform";
+import { ensureDeveloperTemplateTables, linkTemplatesToAccount } from "../lib/developerTemplates";
 
 function adminEmail(req: Request): string {
   const a = req.admin as AdminIdentity | undefined;
@@ -779,12 +780,18 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
       }
       const docs = await query(`SELECT * FROM developer_lead_documents WHERE lead_id = $1 ORDER BY doc_type`, [id]);
       const account = await query(`SELECT * FROM developer_api_accounts WHERE lead_id = $1`, [id]);
+      await ensureDeveloperTemplateTables();
+      const templates = await query(
+        `SELECT * FROM developer_message_templates WHERE lead_id = $1 ORDER BY template_key`,
+        [id],
+      );
       res.json({
         success: true,
         lead: lead.rows[0],
         documents: docs.rows,
         requiredDocuments: documentsForEntity(String(lead.rows[0].entity_type)),
         account: account.rows[0] ?? null,
+        templates: templates.rows,
       });
     } catch (err) {
       logger.error({ err }, "admin developer-lead detail");
@@ -856,11 +863,12 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
             row.payment_status === "paid" ||
             row.payment_status === "waived";
           const billingStatus = paymentOk ? "active" : "hold";
-          await query(
+          const ins = await query(
             `INSERT INTO developer_api_accounts
              (lead_id, reference_code, company_name, display_name, logo_url, api_key_id, api_key_secret_hash,
               billing_status, plan_id, amount_inr_monthly, total_billed_inr, last_payment_at, next_billing_at, approved_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW() + INTERVAL '30 days', $13)`,
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW() + INTERVAL '30 days', $13)
+             RETURNING id`,
             [
               id,
               row.reference_code,
@@ -877,7 +885,12 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
               adminEmail(req),
             ],
           );
+          const newAccountId = Number((ins.rows[0] as { id: number }).id);
+          await linkTemplatesToAccount(id, newAccountId);
           apiSecretOnce = apiSecret;
+        } else {
+          const acct = existing.rows[0] as { id: number };
+          await linkTemplatesToAccount(id, acct.id);
         }
       }
 
@@ -969,4 +982,204 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
       res.status(500).json({ success: false, message: "Update failed" });
     }
   });
+
+  router.get(
+    "/developer-leads/:leadId/templates",
+    requireAdmin,
+    requirePermission("developer.read"),
+    async (req, res) => {
+      const leadId = Number(req.params.leadId);
+      if (!leadId) {
+        res.status(400).json({ success: false, message: "Invalid lead id" });
+        return;
+      }
+      try {
+        await ensureDeveloperTemplateTables();
+        const r = await query(
+          `SELECT * FROM developer_message_templates WHERE lead_id = $1 ORDER BY template_key`,
+          [leadId],
+        );
+        res.json({ success: true, templates: r.rows });
+      } catch (err) {
+        logger.error({ err }, "admin list templates");
+        res.status(500).json({ success: false, message: "Could not load templates" });
+      }
+    },
+  );
+
+  router.post(
+    "/developer-leads/:leadId/templates",
+    requireAdmin,
+    requirePermission("developer.manage"),
+    async (req, res) => {
+      const leadId = Number(req.params.leadId);
+      const body = req.body as {
+        templateKey?: string;
+        name?: string;
+        category?: string;
+        language?: string;
+        headerType?: string;
+        bodyText?: string;
+        variables?: string[];
+        footerText?: string;
+      };
+      if (!leadId || !body.templateKey?.trim() || !body.bodyText?.trim()) {
+        res.status(400).json({ success: false, message: "templateKey and bodyText required" });
+        return;
+      }
+      const category = body.category ?? "utility";
+      const allowed = new Set(["marketing", "utility", "authentication", "service"]);
+      if (!allowed.has(category)) {
+        res.status(400).json({ success: false, message: "Invalid category" });
+        return;
+      }
+      try {
+        await ensureDeveloperTemplateTables();
+        const lead = await query(`SELECT id FROM developer_leads WHERE id = $1`, [leadId]);
+        if (!lead.rows[0]) {
+          res.status(404).json({ success: false, message: "Lead not found" });
+          return;
+        }
+        const account = await query(`SELECT id FROM developer_api_accounts WHERE lead_id = $1`, [leadId]);
+        const accountId = (account.rows[0] as { id?: number } | undefined)?.id ?? null;
+        const key = body.templateKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+        const vars = Array.isArray(body.variables) ? body.variables : [];
+        const preview = body.bodyText.slice(0, 160);
+        const r = await query(
+          `INSERT INTO developer_message_templates
+           (lead_id, account_id, template_key, name, category, language, header_type, body_text, body_preview, variables_json, footer_text, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending')
+           ON CONFLICT (lead_id, template_key) DO UPDATE SET
+             name = EXCLUDED.name,
+             category = EXCLUDED.category,
+             language = EXCLUDED.language,
+             header_type = EXCLUDED.header_type,
+             body_text = EXCLUDED.body_text,
+             body_preview = EXCLUDED.body_preview,
+             variables_json = EXCLUDED.variables_json,
+             footer_text = EXCLUDED.footer_text,
+             account_id = COALESCE(EXCLUDED.account_id, developer_message_templates.account_id),
+             updated_at = NOW()
+           RETURNING *`,
+          [
+            leadId,
+            accountId,
+            key,
+            body.name?.trim() || key,
+            category,
+            body.language ?? "en",
+            body.headerType ?? null,
+            body.bodyText.trim(),
+            preview,
+            JSON.stringify(vars),
+            body.footerText ?? null,
+          ],
+        );
+        await logAdminAction(
+          { action: "developer_template_create", entityType: "developer_template", entityId: (r.rows[0] as { id: number }).id },
+          req,
+        );
+        res.json({ success: true, template: r.rows[0] });
+      } catch (err) {
+        logger.error({ err }, "admin create template");
+        res.status(500).json({ success: false, message: "Could not save template" });
+      }
+    },
+  );
+
+  router.patch(
+    "/developer-templates/:id",
+    requireAdmin,
+    requirePermission("developer.manage"),
+    async (req, res) => {
+      const id = Number(req.params.id);
+      const body = req.body as { status?: string; rejectionReason?: string; name?: string; category?: string };
+      if (!id) {
+        res.status(400).json({ success: false, message: "Invalid id" });
+        return;
+      }
+      const allowed = new Set(["pending", "approved", "rejected"]);
+      if (body.status && !allowed.has(body.status)) {
+        res.status(400).json({ success: false, message: "Invalid status" });
+        return;
+      }
+      try {
+        await ensureDeveloperTemplateTables();
+        const updates: string[] = ["updated_at = NOW()"];
+        const params: unknown[] = [];
+        let i = 1;
+        if (body.status) {
+          updates.push(`status = $${i++}`);
+          params.push(body.status);
+          if (body.status === "approved") {
+            updates.push(`approved_at = NOW()`, `approved_by = $${i++}`);
+            params.push(adminEmail(req));
+            updates.push(`rejection_reason = NULL`);
+          }
+          if (body.status === "rejected") {
+            updates.push(`rejection_reason = $${i++}`);
+            params.push(body.rejectionReason ?? "Rejected by admin");
+          }
+        }
+        if (body.name) {
+          updates.push(`name = $${i++}`);
+          params.push(body.name);
+        }
+        if (body.category) {
+          updates.push(`category = $${i++}`);
+          params.push(body.category);
+        }
+        if (updates.length === 1) {
+          res.status(400).json({ success: false, message: "Nothing to update" });
+          return;
+        }
+        params.push(id);
+        const r = await query(
+          `UPDATE developer_message_templates SET ${updates.join(", ")} WHERE id = $${i} RETURNING *`,
+          params,
+        );
+        if (!r.rows[0]) {
+          res.status(404).json({ success: false, message: "Template not found" });
+          return;
+        }
+        const tpl = r.rows[0] as { lead_id: number; account_id: number | null };
+        if (body.status === "approved" && !tpl.account_id) {
+          const acct = await query(`SELECT id FROM developer_api_accounts WHERE lead_id = $1`, [tpl.lead_id]);
+          const accountId = (acct.rows[0] as { id?: number } | undefined)?.id;
+          if (accountId) {
+            await query(`UPDATE developer_message_templates SET account_id = $1 WHERE id = $2`, [accountId, id]);
+          }
+        }
+        await logAdminAction(
+          { action: "developer_template_update", entityType: "developer_template", entityId: id, metadata: { status: body.status } },
+          req,
+        );
+        res.json({ success: true, template: r.rows[0] });
+      } catch (err) {
+        logger.error({ err }, "admin patch template");
+        res.status(500).json({ success: false, message: "Update failed" });
+      }
+    },
+  );
+
+  router.delete(
+    "/developer-templates/:id",
+    requireAdmin,
+    requirePermission("developer.manage"),
+    async (req, res) => {
+      const id = Number(req.params.id);
+      if (!id) {
+        res.status(400).json({ success: false, message: "Invalid id" });
+        return;
+      }
+      try {
+        await query(`DELETE FROM developer_message_templates WHERE id = $1`, [id]);
+        await logAdminAction({ action: "developer_template_delete", entityType: "developer_template", entityId: id }, req);
+        res.json({ success: true });
+      } catch (err) {
+        logger.error({ err }, "admin delete template");
+        res.status(500).json({ success: false, message: "Delete failed" });
+      }
+    },
+  );
 }

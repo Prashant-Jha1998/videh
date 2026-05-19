@@ -23,6 +23,7 @@ import {
   ensureDeveloperPlatformTables,
   WIZARD_STEPS,
 } from "../lib/developerPlatform";
+import { ensureDeveloperTemplateTables, templateToPublic, type MessageTemplateRow } from "../lib/developerTemplates";
 
 const router = Router();
 
@@ -490,6 +491,102 @@ router.post("/verify-payment", async (req: Request, res: Response) => {
       [leadId],
     ).catch(() => null);
     res.status(500).json({ success: false, message: "Payment verification failed. API will remain on hold." });
+  }
+});
+
+function portalAuth(lead: { reference_code?: string }, reference: string): boolean {
+  return Boolean(reference && lead.reference_code && lead.reference_code === reference);
+}
+
+/** GET /api/developer-leads/:id/portal?reference=DEV-xxx — application status + API key id when approved */
+router.get("/:id/portal", async (req, res) => {
+  const leadId = Number(req.params.id);
+  const reference = String(req.query.reference ?? "").trim();
+  if (!leadId || !reference) {
+    res.status(400).json({ success: false, message: "lead id and reference query required" });
+    return;
+  }
+  try {
+    await ensureDeveloperPlatformTables();
+    const lead = await query(`SELECT * FROM developer_leads WHERE id = $1`, [leadId]);
+    const row = lead.rows[0] as { reference_code?: string } | undefined;
+    if (!row || !portalAuth(row, reference)) {
+      res.status(404).json({ success: false, message: "Application not found" });
+      return;
+    }
+    const account = await query(
+      `SELECT id, api_key_id, billing_status, messages_sent_total, messages_sent_month, usage_billing_month_inr
+       FROM developer_api_accounts WHERE lead_id = $1`,
+      [leadId],
+    );
+    const acct = account.rows[0] as Record<string, unknown> | undefined;
+    res.json({
+      success: true,
+      lead: {
+        id: leadId,
+        reference_code: row.reference_code,
+        status: (row as { status?: string }).status,
+        approval_phase: (row as { approval_phase?: string }).approval_phase,
+        company_name: (row as { company_name?: string }).company_name,
+        payment_status: (row as { payment_status?: string }).payment_status,
+      },
+      account: acct
+        ? {
+            api_key_id: acct.api_key_id,
+            billing_status: acct.billing_status,
+            messages_sent_total: acct.messages_sent_total,
+            messages_sent_month: acct.messages_sent_month,
+            usage_billing_month_inr: acct.usage_billing_month_inr,
+          }
+        : null,
+      apiBaseUrl: "/v1",
+    });
+  } catch (err) {
+    logger.error({ err }, "developer portal");
+    res.status(500).json({ success: false, message: "Could not load portal" });
+  }
+});
+
+/** GET /api/developer-leads/:id/templates?reference= — approved templates for integrators */
+router.get("/:id/templates", async (req, res) => {
+  const leadId = Number(req.params.id);
+  const reference = String(req.query.reference ?? "").trim();
+  if (!leadId || !reference) {
+    res.status(400).json({ success: false, message: "lead id and reference query required" });
+    return;
+  }
+  try {
+    await ensureDeveloperTemplateTables();
+    const lead = await query(`SELECT reference_code, status FROM developer_leads WHERE id = $1`, [leadId]);
+    const row = lead.rows[0] as { reference_code?: string; status?: string } | undefined;
+    if (!row || !portalAuth(row, reference)) {
+      res.status(404).json({ success: false, message: "Application not found" });
+      return;
+    }
+
+    const account = await query(`SELECT id FROM developer_api_accounts WHERE lead_id = $1`, [leadId]);
+    const accountId = (account.rows[0] as { id?: number } | undefined)?.id;
+    if (!accountId) {
+      res.json({
+        success: true,
+        templates: [],
+        message: "API account not created yet. Templates appear after approval.",
+      });
+      return;
+    }
+
+    const r = await query(
+      `SELECT * FROM developer_message_templates WHERE account_id = $1 ORDER BY template_key`,
+      [accountId],
+    );
+    const templates = (r.rows as MessageTemplateRow[]).map((t) => ({
+      ...templateToPublic(t),
+      approved: t.status === "approved",
+    }));
+    res.json({ success: true, templates, approvedCount: templates.filter((t) => t.approved).length });
+  } catch (err) {
+    logger.error({ err }, "developer portal templates");
+    res.status(500).json({ success: false, message: "Could not load templates" });
   }
 });
 

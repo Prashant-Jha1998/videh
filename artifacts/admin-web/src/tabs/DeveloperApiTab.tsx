@@ -17,6 +17,7 @@ type Lead = {
   plan_id?: string;
   amount_inr?: number;
   payment_status?: string;
+  payment_method_verified?: boolean;
   payment_method?: string;
   razorpay_payment_id?: string;
   paid_at?: string;
@@ -39,6 +40,20 @@ type LeadDoc = {
   file_name: string;
   file_path: string;
   uploaded_at: string;
+};
+
+type MessageTemplate = {
+  id: number;
+  lead_id: number;
+  template_key: string;
+  name: string;
+  category: string;
+  language: string;
+  body_text: string;
+  body_preview?: string;
+  variables_json?: unknown;
+  status: string;
+  rejection_reason?: string;
 };
 
 type ApiAccount = {
@@ -100,8 +115,17 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
     documents: LeadDoc[];
     account: ApiAccount | null;
     requiredDocuments: { key: string; label: string; required: boolean }[];
+    templates: MessageTemplate[];
   } | null>(null);
   const [apiSecretOnce, setApiSecretOnce] = useState<string | null>(null);
+  const [newTpl, setNewTpl] = useState({
+    templateKey: "",
+    name: "",
+    category: "utility",
+    language: "en",
+    bodyText: "",
+    variables: "",
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -131,12 +155,14 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
         documents: LeadDoc[];
         account: ApiAccount | null;
         requiredDocuments: { key: string; label: string; required: boolean }[];
+        templates?: MessageTemplate[];
       }>(`/admin/developer-leads/${id}`);
       setDetail({
         lead: data.lead,
         documents: data.documents ?? [],
         account: data.account ?? null,
         requiredDocuments: data.requiredDocuments ?? [],
+        templates: data.templates ?? [],
       });
       setDetailId(id);
       setApiSecretOnce(null);
@@ -184,6 +210,46 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
     const note = window.prompt("Reject reason (required)")?.trim();
     if (!note) return;
     void updateLead(lead.id, { status: "rejected", adminNotes: note });
+  };
+
+  const createTemplate = async (leadId: number) => {
+    if (!newTpl.templateKey.trim() || !newTpl.bodyText.trim()) {
+      onErr("Template key and body text required");
+      return;
+    }
+    try {
+      await adminApi(`/admin/developer-leads/${leadId}/templates`, {
+        method: "POST",
+        body: JSON.stringify({
+          templateKey: newTpl.templateKey,
+          name: newTpl.name || newTpl.templateKey,
+          category: newTpl.category,
+          language: newTpl.language,
+          bodyText: newTpl.bodyText,
+          variables: newTpl.variables
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        }),
+      });
+      setNewTpl({ templateKey: "", name: "", category: "utility", language: "en", bodyText: "", variables: "" });
+      await loadDetail(leadId);
+    } catch (err) {
+      onErr(err instanceof Error ? err.message : "Could not create template");
+    }
+  };
+
+  const patchTemplate = async (templateId: number, status: string) => {
+    try {
+      const reason = status === "rejected" ? window.prompt("Rejection reason?")?.trim() : undefined;
+      await adminApi(`/admin/developer-templates/${templateId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status, rejectionReason: reason }),
+      });
+      if (detailId) await loadDetail(detailId);
+    } catch (err) {
+      onErr(err instanceof Error ? err.message : "Template update failed");
+    }
   };
 
   return (
@@ -442,6 +508,100 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
                 </p>
               </>
             ) : null}
+
+            <h4>Message templates</h4>
+            <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+              Companies call templates by <code>name</code> (template_key) in POST /v1/business-messages. Approve before
+              go-live.
+            </p>
+            {detail.templates.length === 0 ? (
+              <p className="muted" style={{ fontSize: 13 }}>No templates yet.</p>
+            ) : (
+              <ul style={{ fontSize: 13, marginBottom: 12 }}>
+                {detail.templates.map((t) => (
+                  <li key={t.id} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
+                    <strong className="font-mono">{t.template_key}</strong> — {t.name}{" "}
+                    <span className="muted">
+                      ({t.category}, {t.language}) · {t.status}
+                    </span>
+                    <p className="muted" style={{ margin: "4px 0" }}>
+                      {t.body_preview ?? t.body_text.slice(0, 100)}
+                    </p>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {t.status !== "approved" ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ width: "auto", padding: "4px 10px", fontSize: 12 }}
+                          onClick={() => void patchTemplate(t.id, "approved")}
+                        >
+                          Approve
+                        </button>
+                      ) : null}
+                      {t.status !== "rejected" ? (
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ width: "auto", padding: "4px 10px", fontSize: 12 }}
+                          onClick={() => void patchTemplate(t.id, "rejected")}
+                        >
+                          Reject
+                        </button>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+              <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Add template</p>
+              <div style={{ display: "grid", gap: 8 }}>
+                <input
+                  placeholder="template_key e.g. order_update"
+                  value={newTpl.templateKey}
+                  onChange={(e) => setNewTpl((s) => ({ ...s, templateKey: e.target.value }))}
+                  style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border)" }}
+                />
+                <input
+                  placeholder="Display name"
+                  value={newTpl.name}
+                  onChange={(e) => setNewTpl((s) => ({ ...s, name: e.target.value }))}
+                  style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border)" }}
+                />
+                <select
+                  value={newTpl.category}
+                  onChange={(e) => setNewTpl((s) => ({ ...s, category: e.target.value }))}
+                  style={{ padding: 8, borderRadius: 8 }}
+                >
+                  <option value="utility">utility</option>
+                  <option value="marketing">marketing</option>
+                  <option value="authentication">authentication</option>
+                  <option value="service">service</option>
+                </select>
+                <textarea
+                  placeholder="Body text with {{1}} {{2}} placeholders"
+                  value={newTpl.bodyText}
+                  onChange={(e) => setNewTpl((s) => ({ ...s, bodyText: e.target.value }))}
+                  rows={3}
+                  style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border)" }}
+                />
+                <input
+                  placeholder="Variables comma-separated: customer_name, order_id"
+                  value={newTpl.variables}
+                  onChange={(e) => setNewTpl((s) => ({ ...s, variables: e.target.value }))}
+                  style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border)" }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ width: "auto" }}
+                  onClick={() => void createTemplate(detail.lead.id)}
+                >
+                  Save template
+                </button>
+              </div>
+            </div>
 
             {apiSecretOnce ? (
               <p style={{ fontSize: 12, color: "var(--warn)" }}>API secret was shown once on approval.</p>
