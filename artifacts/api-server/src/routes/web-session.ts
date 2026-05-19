@@ -721,6 +721,44 @@ async function ensureGroupMetadataColumns(): Promise<void> {
   groupMetadataEnsured = true;
 }
 
+router.get("/:token/contacts", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const q = String(req.query.q ?? "").trim();
+  try {
+    if (q.length > 0) {
+      const result = await query(
+        `SELECT id, phone, name, avatar_url, about FROM users
+         WHERE id != $1 AND (phone LIKE $2 OR COALESCE(name, '') ILIKE $2)
+         ORDER BY name NULLS LAST
+         LIMIT 100`,
+        [session.userId, `%${q}%`],
+      );
+      res.json({ success: true, users: result.rows });
+      return;
+    }
+    const result = await query(
+      `SELECT DISTINCT u.id, u.phone, u.name, u.avatar_url, u.about
+       FROM users u
+       WHERE u.id != $1
+         AND u.id IN (
+           SELECT cm_other.user_id
+           FROM chat_members cm_self
+           JOIN chat_members cm_other ON cm_other.chat_id = cm_self.chat_id AND cm_other.user_id != cm_self.user_id
+           JOIN chats c ON c.id = cm_self.chat_id AND c.is_group = FALSE
+           WHERE cm_self.user_id = $1
+         )
+       ORDER BY COALESCE(u.name, u.phone) ASC
+       LIMIT 500`,
+      [session.userId],
+    );
+    res.json({ success: true, users: result.rows });
+  } catch (err) {
+    req.log.error({ err }, "web contacts list");
+    res.status(500).json({ success: false });
+  }
+});
+
 router.get("/:token/users/search", async (req: Request, res: Response) => {
   const session = await requireLinkedSession(req, res);
   if (!session) return;
@@ -731,7 +769,7 @@ router.get("/:token/users/search", async (req: Request, res: Response) => {
   }
   try {
     const result = await query(
-      `SELECT id, phone, name, avatar_url FROM users
+      `SELECT id, phone, name, avatar_url, about FROM users
        WHERE id != $1 AND (phone LIKE $2 OR COALESCE(name, '') ILIKE $2)
        ORDER BY name NULLS LAST
        LIMIT 25`,
@@ -740,6 +778,119 @@ router.get("/:token/users/search", async (req: Request, res: Response) => {
     res.json({ success: true, users: result.rows });
   } catch (err) {
     req.log.error({ err }, "web user search");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:token/statuses", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const userId = session.userId;
+  try {
+    const result = await query(
+      `SELECT
+        s.id, s.user_id, s.content, s.type, s.background_color,
+        s.media_url, s.expires_at, s.created_at,
+        u.name AS user_name, u.avatar_url AS user_avatar,
+        EXISTS(
+          SELECT 1 FROM status_views sv
+          WHERE sv.status_id = s.id AND sv.viewer_id = $1::int
+        ) AS viewed
+      FROM statuses s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.expires_at > NOW()
+        AND NOT EXISTS (
+          SELECT 1 FROM blocked_users b
+          WHERE (b.blocker_id = $1::int AND b.blocked_id = s.user_id)
+             OR (b.blocker_id = s.user_id AND b.blocked_id = $1::int)
+        )
+        AND (
+          s.user_id = $1::int
+          OR s.user_id IN (
+            SELECT cm_other.user_id
+            FROM chat_members cm_self
+            JOIN chat_members cm_other ON cm_other.chat_id = cm_self.chat_id
+            JOIN chats c ON c.id = cm_self.chat_id
+            WHERE cm_self.user_id = $1::int
+              AND cm_other.user_id != $1::int
+              AND c.is_group = FALSE
+          )
+        )
+      ORDER BY s.created_at DESC`,
+      [userId],
+    );
+    res.json({ success: true, statuses: result.rows });
+  } catch (err) {
+    req.log.error({ err }, "web statuses");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:token/statuses/:statusId/view", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const statusId = parseInt(routeParam(req.params.statusId), 10);
+  if (isNaN(statusId)) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  try {
+    await query(
+      `INSERT INTO status_views (status_id, viewer_id) VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [statusId, session.userId],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "web status view");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:token/starred", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  try {
+    const result = await query(
+      `SELECT m.id, m.chat_id, m.content, m.type, m.media_url, m.created_at,
+              c.is_group, c.group_name,
+              u.name AS sender_name
+       FROM messages m
+       JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1
+       JOIN chats c ON c.id = m.chat_id
+       LEFT JOIN users u ON u.id = m.sender_id
+       WHERE m.is_starred = TRUE AND m.is_deleted = FALSE
+       ORDER BY m.created_at DESC
+       LIMIT 120`,
+      [session.userId],
+    );
+    res.json({ success: true, messages: result.rows });
+  } catch (err) {
+    req.log.error({ err }, "web starred messages");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:token/chats/read-all", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  try {
+    await query(
+      `INSERT INTO message_status (message_id, user_id, status, updated_at)
+       SELECT m.id, $1, 'read', NOW()
+       FROM messages m
+       JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1
+       WHERE m.sender_id != $1
+         AND NOT EXISTS (
+           SELECT 1 FROM message_status ms
+           WHERE ms.message_id = m.id AND ms.user_id = $1 AND ms.status = 'read'
+         )
+       ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'read', updated_at = NOW()`,
+      [session.userId],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "web mark all read");
     res.status(500).json({ success: false });
   }
 });

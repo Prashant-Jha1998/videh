@@ -68,6 +68,32 @@ export type Message = {
   delivery_status?: "sent" | "delivered" | "read" | null;
 };
 
+export type WebStatus = {
+  id: number;
+  user_id: number;
+  content: string;
+  type: string;
+  background_color?: string;
+  media_url?: string;
+  expires_at: string;
+  created_at: string;
+  user_name: string;
+  user_avatar?: string;
+  viewed: boolean;
+};
+
+export type StarredMessage = {
+  id: number;
+  chat_id: number;
+  content: string;
+  type: string;
+  media_url?: string;
+  created_at: string;
+  is_group: boolean;
+  group_name?: string;
+  sender_name?: string;
+};
+
 export type ChatDetails = {
   chat?: {
     id: number;
@@ -141,6 +167,18 @@ export const webApi = {
   logout: (token: string) => request<{ success: true }>(`/web-session/${token}`, { method: "DELETE" }),
   searchUsers: (token: string, q: string) =>
     request<{ success: true; users: ChatMember[] }>(`/web-session/${token}/users/search?q=${encodeURIComponent(q)}`),
+  contacts: (token: string, q?: string) => {
+    const qs = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
+    return request<{ success: true; users: ChatMember[] }>(`/web-session/${token}/contacts${qs}`);
+  },
+  statuses: (token: string) =>
+    request<{ success: true; statuses: WebStatus[] }>(`/web-session/${token}/statuses`),
+  viewStatus: (token: string, statusId: number) =>
+    request<{ success: true }>(`/web-session/${token}/statuses/${statusId}/view`, { method: "POST" }),
+  starredMessages: (token: string) =>
+    request<{ success: true; messages: StarredMessage[] }>(`/web-session/${token}/starred`),
+  markAllRead: (token: string) =>
+    request<{ success: true }>(`/web-session/${token}/chats/read-all`, { method: "POST" }),
   createDirectChat: (token: string, otherUserId: number) =>
     request<{ success: true; chatId: number }>(`/web-session/${token}/chats/direct`, {
       method: "POST",

@@ -38,6 +38,7 @@ jobs:
           pnpm --filter @workspace/api-server build
           BASE_PATH=/ pnpm --filter @workspace/admin-web build
           BASE_PATH=/ pnpm --filter @workspace/videh-web build
+          BASE_PATH=/ pnpm --filter @workspace/developer-web build
 
           pm2 restart videh-api --update-env || (
             cd /var/www/videh/artifacts/api-server

@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { webApi, type WebUser } from "../lib/webApi";
-import { DropdownMenu, EmojiPicker, ProfileModal, NewChatModal, useClickOutside } from "../components/web/WebOverlays";
+import { webApi, type WebStatus, type WebUser } from "../lib/webApi";
+import { DropdownMenu, EmojiPicker, useClickOutside } from "../components/web/WebOverlays";
+import { WebNavRail, type NavTab } from "../components/web/WebNavRail";
+import { WebContactPicker, type ContactPickerMode } from "../components/web/WebContactPicker";
+import { WebContactInfo } from "../components/web/WebContactInfo";
+import { WebStatusPanel } from "../components/web/WebStatusPanel";
+import { WebStarredPanel } from "../components/web/WebStarredPanel";
+import { Avatar, initials, hue, WA_BG } from "../components/web/webUiShared";
+import type { ChatMember } from "../lib/webApi";
 
 const API = "";
 
@@ -9,7 +16,7 @@ interface ChatEntry {
   id: number;
   is_group: boolean;
   group_name?: string;
-  other_members?: { id: number; name: string; avatar_url?: string; is_online: boolean }[];
+  other_members?: { id: number; name: string; avatar_url?: string; is_online: boolean; about?: string; phone?: string }[];
   last_message?: { content: string; created_at: string; is_deleted: boolean; sender_id: number };
   unread_count: number;
   is_pinned?: boolean;
@@ -29,6 +36,7 @@ interface Msg {
 }
 
 type SessionStatus = "loading" | "pending" | "scanning" | "linked" | "expired" | "error";
+type SidebarView = "chats" | "status" | "contacts-direct" | "contacts-group" | "group-name" | "starred";
 
 export default function VidehWeb() {
   const [status, setStatus] = useState<SessionStatus>("loading");
@@ -40,10 +48,18 @@ export default function VidehWeb() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [msgText, setMsgText] = useState("");
   const [search, setSearch] = useState("");
+  const [navTab, setNavTab] = useState<NavTab>("chats");
+  const [sidebarView, setSidebarView] = useState<SidebarView>("chats");
   const [sidebarMenuOpen, setSidebarMenuOpen] = useState(false);
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
-  const [newChatMode, setNewChatMode] = useState<"direct" | "group" | null>(null);
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [showContactInfo, setShowContactInfo] = useState(false);
+  const [contactInfoChatId, setContactInfoChatId] = useState<number | null>(null);
+  const [statusFeed, setStatusFeed] = useState<WebStatus[]>([]);
+  const [starredMessages, setStarredMessages] = useState<Awaited<ReturnType<typeof webApi.starredMessages>>["messages"]>([]);
+  const [groupSelected, setGroupSelected] = useState<ChatMember[]>([]);
+  const [groupName, setGroupName] = useState("");
+  const [groupBusy, setGroupBusy] = useState(false);
+  const [statusViewerUserId, setStatusViewerUserId] = useState<number | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
@@ -77,6 +93,13 @@ export default function VidehWeb() {
     return null;
   }, []);
 
+  const loadStatuses = useCallback(async (tok: string) => {
+    try {
+      const res = await webApi.statuses(tok);
+      setStatusFeed(res.statuses);
+    } catch {}
+  }, []);
+
   // Poll session status
   const pollStatus = useCallback(async (tok: string) => {
     try {
@@ -90,9 +113,10 @@ export default function VidehWeb() {
         stopPoll();
         localStorage.setItem("videh_web_token", tok);
         loadChats(tok);
+        loadStatuses(tok);
       }
     } catch {}
-  }, []);
+  }, [loadStatuses]);
 
   const stopPoll = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -146,8 +170,53 @@ export default function VidehWeb() {
   const openChatById = useCallback(async (chatId: number) => {
     if (token) await loadChats(token);
     setActiveChatId(chatId);
-    setNewChatMode(null);
+    setSidebarView("chats");
+    setNavTab("chats");
     setSearch("");
+  }, [token, loadChats]);
+
+  const openDirectChat = useCallback(async (otherUserId: number) => {
+    if (!token) return;
+    try {
+      const res = await webApi.createDirectChat(token, otherUserId);
+      await openChatById(res.chatId);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not start chat");
+    }
+  }, [token, openChatById]);
+
+  const createGroupChat = useCallback(async () => {
+    if (!token || groupSelected.length === 0) return;
+    setGroupBusy(true);
+    try {
+      const res = await webApi.createGroup(token, groupName.trim(), groupSelected.map((m) => m.id));
+      setGroupSelected([]);
+      setGroupName("");
+      await openChatById(res.chatId);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not create group");
+    } finally {
+      setGroupBusy(false);
+    }
+  }, [token, groupName, groupSelected, openChatById]);
+
+  const openStarred = useCallback(async () => {
+    if (!token) return;
+    setSidebarView("starred");
+    try {
+      const res = await webApi.starredMessages(token);
+      setStarredMessages(res.messages);
+    } catch {
+      setStarredMessages([]);
+    }
+  }, [token]);
+
+  const markAllRead = useCallback(async () => {
+    if (!token) return;
+    try {
+      await webApi.markAllRead(token);
+      await loadChats(token);
+    } catch {}
   }, [token, loadChats]);
 
   const handleAttachment = useCallback(async (file: File) => {
@@ -183,8 +252,25 @@ export default function VidehWeb() {
     if (!token) return;
     const res = await webApi.updateProfile(token, { name, about });
     setUser(res.user);
-    setProfileOpen(false);
   }, [token]);
+
+  const statusRingForUser = useCallback((userId: number): "unviewed" | "viewed" | null => {
+    const items = statusFeed.filter((s) => s.user_id === userId);
+    if (items.length === 0) return null;
+    return items.some((s) => !s.viewed) ? "unviewed" : "viewed";
+  }, [statusFeed]);
+
+  const openStatusViewer = useCallback(async (userId: number) => {
+    setStatusViewerUserId(userId);
+    if (!token) return;
+    const items = statusFeed.filter((s) => s.user_id === userId && !s.viewed);
+    for (const s of items) {
+      try {
+        await webApi.viewStatus(token, s.id);
+      } catch {}
+    }
+    if (items.length > 0) loadStatuses(token);
+  }, [token, statusFeed, loadStatuses]);
 
   useEffect(() => {
     const startNewSession = () => {
@@ -203,6 +289,7 @@ export default function VidehWeb() {
             setUser(data.user);
             setStatus("linked");
             loadChats(savedToken);
+            loadStatuses(savedToken);
           } else {
             localStorage.removeItem("videh_web_token");
             startNewSession();
@@ -236,6 +323,12 @@ export default function VidehWeb() {
     return () => clearInterval(t);
   }, [activeChatId, token]);
 
+  useEffect(() => {
+    if (!token || status !== "linked") return;
+    const t = setInterval(() => loadStatuses(token), 45000);
+    return () => clearInterval(t);
+  }, [token, status, loadStatuses]);
+
   const formatTime = (iso: string) => {
     const d = new Date(iso);
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -253,10 +346,17 @@ export default function VidehWeb() {
 
   const getChatName = (c: ChatEntry) => c.is_group ? (c.group_name ?? "Group") : (c.other_members?.[0]?.name ?? "Unknown");
   const getChatAvatar = (c: ChatEntry) => c.is_group ? undefined : c.other_members?.[0]?.avatar_url;
-  const initials = (name: string) => name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
-  const hue = (name: string) => name.charCodeAt(0) * 37 % 360;
-
   const filteredChats = chats.filter((c) => getChatName(c).toLowerCase().includes(search.toLowerCase()));
+
+  const pickerMode: ContactPickerMode | null =
+    sidebarView === "contacts-direct" ? "direct"
+    : sidebarView === "contacts-group" ? "group-members"
+    : sidebarView === "group-name" ? "group-name"
+    : null;
+
+  const viewingStatuses = statusViewerUserId != null
+    ? statusFeed.filter((s) => s.user_id === statusViewerUserId)
+    : [];
   const activeChat = chats.find((c) => c.id === activeChatId);
   const displayMessages = chatSearchQuery.trim()
     ? messages.filter((m) => !m.is_deleted && m.content.toLowerCase().includes(chatSearchQuery.toLowerCase()))
@@ -396,8 +496,14 @@ export default function VidehWeb() {
   // ─── CHAT INTERFACE ────────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "Segoe UI, sans-serif", overflow: "hidden" }}>
-
-      {/* Sidebar */}
+      <WebNavRail active={navTab} onSelect={(tab) => { setNavTab(tab); setSidebarView(tab === "status" ? "status" : "chats"); }} userAvatar={user?.avatarUrl} userName={user?.name ?? "Videh"} onProfileClick={() => { setContactInfoChatId(null); setShowContactInfo(true); }} />
+      {pickerMode && token ? (
+        <WebContactPicker token={token} mode={pickerMode} selected={groupSelected} onSelectedChange={setGroupSelected} groupName={groupName} onGroupNameChange={setGroupName} onClose={() => { setSidebarView(navTab === "status" ? "status" : "chats"); setGroupSelected([]); }} onOpenChat={openDirectChat} onGroupNext={() => setSidebarView("group-name")} onCreateGroup={createGroupChat} busy={groupBusy} />
+      ) : sidebarView === "status" ? (
+        <WebStatusPanel statuses={statusFeed} selfId={user!.id} selfName={user!.name} selfAvatar={user?.avatarUrl} onSelectUser={openStatusViewer} />
+      ) : sidebarView === "starred" ? (
+        <WebStarredPanel messages={starredMessages} onClose={() => setSidebarView("chats")} onOpenChat={openChatById} />
+      ) : (
       <div style={{ width: 380, display: "flex", flexDirection: "column", borderRight: "1px solid #e9edef", backgroundColor: "white", flexShrink: 0 }}>
 
         {/* Sidebar header */}
@@ -405,8 +511,8 @@ export default function VidehWeb() {
           <div
             role="button"
             tabIndex={0}
-            onClick={() => setProfileOpen(true)}
-            onKeyDown={(e) => { if (e.key === "Enter") setProfileOpen(true); }}
+            onClick={() => { setContactInfoChatId(null); setShowContactInfo(true); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { setContactInfoChatId(null); setShowContactInfo(true); } }}
             style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", flex: 1, minWidth: 0 }}
           >
             {user?.avatarUrl ? (
@@ -422,7 +528,7 @@ export default function VidehWeb() {
             <button
               type="button"
               title="New chat"
-              onClick={() => { setSidebarMenuOpen(false); setNewChatMode("direct"); }}
+              onClick={() => { setSidebarMenuOpen(false); setSidebarView("contacts-direct"); }}
               style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}
             >
               <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M19.005 3.175H4.674C3.642 3.175 3 3.789 3 4.821V21.02l3.544-3.514h12.461c1.033 0 2.064-1.06 2.064-2.093V4.821c-.001-1.032-1.032-1.646-2.064-1.646zm-4.989 9.869H7.041V11.1h6.975v1.944zm3-4H7.041V7.1h9.975v1.944z"/></svg>
@@ -441,8 +547,9 @@ export default function VidehWeb() {
               onClose={() => setSidebarMenuOpen(false)}
               anchorRef={sidebarMenuBtnRef}
               items={[
-                { label: "New group", onClick: () => setNewChatMode("group") },
-                { label: "Refresh chats", onClick: () => token && loadChats(token) },
+                { label: "New group", onClick: () => { setGroupSelected([]); setSidebarView("contacts-group"); } },
+                { label: "Starred messages", onClick: openStarred },
+                { label: "Mark all as read", onClick: markAllRead },
                 { label: "Log out", onClick: handleLogout, danger: true },
               ]}
             />
@@ -496,13 +603,7 @@ export default function VidehWeb() {
                 onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLDivElement).style.backgroundColor = "#f5f6f6"; }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.backgroundColor = isActive ? "#f0f2f5" : "white"; }}
               >
-                {av ? (
-                  <img src={av} alt={chatName} style={{ width: 49, height: 49, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
-                ) : (
-                  <div style={{ width: 49, height: 49, borderRadius: "50%", backgroundColor: `hsl(${hue(chatName)},50%,45%)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <span style={{ color: "white", fontWeight: 700, fontSize: 18 }}>{initials(chatName)}</span>
-                  </div>
-                )}
+                <Avatar name={chatName} url={av} size={49} ring={!chat.is_group && chat.other_members?.[0] ? statusRingForUser(chat.other_members[0].id) : null} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
                     <span style={{ fontWeight: 600, color: "#111b21", fontSize: 16 }}>{chatName}</span>
@@ -526,6 +627,7 @@ export default function VidehWeb() {
           })}
         </div>
       </div>
+      )}
 
       {/* Right panel */}
       {activeChatId && activeChat ? (
@@ -575,7 +677,7 @@ export default function VidehWeb() {
                 items={[
                   { label: chatSearchOpen ? "Close search" : "Search messages", onClick: () => setChatSearchOpen((o) => !o) },
                   { label: activeChat.is_muted ? "Unmute notifications" : "Mute notifications", onClick: toggleMute },
-                  { label: "Contact info", onClick: () => alert(`${getChatName(activeChat)}\n${activeChat.is_group ? "Group chat" : "Direct chat"}`) },
+                  { label: "Contact info", onClick: () => { setContactInfoChatId(activeChatId); setShowContactInfo(true); } },
                 ]}
               />
             </div>
@@ -711,16 +813,23 @@ export default function VidehWeb() {
         </div>
       )}
 
-      {profileOpen && user && (
-        <ProfileModal user={user} onClose={() => setProfileOpen(false)} onSave={saveProfile} />
+      {showContactInfo && user && token && (
+        <WebContactInfo token={token} self={user} chatId={contactInfoChatId} onClose={() => setShowContactInfo(false)} onSaveProfile={saveProfile} onMuteToggle={contactInfoChatId ? () => toggleMute() : undefined} />
       )}
-      {newChatMode && token && (
-        <NewChatModal
-          token={token}
-          mode={newChatMode}
-          onClose={() => setNewChatMode(null)}
-          onChatOpened={openChatById}
-        />
+      {statusViewerUserId != null && viewingStatuses.length > 0 && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 3000, backgroundColor: "#0b141a", display: "flex", flexDirection: "column" }} onClick={() => setStatusViewerUserId(null)}>
+          <div style={{ padding: 16, color: "white", display: "flex", justifyContent: "space-between" }}>
+            <span>{viewingStatuses[0].user_name}</span>
+            <button type="button" onClick={() => setStatusViewerUserId(null)} style={{ background: "none", border: "none", color: "white", fontSize: 22, cursor: "pointer" }}>×</button>
+          </div>
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={(e) => e.stopPropagation()}>
+            {viewingStatuses[0].type === "image" && viewingStatuses[0].media_url ? (
+              <img src={viewingStatuses[0].media_url} alt="" style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: 8 }} />
+            ) : (
+              <p style={{ color: "white", fontSize: 22, textAlign: "center" }}>{viewingStatuses[0].content}</p>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

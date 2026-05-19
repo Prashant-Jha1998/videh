@@ -6,6 +6,7 @@ SITE_ROOT="/var/www/videh-site"
 MAIN_CONF="/etc/nginx/conf.d/videh-main.conf"
 ADMIN_CONF="/etc/nginx/conf.d/videh-admin.conf"
 WEB_CONF="/etc/nginx/conf.d/videh-web.conf"
+DEVELOPER_CONF="/etc/nginx/conf.d/videh-developer.conf"
 
 cert_dir_for() {
   local host="$1"
@@ -140,6 +141,7 @@ fi
 
 ADMIN_ROOT="/var/www/videh/artifacts/admin-web/dist/public"
 WEB_ROOT="/var/www/videh/artifacts/videh-web/dist/public"
+DEVELOPER_ROOT="/var/www/videh/artifacts/developer-web/dist/public"
 
 if write_ssl_server "${ADMIN_CONF}" "admin.videh.co.in" "${ADMIN_ROOT}" "true"; then
   echo "Configured HTTPS for admin.videh.co.in"
@@ -153,6 +155,13 @@ if write_ssl_server "${WEB_CONF}" "web.videh.co.in" "${WEB_ROOT}" "true"; then
 else
   write_http_server "${WEB_CONF}" "web.videh.co.in" "${WEB_ROOT}" "true"
   echo "Configured HTTP for web.videh.co.in"
+fi
+
+if write_ssl_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true"; then
+  echo "Configured HTTPS for developer.videh.co.in"
+else
+  write_http_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true"
+  echo "Configured HTTP for developer.videh.co.in"
 fi
 
 echo "Testing nginx config..."
