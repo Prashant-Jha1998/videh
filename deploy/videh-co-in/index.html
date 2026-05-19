@@ -57,13 +57,25 @@
         font-weight: 800;
         font-size: 1.15rem;
       }
-      .brand img {
+      .logo-chip {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #ffffff;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+      }
+      .brand .logo-chip {
         width: 52px;
         height: 52px;
+        padding: 7px;
         border-radius: 14px;
-        object-fit: cover;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
-        border: 2px solid rgba(255, 255, 255, 0.2);
+      }
+      .brand .logo-chip img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
       }
       .nav-buttons {
         display: flex;
@@ -103,15 +115,23 @@
         padding: 48px 20px 56px;
         text-align: center;
       }
-      .hero-logo {
-        width: 96px;
-        height: 96px;
-        border-radius: 22px;
-        object-fit: cover;
-        margin: 0 auto 16px;
+      .hero-logo-chip {
+        width: 120px;
+        height: 120px;
+        margin: 0 auto 20px;
+        padding: 14px;
+        border-radius: 28px;
+        background: #ffffff;
+        box-shadow: 0 14px 44px rgba(0, 0, 0, 0.22);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .hero-logo-chip img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
         display: block;
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
-        border: 3px solid rgba(255, 255, 255, 0.35);
       }
       header h1 {
         margin: 0 0 10px;
@@ -220,7 +240,9 @@
     <div class="topbar">
       <div class="topbar-inner">
         <a class="brand" href="/">
-          <img src="/videh_icon_foreground.png" alt="Videh logo" width="52" height="52" />
+          <span class="logo-chip" aria-hidden="true">
+            <img src="/videh_icon_foreground.png" alt="" width="38" height="38" />
+          </span>
           <span>Videh</span>
         </a>
         <nav class="nav-buttons" aria-label="Main">
@@ -235,7 +257,9 @@
     </div>
     <header>
       <div class="wrap">
-        <img class="hero-logo" src="/videh_icon_foreground.png" alt="Videh" width="96" height="96" />
+        <div class="hero-logo-chip">
+          <img src="/videh_icon_foreground.png" alt="Videh logo" width="92" height="92" />
+        </div>
         <h1>Videh</h1>
         <p class="tagline">
           India's fast, secure messaging app — chat, voice &amp; video calls, status stories,

@@ -347,7 +347,9 @@ export function OnboardingWizard({ onClose }: Props) {
         <header className="sticky top-0 z-10 glass border-b border-white/10 px-4 py-4">
           <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 text-white">
-              <img src="/videh_icon_foreground.png" alt="" className="h-8 w-8 rounded-lg" />
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white p-1">
+                <img src="/videh_icon_foreground.png" alt="" className="h-full w-full object-contain" />
+              </span>
               <div>
                 <p className="font-bold text-sm">Videh API onboarding</p>
                 {reference ? <p className="text-xs text-white/50 font-mono">{reference}</p> : null}

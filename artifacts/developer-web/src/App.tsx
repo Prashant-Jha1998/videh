@@ -204,11 +204,13 @@ export default function App() {
       <header className="fixed top-0 inset-x-0 z-50 glass border-b border-white/10">
         <div className="max-w-6xl mx-auto px-4 h-[4.5rem] md:h-20 flex items-center justify-between gap-3">
           <a href="#" className="flex items-center gap-3 text-white font-bold shrink-0 min-w-0">
-            <img
-              src="/videh_icon_foreground.png"
-              alt="Videh"
-              className="h-12 w-12 md:h-14 md:w-14 rounded-2xl object-cover shadow-lg ring-2 ring-white/25"
-            />
+            <span className="flex h-12 w-12 md:h-14 md:w-14 shrink-0 items-center justify-center rounded-2xl bg-white p-1.5 md:p-2 shadow-lg ring-2 ring-white/30">
+              <img
+                src="/videh_icon_foreground.png"
+                alt="Videh"
+                className="h-full w-full object-contain"
+              />
+            </span>
             <span className="hidden sm:inline leading-tight">
               Videh <span className="text-[#00a884] font-semibold text-base sm:ml-1">Developer</span>
             </span>
