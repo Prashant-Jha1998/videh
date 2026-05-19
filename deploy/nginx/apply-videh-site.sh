@@ -21,13 +21,39 @@ cert_dir_for() {
   echo ""
 }
 
+ensure_letsencrypt_cert() {
+  local host="$1"
+  if [ -f "/etc/letsencrypt/live/${host}/fullchain.pem" ]; then
+    return 0
+  fi
+  if ! command -v certbot >/dev/null 2>&1; then
+    echo "certbot not installed; skipping TLS for ${host}"
+    return 1
+  fi
+  echo "Requesting Let's Encrypt certificate for ${host}..."
+  sudo certbot certonly --nginx -d "${host}" \
+    --non-interactive --agree-tos --register-unsafely-without-email \
+    --keep-until-expiring || return 1
+  [ -f "/etc/letsencrypt/live/${host}/fullchain.pem" ]
+}
+
+cert_dir_for_host_only() {
+  local host="$1"
+  if [ -f "/etc/letsencrypt/live/${host}/fullchain.pem" ]; then
+    echo "/etc/letsencrypt/live/${host}"
+    return
+  fi
+  echo ""
+}
+
 write_ssl_server() {
   local conf_path="$1"
   local server_name="$2"
   local document_root="$3"
   local spa_fallback="${4:-false}"
+  local cert_resolver="${5:-cert_dir_for}"
   local cert_dir
-  cert_dir="$(cert_dir_for "${server_name}")"
+  cert_dir="$("${cert_resolver}" "${server_name}")"
 
   if [ -z "${cert_dir}" ]; then
     return 1
@@ -157,10 +183,13 @@ else
   echo "Configured HTTP for web.videh.co.in"
 fi
 
-if write_ssl_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true"; then
+write_http_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true"
+sudo nginx -t
+sudo systemctl reload nginx
+ensure_letsencrypt_cert "developer.videh.co.in" || true
+if write_ssl_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true" "cert_dir_for_host_only"; then
   echo "Configured HTTPS for developer.videh.co.in"
 else
-  write_http_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true"
   echo "Configured HTTP for developer.videh.co.in"
 fi
 
