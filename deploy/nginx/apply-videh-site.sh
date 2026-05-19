@@ -142,6 +142,11 @@ EOF
 echo "Syncing Videh landing page (videh.co.in only)..."
 sudo mkdir -p "${SITE_ROOT}"
 sudo rsync -a --delete "${REPO}/deploy/videh-co-in/" "${SITE_ROOT}/"
+ICON_SRC="${REPO}/artifacts/videh/assets/images/videh_icon_foreground.png"
+if [ -f "${ICON_SRC}" ]; then
+  sudo cp "${ICON_SRC}" "${SITE_ROOT}/videh_icon_foreground.png"
+  echo "Copied favicon/logo to videh.co.in site root"
+fi
 
 echo "Disabling default nginx welcome page..."
 for default_conf in \

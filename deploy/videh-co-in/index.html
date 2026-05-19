@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Videh — India's Secure Messaging App</title>
+    <link rel="icon" type="image/png" href="/videh_icon_foreground.png" />
+    <link rel="apple-touch-icon" href="/videh_icon_foreground.png" />
     <meta
       name="description"
       content="Videh is a fast, secure messaging app with chat, calls, status, broadcasts, group ledger, SOS safety, scheduled messages, and Videh Web."
@@ -27,11 +29,89 @@
         color: var(--text);
         line-height: 1.6;
       }
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        background: rgba(11, 20, 26, 0.92);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 10px 0;
+      }
+      .topbar-inner {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 0 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #fff;
+        text-decoration: none;
+        font-weight: 800;
+        font-size: 1.15rem;
+      }
+      .brand img {
+        width: 52px;
+        height: 52px;
+        border-radius: 14px;
+        object-fit: cover;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+        border: 2px solid rgba(255, 255, 255, 0.2);
+      }
+      .nav-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        flex: 1;
+      }
+      .nav-btn {
+        display: inline-block;
+        color: #fff;
+        text-decoration: none;
+        padding: 8px 16px;
+        border-radius: 10px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(255, 255, 255, 0.08);
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .nav-btn:hover {
+        background: rgba(255, 255, 255, 0.16);
+        border-color: rgba(255, 255, 255, 0.28);
+      }
+      .nav-btn.primary {
+        background: var(--brand);
+        border-color: var(--brand);
+      }
+      .nav-btn.primary:hover {
+        background: var(--brand-dark);
+        border-color: var(--brand-dark);
+      }
       header {
         background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%);
         color: #fff;
-        padding: 56px 20px 48px;
+        padding: 48px 20px 56px;
         text-align: center;
+      }
+      .hero-logo {
+        width: 96px;
+        height: 96px;
+        border-radius: 22px;
+        object-fit: cover;
+        margin: 0 auto 16px;
+        display: block;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+        border: 3px solid rgba(255, 255, 255, 0.35);
       }
       header h1 {
         margin: 0 0 10px;
@@ -137,8 +217,25 @@
     </style>
   </head>
   <body>
+    <div class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="/">
+          <img src="/videh_icon_foreground.png" alt="Videh logo" width="52" height="52" />
+          <span>Videh</span>
+        </a>
+        <nav class="nav-buttons" aria-label="Main">
+          <a class="nav-btn" href="#about">About</a>
+          <a class="nav-btn" href="#features">Features</a>
+          <a class="nav-btn" href="#links">Quick Links</a>
+          <a class="nav-btn" href="https://web.videh.co.in/">Videh Web</a>
+          <a class="nav-btn" href="https://developer.videh.co.in/">Developer API</a>
+          <a class="nav-btn primary" href="https://web.videh.co.in/privacy-policy/">Privacy</a>
+        </nav>
+      </div>
+    </div>
     <header>
       <div class="wrap">
+        <img class="hero-logo" src="/videh_icon_foreground.png" alt="Videh" width="96" height="96" />
         <h1>Videh</h1>
         <p class="tagline">
           India's fast, secure messaging app — chat, voice &amp; video calls, status stories,
@@ -148,7 +245,7 @@
     </header>
 
     <main class="wrap">
-      <section>
+      <section id="about">
         <h2 class="section-title">About Videh</h2>
         <p class="section-sub">
           Videh helps you stay connected with friends, family, and teams through private messaging,
@@ -156,7 +253,7 @@
         </p>
       </section>
 
-      <section>
+      <section id="features">
         <h2 class="section-title">Features</h2>
         <p class="section-sub">Everything you need in one secure messenger.</p>
         <div class="features">
@@ -227,7 +324,7 @@
         </div>
       </section>
 
-      <section>
+      <section id="links">
         <h2 class="section-title">Quick Links</h2>
         <div class="links">
           <div class="link-card">

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
@@ -15,8 +15,9 @@ import {
   Zap,
 } from "lucide-react";
 import { TemplateMessagePreview } from "./components/TemplateMessagePreview";
-import { LeadForm } from "./components/LeadForm";
 import { OnboardingRequirements } from "./components/OnboardingRequirements";
+import { OnboardingWizard } from "./components/OnboardingWizard";
+import { ConversationPricing } from "./components/ConversationPricing";
 
 const NAV = [
   { href: "#requirements", label: "Verification" },
@@ -24,7 +25,7 @@ const NAV = [
   { href: "#how-it-works", label: "How it works" },
   { href: "#pricing", label: "Pricing" },
   { href: "#api", label: "API" },
-  { href: "#apply", label: "Apply" },
+  { href: "#get-api", label: "Apply", action: "apply" as const },
 ];
 
 const FEATURES = [
@@ -133,8 +134,8 @@ const FAQ = [
     a: "Haan, par aapko technical team, compliance, aur billing khud setup karni padti hai. Videh partner onboarding, Indian support, aur faster troubleshooting deta hai.",
   },
   {
-    q: "Per message cost?",
-    a: "Videh per conversation category charge karta hai (marketing, utility, authentication, service). Platform fee upar plans mein hai. Exact rates volume aur country par depend karte hain.",
+    q: "Per conversation cost?",
+    a: "User-initiated ~₹0.35–0.58; business-initiated marketing ~₹0.78, utility/auth/service ~₹0.35. Pehle 100 user-initiated/month free. Payment method verify karna zaroori hai API se pehle.",
   },
 ];
 
@@ -175,34 +176,76 @@ function FaqItem({ q, a }: { q: string; a: string }) {
   );
 }
 
+function openApplyWizard(e: MouseEvent) {
+  e.preventDefault();
+  window.open(`${window.location.origin}${window.location.pathname}#apply`, "_blank", "noopener,noreferrer");
+}
+
 export default function App() {
+  const [wizardOpen, setWizardOpen] = useState(false);
+
+  useEffect(() => {
+    const sync = () => setWizardOpen(window.location.hash === "#apply");
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  const closeWizard = () => {
+    if (window.location.hash === "#apply") {
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    setWizardOpen(false);
+  };
+
   return (
     <div className="min-h-screen">
+      {wizardOpen ? <OnboardingWizard onClose={closeWizard} /> : null}
       <header className="fixed top-0 inset-x-0 z-50 glass border-b border-white/10">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <a href="#" className="flex items-center gap-2.5 text-white font-bold">
-            <img src="/videh_icon_foreground.png" alt="Videh" className="h-9 w-9 rounded-lg" />
-            <span>
-              Videh <span className="text-[#00a884] font-normal text-sm">Developer</span>
+        <div className="max-w-6xl mx-auto px-4 h-[4.5rem] md:h-20 flex items-center justify-between gap-3">
+          <a href="#" className="flex items-center gap-3 text-white font-bold shrink-0 min-w-0">
+            <img
+              src="/videh_icon_foreground.png"
+              alt="Videh"
+              className="h-12 w-12 md:h-14 md:w-14 rounded-2xl object-cover shadow-lg ring-2 ring-white/25"
+            />
+            <span className="hidden sm:inline leading-tight">
+              Videh <span className="text-[#00a884] font-semibold text-base sm:ml-1">Developer</span>
             </span>
           </a>
-          <nav className="hidden md:flex items-center gap-6 text-sm text-white/80">
-            {NAV.map((l) => (
-              <a key={l.href} href={l.href} className="hover:text-white transition-colors">
-                {l.label}
-              </a>
-            ))}
+          <nav className="hidden lg:flex items-center justify-center gap-2 flex-1 px-2">
+            {NAV.map((l) =>
+              "action" in l && l.action === "apply" ? (
+                <a
+                  key={l.href}
+                  href={l.href}
+                  onClick={openApplyWizard}
+                  className="text-sm font-semibold text-white/95 px-4 py-2 rounded-lg border border-white/20 bg-white/10 hover:bg-white/20 hover:border-white/30 transition-colors whitespace-nowrap"
+                >
+                  {l.label}
+                </a>
+              ) : (
+                <a
+                  key={l.href}
+                  href={l.href}
+                  className="text-sm font-semibold text-white/95 px-4 py-2 rounded-lg border border-white/20 bg-white/10 hover:bg-white/20 hover:border-white/30 transition-colors whitespace-nowrap"
+                >
+                  {l.label}
+                </a>
+              ),
+            )}
           </nav>
           <a
-            href="#apply"
-            className="text-sm font-semibold bg-[#00a884] hover:bg-[#008f6f] text-white px-4 py-2 rounded-lg transition-colors"
+            href="#get-api"
+            onClick={openApplyWizard}
+            className="shrink-0 text-sm font-semibold bg-[#00a884] hover:bg-[#008f6f] text-white px-4 py-2.5 rounded-lg transition-colors shadow-md shadow-[#00a884]/25 whitespace-nowrap"
           >
             Get API access
           </a>
         </div>
       </header>
 
-      <section className="gradient-hero pt-28 pb-20 px-4 text-white">
+      <section className="gradient-hero pt-32 md:pt-36 pb-20 px-4 text-white">
         <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
           <motion.div
             initial={{ opacity: 0, y: 24 }}
@@ -226,6 +269,7 @@ export default function App() {
             <div className="flex flex-wrap gap-3">
               <a
                 href="#apply"
+                onClick={openApplyWizard}
                 className="inline-flex items-center gap-2 bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold px-6 py-3 rounded-xl transition-colors"
               >
                 Start application
@@ -375,9 +419,10 @@ export default function App() {
 
       <section id="pricing" className="py-20 px-4 bg-[#111b21] text-white">
         <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl font-bold text-center mb-3">Transparent pricing</h2>
-          <p className="text-white/60 text-center mb-12 max-w-lg mx-auto">
-            Platform fee + Videh usage charges. No hidden setup fee on Growth plan.
+          <ConversationPricing variant="dark" />
+          <h3 className="text-xl font-bold text-center mt-16 mb-3">Platform plans (partner fee)</h3>
+          <p className="text-white/60 text-center mb-8 max-w-lg mx-auto text-sm">
+            Monthly platform fee plus conversation usage. Payment method verification required before API.
           </p>
           <div className="grid md:grid-cols-3 gap-6">
             {PLANS.map((p) => (
@@ -409,6 +454,7 @@ export default function App() {
                 </ul>
                 <a
                   href="#apply"
+                  onClick={openApplyWizard}
                   className={`mt-8 block text-center font-semibold py-2.5 rounded-xl transition-colors ${
                     p.popular
                       ? "bg-[#00a884] hover:bg-[#008f6f] text-white"
@@ -440,10 +486,10 @@ export default function App() {
       <section id="apply" className="py-20 px-4 bg-gradient-to-b from-[#f0f2f5] to-white">
         <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 items-start">
           <div>
-            <h2 className="text-3xl font-bold text-[#111b21] mb-4">Apply for API access</h2>
+            <h2 className="text-3xl font-bold text-[#111b21] mb-4">Get API access</h2>
             <p className="text-[#667781] leading-relaxed mb-6">
-              Fill the form — our team will schedule a call, verify documents, and set up your sandbox. Production
-              goes live after Videh approves your business and templates.
+              Information page only — click the button to open a new tab with the full wizard: plan, company,
+              entity-specific documents, business profile (logo), and payment verification.
             </p>
             <div className="space-y-4 text-sm">
               <p className="font-semibold text-[#111b21]">Documents typically required:</p>
@@ -456,7 +502,14 @@ export default function App() {
               </ul>
             </div>
           </div>
-          <LeadForm />
+          <a
+            href="#apply"
+            onClick={openApplyWizard}
+            className="inline-flex items-center justify-center gap-2 w-full bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold px-6 py-4 rounded-xl"
+          >
+            Open step-by-step application
+            <ArrowRight className="h-5 w-5" />
+          </a>
         </div>
       </section>
 

@@ -111,7 +111,7 @@ const PHASES = [
       {
         icon: FileCheck2,
         title: "Billing on file",
-        detail: "Per-conversation charges — marketing, utility, authentication alag rate.",
+        detail: "Per-conversation charges (India): user-initiated ₹0.35–0.58; business marketing/utility/auth/service alag rate. Pehle 100 user-initiated free/month.",
       },
       {
         icon: Globe,

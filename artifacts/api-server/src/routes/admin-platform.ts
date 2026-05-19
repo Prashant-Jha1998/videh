@@ -7,7 +7,9 @@ import { computeReportPriority, priorityLabel } from "../lib/reportPriority";
 import { getUserRiskScore, suggestModerationAction } from "../lib/riskScoring";
 import type { AdminIdentity } from "../lib/adminSession";
 import { requirePermission, type RequireAdmin } from "./admin-rbac";
+import crypto from "node:crypto";
 import { DEVELOPER_STATUSES, ensureDeveloperLeadsTable } from "./developer-leads";
+import { documentsForEntity } from "../lib/developerPlatform";
 
 function adminEmail(req: Request): string {
   const a = req.admin as AdminIdentity | undefined;
@@ -762,6 +764,34 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
     }
   });
 
+  router.get("/developer-leads/:id", requireAdmin, requirePermission("developer.read"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) {
+      res.status(400).json({ success: false, message: "Invalid id" });
+      return;
+    }
+    try {
+      await ensureDeveloperLeadsTable();
+      const lead = await query(`SELECT * FROM developer_leads WHERE id = $1`, [id]);
+      if (!lead.rows[0]) {
+        res.status(404).json({ success: false, message: "Not found" });
+        return;
+      }
+      const docs = await query(`SELECT * FROM developer_lead_documents WHERE lead_id = $1 ORDER BY doc_type`, [id]);
+      const account = await query(`SELECT * FROM developer_api_accounts WHERE lead_id = $1`, [id]);
+      res.json({
+        success: true,
+        lead: lead.rows[0],
+        documents: docs.rows,
+        requiredDocuments: documentsForEntity(String(lead.rows[0].entity_type)),
+        account: account.rows[0] ?? null,
+      });
+    } catch (err) {
+      logger.error({ err }, "admin developer-lead detail");
+      res.status(500).json({ success: false, message: "Could not load application" });
+    }
+  });
+
   router.patch("/developer-leads/:id", requireAdmin, requirePermission("developer.manage"), async (req, res) => {
     const id = Number(req.params.id);
     const body = req.body as { status?: string; adminNotes?: string; approvalPhase?: string };
@@ -774,7 +804,8 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
       return;
     }
     try {
-      const updates: string[] = ["reviewed_at = NOW()", `assigned_admin = $1`];
+      await ensureDeveloperLeadsTable();
+      const updates: string[] = ["reviewed_at = NOW()", `assigned_admin = $1`, "updated_at = NOW()"];
       const params: unknown[] = [adminEmail(req)];
       let i = 2;
       if (body.status) {
@@ -798,6 +829,58 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
         res.status(404).json({ success: false, message: "Application not found" });
         return;
       }
+
+      let apiSecretOnce: string | null = null;
+      if (body.status === "approved") {
+        const row = r.rows[0] as Record<string, unknown>;
+        const paymentOk =
+          row.payment_method_verified === true ||
+          row.payment_status === "method_verified" ||
+          row.payment_status === "paid" ||
+          row.payment_status === "waived";
+        if (!paymentOk) {
+          res.status(400).json({
+            success: false,
+            message: "Cannot approve: payment method not verified. Applicant must complete Razorpay verification.",
+          });
+          return;
+        }
+        const existing = await query(`SELECT id FROM developer_api_accounts WHERE lead_id = $1`, [id]);
+        if (!existing.rows[0]) {
+          const apiKeyId = `vsk_${crypto.randomBytes(8).toString("hex")}`;
+          const apiSecret = `vsec_${crypto.randomBytes(24).toString("hex")}`;
+          const secretHash = crypto.createHash("sha256").update(apiSecret).digest("hex");
+          const paymentOk =
+            row.payment_method_verified === true ||
+            row.payment_status === "method_verified" ||
+            row.payment_status === "paid" ||
+            row.payment_status === "waived";
+          const billingStatus = paymentOk ? "active" : "hold";
+          await query(
+            `INSERT INTO developer_api_accounts
+             (lead_id, reference_code, company_name, display_name, logo_url, api_key_id, api_key_secret_hash,
+              billing_status, plan_id, amount_inr_monthly, total_billed_inr, last_payment_at, next_billing_at, approved_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW() + INTERVAL '30 days', $13)`,
+            [
+              id,
+              row.reference_code,
+              row.company_name,
+              row.display_name ?? row.company_name,
+              row.logo_url,
+              apiKeyId,
+              secretHash,
+              billingStatus,
+              row.plan_id,
+              row.amount_inr,
+              row.payment_status === "paid" ? row.amount_inr : 0,
+              row.paid_at ?? null,
+              adminEmail(req),
+            ],
+          );
+          apiSecretOnce = apiSecret;
+        }
+      }
+
       await logAdminAction(
         {
           action: "developer_lead_update",
@@ -807,9 +890,82 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
         },
         req,
       );
-      res.json({ success: true, lead: r.rows[0] });
+      res.json({ success: true, lead: r.rows[0], apiSecretOnce });
     } catch (err) {
       logger.error({ err }, "admin developer-lead patch");
+      res.status(500).json({ success: false, message: "Update failed" });
+    }
+  });
+
+  router.get("/developer-accounts", requireAdmin, requirePermission("developer.read"), async (_req, res) => {
+    try {
+      await ensureDeveloperLeadsTable();
+      const r = await query(
+        `SELECT a.*, l.email, l.phone, l.entity_type, l.gstin, l.payment_status, l.status AS lead_status
+         FROM developer_api_accounts a
+         JOIN developer_leads l ON l.id = a.lead_id
+         ORDER BY a.created_at DESC
+         LIMIT 500`,
+      );
+      res.json({ success: true, accounts: r.rows });
+    } catch (err) {
+      logger.error({ err }, "admin developer-accounts");
+      res.status(500).json({ success: false, message: "Could not load API accounts" });
+    }
+  });
+
+  router.patch("/developer-accounts/:id", requireAdmin, requirePermission("developer.manage"), async (req, res) => {
+    const id = Number(req.params.id);
+    const body = req.body as { billingStatus?: string; adminNotes?: string };
+    if (!id) {
+      res.status(400).json({ success: false, message: "Invalid id" });
+      return;
+    }
+    const allowed = new Set(["active", "hold", "past_due"]);
+    if (body.billingStatus && !allowed.has(body.billingStatus)) {
+      res.status(400).json({ success: false, message: "Invalid billing status" });
+      return;
+    }
+    try {
+      const updates: string[] = [];
+      const params: unknown[] = [];
+      let i = 1;
+      if (body.billingStatus) {
+        updates.push(`billing_status = $${i++}`);
+        params.push(body.billingStatus);
+        if (body.billingStatus === "hold") {
+          updates.push(`last_payment_failed_at = NOW()`);
+        }
+        if (body.billingStatus === "active") {
+          updates.push(`last_payment_at = NOW()`);
+        }
+      }
+      if (updates.length === 0) {
+        res.status(400).json({ success: false, message: "Nothing to update" });
+        return;
+      }
+      params.push(id);
+      const r = await query(
+        `UPDATE developer_api_accounts SET ${updates.join(", ")} WHERE id = $${i} RETURNING *`,
+        params,
+      );
+      if (!r.rows[0]) {
+        res.status(404).json({ success: false, message: "Account not found" });
+        return;
+      }
+      if (body.adminNotes) {
+        await query(`UPDATE developer_leads SET admin_notes = $1 WHERE id = $2`, [
+          body.adminNotes,
+          (r.rows[0] as { lead_id: number }).lead_id,
+        ]);
+      }
+      await logAdminAction(
+        { action: "developer_account_update", entityType: "developer_api_account", entityId: id },
+        req,
+      );
+      res.json({ success: true, account: r.rows[0] });
+    } catch (err) {
+      logger.error({ err }, "admin developer-account patch");
       res.status(500).json({ success: false, message: "Update failed" });
     }
   });

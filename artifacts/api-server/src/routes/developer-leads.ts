@@ -1,4 +1,9 @@
 import { Router, type Request, type Response } from "express";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import multer from "multer";
 import { query } from "../lib/db";
 import { logger } from "../lib/logger";
 import {
@@ -7,11 +12,22 @@ import {
   getRazorpayConfig,
   verifyRazorpaySignature,
 } from "../lib/razorpay";
+import {
+  CONVERSATION_PRICING_INR,
+  FREE_USER_INITIATED_PER_MONTH,
+  PAYMENT_VERIFICATION_INR,
+  SERVICE_REPLY_FREE_HOURS,
+} from "../lib/developerBilling";
+import {
+  documentsForEntity,
+  ensureDeveloperPlatformTables,
+  WIZARD_STEPS,
+} from "../lib/developerPlatform";
 
 const router = Router();
 
 const rateMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 8;
+const RATE_LIMIT = 12;
 const RATE_WINDOW_MS = 60 * 60 * 1000;
 
 const ENTITY_TYPES = new Set(["pvt_ltd", "llp", "proprietorship", "partnership", "other"]);
@@ -25,6 +41,7 @@ export const DEVELOPER_PLANS = {
 export type DeveloperPlanId = keyof typeof DEVELOPER_PLANS;
 
 export const DEVELOPER_STATUSES = [
+  "draft",
   "payment_pending",
   "paid",
   "documents_review",
@@ -33,6 +50,42 @@ export const DEVELOPER_STATUSES = [
   "approved",
   "rejected",
 ] as const;
+
+const apiServerDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const developerUploadsDir = path.join(apiServerDir, "uploads", "developer");
+fs.mkdirSync(developerUploadsDir, { recursive: true });
+
+const docUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, developerUploadsDir),
+    filename: (req, file, cb) => {
+      const leadId = String(req.params.id ?? "0");
+      const docType = String(req.body?.docType ?? "file").replace(/[^a-z0-9_]/gi, "");
+      const ext = path.extname(file.originalname) || ".bin";
+      cb(null, `lead_${leadId}_${docType}_${Date.now()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 12 * 1024 * 1024 },
+});
+
+const logoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, developerUploadsDir),
+    filename: (req, file, cb) => {
+      const leadId = String(req.params.id ?? "0");
+      const ext = path.extname(file.originalname) || ".png";
+      cb(null, `lead_${leadId}_logo_${Date.now()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 4 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      cb(new Error("Logo must be an image"));
+      return;
+    }
+    cb(null, true);
+  },
+});
 
 function clientKey(req: Request): string {
   const xf = req.headers["x-forwarded-for"];
@@ -52,177 +105,303 @@ function rateLimited(key: string): boolean {
 }
 
 function referenceCode(): string {
-  const part = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `VWA-${part}`;
+  return `VWA-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 }
 
-export async function ensureDeveloperLeadsTable(): Promise<void> {
-  await query(`
-    CREATE TABLE IF NOT EXISTS developer_leads (
-      id SERIAL PRIMARY KEY,
-      reference_code TEXT NOT NULL UNIQUE,
-      company_name TEXT NOT NULL,
-      entity_type TEXT NOT NULL,
-      contact_name TEXT NOT NULL,
-      email TEXT NOT NULL,
-      phone TEXT NOT NULL,
-      website TEXT,
-      gstin TEXT,
-      monthly_volume TEXT NOT NULL DEFAULT 'under_10k',
-      use_case TEXT,
-      message TEXT,
-      status TEXT NOT NULL DEFAULT 'payment_pending',
-      plan_id TEXT,
-      amount_inr INTEGER NOT NULL DEFAULT 0,
-      payment_status TEXT NOT NULL DEFAULT 'none',
-      razorpay_order_id TEXT,
-      razorpay_payment_id TEXT,
-      payment_method TEXT,
-      paid_at TIMESTAMPTZ,
-      admin_notes TEXT,
-      assigned_admin TEXT,
-      reviewed_at TIMESTAMPTZ,
-      approval_phase TEXT NOT NULL DEFAULT 'payment',
-      source_ip TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await query(`ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS plan_id TEXT`);
-  await query(`ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS amount_inr INTEGER NOT NULL DEFAULT 0`);
-  await query(`ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'none'`);
-  await query(`ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT`);
-  await query(`ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS razorpay_payment_id TEXT`);
-  await query(`ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS payment_method TEXT`);
-  await query(`ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ`);
-  await query(`ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS admin_notes TEXT`);
-  await query(`ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS assigned_admin TEXT`);
-  await query(`ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`);
-  await query(`ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS approval_phase TEXT NOT NULL DEFAULT 'payment'`);
+function publicUploadUrl(filePath: string): string {
+  const rel = path.relative(path.join(apiServerDir, "uploads"), filePath).replace(/\\/g, "/");
+  return `/uploads/${rel}`;
 }
 
-router.get("/", (_req, res) => {
+export { ensureDeveloperPlatformTables, ensureDeveloperPlatformTables as ensureDeveloperLeadsTable };
+
+router.get("/", async (_req, res) => {
   const { configured, keyId } = getRazorpayConfig();
+  await ensureDeveloperPlatformTables();
   res.json({
     success: true,
-    service: "Videh Business Messaging API — Developer leads",
+    service: "Videh Business Messaging API",
     razorpayConfigured: configured,
     razorpayKeyId: configured ? keyId : null,
     plans: Object.values(DEVELOPER_PLANS),
-    apply: "POST /api/developer-leads",
-    verifyPayment: "POST /api/developer-leads/verify-payment",
+    wizardSteps: WIZARD_STEPS,
+    documentTypes: "/api/developer-leads/document-types?entity=pvt_ltd",
+    paymentFlow: {
+      step: "Payment method verification before API (same as industry standard)",
+      verificationAmountInr: PAYMENT_VERIFICATION_INR,
+      note: "₹5 card/UPI verification — API blocked until captured. Usage billed per conversation.",
+    },
+    conversationPricing: CONVERSATION_PRICING_INR,
+    freeTier: {
+      userInitiatedPerMonth: FREE_USER_INITIATED_PER_MONTH,
+      serviceReplyFreeHours: SERVICE_REPLY_FREE_HOURS,
+    },
   });
 });
 
-router.post("/", async (req: Request, res: Response) => {
+router.get("/document-types", (req, res) => {
+  const entity = String(req.query.entity ?? "pvt_ltd");
+  res.json({ success: true, entity, documents: documentsForEntity(entity) });
+});
+
+router.post("/draft", async (req: Request, res: Response) => {
   const ip = clientKey(req);
   if (rateLimited(ip)) {
-    res.status(429).json({ success: false, message: "Too many requests. Try again later." });
+    res.status(429).json({ success: false, message: "Too many requests." });
     return;
   }
-
-  const body = req.body as Record<string, unknown>;
-  const companyName = String(body.companyName ?? "").trim();
-  const entityType = String(body.entityType ?? "pvt_ltd").trim();
-  const contactName = String(body.contactName ?? "").trim();
-  const email = String(body.email ?? "").trim();
-  const phone = String(body.phone ?? "").trim();
-  const website = String(body.website ?? "").trim() || null;
-  const gstin = String(body.gstin ?? "").trim() || null;
-  const monthlyVolume = String(body.monthlyVolume ?? "under_10k").trim() || "under_10k";
-  const useCase = String(body.useCase ?? "").trim() || null;
-  const message = String(body.message ?? "").trim() || null;
-  const planId = String(body.planId ?? "starter").trim() as DeveloperPlanId;
-  const plan = DEVELOPER_PLANS[planId in DEVELOPER_PLANS ? planId : "starter"];
-
-  if (companyName.length < 2 || contactName.length < 2 || phone.length < 8) {
-    res.status(400).json({
-      success: false,
-      message: "Company name, contact name, and phone are required.",
+  const planId = String((req.body as { planId?: string }).planId ?? "starter");
+  const plan = DEVELOPER_PLANS[planId in DEVELOPER_PLANS ? (planId as DeveloperPlanId) : "starter"];
+  try {
+    await ensureDeveloperPlatformTables();
+    const reference = referenceCode();
+    const r = await query(
+      `INSERT INTO developer_leads
+       (reference_code, company_name, contact_name, email, phone, status, plan_id, amount_inr,
+        wizard_step, approval_phase, source_ip)
+       VALUES ($1,'','','','', 'draft', $2, $3, 'plan', 'plan', $4)
+       RETURNING id, reference_code`,
+      [reference, plan.id, plan.amountInr, ip],
+    );
+    res.status(201).json({
+      success: true,
+      leadId: r.rows[0]?.id,
+      reference: r.rows[0]?.reference_code,
+      plan,
     });
+  } catch (err) {
+    req.log.error({ err }, "developer draft");
+    res.status(500).json({ success: false, message: "Could not start application." });
+  }
+});
+
+router.get("/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) {
+    res.status(400).json({ success: false, message: "Invalid id" });
+    return;
+  }
+  try {
+    await ensureDeveloperPlatformTables();
+    const lead = await query(`SELECT * FROM developer_leads WHERE id = $1`, [id]);
+    if (!lead.rows[0]) {
+      res.status(404).json({ success: false, message: "Not found" });
+      return;
+    }
+    const docs = await query(`SELECT * FROM developer_lead_documents WHERE lead_id = $1 ORDER BY doc_type`, [id]);
+    res.json({
+      success: true,
+      lead: lead.rows[0],
+      documents: docs.rows,
+      requiredDocuments: documentsForEntity(String(lead.rows[0].entity_type)),
+    });
+  } catch (err) {
+    req.log.error({ err }, "developer lead get");
+    res.status(500).json({ success: false, message: "Load failed" });
+  }
+});
+
+router.patch("/:id", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const body = req.body as Record<string, unknown>;
+  if (!id) {
+    res.status(400).json({ success: false, message: "Invalid id" });
     return;
   }
 
-  if (!ENTITY_TYPES.has(entityType)) {
-    res.status(400).json({ success: false, message: "Invalid entity type." });
-    return;
-  }
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    res.status(400).json({ success: false, message: "Valid work email is required." });
+  const entityType = body.entityType != null ? String(body.entityType).trim() : undefined;
+  if (entityType && !ENTITY_TYPES.has(entityType)) {
+    res.status(400).json({ success: false, message: "Invalid entity type" });
     return;
   }
 
   try {
-    await ensureDeveloperLeadsTable();
-    const reference = referenceCode();
-    const { configured } = getRazorpayConfig();
-    const needsPayment = plan.amountInr > 0 && configured;
-    const initialStatus = needsPayment ? "payment_pending" : "paid";
-    const paymentStatus = needsPayment ? "pending" : plan.amountInr === 0 ? "waived" : "paid";
-    const approvalPhase = needsPayment ? "payment" : "documents";
+    await ensureDeveloperPlatformTables();
+    const fields: string[] = ["updated_at = NOW()"];
+    const params: unknown[] = [];
+    let i = 1;
 
-    const insert = await query(
-      `INSERT INTO developer_leads
-       (reference_code, company_name, entity_type, contact_name, email, phone,
-        website, gstin, monthly_volume, use_case, message, status, plan_id, amount_inr,
-        payment_status, approval_phase, source_ip)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-       RETURNING id`,
-      [
-        reference,
-        companyName,
-        entityType,
-        contactName,
-        email,
-        phone,
-        website,
-        gstin,
-        monthlyVolume,
-        useCase,
-        message,
-        initialStatus,
-        plan.id,
-        plan.amountInr,
-        paymentStatus,
-        approvalPhase,
-        ip,
-      ],
-    );
+    const setField = (col: string, val: unknown) => {
+      if (val === undefined) return;
+      fields.push(`${col} = $${i++}`);
+      params.push(val);
+    };
 
-    const leadId = Number(insert.rows[0]?.id);
-    let checkout: { orderId: string; amountInr: number; keyId: string; currency: string } | null = null;
+    setField("company_name", body.companyName != null ? String(body.companyName).trim() : undefined);
+    setField("entity_type", entityType);
+    setField("contact_name", body.contactName != null ? String(body.contactName).trim() : undefined);
+    setField("email", body.email != null ? String(body.email).trim() : undefined);
+    setField("phone", body.phone != null ? String(body.phone).trim() : undefined);
+    setField("website", body.website != null ? String(body.website).trim() || null : undefined);
+    setField("gstin", body.gstin != null ? String(body.gstin).trim().toUpperCase() || null : undefined);
+    setField("cin", body.cin != null ? String(body.cin).trim() || null : undefined);
+    setField("llpin", body.llpin != null ? String(body.llpin).trim() || null : undefined);
+    setField("udyam", body.udyam != null ? String(body.udyam).trim() || null : undefined);
+    setField("monthly_volume", body.monthlyVolume != null ? String(body.monthlyVolume) : undefined);
+    setField("use_case", body.useCase != null ? String(body.useCase).trim() || null : undefined);
+    setField("message", body.message != null ? String(body.message).trim() || null : undefined);
+    setField("wizard_step", body.wizardStep != null ? String(body.wizardStep) : undefined);
+    setField("display_name", body.displayName != null ? String(body.displayName).trim() : undefined);
+    setField("business_category", body.businessCategory != null ? String(body.businessCategory).trim() : undefined);
+    setField("business_description", body.businessDescription != null ? String(body.businessDescription).trim() : undefined);
+    setField("business_address", body.businessAddress != null ? String(body.businessAddress).trim() : undefined);
 
-    if (needsPayment) {
-      const order = await createRazorpayOrder({
-        amountInr: plan.amountInr,
-        receipt: reference.slice(0, 40),
-        notes: { leadId, planId: plan.id, company: companyName.slice(0, 80) },
-      });
-      await query(`UPDATE developer_leads SET razorpay_order_id = $1 WHERE id = $2`, [order.id, leadId]);
-      checkout = {
-        orderId: order.id,
-        amountInr: plan.amountInr,
-        keyId: getRazorpayConfig().keyId,
-        currency: "INR",
-      };
+    if (body.planId != null) {
+      const pid = String(body.planId) as DeveloperPlanId;
+      const plan = DEVELOPER_PLANS[pid in DEVELOPER_PLANS ? pid : "starter"];
+      setField("plan_id", plan.id);
+      setField("amount_inr", plan.amountInr);
     }
 
-    logger.info({ reference, leadId, planId: plan.id, needsPayment }, "developer lead submitted");
+    params.push(id);
+    const r = await query(
+      `UPDATE developer_leads SET ${fields.join(", ")} WHERE id = $${i} RETURNING *`,
+      params,
+    );
+    if (!r.rows[0]) {
+      res.status(404).json({ success: false, message: "Not found" });
+      return;
+    }
+    res.json({ success: true, lead: r.rows[0] });
+  } catch (err) {
+    req.log.error({ err }, "developer lead patch");
+    res.status(500).json({ success: false, message: "Update failed" });
+  }
+});
 
-    res.status(201).json({
+router.post("/:id/documents", docUpload.single("file"), async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const docType = String(req.body?.docType ?? "").trim();
+  if (!id || !docType || !req.file) {
+    res.status(400).json({ success: false, message: "lead id, docType, and file required" });
+    return;
+  }
+  try {
+    await ensureDeveloperPlatformTables();
+    const url = publicUploadUrl(req.file.path);
+    await query(
+      `INSERT INTO developer_lead_documents (lead_id, doc_type, file_name, file_path, mime_type)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (lead_id, doc_type) DO UPDATE SET
+         file_name = EXCLUDED.file_name,
+         file_path = EXCLUDED.file_path,
+         mime_type = EXCLUDED.mime_type,
+         uploaded_at = NOW()`,
+      [id, docType, req.file.originalname, url, req.file.mimetype],
+    );
+    res.json({ success: true, docType, url });
+  } catch (err) {
+    req.log.error({ err }, "developer doc upload");
+    res.status(500).json({ success: false, message: "Upload failed" });
+  }
+});
+
+router.post("/:id/logo", logoUpload.single("logo"), async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!id || !req.file) {
+    res.status(400).json({ success: false, message: "Logo file required" });
+    return;
+  }
+  try {
+    await ensureDeveloperPlatformTables();
+    const url = publicUploadUrl(req.file.path);
+    await query(`UPDATE developer_leads SET logo_url = $1, updated_at = NOW() WHERE id = $2`, [url, id]);
+    res.json({ success: true, logoUrl: url });
+  } catch (err) {
+    req.log.error({ err }, "developer logo upload");
+    res.status(500).json({ success: false, message: "Logo upload failed" });
+  }
+});
+
+router.post("/:id/start-payment", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!id) {
+    res.status(400).json({ success: false, message: "Invalid id" });
+    return;
+  }
+  try {
+    await ensureDeveloperPlatformTables();
+    const lead = await query(`SELECT * FROM developer_leads WHERE id = $1`, [id]);
+    const row = lead.rows[0] as Record<string, unknown> | undefined;
+    if (!row) {
+      res.status(404).json({ success: false, message: "Not found" });
+      return;
+    }
+
+    const entityType = String(row.entity_type);
+    const required = documentsForEntity(entityType).filter((d) => d.required);
+    const uploaded = await query(
+      `SELECT doc_type FROM developer_lead_documents WHERE lead_id = $1`,
+      [id],
+    );
+    const have = new Set(uploaded.rows.map((r) => String((r as { doc_type: string }).doc_type)));
+    const missing = required.filter((d) => !have.has(d.key)).map((d) => d.label);
+    if (missing.length > 0) {
+      res.status(400).json({ success: false, message: `Missing documents: ${missing.join(", ")}` });
+      return;
+    }
+
+    if (!String(row.display_name ?? "").trim() || !String(row.logo_url ?? "").trim()) {
+      res.status(400).json({ success: false, message: "Complete business profile and logo first." });
+      return;
+    }
+
+    const planId = String(row.plan_id ?? "starter") as DeveloperPlanId;
+    const plan = DEVELOPER_PLANS[planId in DEVELOPER_PLANS ? planId : "starter"];
+    const { configured } = getRazorpayConfig();
+
+    if (plan.amountInr === 0 || !configured) {
+      await query(
+        `UPDATE developer_leads SET status = 'paid', payment_status = 'waived', payment_method_verified = true,
+         wizard_step = 'done', approval_phase = 'documents', updated_at = NOW() WHERE id = $1`,
+        [id],
+      );
+      res.json({
+        success: true,
+        needsPayment: false,
+        message: "Application submitted for admin review.",
+      });
+      return;
+    }
+
+    if (row.payment_method_verified === true || row.payment_status === "method_verified") {
+      res.json({
+        success: true,
+        needsPayment: false,
+        message: "Payment method already verified. Awaiting admin review.",
+      });
+      return;
+    }
+
+    const reference = String(row.reference_code);
+    const order = await createRazorpayOrder({
+      amountInr: PAYMENT_VERIFICATION_INR,
+      receipt: `${reference.slice(0, 32)}-verify`,
+      notes: { leadId: id, planId: plan.id, purpose: "payment_method_verification" },
+    });
+
+    await query(
+      `UPDATE developer_leads SET status = 'payment_pending', payment_status = 'pending',
+       amount_inr = $1, razorpay_order_id = $2, wizard_step = 'payment', updated_at = NOW() WHERE id = $3`,
+      [PAYMENT_VERIFICATION_INR, order.id, id],
+    );
+
+    res.json({
       success: true,
-      leadId,
-      reference,
-      status: initialStatus,
-      needsPayment,
-      checkout,
-      message: needsPayment
-        ? "Complete card payment (debit/credit) to submit for admin review."
-        : "Application received. Admin will review within 1–2 business days.",
+      needsPayment: true,
+      paymentPurpose: "method_verification",
+      verificationAmountInr: PAYMENT_VERIFICATION_INR,
+      platformPlan: plan,
+      checkout: {
+        orderId: order.id,
+        amountInr: PAYMENT_VERIFICATION_INR,
+        keyId: getRazorpayConfig().keyId,
+        currency: "INR",
+      },
     });
   } catch (err) {
-    req.log.error({ err }, "developer lead insert");
-    res.status(500).json({ success: false, message: "Could not save application. Try again later." });
+    req.log.error({ err }, "start payment");
+    res.status(500).json({ success: false, message: "Could not start payment" });
   }
 });
 
@@ -240,66 +419,72 @@ router.post("/verify-payment", async (req: Request, res: Response) => {
   const signature = String(body.razorpaySignature ?? "").trim();
 
   if (!leadId || !orderId || !paymentId || !signature) {
-    res.status(400).json({ success: false, message: "Missing payment verification fields." });
+    res.status(400).json({ success: false, message: "Missing payment fields" });
     return;
   }
-
   if (!verifyRazorpaySignature(orderId, paymentId, signature)) {
-    res.status(400).json({ success: false, message: "Invalid payment signature." });
+    res.status(400).json({ success: false, message: "Invalid payment signature" });
     return;
   }
 
   try {
-    await ensureDeveloperLeadsTable();
+    await ensureDeveloperPlatformTables();
     const lead = await query(`SELECT * FROM developer_leads WHERE id = $1`, [leadId]);
-    if (!lead.rows[0]) {
-      res.status(404).json({ success: false, message: "Application not found." });
-      return;
-    }
-
     const row = lead.rows[0] as {
       razorpay_order_id: string | null;
       amount_inr: number;
       payment_status: string;
-    };
-
+    } | undefined;
+    if (!row) {
+      res.status(404).json({ success: false, message: "Not found" });
+      return;
+    }
     if (row.razorpay_order_id !== orderId) {
-      res.status(400).json({ success: false, message: "Order mismatch." });
+      res.status(400).json({ success: false, message: "Order mismatch" });
       return;
     }
 
-    if (row.payment_status === "paid") {
-      res.json({ success: true, message: "Payment already verified." });
-      return;
-    }
-
+    const verifyAmount = Number(row.amount_inr) || PAYMENT_VERIFICATION_INR;
     const payment = await ensureRazorpayPaymentCaptured({
       orderId,
       paymentId,
-      amountInr: Number(row.amount_inr),
+      amountInr: verifyAmount,
     });
 
     await query(
       `UPDATE developer_leads SET
-         payment_status = 'paid',
+         payment_status = 'method_verified',
+         payment_method_verified = true,
          status = 'paid',
          approval_phase = 'documents',
+         wizard_step = 'done',
          razorpay_payment_id = $1,
          payment_method = $2,
-         paid_at = NOW()
+         paid_at = NOW(),
+         updated_at = NOW()
        WHERE id = $3`,
       [paymentId, payment.method ?? "card", leadId],
     );
 
-    logger.info({ leadId, paymentId, method: payment.method }, "developer lead payment verified");
+    await query(
+      `INSERT INTO developer_billing_events (account_id, event_type, amount_inr, razorpay_payment_id, status, metadata)
+       SELECT a.id, 'payment_method_verification', $2, $3, 'captured', '{"purpose":"method_verification"}'::jsonb
+       FROM developer_api_accounts a WHERE a.lead_id = $1`,
+      [leadId, verifyAmount, paymentId],
+    ).catch(() => null);
 
     res.json({
       success: true,
-      message: "Payment verified. Application sent to Videh admin for approval.",
+      message:
+        "Payment method verified. Admin will review documents and profile. API keys only after approval; usage billed per conversation.",
     });
   } catch (err) {
-    req.log.error({ err }, "developer payment verify");
-    res.status(500).json({ success: false, message: "Payment verification failed." });
+    req.log.error({ err }, "verify payment");
+    await query(
+      `UPDATE developer_leads SET payment_status = 'failed', updated_at = NOW() WHERE id = $1`,
+      [leadId],
+    ).catch(() => null);
+    res.status(500).json({ success: false, message: "Payment verification failed. API will remain on hold." });
   }
 });
 
