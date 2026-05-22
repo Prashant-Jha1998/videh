@@ -154,6 +154,23 @@ function statusBadgeClass(status: string): string {
   return "dev-badge dev-badge--muted";
 }
 
+function leadPaymentOk(lead: Lead): boolean {
+  return Boolean(
+    lead.payment_method_verified ||
+      lead.payment_status === "method_verified" ||
+      lead.payment_status === "paid" ||
+      lead.payment_status === "waived",
+  );
+}
+
+function leadChannelOk(lead: Lead): boolean {
+  return lead.channel_status === "verified" && Boolean(lead.videh_phone_number_id);
+}
+
+function canFullyApprove(lead: Lead): boolean {
+  return leadPaymentOk(lead) && leadChannelOk(lead);
+}
+
 function paymentLabel(lead: Lead): string {
   if (lead.payment_method_verified) return "Verified";
   const map: Record<string, string> = {
@@ -292,7 +309,19 @@ function ApplicationCard({
             View details
           </button>
           {NEXT_STATUS[lead.status] ? (
-            <button type="button" className="btn-sm" onClick={onAdvance}>
+            <button
+              type="button"
+              className="btn-sm"
+              disabled={NEXT_STATUS[lead.status] === "approved" && !canFullyApprove(lead)}
+              title={
+                NEXT_STATUS[lead.status] === "approved" && !canFullyApprove(lead)
+                  ? !leadPaymentOk(lead)
+                    ? "Payment not verified"
+                    : "Channel phone not verified"
+                  : undefined
+              }
+              onClick={onAdvance}
+            >
               Advance → {STATUS_LABELS[NEXT_STATUS[lead.status]!]}
             </button>
           ) : null}
@@ -332,6 +361,7 @@ export function DeveloperApiTab({
   const [view, setView] = useState<"applications" | "template-queue" | "accounts">("applications");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [accounts, setAccounts] = useState<ApiAccount[]>([]);
+  const [approvedWithoutKeys, setApprovedWithoutKeys] = useState<Lead[]>([]);
   const [filter, setFilter] = useState("pending");
   const [loading, setLoading] = useState(true);
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -381,8 +411,11 @@ export function DeveloperApiTab({
         const data = await adminApi<{ leads: Lead[] }>(`/admin/developer-leads?status=${filter}`);
         setLeads(data.leads ?? []);
       } else if (view === "accounts") {
-        const data = await adminApi<{ accounts: ApiAccount[] }>("/admin/developer-accounts");
+        const data = await adminApi<{ accounts: ApiAccount[]; approvedWithoutKeys?: Lead[] }>(
+          "/admin/developer-accounts",
+        );
         setAccounts(data.accounts ?? []);
+        setApprovedWithoutKeys(data.approvedWithoutKeys ?? []);
       }
     } catch (err) {
       onErr(err instanceof Error ? err.message : "Load failed");
@@ -435,6 +468,9 @@ export function DeveloperApiTab({
       if (data.apiSecretOnce) {
         setApiSecretOnce(data.apiSecretOnce);
         window.alert(`API secret (show once): ${data.apiSecretOnce}`);
+      }
+      if (patch.status === "approved") {
+        setView("accounts");
       }
       await load();
       if (detailId === id) await loadDetail(id);
@@ -683,7 +719,9 @@ export function DeveloperApiTab({
             <div className="dev-empty">
               <h3>No applications here</h3>
               <p className="muted" style={{ margin: 0 }}>
-                Try another filter, or wait for a new partner signup on developer.videh.co.in.
+                {filter === "pending"
+                  ? "Approved applications move to the Approved filter and Live APIs tab (after API keys are issued)."
+                  : "Try another filter, or wait for a new partner signup on developer.videh.co.in."}
               </p>
             </div>
           ) : (
@@ -709,14 +747,66 @@ export function DeveloperApiTab({
         </>
       ) : loading ? (
         <div className="dev-loading">Loading live accounts…</div>
-      ) : accounts.length === 0 ? (
-        <div className="dev-empty">
-          <h3>No live API accounts</h3>
-          <p className="muted" style={{ margin: 0 }}>
-            Approve an application to issue API keys and show it here.
-          </p>
-        </div>
       ) : (
+        <>
+          {approvedWithoutKeys.length > 0 ? (
+            <div className="dev-template-alert" role="alert" style={{ marginBottom: 16 }}>
+              <strong>
+                {approvedWithoutKeys.length} approved application{approvedWithoutKeys.length === 1 ? "" : "s"} without API
+                keys
+              </strong>
+              <span className="muted" style={{ fontSize: "0.85rem", display: "block", marginTop: 4 }}>
+                Usually payment or channel was missing when status was set to Approved. Fix prerequisites, then issue keys.
+              </span>
+              <ul style={{ margin: "10px 0 0", padding: 0, listStyle: "none" }}>
+                {approvedWithoutKeys.map((l) => (
+                  <li
+                    key={l.id}
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 8,
+                      alignItems: "center",
+                      marginTop: 8,
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    <span>
+                      <strong>{l.company_name || l.reference_code}</strong>{" "}
+                      <span className="font-mono muted">{l.reference_code}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="btn-sm btn-sm-primary"
+                      disabled={!canFullyApprove(l)}
+                      title={
+                        !canFullyApprove(l)
+                          ? !leadPaymentOk(l)
+                            ? "Payment not verified"
+                            : "Channel not verified"
+                          : "Create API account"
+                      }
+                      onClick={() => void updateLead(l.id, { status: "approved" })}
+                    >
+                      Issue API keys
+                    </button>
+                    <button type="button" className="btn-sm" onClick={() => void loadDetail(l.id)}>
+                      View
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {accounts.length === 0 ? (
+            <div className="dev-empty">
+              <h3>No live API accounts</h3>
+              <p className="muted" style={{ margin: 0 }}>
+                Full approval creates API keys here. Check the Approved filter, or use Issue API keys above if status was
+                approved without keys.
+              </p>
+            </div>
+          ) : (
         <div className="dev-list">
           {accounts.map((a) => (
             <article key={a.id} className="dev-app-card">
@@ -829,6 +919,8 @@ export function DeveloperApiTab({
             </article>
           ))}
         </div>
+          )}
+        </>
       )}
 
       {detail && detailId ? (
@@ -1027,9 +1119,29 @@ export function DeveloperApiTab({
                   <button
                     type="button"
                     className="btn-sm btn-sm-primary"
+                    disabled={
+                      NEXT_STATUS[detail.lead.status] === "approved" && !canFullyApprove(detail.lead)
+                    }
+                    title={
+                      NEXT_STATUS[detail.lead.status] === "approved" && !canFullyApprove(detail.lead)
+                        ? !leadPaymentOk(detail.lead)
+                          ? "Payment not verified"
+                          : "Channel not verified"
+                        : undefined
+                    }
                     onClick={() => void updateLead(detail.lead.id, { status: NEXT_STATUS[detail.lead.status] })}
                   >
                     Advance → {STATUS_LABELS[NEXT_STATUS[detail.lead.status]!]}
+                  </button>
+                ) : null}
+                {detail.lead.status === "approved" && !detail.account ? (
+                  <button
+                    type="button"
+                    className="btn-sm btn-sm-primary"
+                    disabled={!canFullyApprove(detail.lead)}
+                    onClick={() => void updateLead(detail.lead.id, { status: "approved" })}
+                  >
+                    Issue API keys
                   </button>
                 ) : null}
                 {detail.lead.status === "approved" ? (

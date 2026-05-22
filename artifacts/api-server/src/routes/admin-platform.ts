@@ -8,7 +8,7 @@ import { getUserRiskScore, suggestModerationAction } from "../lib/riskScoring";
 import type { AdminIdentity } from "../lib/adminSession";
 import { requirePermission, type RequireAdmin } from "./admin-rbac";
 import crypto from "node:crypto";
-import { DEVELOPER_STATUSES, ensureDeveloperLeadsTable } from "./developer-leads";
+import { DEVELOPER_STATUSES, ensureDeveloperLeadsTable, ensureDeveloperPlatformTables } from "./developer-leads";
 import { documentsForEntity } from "../lib/developerPlatform";
 import {
   buildTemplateInsertParams,
@@ -27,6 +27,82 @@ import { deleteDeveloperLeadById } from "../lib/deleteDeveloperLead";
 function adminEmail(req: Request): string {
   const a = req.admin as AdminIdentity | undefined;
   return a?.email ?? process.env["ADMIN_EMAIL"]?.trim().toLowerCase() ?? "platform-admin";
+}
+
+function leadPaymentVerified(row: Record<string, unknown>): boolean {
+  return (
+    row.payment_method_verified === true ||
+    row.payment_status === "method_verified" ||
+    row.payment_status === "paid" ||
+    row.payment_status === "waived"
+  );
+}
+
+function leadChannelVerified(row: Record<string, unknown>): boolean {
+  return row.channel_status === "verified" && Boolean(row.videh_phone_number_id);
+}
+
+function assertCanApproveLead(row: Record<string, unknown>): string | null {
+  if (!leadPaymentVerified(row)) {
+    return "Cannot approve: payment method not verified. Applicant must complete Razorpay verification (or admin waives payment).";
+  }
+  if (!leadChannelVerified(row)) {
+    return "Cannot approve: business channel phone not verified. Applicant must complete OTP, or use View details → verify channel manually.";
+  }
+  return null;
+}
+
+async function issueApiAccountForLead(
+  leadId: number,
+  row: Record<string, unknown>,
+  approvedBy: string,
+): Promise<{ accountId: number; apiSecretOnce: string | null }> {
+  await ensureDeveloperPlatformTables();
+  const paymentOk = leadPaymentVerified(row);
+  const apiKeyId = `vsk_${crypto.randomBytes(8).toString("hex")}`;
+  const apiSecret = `vsec_${crypto.randomBytes(24).toString("hex")}`;
+  const secretHash = hashApiSecret(apiSecret);
+  let secretEnc: string | null = null;
+  try {
+    secretEnc = encryptApiSecret(apiSecret);
+  } catch {
+    secretEnc = null;
+  }
+  const billingStatus = paymentOk ? "active" : "hold";
+  const ins = await query(
+    `INSERT INTO developer_api_accounts
+     (lead_id, reference_code, company_name, display_name, logo_url, api_key_id, api_key_secret_hash, api_key_secret_enc,
+      billing_status, plan_id, amount_inr_monthly, total_billed_inr, last_payment_at, next_billing_at, approved_by,
+      channel_phone, channel_status, channel_verified_at, videh_phone_number_id, videh_business_account_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW() + INTERVAL '30 days', $13,
+      $14,$15,$16,$17,$18)
+     RETURNING id`,
+    [
+      leadId,
+      row.reference_code,
+      row.company_name,
+      row.display_name ?? row.company_name,
+      row.logo_url,
+      apiKeyId,
+      secretHash,
+      secretEnc,
+      billingStatus,
+      row.plan_id,
+      row.amount_inr,
+      row.payment_status === "paid" ? row.amount_inr : 0,
+      row.paid_at ?? null,
+      approvedBy,
+      row.channel_phone,
+      row.channel_status,
+      row.channel_verified_at,
+      row.videh_phone_number_id,
+      row.videh_business_account_id,
+    ],
+  );
+  const newAccountId = Number((ins.rows[0] as { id: number }).id);
+  await linkTemplatesToAccount(leadId, newAccountId);
+  await copyChannelToAccount(leadId, newAccountId);
+  return { accountId: newAccountId, apiSecretOnce: apiSecret };
 }
 
 async function enrichReportRow(row: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -828,6 +904,21 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
     }
     try {
       await ensureDeveloperLeadsTable();
+      const current = await query(`SELECT * FROM developer_leads WHERE id = $1`, [id]);
+      if (!current.rows[0]) {
+        res.status(404).json({ success: false, message: "Application not found" });
+        return;
+      }
+      const currentRow = current.rows[0] as Record<string, unknown>;
+
+      if (body.status === "approved") {
+        const approveErr = assertCanApproveLead(currentRow);
+        if (approveErr) {
+          res.status(400).json({ success: false, message: approveErr });
+          return;
+        }
+      }
+
       const updates: string[] = ["reviewed_at = NOW()", `assigned_admin = $1`, "updated_at = NOW()"];
       const params: unknown[] = [adminEmail(req)];
       let i = 2;
@@ -883,69 +974,8 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
           await linkTemplatesToAccount(id, acct.id);
           await copyChannelToAccount(id, acct.id);
         } else {
-          const paymentOk =
-            row.payment_method_verified === true ||
-            row.payment_status === "method_verified" ||
-            row.payment_status === "paid" ||
-            row.payment_status === "waived";
-          if (!paymentOk) {
-            res.status(400).json({
-              success: false,
-              message: "Cannot approve: payment method not verified. Applicant must complete Razorpay verification.",
-            });
-            return;
-          }
-          if (row.channel_status !== "verified" || !row.videh_phone_number_id) {
-            res.status(400).json({
-              success: false,
-              message: "Cannot approve: business channel phone not verified. Applicant must complete dedicated number OTP.",
-            });
-            return;
-          }
-          const apiKeyId = `vsk_${crypto.randomBytes(8).toString("hex")}`;
-          const apiSecret = `vsec_${crypto.randomBytes(24).toString("hex")}`;
-          const secretHash = hashApiSecret(apiSecret);
-          let secretEnc: string | null = null;
-          try {
-            secretEnc = encryptApiSecret(apiSecret);
-          } catch {
-            secretEnc = null;
-          }
-          const billingStatus = paymentOk ? "active" : "hold";
-          const ins = await query(
-            `INSERT INTO developer_api_accounts
-             (lead_id, reference_code, company_name, display_name, logo_url, api_key_id, api_key_secret_hash, api_key_secret_enc,
-              billing_status, plan_id, amount_inr_monthly, total_billed_inr, last_payment_at, next_billing_at, approved_by,
-              channel_phone, channel_status, channel_verified_at, videh_phone_number_id, videh_business_account_id)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW() + INTERVAL '30 days', $13,
-              $14,$15,$16,$17,$18)
-             RETURNING id`,
-            [
-              id,
-              row.reference_code,
-              row.company_name,
-              row.display_name ?? row.company_name,
-              row.logo_url,
-              apiKeyId,
-              secretHash,
-              secretEnc,
-              billingStatus,
-              row.plan_id,
-              row.amount_inr,
-              row.payment_status === "paid" ? row.amount_inr : 0,
-              row.paid_at ?? null,
-              adminEmail(req),
-              row.channel_phone,
-              row.channel_status,
-              row.channel_verified_at,
-              row.videh_phone_number_id,
-              row.videh_business_account_id,
-            ],
-          );
-          const newAccountId = Number((ins.rows[0] as { id: number }).id);
-          await linkTemplatesToAccount(id, newAccountId);
-          await copyChannelToAccount(id, newAccountId);
-          apiSecretOnce = apiSecret;
+          const issued = await issueApiAccountForLead(id, row, adminEmail(req));
+          apiSecretOnce = issued.apiSecretOnce;
         }
       }
 
@@ -991,7 +1021,7 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
 
   router.get("/developer-accounts", requireAdmin, requirePermission("developer.read"), async (_req, res) => {
     try {
-      await ensureDeveloperLeadsTable();
+      await ensureDeveloperPlatformTables();
       const r = await query(
         `SELECT a.*, l.email, l.phone, l.entity_type, l.gstin, l.payment_status, l.status AS lead_status
          FROM developer_api_accounts a
@@ -999,7 +1029,20 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
          ORDER BY a.created_at DESC
          LIMIT 500`,
       );
-      res.json({ success: true, accounts: r.rows });
+      const orphans = await query(
+        `SELECT l.id, l.reference_code, l.company_name, l.display_name, l.status, l.payment_status,
+                l.payment_method_verified, l.channel_status, l.videh_phone_number_id
+         FROM developer_leads l
+         WHERE l.status = 'approved'
+           AND NOT EXISTS (SELECT 1 FROM developer_api_accounts a WHERE a.lead_id = l.id)
+         ORDER BY l.updated_at DESC
+         LIMIT 50`,
+      );
+      res.json({
+        success: true,
+        accounts: r.rows,
+        approvedWithoutKeys: orphans.rows,
+      });
     } catch (err) {
       logger.error({ err }, "admin developer-accounts");
       res.status(500).json({ success: false, message: "Could not load API accounts" });
