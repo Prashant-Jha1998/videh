@@ -21,6 +21,7 @@ import { ConversationPricing } from "./components/ConversationPricing";
 import { DeveloperDashboard } from "./components/DeveloperDashboard";
 import { DeveloperAuth, type AuthMode } from "./components/DeveloperAuth";
 import { devFetch } from "./lib/devFetch";
+import { isLeadConsoleReady, type ActiveLeadSummary } from "./lib/developerPortalState";
 
 const NAV = [
   { href: "#requirements", label: "Verification" },
@@ -208,21 +209,38 @@ export default function App() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
   const [session, setSession] = useState<{ email: string } | null>(null);
+  const [activeLead, setActiveLead] = useState<ActiveLeadSummary | null>(null);
+
+  const consoleReady = isLeadConsoleReady(activeLead);
 
   const refreshSession = useCallback(async () => {
     try {
       const r = await devFetch("/api/developer-auth/me");
-      const d = (await r.json()) as { success?: boolean; user?: { email: string } };
-      if (r.ok && d.success && d.user) setSession({ email: d.user.email });
-      else setSession(null);
+      const d = (await r.json()) as {
+        success?: boolean;
+        user?: { email: string };
+        activeLead?: ActiveLeadSummary & { id: number; reference_code: string };
+      };
+      if (r.ok && d.success && d.user) {
+        setSession({ email: d.user.email });
+        setActiveLead(d.activeLead ?? null);
+      } else {
+        setSession(null);
+        setActiveLead(null);
+      }
     } catch {
       setSession(null);
+      setActiveLead(null);
     }
   }, []);
 
   useEffect(() => {
     const sync = () => {
       const hash = window.location.hash;
+      if (hash === "#dashboard" && consoleReady) {
+        window.location.hash = "#apply";
+        return;
+      }
       setWizardOpen(hash === "#apply");
       setAuthMode(authModeFromHash());
       if (hash === "#apply" && !session) {
@@ -233,9 +251,9 @@ export default function App() {
     void refreshSession();
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
-  }, [refreshSession]);
+  }, [refreshSession, consoleReady, session]);
 
-  const openApplyWizard = (e?: MouseEvent) => {
+  const openConsole = (e?: MouseEvent) => {
     e?.preventDefault();
     if (!session) {
       sessionStorage.setItem("videh_auth_next", "apply");
@@ -244,6 +262,8 @@ export default function App() {
     }
     window.location.hash = "#apply";
   };
+
+  const openApplyWizard = openConsole;
 
   const closeWizard = () => {
     if (window.location.hash === "#apply") {
@@ -301,26 +321,21 @@ export default function App() {
             </span>
           </a>
           <nav className="hidden lg:flex items-center justify-center gap-2 flex-1 px-2">
-            {NAV.map((l) =>
-              "action" in l && l.action === "apply" ? (
+            {NAV.filter((l) => !(consoleReady && l.href === "#get-api")).map((l) => {
+              const href = consoleReady && l.href === "#dashboard" ? "#apply" : l.href;
+              const open =
+                (consoleReady && l.href === "#dashboard") || ("action" in l && l.action === "apply");
+              return (
                 <a
                   key={l.href}
-                  href={l.href}
-                  onClick={openApplyWizard}
+                  href={href}
+                  onClick={open ? openConsole : undefined}
                   className="text-sm font-semibold text-white/95 px-4 py-2 rounded-lg border border-white/20 bg-white/10 hover:bg-white/20 hover:border-white/30 transition-colors whitespace-nowrap"
                 >
                   {l.label}
                 </a>
-              ) : (
-                <a
-                  key={l.href}
-                  href={l.href}
-                  className="text-sm font-semibold text-white/95 px-4 py-2 rounded-lg border border-white/20 bg-white/10 hover:bg-white/20 hover:border-white/30 transition-colors whitespace-nowrap"
-                >
-                  {l.label}
-                </a>
-              ),
-            )}
+              );
+            })}
           </nav>
           <div className="shrink-0 flex items-center gap-2">
             {session ? (
@@ -351,11 +366,11 @@ export default function App() {
               </>
             )}
             <a
-              href="#get-api"
-              onClick={openApplyWizard}
+              href={consoleReady ? "#apply" : "#get-api"}
+              onClick={openConsole}
               className="text-sm font-semibold bg-[#00a884] hover:bg-[#008f6f] text-white px-4 py-2.5 rounded-lg transition-colors shadow-md shadow-[#00a884]/25 whitespace-nowrap"
             >
-              Get API access
+              {consoleReady ? "Open console" : "Get API access"}
             </a>
           </div>
         </div>
@@ -547,7 +562,7 @@ export default function App() {
         </div>
       </section>
 
-      <DeveloperDashboard />
+      {!consoleReady ? <DeveloperDashboard /> : null}
 
       <section id="pricing" className="py-20 px-4 bg-[#111b21] text-white">
         <div className="max-w-6xl mx-auto">

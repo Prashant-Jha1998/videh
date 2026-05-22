@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { devFetch } from "../lib/devFetch";
 import { DeveloperApiCredentials } from "./DeveloperApiCredentials";
+import { isLeadConsoleReady } from "../lib/developerPortalState";
 
 export const DEV_LEAD_ID_KEY = "videh_dev_lead_id";
 export const DEV_REF_KEY = "videh_dev_reference";
@@ -217,6 +218,18 @@ export function DeveloperDashboard() {
       setSubmittingTpl(false);
     }
   };
+
+  if (
+    data &&
+    isLeadConsoleReady({
+      status: data.lead.status,
+      wizard_step: data.lead.wizard_step,
+      payment_method_verified: data.lead.payment_method_verified,
+      has_api_account: Boolean(data.account),
+    })
+  ) {
+    return null;
+  }
 
   const phoneId =
     data?.account?.videh_phone_number_id ??

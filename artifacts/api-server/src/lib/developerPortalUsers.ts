@@ -101,20 +101,34 @@ export async function getActiveLeadForPortalUser(userId: number): Promise<{
   wizard_step: string;
   status: string;
   company_name: string;
+  payment_method_verified: boolean;
+  has_api_account: boolean;
 } | null> {
   const r = await query(
-    `SELECT id, reference_code, wizard_step, status, company_name
-     FROM developer_leads
-     WHERE portal_user_id = $1 AND status NOT IN ('rejected')
-     ORDER BY updated_at DESC
+    `SELECT l.id, l.reference_code, l.wizard_step, l.status, l.company_name,
+            COALESCE(l.payment_method_verified, false) AS payment_method_verified,
+            EXISTS(SELECT 1 FROM developer_api_accounts a WHERE a.lead_id = l.id) AS has_api_account
+     FROM developer_leads l
+     WHERE l.portal_user_id = $1 AND l.status NOT IN ('rejected')
+     ORDER BY l.updated_at DESC
      LIMIT 1`,
     [userId],
   );
-  return (r.rows[0] as {
-    id: number;
-    reference_code: string;
-    wizard_step: string;
-    status: string;
-    company_name: string;
-  } | undefined) ?? null;
+  const row = r.rows[0] as
+    | {
+        id: number;
+        reference_code: string;
+        wizard_step: string;
+        status: string;
+        company_name: string;
+        payment_method_verified: boolean;
+        has_api_account: boolean;
+      }
+    | undefined;
+  if (!row) return null;
+  return {
+    ...row,
+    payment_method_verified: Boolean(row.payment_method_verified),
+    has_api_account: Boolean(row.has_api_account),
+  };
 }
