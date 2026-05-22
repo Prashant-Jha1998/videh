@@ -222,8 +222,23 @@ export default function App() {
         activeLead?: ActiveLeadSummary & { id: number; reference_code: string };
       };
       if (r.ok && d.success && d.user) {
-        setSession({ email: d.user.email });
-        setActiveLead(d.activeLead ?? null);
+        const email = d.user.email;
+        setSession((prev) => (prev?.email === email ? prev : { email }));
+        setActiveLead((prev) => {
+          const next = d.activeLead ?? null;
+          if (!next && !prev) return null;
+          if (
+            next &&
+            prev &&
+            next.id === prev.id &&
+            next.reference_code === prev.reference_code &&
+            next.status === prev.status &&
+            next.wizard_step === prev.wizard_step
+          ) {
+            return prev;
+          }
+          return next;
+        });
       } else {
         setSession(null);
         setActiveLead(null);
@@ -233,6 +248,10 @@ export default function App() {
       setActiveLead(null);
     }
   }, []);
+
+  useEffect(() => {
+    void refreshSession();
+  }, [refreshSession]);
 
   useEffect(() => {
     const sync = () => {
@@ -248,10 +267,9 @@ export default function App() {
       }
     };
     sync();
-    void refreshSession();
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
-  }, [refreshSession, consoleReady, session]);
+  }, [consoleReady, session]);
 
   const openConsole = (e?: MouseEvent) => {
     e?.preventDefault();
@@ -287,8 +305,13 @@ export default function App() {
   const logout = async () => {
     await devFetch("/api/developer-auth/logout", { method: "POST" });
     setSession(null);
+    setActiveLead(null);
     history.replaceState(null, "", window.location.pathname);
   };
+
+  const needAuthForWizard = useCallback(() => {
+    window.location.hash = "#signup";
+  }, []);
 
   return (
     <div className="min-h-screen">
@@ -303,7 +326,7 @@ export default function App() {
           onSwitchMode={setAuthHash}
         />
       ) : null}
-      {wizardOpen ? <OnboardingWizard onClose={closeWizard} onNeedAuth={() => { window.location.hash = "#signup"; }} /> : null}
+      {wizardOpen ? <OnboardingWizard onClose={closeWizard} onNeedAuth={needAuthForWizard} /> : null}
       {!wizardOpen && !authMode ? (
       <>
       <header className="fixed top-0 inset-x-0 z-50 glass border-b border-white/10">

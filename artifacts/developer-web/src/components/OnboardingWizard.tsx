@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -155,8 +155,13 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
     setDocs(d.documents ?? []);
   }, []);
 
+  const hydratedLeadIdRef = useRef<number | null>(null);
+  const onNeedAuthRef = useRef(onNeedAuth);
+  onNeedAuthRef.current = onNeedAuth;
+
   const loadLead = useCallback(
-    async (id: number) => {
+    async (id: number, opts?: { force?: boolean }) => {
+      if (!opts?.force && hydratedLeadIdRef.current === id) return;
       const r = await devFetch(`/api/developer-leads/${id}`);
       const d = (await r.json()) as {
         lead?: Record<string, unknown>;
@@ -209,20 +214,23 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       });
       setUploaded(new Set((d.documents ?? []).map((x) => x.doc_type)));
       await loadDocs(String(L.entity_type ?? "pvt_ltd"));
+      hydratedLeadIdRef.current = id;
     },
     [loadDocs],
   );
 
   useEffect(() => {
+    let cancelled = false;
     devFetch("/api/developer-auth/me")
       .then((r) => r.json())
       .then((auth: { success?: boolean; activeLead?: { id: number; reference_code: string }; user?: { email: string } }) => {
+        if (cancelled) return;
         if (!auth.success) {
-          onNeedAuth?.();
+          onNeedAuthRef.current?.();
           return;
         }
-        if (auth.user?.email && !company.email) {
-          setCompany((c) => ({ ...c, email: auth.user!.email }));
+        if (auth.user?.email) {
+          setCompany((c) => (c.email ? c : { ...c, email: auth.user!.email }));
         }
         if (auth.activeLead?.id) {
           setLeadId(auth.activeLead.id);
@@ -241,7 +249,15 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
           }
         }
       })
-      .catch(() => onNeedAuth?.());
+      .catch(() => {
+        if (!cancelled) onNeedAuthRef.current?.();
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadLead]);
+
+  useEffect(() => {
     devFetch("/api/developer-leads")
       .then((r) => r.json())
       .then((d: { plans?: Plan[] }) => {
@@ -249,7 +265,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       })
       .catch(() => {});
     void loadDocs("pvt_ltd");
-  }, [loadDocs, loadLead, onNeedAuth]);
+  }, [loadDocs]);
 
   async function patchLead(body: Record<string, unknown>, idOverride?: number) {
     const id = idOverride ?? leadId;
@@ -690,7 +706,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                   <input
                     required
                     value={company.companyName}
-                    onChange={(e) => setCompany({ ...company, companyName: e.target.value })}
+                    onChange={(e) => setCompany((c) => ({ ...c, companyName: e.target.value }))}
                     className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm"
                   />
                 </label>
@@ -699,8 +715,9 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                   <select
                     value={company.entityType}
                     onChange={(e) => {
-                      setCompany({ ...company, entityType: e.target.value });
-                      void loadDocs(e.target.value);
+                      const entityType = e.target.value;
+                      setCompany((c) => ({ ...c, entityType }));
+                      void loadDocs(entityType);
                     }}
                     className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm"
                   >
@@ -715,7 +732,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                   <span className="text-sm font-medium">GSTIN</span>
                   <input
                     value={company.gstin}
-                    onChange={(e) => setCompany({ ...company, gstin: e.target.value.toUpperCase() })}
+                    onChange={(e) => setCompany((c) => ({ ...c, gstin: e.target.value.toUpperCase() }))}
                     className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm"
                   />
                 </label>
@@ -724,7 +741,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                     <span className="text-sm font-medium">CIN</span>
                     <input
                       value={company.cin}
-                      onChange={(e) => setCompany({ ...company, cin: e.target.value })}
+                      onChange={(e) => setCompany((c) => ({ ...c, cin: e.target.value }))}
                       className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm"
                     />
                   </label>
@@ -734,7 +751,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                     <span className="text-sm font-medium">LLPIN</span>
                     <input
                       value={company.llpin}
-                      onChange={(e) => setCompany({ ...company, llpin: e.target.value })}
+                      onChange={(e) => setCompany((c) => ({ ...c, llpin: e.target.value }))}
                       className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm"
                     />
                   </label>
@@ -744,7 +761,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                     <span className="text-sm font-medium">Udyam registration *</span>
                     <input
                       value={company.udyam}
-                      onChange={(e) => setCompany({ ...company, udyam: e.target.value })}
+                      onChange={(e) => setCompany((c) => ({ ...c, udyam: e.target.value }))}
                       className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm"
                     />
                   </label>
@@ -754,7 +771,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                   <input
                     required
                     value={company.contactName}
-                    onChange={(e) => setCompany({ ...company, contactName: e.target.value })}
+                    onChange={(e) => setCompany((c) => ({ ...c, contactName: e.target.value }))}
                     className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm"
                   />
                 </label>
@@ -764,7 +781,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                     required
                     type="email"
                     value={company.email}
-                    onChange={(e) => setCompany({ ...company, email: e.target.value })}
+                    onChange={(e) => setCompany((c) => ({ ...c, email: e.target.value }))}
                     className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm"
                   />
                 </label>
@@ -773,7 +790,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                   <input
                     required
                     value={company.phone}
-                    onChange={(e) => setCompany({ ...company, phone: e.target.value })}
+                    onChange={(e) => setCompany((c) => ({ ...c, phone: e.target.value }))}
                     className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm"
                   />
                 </label>
@@ -781,7 +798,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                   <span className="text-sm font-medium">Website</span>
                   <input
                     value={company.website}
-                    onChange={(e) => setCompany({ ...company, website: e.target.value })}
+                    onChange={(e) => setCompany((c) => ({ ...c, website: e.target.value }))}
                     className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm"
                   />
                 </label>
@@ -896,7 +913,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                 <span className="text-sm font-medium">Display name *</span>
                 <input
                   value={profile.displayName}
-                  onChange={(e) => setProfile({ ...profile, displayName: e.target.value })}
+                  onChange={(e) => setProfile((p) => ({ ...p, displayName: e.target.value }))}
                   placeholder="Brand name customers see"
                   className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm"
                 />
@@ -905,7 +922,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                 <span className="text-sm font-medium">Business category</span>
                 <input
                   value={profile.businessCategory}
-                  onChange={(e) => setProfile({ ...profile, businessCategory: e.target.value })}
+                  onChange={(e) => setProfile((p) => ({ ...p, businessCategory: e.target.value }))}
                   placeholder="e.g. E-commerce, Finance"
                   className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm"
                 />
@@ -915,7 +932,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                 <textarea
                   rows={2}
                   value={profile.businessDescription}
-                  onChange={(e) => setProfile({ ...profile, businessDescription: e.target.value })}
+                  onChange={(e) => setProfile((p) => ({ ...p, businessDescription: e.target.value }))}
                   className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm resize-none"
                 />
               </label>
@@ -924,7 +941,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                 <textarea
                   rows={2}
                   value={profile.businessAddress}
-                  onChange={(e) => setProfile({ ...profile, businessAddress: e.target.value })}
+                  onChange={(e) => setProfile((p) => ({ ...p, businessAddress: e.target.value }))}
                   className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm resize-none"
                 />
               </label>

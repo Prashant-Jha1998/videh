@@ -155,8 +155,13 @@ export function useDeveloperPortal(opts: {
   }, [leadId, reference, enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      setData(null);
+      setBusy(false);
+      return;
+    }
     void load();
-  }, [load]);
+  }, [load, enabled]);
 
   return { data, busy, error, setError, load, signedInEmail };
 }
