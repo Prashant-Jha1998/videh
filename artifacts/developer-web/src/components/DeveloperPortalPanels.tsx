@@ -296,8 +296,9 @@ export function DeveloperApiPanel({ data, busy, error, leadId, reference, onRefr
         Production credentials
       </h2>
       <p className="text-sm text-[#667781]">
-        API keys are issued after Videh approves your application. Use them with your Phone Number ID from Business
-        channel.
+        You get two parts: <strong>Key ID</strong> (<code className="text-xs">vsk_…</code>) and{" "}
+        <strong>Secret Key</strong> (<code className="text-xs">vsec_…</code>). Both are below — use Secret in{" "}
+        <code className="text-xs">Authorization: Bearer</code> with your Phone Number ID from Business channel.
       </p>
 
       {error ? <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p> : null}
