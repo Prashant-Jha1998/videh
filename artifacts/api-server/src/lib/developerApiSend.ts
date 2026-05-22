@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { query } from "./db";
 import { assertApiBillingActive, billConversation, type ConversationCategory } from "./developerBilling";
 import { assertChannelVerifiedForAccount } from "./developerChannel";
+import { deliverBusinessMessageToVidehInbox } from "./developerApiDeliver";
 import { ensureDeveloperTemplateTables, normalizePhone, type MessageTemplateRow } from "./developerTemplates";
 
 export type SendMessageBody = {
@@ -36,10 +37,17 @@ export async function sendBusinessMessage(
   await ensureDeveloperTemplateTables();
 
   const acct = await query(
-    `SELECT videh_phone_number_id, channel_status, display_name FROM developer_api_accounts WHERE id = $1`,
+    `SELECT videh_phone_number_id, channel_status, display_name, channel_phone, company_name
+     FROM developer_api_accounts WHERE id = $1`,
     [accountId],
   );
-  const accountRow = acct.rows[0] as { videh_phone_number_id?: string; channel_status?: string; display_name?: string };
+  const accountRow = acct.rows[0] as {
+    videh_phone_number_id?: string;
+    channel_status?: string;
+    display_name?: string;
+    channel_phone?: string;
+    company_name?: string;
+  };
   if (!accountRow) {
     return { ok: false, status: 404, body: { success: false, error: { code: "account_not_found", message: "Account not found" } } };
   }
@@ -120,45 +128,110 @@ export async function sendBusinessMessage(
     };
   }
 
+  const channelPhone = String(accountRow.channel_phone ?? "").trim();
+  if (!channelPhone) {
+    return {
+      ok: false,
+      status: 403,
+      body: {
+        success: false,
+        error: {
+          code: "channel_phone_missing",
+          message: "Business channel phone is not set. Complete channel verification in the developer console.",
+        },
+      },
+    };
+  }
+
   const category = (tmpl.category as ConversationCategory) || "utility";
   const bill = await billConversation({ accountId, initiator: "business", category, withinServiceWindow: false });
 
   const externalId = `vmsg_${crypto.randomBytes(12).toString("hex")}`;
   const amountPaise = Math.round(bill.amountInr * 100);
+  const senderLabel = (accountRow.display_name ?? accountRow.company_name ?? "").trim() || null;
+
+  const delivered = await deliverBusinessMessageToVidehInbox({
+    accountId,
+    channelPhone,
+    senderDisplayName: senderLabel,
+    recipientPhone: phone,
+    tmpl,
+    apiBody: body,
+    externalId,
+  });
+
+  const deliveryStatus = delivered.ok ? "sent" : "failed";
+  const payloadMeta = {
+    ...body,
+    delivery: delivered.ok
+      ? { chat_id: delivered.chatId, message_id: delivered.messageId }
+      : { code: delivered.code, message: delivered.message },
+  };
 
   await query(
     `INSERT INTO developer_api_messages
      (account_id, template_id, external_id, recipient_phone, template_key, language, payload_json, status, billing_amount_inr)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'queued',$8)`,
-    [accountId, tmpl.id, externalId, phone, tmpl.template_key, langCode, JSON.stringify(body), amountPaise],
-  );
-
-  await query(
-    `INSERT INTO developer_webhook_events (account_id, event_type, payload_json, delivery_status)
-     VALUES ($1, 'message.queued', $2, 'pending')`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
     [
       accountId,
+      tmpl.id,
+      externalId,
+      phone,
+      tmpl.template_key,
+      langCode,
+      JSON.stringify(payloadMeta),
+      deliveryStatus,
+      amountPaise,
+    ],
+  );
+
+  const webhookType = delivered.ok ? "message.sent" : "message.failed";
+  await query(
+    `INSERT INTO developer_webhook_events (account_id, event_type, payload_json, delivery_status)
+     VALUES ($1, $2, $3, 'pending')`,
+    [
+      accountId,
+      webhookType,
       JSON.stringify({
         id: externalId,
         phone_number_id: accountRow.videh_phone_number_id,
+        from: channelPhone,
         to: phone,
         template: templateName,
-        status: "queued",
+        status: deliveryStatus,
+        ...(delivered.ok
+          ? { chat_id: delivered.chatId, message_id: delivered.messageId }
+          : { error: { code: delivered.code, message: delivered.message } }),
       }),
     ],
   ).catch(() => null);
 
+  if (!delivered.ok) {
+    return {
+      ok: false,
+      status: delivered.code === "recipient_not_on_videh" ? 404 : 400,
+      body: {
+        success: false,
+        error: { code: delivered.code, message: delivered.message },
+        data: { id: externalId, status: "failed", to: phone },
+      },
+    };
+  }
+
   return {
     ok: true,
-    status: 202,
+    status: 200,
     body: {
       success: true,
       data: {
         id: externalId,
         messaging_product: "videh",
         phone_number_id: accountRow.videh_phone_number_id,
-        status: "queued",
+        from: channelPhone,
+        status: "sent",
         to: phone,
+        chat_id: delivered.chatId,
+        message_id: delivered.messageId,
         template: { name: tmpl.template_key, language: { code: langCode } },
         billing: { charged: bill.charged, amount_inr: bill.amountInr, reason: bill.reason },
       },
