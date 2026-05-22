@@ -14,6 +14,7 @@ import { query } from "./lib/db";
 import { stateAcquireLock, stateDelete } from "./lib/sharedState";
 import { runAdminSlaEscalationJob } from "./lib/adminEscalation";
 import { ensureAdminUsersTable } from "./lib/adminUsers";
+import { enforceAllOverdueBillingHolds } from "./lib/developerBilling";
 
 const app: Express = express();
 app.set("trust proxy", 1);
@@ -171,6 +172,22 @@ cron.schedule("*/15 * * * *", async () => {
   } catch (err) {
     await stateDelete("jobs:admin-sla-escalation:lock").catch(() => {});
     logger.error({ err }, "Admin SLA escalation cron error");
+  }
+});
+
+/** Every hour — hold API accounts with unpaid invoices past due date */
+cron.schedule("0 * * * *", async () => {
+  try {
+    const lockKey = "jobs:developer-billing-overdue:lock";
+    if (!(await stateAcquireLock(lockKey, 55 * 60_000))) return;
+    const count = await enforceAllOverdueBillingHolds();
+    if (count > 0) {
+      logger.info({ count }, "Developer API accounts placed on billing hold (overdue invoice)");
+    }
+    await stateDelete(lockKey);
+  } catch (err) {
+    await stateDelete("jobs:developer-billing-overdue:lock").catch(() => {});
+    logger.error({ err }, "Developer overdue billing cron error");
   }
 });
 

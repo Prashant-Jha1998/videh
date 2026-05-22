@@ -298,4 +298,16 @@ export async function markInvoicePaid(
      ) WHERE id = $2`,
     [invoiceId, accountId],
   );
+  const today = new Date().toISOString().slice(0, 10);
+  const stillOverdue = await query(
+    `SELECT 1 FROM developer_invoices
+     WHERE account_id = $1 AND status = 'unpaid' AND due_date < $2::date LIMIT 1`,
+    [accountId, today],
+  );
+  if (stillOverdue.rows.length > 0) {
+    await query(
+      `UPDATE developer_api_accounts SET billing_status = 'hold', updated_at = NOW() WHERE id = $1`,
+      [accountId],
+    );
+  }
 }

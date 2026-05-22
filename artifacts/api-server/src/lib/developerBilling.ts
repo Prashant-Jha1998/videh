@@ -1,4 +1,5 @@
 import { query } from "./db";
+import { ensureDeveloperInvoicesTable } from "./developerInvoices";
 
 /** India conversation rates (INR, per 24h conversation window). */
 export const CONVERSATION_PRICING_INR = {
@@ -100,7 +101,48 @@ export async function billConversation(input: BillConversationInput): Promise<Bi
   return { charged: true, amountInr: amount, reason: "conversation_billed" };
 }
 
+function billingTodayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Unpaid invoice past due_date → API billing hold (blocks message send). */
+export async function enforceOverdueBillingForAccount(accountId: number): Promise<boolean> {
+  await ensureDeveloperInvoicesTable();
+  const today = billingTodayUtc();
+  const overdue = await query(
+    `SELECT 1 FROM developer_invoices
+     WHERE account_id = $1 AND status = 'unpaid' AND due_date < $2::date
+     LIMIT 1`,
+    [accountId, today],
+  );
+  if (!overdue.rows.length) return false;
+  await query(
+    `UPDATE developer_api_accounts SET billing_status = 'hold', updated_at = NOW()
+     WHERE id = $1 AND billing_status <> 'suspended'`,
+    [accountId],
+  );
+  return true;
+}
+
+/** Hourly/daily job: hold all accounts with an overdue unpaid invoice. */
+export async function enforceAllOverdueBillingHolds(): Promise<number> {
+  await ensureDeveloperInvoicesTable();
+  const today = billingTodayUtc();
+  const r = await query(
+    `UPDATE developer_api_accounts a SET billing_status = 'hold', updated_at = NOW()
+     WHERE a.billing_status IN ('active', 'past_due')
+       AND EXISTS (
+         SELECT 1 FROM developer_invoices i
+         WHERE i.account_id = a.id AND i.status = 'unpaid' AND i.due_date < $1::date
+       )
+     RETURNING a.id`,
+    [today],
+  );
+  return r.rowCount ?? 0;
+}
+
 export async function assertApiBillingActive(accountId: number): Promise<{ ok: boolean; reason?: string }> {
+  await enforceOverdueBillingForAccount(accountId);
   const r = await query(
     `SELECT a.billing_status, l.status AS lead_status, l.payment_status, l.payment_method_verified
      FROM developer_api_accounts a
