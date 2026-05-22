@@ -188,6 +188,7 @@ interface AppContextType {
   updateLocationOnServer: (chatId: string, messageId: string, body: { content?: string; mediaUrl?: string }) => Promise<void>;
   startLiveLocationSession: (args: { chatId: string; messageId: string; untilMs: number; comment?: string }) => void;
   stopLiveLocationSession: () => void;
+  setActiveChatId: (chatId: string | null) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -205,6 +206,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   userRef.current = user;
   const refreshInFlightRef = useRef({ chats: false, statuses: false, calls: false });
   const liveLocationTickingRef = useRef(false);
+  const activeChatIdRef = useRef<string | null>(null);
+
+  const formatLastMessagePreview = (lastMsg: {
+    is_deleted?: boolean;
+    type?: string;
+    content?: string;
+  } | null | undefined): string | undefined => {
+    if (!lastMsg) return undefined;
+    if (lastMsg.is_deleted) return "This message was deleted";
+    const type = String(lastMsg.type ?? "text");
+    const content = String(lastMsg.content ?? "").trim();
+    if (type === "image") return content && content !== "📷 Photo" ? content : "Photo";
+    if (type === "video") return content && content !== "🎥 Video" ? content : "Video";
+    if (type === "audio") return "Voice message";
+    if (type === "document") return content || "Document";
+    return content || undefined;
+  };
 
   const mapDbChats = (rows: any[]): Chat[] =>
     rows.map((c: any) => {
@@ -214,11 +232,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         id: String(c.id),
         name: c.is_group ? (c.group_name ?? "Group") : (otherUser?.name ?? "Unknown"),
         avatar: c.is_group ? c.group_avatar_url : otherUser?.avatar_url,
-        lastMessage: lastMsg
-          ? lastMsg.is_deleted
-            ? "This message was deleted"
-            : lastMsg.content
-          : undefined,
+        lastMessage: formatLastMessagePreview(lastMsg),
         lastMessageTime: lastMsg ? new Date(lastMsg.created_at).getTime() : undefined,
         unreadCount: c.unread_count ?? 0,
         isGroup: c.is_group,
@@ -427,48 +441,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     loadUser();
   }, []);
 
-  // Auto-refresh chats, statuses and call logs
-  useEffect(() => {
-    const u = userRef.current;
-    if (!u?.dbId) return;
-    const runChats = () => {
-      const uid = userRef.current?.dbId;
-      if (!uid || refreshInFlightRef.current.chats) return;
-      refreshInFlightRef.current.chats = true;
-      loadChats(uid).finally(() => { refreshInFlightRef.current.chats = false; });
-    };
-    const runStatuses = () => {
-      const uid = userRef.current?.dbId;
-      if (!uid || refreshInFlightRef.current.statuses) return;
-      refreshInFlightRef.current.statuses = true;
-      loadStatuses(uid).finally(() => { refreshInFlightRef.current.statuses = false; });
-    };
-    const runCalls = () => {
-      const uid = userRef.current?.dbId;
-      if (!uid || refreshInFlightRef.current.calls) return;
-      refreshInFlightRef.current.calls = true;
-      loadCallLogs(uid).finally(() => { refreshInFlightRef.current.calls = false; });
-    };
-    const EventSourceCtor = (globalThis as any).EventSource as undefined | (new (url: string, init?: any) => {
-      addEventListener: (type: string, listener: () => void) => void;
-      close: () => void;
-    });
-    const eventToken = authSessionToken ? `?token=${encodeURIComponent(authSessionToken)}` : "";
-    const eventSource = EventSourceCtor
-      ? new EventSourceCtor(`${BASE_URL}/api/chats/user/${u.dbId}/events${eventToken}`)
-      : null;
-    eventSource?.addEventListener("message", runChats);
-    const chatTimer = eventSource ? null : setInterval(runChats, 7000);
-    const statusTimer = setInterval(runStatuses, 12000);
-    const callTimer = setInterval(runCalls, 30000);
-    return () => {
-      if (chatTimer) clearInterval(chatTimer);
-      eventSource?.close();
-      clearInterval(statusTimer);
-      clearInterval(callTimer);
-    };
-  }, [isAuthenticated]);
-
   // WhatsApp-like expiry: hide status locally as soon as the 24-hour window ends.
   useEffect(() => {
     const expiryTimer = setInterval(() => {
@@ -607,6 +579,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [chats]);
 
   // Load messages for a chat from DB
+  const setActiveChatId = useCallback((chatId: string | null) => {
+    activeChatIdRef.current = chatId;
+  }, []);
+
   const loadMessages = useCallback(async (chatId: string) => {
     try {
       const u = userRef.current;
@@ -649,6 +625,62 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
     } catch {}
   }, []);
+
+  // Auto-refresh chats, statuses and call logs (+ reload open chat on new API messages)
+  useEffect(() => {
+    const u = userRef.current;
+    if (!u?.dbId) return;
+    const runChats = () => {
+      const uid = userRef.current?.dbId;
+      if (!uid || refreshInFlightRef.current.chats) return;
+      refreshInFlightRef.current.chats = true;
+      loadChats(uid).finally(() => { refreshInFlightRef.current.chats = false; });
+    };
+    const runStatuses = () => {
+      const uid = userRef.current?.dbId;
+      if (!uid || refreshInFlightRef.current.statuses) return;
+      refreshInFlightRef.current.statuses = true;
+      loadStatuses(uid).finally(() => { refreshInFlightRef.current.statuses = false; });
+    };
+    const runCalls = () => {
+      const uid = userRef.current?.dbId;
+      if (!uid || refreshInFlightRef.current.calls) return;
+      refreshInFlightRef.current.calls = true;
+      loadCallLogs(uid).finally(() => { refreshInFlightRef.current.calls = false; });
+    };
+    const EventSourceCtor = (globalThis as any).EventSource as undefined | (new (url: string, init?: any) => {
+      addEventListener: (type: string, listener: () => void) => void;
+      close: () => void;
+    });
+    const eventToken = authSessionToken ? `?token=${encodeURIComponent(authSessionToken)}` : "";
+    const eventSource = EventSourceCtor
+      ? new EventSourceCtor(`${BASE_URL}/api/chats/user/${u.dbId}/events${eventToken}`)
+      : null;
+    const onChatEvent = (ev?: { data?: string }) => {
+      runChats();
+      try {
+        const raw = ev?.data;
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as { chatId?: string | number };
+        const cid = parsed.chatId != null ? String(parsed.chatId) : null;
+        if (cid && activeChatIdRef.current === cid) {
+          void loadMessages(cid);
+        }
+      } catch {
+        /* ignore malformed SSE payload */
+      }
+    };
+    eventSource?.addEventListener("message", onChatEvent as () => void);
+    const chatTimer = eventSource ? null : setInterval(runChats, 7000);
+    const statusTimer = setInterval(runStatuses, 12000);
+    const callTimer = setInterval(runCalls, 30000);
+    return () => {
+      if (chatTimer) clearInterval(chatTimer);
+      eventSource?.close();
+      clearInterval(statusTimer);
+      clearInterval(callTimer);
+    };
+  }, [isAuthenticated, loadChats, loadMessages]);
 
   const sendMessage = useCallback((chatId: string, text: string, replyToId?: string) => {
     if (!text.trim()) return;
@@ -834,21 +866,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const deleteForEveryone = useCallback((chatId: string, messageId: string) => {
     const u = userRef.current;
     setChats((prev) =>
-      prev.map((c) =>
-        c.id === chatId
-          ? { ...c, messages: c.messages.map((m) =>
-              m.id === messageId ? { ...m, type: "deleted" as const, text: "This message was deleted", mediaUrl: undefined } : m
-            )}
-          : c
-      )
+      prev.map((c) => {
+        if (c.id !== chatId) return c;
+        const messages = c.messages.map((m) =>
+          m.id === messageId
+            ? { ...m, type: "deleted" as const, text: "This message was deleted", mediaUrl: undefined }
+            : m,
+        );
+        const last = [...messages].reverse().find((m) => m.type !== "deleted");
+        return {
+          ...c,
+          messages,
+          lastMessage: last?.text,
+          lastMessageTime: last?.timestamp,
+        };
+      }),
     );
     if (u?.dbId) {
-      api(`/chats/${chatId}/messages/${messageId}`, {
-        method: "DELETE",
-        body: JSON.stringify({ userId: u.dbId, deleteForEveryone: true }),
-      }).catch(() => {});
+      void (async () => {
+        try {
+          await api(`/chats/${chatId}/messages/${messageId}`, {
+            method: "DELETE",
+            body: JSON.stringify({ userId: u.dbId, deleteForEveryone: true }),
+          });
+          await loadChats(u.dbId);
+          if (activeChatIdRef.current === chatId) await loadMessages(chatId);
+        } catch {
+          /* keep optimistic UI */
+        }
+      })();
     }
-  }, []);
+  }, [loadChats, loadMessages]);
 
   // Edit message
   const editMessage = useCallback((chatId: string, messageId: string, newText: string) => {
@@ -1009,20 +1057,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const deleteMessage = useCallback((chatId: string, messageId: string) => {
     setChats((prev) =>
-      prev.map((c) =>
-        c.id === chatId
-          ? { ...c, messages: c.messages.map((m) => m.id === messageId ? { ...m, type: "deleted" as const, text: "This message was deleted" } : m) }
-          : c
-      )
+      prev.map((c) => {
+        if (c.id !== chatId) return c;
+        const remaining = c.messages.filter((m) => m.id !== messageId);
+        const last = [...remaining].reverse().find((m) => m.type !== "deleted");
+        return {
+          ...c,
+          messages: remaining,
+          lastMessage: last?.text,
+          lastMessageTime: last?.timestamp,
+        };
+      }),
     );
     const u = userRef.current;
     if (u?.dbId) {
-      api(`/chats/${chatId}/messages/${messageId}`, {
-        method: "DELETE",
-        body: JSON.stringify({ userId: u.dbId }),
-      }).catch(() => {});
+      void (async () => {
+        try {
+          await api(`/chats/${chatId}/messages/${messageId}`, {
+            method: "DELETE",
+            body: JSON.stringify({ userId: u.dbId }),
+          });
+          await loadChats(u.dbId);
+          if (activeChatIdRef.current === chatId) await loadMessages(chatId);
+        } catch {
+          /* keep optimistic UI */
+        }
+      })();
     }
-  }, []);
+  }, [loadChats, loadMessages]);
 
   const pinChat = useCallback((chatId: string) => {
     setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, isPinned: !c.isPinned } : c));
@@ -1280,6 +1342,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, reportUser, setChatDisappear,
       updateLocationOnServer, startLiveLocationSession, stopLiveLocationSession,
+      setActiveChatId,
     }}>
       {children}
     </AppContext.Provider>

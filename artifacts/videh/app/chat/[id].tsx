@@ -711,7 +711,7 @@ export default function ChatScreen() {
     setTyping, clearTyping, markAsRead, deleteMessage, deleteForEveryone,
     editMessage, reactToMessage, starMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
-    loadMessages, forwardMessage, updateLocationOnServer, stopLiveLocationSession,
+    loadMessages, forwardMessage, updateLocationOnServer, stopLiveLocationSession, setActiveChatId,
   } = useApp();
 
   const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
@@ -783,6 +783,7 @@ export default function ChatScreen() {
     useCallback(() => {
       void loadEnterIsSend().then(setEnterIsSend);
       if (!chatId) return;
+      setActiveChatId(chatId);
       const pollMessages = () => {
         if (messagePollInFlightRef.current) return;
         messagePollInFlightRef.current = true;
@@ -824,11 +825,12 @@ export default function ChatScreen() {
       const presenceTimer = !isGroupChat && peerId ? setInterval(loadPresence, 5000) : null;
 
       return () => {
+        setActiveChatId(null);
         clearInterval(msgTimer);
         clearInterval(typingTimer);
         if (presenceTimer) clearInterval(presenceTimer);
       };
-    }, [chatId, user?.dbId, chats])
+    }, [chatId, user?.dbId, chats, setActiveChatId, loadMessages])
   );
 
   const webEnterSend = Platform.OS === "web" && enterIsSend;

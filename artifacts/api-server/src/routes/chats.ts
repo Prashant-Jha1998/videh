@@ -12,6 +12,7 @@ import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
 import { assertSameUser, getAuthUserId, requireAuth } from "../lib/auth";
 import { publicMediaUrl } from "../lib/mediaStorage";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
+import { ensureMessageUserHidesTable, hideMessageForUser, messageVisibleToUserSql } from "../lib/messageUserHides";
 import { getPresenceForViewer } from "../lib/presencePrivacy";
 
 const router = Router();
@@ -163,6 +164,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
   if (!assertSameUser(req, res, userId)) return;
   try {
     await ensureChatMemberArchiveColumn();
+    await ensureMessageUserHidesTable();
     const result = await query(`
       SELECT
         c.id,
@@ -190,7 +192,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         ) AS last_message,
         m.created_at AS last_created_at
         FROM messages m
-        WHERE m.chat_id = c.id AND m.is_deleted = FALSE
+        WHERE m.chat_id = c.id AND ${messageVisibleToUserSql("$1")}
         ORDER BY m.created_at DESC
         LIMIT 1
       ) last_msg ON TRUE
@@ -200,7 +202,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         WHERE m.chat_id = c.id
           AND m.sender_id != $1::int
           AND m.created_at > cm.last_read_at
-          AND m.is_deleted = FALSE
+          AND ${messageVisibleToUserSql("$1")}
       ) unread ON TRUE
       LEFT JOIN LATERAL (
         SELECT json_agg(json_build_object(
@@ -451,6 +453,9 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
   const before = req.query.before as string | undefined;
   if (!assertSameUser(req, res, userId)) return;
   try {
+    await ensureMessageUserHidesTable();
+    const viewerId = Number(userId);
+    const viewerParam = before ? "$4" : "$3";
     const result = await query(`
       SELECT
         m.id, m.chat_id, m.sender_id, m.content, m.type, m.media_url,
@@ -473,10 +478,11 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
       LEFT JOIN messages rm ON rm.id = m.reply_to_id
       LEFT JOIN users rm_u ON rm_u.id = rm.sender_id
       WHERE m.chat_id = $1
+        AND ${messageVisibleToUserSql(viewerParam)}
         ${before ? "AND m.created_at < $3" : ""}
       ORDER BY m.created_at DESC
       LIMIT $2
-    `, before ? [chatId, limit, before] : [chatId, limit]);
+    `, before ? [chatId, limit, before, viewerId] : [chatId, limit, viewerId]);
 
     res.json({ success: true, messages: result.rows.reverse() });
   } catch (err) {
@@ -825,24 +831,55 @@ router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Re
 
 // Delete message (for me OR for everyone)
 router.delete("/:chatId/messages/:messageId", async (req: Request, res: Response) => {
-  const { messageId } = req.params;
+  const { chatId, messageId } = req.params;
   const { userId, deleteForEveryone } = req.body as { userId?: number; deleteForEveryone?: boolean };
-  if (!assertSameUser(req, res, userId)) return;
+  if (!userId || !assertSameUser(req, res, userId)) return;
   try {
-    if (deleteForEveryone) {
+    const member = await query(
+      `SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2`,
+      [chatId, userId],
+    );
+    if (!member.rows.length) {
+      res.status(403).json({ success: false, message: "Not a member of this chat" });
+      return;
+    }
+
+    const msgRow = await query(`SELECT sender_id, chat_id FROM messages WHERE id = $1`, [messageId]);
+    const msg = msgRow.rows[0] as { sender_id: number; chat_id: number } | undefined;
+    if (!msg || String(msg.chat_id) !== String(chatId)) {
+      res.status(404).json({ success: false, message: "Message not found" });
+      return;
+    }
+
+    const isSender = Number(msg.sender_id) === Number(userId);
+    if (deleteForEveryone && isSender) {
       await query(
         "UPDATE messages SET is_deleted = TRUE, content = 'This message was deleted', media_url = NULL WHERE id = $1 AND sender_id = $2",
-        [messageId, userId]
+        [messageId, userId],
       );
     } else {
-      // Just soft-delete for sender — in real app you'd track per-user deletes; we do same for simplicity
-      await query(
-        "UPDATE messages SET is_deleted = TRUE, content = 'This message was deleted' WHERE id = $1 AND sender_id = $2",
-        [messageId, userId]
-      );
+      await hideMessageForUser(Number(messageId), userId);
     }
-    res.json({ success: true, deleteForEveryone: !!deleteForEveryone });
+
+    const peers = await query(
+      `SELECT user_id FROM chat_members WHERE chat_id = $1`,
+      [chatId],
+    );
+    const chatIdNorm = Array.isArray(chatId) ? chatId[0] : chatId;
+    publishChatEvent({
+      type: "message",
+      chatId: chatIdNorm,
+      userIds: peers.rows.map((r: { user_id: number }) => r.user_id),
+      payload: { messageId: Number(messageId), deleted: true },
+    });
+
+    res.json({
+      success: true,
+      deleteForEveryone: !!(deleteForEveryone && isSender),
+      hiddenForMe: !isSender || !deleteForEveryone,
+    });
   } catch (err) {
+    req.log.error({ err }, "delete message error");
     res.status(500).json({ success: false });
   }
 });
