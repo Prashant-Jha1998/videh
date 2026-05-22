@@ -9,6 +9,24 @@ export type DeliverResult =
   | { ok: true; chatId: number; messageId: number }
   | { ok: false; code: string; message: string };
 
+export type TemplateDeliveryContent = {
+  imageUrl: string | null;
+  textContent: string;
+};
+
+/** Make /uploads/... URLs load in the mobile app. */
+export function toPublicAssetUrl(url: string | null | undefined): string | null {
+  const u = (url ?? "").trim();
+  if (!u) return null;
+  if (/^https?:\/\//i.test(u) || u.startsWith("data:")) return u;
+  const base = (
+    process.env["API_PUBLIC_URL"]?.trim() ||
+    process.env["VIDEH_PUBLIC_URL"]?.trim() ||
+    "https://videh.co.in"
+  ).replace(/\/$/, "");
+  return u.startsWith("/") ? `${base}${u}` : `${base}/${u}`;
+}
+
 function toE164(normalized91: string): string {
   const d = normalized91.replace(/\D/g, "");
   if (d.length === 12 && d.startsWith("91")) return `+${d}`;
@@ -40,26 +58,31 @@ export async function findVidehUserByPhone(normalized91: string): Promise<{
 export async function ensureBusinessSenderUser(
   channelPhone: string,
   displayName: string | null,
+  logoUrl: string | null,
 ): Promise<number | null> {
   const normalized = normalizePhone(channelPhone);
   if (!normalized) return null;
 
   const existing = await findVidehUserByPhone(normalized);
   const label = (displayName ?? "").trim() || "Business";
+  const avatar = toPublicAssetUrl(logoUrl);
   if (existing) {
-    if (label && label !== "Business") {
-      await query(
-        `UPDATE users SET name = COALESCE(NULLIF(name, ''), $1), updated_at = NOW() WHERE id = $2`,
-        [label, existing.id],
-      );
-    }
+    await query(
+      `UPDATE users SET
+         name = COALESCE(NULLIF($1, ''), NULLIF(name, ''), 'Business'),
+         avatar_url = COALESCE($2, avatar_url),
+         updated_at = NOW()
+       WHERE id = $3`,
+      [label, avatar, existing.id],
+    );
     return existing.id;
   }
 
   const e164 = toE164(normalized);
   const ins = await query(
-    `INSERT INTO users (phone, name, is_online, last_seen) VALUES ($1, $2, FALSE, NOW()) RETURNING id`,
-    [e164, label],
+    `INSERT INTO users (phone, name, avatar_url, is_online, last_seen)
+     VALUES ($1, $2, $3, FALSE, NOW()) RETURNING id`,
+    [e164, label, avatar],
   );
   return (ins.rows[0] as { id: number }).id;
 }
@@ -91,32 +114,41 @@ function applyVariables(text: string, values: string[]): string {
   return out;
 }
 
-export function renderTemplateMessageContent(
+/** WhatsApp-style template: logo/image header + text body (caption). */
+export function buildTemplateDeliveryContent(
   tmpl: MessageTemplateRow,
   body: SendMessageBody,
-): string {
+  businessLogoUrl: string | null,
+): TemplateDeliveryContent {
   const components = body.template?.components;
   const headerParams = textParamsFromComponents(components, "header");
   const bodyParams = textParamsFromComponents(components, "body");
-
-  const parts: string[] = [];
   const headerType = String(tmpl.header_type ?? "NONE").toUpperCase();
-  if (headerType === "TEXT" && tmpl.header_text) {
-    parts.push(applyVariables(tmpl.header_text, headerParams));
-  } else if (headerType !== "NONE" && headerType !== "TEXT") {
-    const label = headerType === "IMAGE" ? "📷 Image" : headerType === "VIDEO" ? "🎬 Video" : "📎 Document";
-    parts.push(label);
+
+  let imageUrl: string | null = null;
+  if (headerType === "IMAGE") {
+    imageUrl = toPublicAssetUrl(tmpl.header_media_url) || toPublicAssetUrl(businessLogoUrl);
+  } else if (businessLogoUrl) {
+    imageUrl = toPublicAssetUrl(businessLogoUrl);
   }
 
-  parts.push(applyVariables(tmpl.body_text, bodyParams));
+  const textParts: string[] = [];
+  if (headerType === "TEXT" && tmpl.header_text) {
+    textParts.push(applyVariables(tmpl.header_text, headerParams));
+  } else if (headerType !== "NONE" && headerType !== "TEXT" && !imageUrl) {
+    const label =
+      headerType === "VIDEO" ? "🎬 Video" : headerType === "DOCUMENT" ? "📎 Document" : "📷 Image";
+    textParts.push(label);
+  }
 
+  textParts.push(applyVariables(tmpl.body_text, bodyParams));
   const footer = String(tmpl.footer_text ?? "").trim();
   if (footer) {
-    parts.push("");
-    parts.push(footer);
+    textParts.push("");
+    textParts.push(footer);
   }
 
-  return parts.join("\n").trim();
+  return { imageUrl, textContent: textParts.join("\n").trim() };
 }
 
 async function findOrCreateDirectChat(userId: number, otherUserId: number): Promise<number> {
@@ -162,6 +194,7 @@ export async function deliverBusinessMessageToVidehInbox(input: {
   accountId: number;
   channelPhone: string;
   senderDisplayName: string | null;
+  businessLogoUrl: string | null;
   recipientPhone: string;
   tmpl: MessageTemplateRow;
   apiBody: SendMessageBody;
@@ -177,7 +210,11 @@ export async function deliverBusinessMessageToVidehInbox(input: {
     };
   }
 
-  const senderId = await ensureBusinessSenderUser(input.channelPhone, input.senderDisplayName);
+  const senderId = await ensureBusinessSenderUser(
+    input.channelPhone,
+    input.senderDisplayName,
+    input.businessLogoUrl,
+  );
   if (!senderId) {
     return {
       ok: false,
@@ -203,14 +240,30 @@ export async function deliverBusinessMessageToVidehInbox(input: {
     };
   }
 
-  const content = renderTemplateMessageContent(input.tmpl, input.apiBody);
-  const msg = await query(
-    `INSERT INTO messages (chat_id, sender_id, content, type)
-     VALUES ($1, $2, $3, 'text')
-     RETURNING id`,
-    [chatId, senderId, content],
+  const { imageUrl, textContent } = buildTemplateDeliveryContent(
+    input.tmpl,
+    input.apiBody,
+    input.businessLogoUrl,
   );
-  const messageId = Number(msg.rows[0].id);
+
+  let messageId: number;
+  if (imageUrl) {
+    const img = await query(
+      `INSERT INTO messages (chat_id, sender_id, content, type, media_url)
+       VALUES ($1, $2, $3, 'image', $4)
+       RETURNING id`,
+      [chatId, senderId, textContent || "📷 Photo", imageUrl],
+    );
+    messageId = Number(img.rows[0].id);
+  } else {
+    const msg = await query(
+      `INSERT INTO messages (chat_id, sender_id, content, type)
+       VALUES ($1, $2, $3, 'text')
+       RETURNING id`,
+      [chatId, senderId, textContent],
+    );
+    messageId = Number(msg.rows[0].id);
+  }
 
   await query(
     `INSERT INTO message_status (message_id, user_id, status)
@@ -222,7 +275,8 @@ export async function deliverBusinessMessageToVidehInbox(input: {
 
   const senderRow = await query("SELECT name FROM users WHERE id = $1", [senderId]);
   const senderName = (senderRow.rows[0] as { name?: string })?.name ?? input.senderDisplayName ?? "Business";
-  const preview = content.length > 60 ? `${content.slice(0, 60)}...` : content;
+  const preview =
+    textContent.length > 60 ? `${textContent.slice(0, 60)}...` : textContent || "New message";
 
   if (isValidPushToken(recipient.push_token)) {
     await sendChatPush(
@@ -234,7 +288,7 @@ export async function deliverBusinessMessageToVidehInbox(input: {
         messageId: String(messageId),
         senderId: String(senderId),
         senderName,
-        messageType: "text",
+        messageType: imageUrl ? "image" : "text",
         type: "message",
         notificationKind: "chat_message",
         businessApi: "true",

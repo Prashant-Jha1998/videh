@@ -37,7 +37,7 @@ export async function sendBusinessMessage(
   await ensureDeveloperTemplateTables();
 
   const acct = await query(
-    `SELECT videh_phone_number_id, channel_status, display_name, channel_phone, company_name
+    `SELECT videh_phone_number_id, channel_status, display_name, channel_phone, company_name, logo_url
      FROM developer_api_accounts WHERE id = $1`,
     [accountId],
   );
@@ -47,6 +47,7 @@ export async function sendBusinessMessage(
     display_name?: string;
     channel_phone?: string;
     company_name?: string;
+    logo_url?: string;
   };
   if (!accountRow) {
     return { ok: false, status: 404, body: { success: false, error: { code: "account_not_found", message: "Account not found" } } };
@@ -154,6 +155,7 @@ export async function sendBusinessMessage(
     accountId,
     channelPhone,
     senderDisplayName: senderLabel,
+    businessLogoUrl: (accountRow.logo_url ?? "").trim() || null,
     recipientPhone: phone,
     tmpl,
     apiBody: body,
