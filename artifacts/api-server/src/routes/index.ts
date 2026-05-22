@@ -16,6 +16,7 @@ import adminRouter from "./admin";
 import grievanceRouter from "./grievance";
 import developerLeadsRouter from "./developer-leads";
 import developerBillingRouter from "./developer-billing";
+import developerAuthRouter from "./developer-auth";
 
 const router: IRouter = Router();
 
@@ -34,6 +35,7 @@ router.use("/sos", sosRouter);
 router.use("/broadcasts", broadcastsRouter);
 router.use("/admin", adminRouter);
 router.use("/grievance", grievanceRouter);
+router.use("/developer-auth", developerAuthRouter);
 router.use("/developer-leads", developerLeadsRouter);
 router.use("/developer-billing", developerBillingRouter);
 

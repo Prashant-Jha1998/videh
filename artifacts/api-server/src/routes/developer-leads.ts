@@ -30,6 +30,11 @@ import {
   sendChannelOtp,
   verifyChannelOtp,
 } from "../lib/developerChannel";
+import { getDeveloperPortalUser } from "../lib/developerPortalSession";
+import {
+  ensureDeveloperPortalUsersTable,
+  getActiveLeadForPortalUser,
+} from "../lib/developerPortalUsers";
 
 const router = Router();
 
@@ -152,6 +157,11 @@ router.get("/document-types", (req, res) => {
 });
 
 router.post("/draft", async (req: Request, res: Response) => {
+  const portalUser = getDeveloperPortalUser(req);
+  if (!portalUser) {
+    res.status(401).json({ success: false, message: "Sign in or create a developer account before applying." });
+    return;
+  }
   const ip = clientKey(req);
   if (rateLimited(ip)) {
     res.status(429).json({ success: false, message: "Too many requests." });
@@ -161,14 +171,28 @@ router.post("/draft", async (req: Request, res: Response) => {
   const plan = DEVELOPER_PLANS[planId in DEVELOPER_PLANS ? (planId as DeveloperPlanId) : "starter"];
   try {
     await ensureDeveloperPlatformTables();
+    await ensureDeveloperPortalUsersTable();
+
+    const existing = await getActiveLeadForPortalUser(portalUser.userId);
+    if (existing && existing.status !== "approved") {
+      res.status(201).json({
+        success: true,
+        leadId: existing.id,
+        reference: existing.reference_code,
+        plan,
+        resumed: true,
+      });
+      return;
+    }
+
     const reference = referenceCode();
     const r = await query(
       `INSERT INTO developer_leads
        (reference_code, company_name, entity_type, contact_name, email, phone, status, plan_id, amount_inr,
-        wizard_step, approval_phase, source_ip)
-       VALUES ($1, '', 'pvt_ltd', '', '', '', 'draft', $2, $3, 'plan', 'plan', $4)
+        wizard_step, approval_phase, source_ip, portal_user_id)
+       VALUES ($1, '', 'pvt_ltd', '', $2, '', 'draft', $3, $4, 'plan', 'plan', $5, $6)
        RETURNING id, reference_code`,
-      [reference, plan.id, plan.amountInr, ip],
+      [reference, portalUser.email, plan.id, plan.amountInr, ip, portalUser.userId],
     );
     res.status(201).json({
       success: true,
@@ -587,7 +611,9 @@ router.post("/:id/channel/verify-otp", async (req, res) => {
   }
 });
 
-function portalAuth(lead: { reference_code?: string }, reference: string): boolean {
+function portalAuth(lead: { reference_code?: string; portal_user_id?: number | null }, reference: string, req?: Request): boolean {
+  const portalUser = req ? getDeveloperPortalUser(req) : null;
+  if (portalUser && lead.portal_user_id === portalUser.userId) return true;
   return Boolean(reference && lead.reference_code && lead.reference_code === reference);
 }
 
@@ -595,15 +621,19 @@ function portalAuth(lead: { reference_code?: string }, reference: string): boole
 router.get("/:id/portal", async (req, res) => {
   const leadId = Number(req.params.id);
   const reference = String(req.query.reference ?? "").trim();
-  if (!leadId || !reference) {
-    res.status(400).json({ success: false, message: "lead id and reference query required" });
+  if (!leadId) {
+    res.status(400).json({ success: false, message: "Invalid lead id" });
+    return;
+  }
+  if (!reference && !getDeveloperPortalUser(req)) {
+    res.status(400).json({ success: false, message: "Sign in or provide reference code" });
     return;
   }
   try {
     await ensureDeveloperPlatformTables();
     const lead = await query(`SELECT * FROM developer_leads WHERE id = $1`, [leadId]);
     const row = lead.rows[0] as { reference_code?: string } | undefined;
-    if (!row || !portalAuth(row, reference)) {
+    if (!row || !portalAuth(row as { reference_code?: string; portal_user_id?: number | null }, reference, req)) {
       res.status(404).json({ success: false, message: "Application not found" });
       return;
     }
@@ -616,16 +646,29 @@ router.get("/:id/portal", async (req, res) => {
         reference_code: row.reference_code,
         status: (row as { status?: string }).status,
         approval_phase: (row as { approval_phase?: string }).approval_phase,
+        wizard_step: (row as { wizard_step?: string }).wizard_step,
         company_name: (row as { company_name?: string }).company_name,
+        plan_id: (row as { plan_id?: string }).plan_id,
         payment_status: (row as { payment_status?: string }).payment_status,
+        payment_method_verified: (row as { payment_method_verified?: boolean }).payment_method_verified,
       },
       account: acct
         ? {
             api_key_id: acct.api_key_id,
             billing_status: acct.billing_status,
+            plan_id: acct.plan_id,
+            amount_inr_monthly: acct.amount_inr_monthly,
             messages_sent_total: acct.messages_sent_total,
             messages_sent_month: acct.messages_sent_month,
+            total_billed_inr: acct.total_billed_inr,
             usage_billing_month_inr: acct.usage_billing_month_inr,
+            conv_user_initiated_month: acct.conv_user_initiated_month,
+            conv_business_marketing_month: acct.conv_business_marketing_month,
+            conv_business_utility_month: acct.conv_business_utility_month,
+            conv_free_user_used_month: acct.conv_free_user_used_month,
+            last_payment_at: acct.last_payment_at,
+            videh_phone_number_id: (acct as { videh_phone_number_id?: string }).videh_phone_number_id,
+            videh_business_account_id: (acct as { videh_business_account_id?: string }).videh_business_account_id,
           }
         : null,
       channel: channelPublicFromRow(row as Record<string, unknown>),
@@ -647,42 +690,144 @@ router.get("/:id/portal", async (req, res) => {
 router.get("/:id/templates", async (req, res) => {
   const leadId = Number(req.params.id);
   const reference = String(req.query.reference ?? "").trim();
-  if (!leadId || !reference) {
-    res.status(400).json({ success: false, message: "lead id and reference query required" });
+  if (!leadId) {
+    res.status(400).json({ success: false, message: "Invalid lead id" });
+    return;
+  }
+  if (!reference && !getDeveloperPortalUser(req)) {
+    res.status(400).json({ success: false, message: "Sign in or provide reference code" });
     return;
   }
   try {
     await ensureDeveloperTemplateTables();
-    const lead = await query(`SELECT reference_code, status FROM developer_leads WHERE id = $1`, [leadId]);
-    const row = lead.rows[0] as { reference_code?: string; status?: string } | undefined;
-    if (!row || !portalAuth(row, reference)) {
+    const lead = await query(
+      `SELECT reference_code, status, portal_user_id FROM developer_leads WHERE id = $1`,
+      [leadId],
+    );
+    const row = lead.rows[0] as { reference_code?: string; status?: string; portal_user_id?: number | null } | undefined;
+    if (!row || !portalAuth(row, reference, req)) {
       res.status(404).json({ success: false, message: "Application not found" });
       return;
     }
 
-    const account = await query(`SELECT id FROM developer_api_accounts WHERE lead_id = $1`, [leadId]);
-    const accountId = (account.rows[0] as { id?: number } | undefined)?.id;
-    if (!accountId) {
-      res.json({
-        success: true,
-        templates: [],
-        message: "API account not created yet. Templates appear after approval.",
-      });
-      return;
-    }
-
     const r = await query(
-      `SELECT * FROM developer_message_templates WHERE account_id = $1 ORDER BY template_key`,
-      [accountId],
+      `SELECT * FROM developer_message_templates WHERE lead_id = $1 ORDER BY template_key`,
+      [leadId],
     );
     const templates = (r.rows as MessageTemplateRow[]).map((t) => ({
       ...templateToPublic(t),
       approved: t.status === "approved",
+      rejection_reason: t.rejection_reason,
+      submitted_at: t.submitted_at,
     }));
     res.json({ success: true, templates, approvedCount: templates.filter((t) => t.approved).length });
   } catch (err) {
     logger.error({ err }, "developer portal templates");
     res.status(500).json({ success: false, message: "Could not load templates" });
+  }
+});
+
+/** POST /api/developer-leads/:id/templates — developer submits template for admin approval */
+router.post("/:id/templates", async (req, res) => {
+  const leadId = Number(req.params.id);
+  const body = req.body as {
+    reference?: string;
+    templateKey?: string;
+    name?: string;
+    category?: string;
+    language?: string;
+    bodyText?: string;
+    variables?: string[];
+  };
+  const reference = String(body.reference ?? req.query.reference ?? "").trim();
+  if (!leadId) {
+    res.status(400).json({ success: false, message: "Invalid lead id" });
+    return;
+  }
+  if (!reference && !getDeveloperPortalUser(req)) {
+    res.status(400).json({ success: false, message: "Sign in or provide reference code" });
+    return;
+  }
+  if (!body.templateKey?.trim() || !body.bodyText?.trim()) {
+    res.status(400).json({ success: false, message: "templateKey and bodyText required" });
+    return;
+  }
+  const category = body.category ?? "utility";
+  const allowed = new Set(["marketing", "utility", "authentication", "service"]);
+  if (!allowed.has(category)) {
+    res.status(400).json({ success: false, message: "Invalid category" });
+    return;
+  }
+  try {
+    await ensureDeveloperTemplateTables();
+    const lead = await query(
+      `SELECT reference_code, status, portal_user_id FROM developer_leads WHERE id = $1`,
+      [leadId],
+    );
+    const row = lead.rows[0] as { reference_code?: string; status?: string; portal_user_id?: number | null } | undefined;
+    if (!row || !portalAuth(row, reference, req)) {
+      res.status(404).json({ success: false, message: "Application not found" });
+      return;
+    }
+    if (row.status === "rejected") {
+      res.status(400).json({ success: false, message: "Application was rejected. Contact support." });
+      return;
+    }
+
+    const account = await query(`SELECT id FROM developer_api_accounts WHERE lead_id = $1`, [leadId]);
+    const accountId = (account.rows[0] as { id?: number } | undefined)?.id ?? null;
+    const key = body.templateKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    const vars = Array.isArray(body.variables) ? body.variables : [];
+    const preview = body.bodyText.slice(0, 160);
+
+    const existing = await query(
+      `SELECT id, status FROM developer_message_templates WHERE lead_id = $1 AND template_key = $2`,
+      [leadId, key],
+    );
+    const prev = existing.rows[0] as { id?: number; status?: string } | undefined;
+    if (prev?.status === "approved") {
+      res.status(400).json({ success: false, message: "Approved templates cannot be edited. Create a new template_key." });
+      return;
+    }
+    if (prev?.status === "pending") {
+      res.status(400).json({ success: false, message: "This template is already pending review." });
+      return;
+    }
+
+    const r = await query(
+      `INSERT INTO developer_message_templates
+       (lead_id, account_id, template_key, name, category, language, body_text, body_preview, variables_json, status, rejection_reason, submitted_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',NULL,NOW())
+       ON CONFLICT (lead_id, template_key) DO UPDATE SET
+         name = EXCLUDED.name,
+         category = EXCLUDED.category,
+         language = EXCLUDED.language,
+         body_text = EXCLUDED.body_text,
+         body_preview = EXCLUDED.body_preview,
+         variables_json = EXCLUDED.variables_json,
+         account_id = COALESCE(EXCLUDED.account_id, developer_message_templates.account_id),
+         status = 'pending',
+         rejection_reason = NULL,
+         submitted_at = NOW(),
+         updated_at = NOW()
+       RETURNING *`,
+      [
+        leadId,
+        accountId,
+        key,
+        body.name?.trim() || key,
+        category,
+        body.language ?? "en",
+        body.bodyText.trim(),
+        preview,
+        JSON.stringify(vars),
+      ],
+    );
+    const tpl = r.rows[0] as MessageTemplateRow;
+    res.json({ success: true, template: { ...templateToPublic(tpl), status: tpl.status } });
+  } catch (err) {
+    logger.error({ err }, "developer submit template");
+    res.status(500).json({ success: false, message: "Could not submit template" });
   }
 });
 

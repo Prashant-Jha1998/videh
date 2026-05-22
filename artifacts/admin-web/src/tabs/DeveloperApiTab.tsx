@@ -122,14 +122,6 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
     templates: MessageTemplate[];
   } | null>(null);
   const [apiSecretOnce, setApiSecretOnce] = useState<string | null>(null);
-  const [newTpl, setNewTpl] = useState({
-    templateKey: "",
-    name: "",
-    category: "utility",
-    language: "en",
-    bodyText: "",
-    variables: "",
-  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -214,33 +206,6 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
     const note = window.prompt("Reject reason (required)")?.trim();
     if (!note) return;
     void updateLead(lead.id, { status: "rejected", adminNotes: note });
-  };
-
-  const createTemplate = async (leadId: number) => {
-    if (!newTpl.templateKey.trim() || !newTpl.bodyText.trim()) {
-      onErr("Template key and body text required");
-      return;
-    }
-    try {
-      await adminApi(`/admin/developer-leads/${leadId}/templates`, {
-        method: "POST",
-        body: JSON.stringify({
-          templateKey: newTpl.templateKey,
-          name: newTpl.name || newTpl.templateKey,
-          category: newTpl.category,
-          language: newTpl.language,
-          bodyText: newTpl.bodyText,
-          variables: newTpl.variables
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-        }),
-      });
-      setNewTpl({ templateKey: "", name: "", category: "utility", language: "en", bodyText: "", variables: "" });
-      await loadDetail(leadId);
-    } catch (err) {
-      onErr(err instanceof Error ? err.message : "Could not create template");
-    }
   };
 
   const manualVerifyChannel = async (leadId: number) => {
@@ -559,11 +524,13 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
 
             <h4>Message templates</h4>
             <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-              Companies call templates by <code>name</code> (template_key) in POST /v1/business-messages. Approve before
-              go-live.
+              Developers submit templates from <strong>developer.videh.co.in → Developer console</strong>. You only
+              approve or reject. Approved <code>template_key</code> values are used in POST /v1/business-messages.
             </p>
             {detail.templates.length === 0 ? (
-              <p className="muted" style={{ fontSize: 13 }}>No templates yet.</p>
+              <p className="muted" style={{ fontSize: 13 }}>
+                No templates submitted yet. Developer adds them in their console after onboarding.
+              </p>
             ) : (
               <ul style={{ fontSize: 13, marginBottom: 12 }}>
                 {detail.templates.map((t) => (
@@ -601,55 +568,6 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
                 ))}
               </ul>
             )}
-
-            <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-              <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Add template</p>
-              <div style={{ display: "grid", gap: 8 }}>
-                <input
-                  placeholder="template_key e.g. order_update"
-                  value={newTpl.templateKey}
-                  onChange={(e) => setNewTpl((s) => ({ ...s, templateKey: e.target.value }))}
-                  style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border)" }}
-                />
-                <input
-                  placeholder="Display name"
-                  value={newTpl.name}
-                  onChange={(e) => setNewTpl((s) => ({ ...s, name: e.target.value }))}
-                  style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border)" }}
-                />
-                <select
-                  value={newTpl.category}
-                  onChange={(e) => setNewTpl((s) => ({ ...s, category: e.target.value }))}
-                  style={{ padding: 8, borderRadius: 8 }}
-                >
-                  <option value="utility">utility</option>
-                  <option value="marketing">marketing</option>
-                  <option value="authentication">authentication</option>
-                  <option value="service">service</option>
-                </select>
-                <textarea
-                  placeholder="Body text with {{1}} {{2}} placeholders"
-                  value={newTpl.bodyText}
-                  onChange={(e) => setNewTpl((s) => ({ ...s, bodyText: e.target.value }))}
-                  rows={3}
-                  style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border)" }}
-                />
-                <input
-                  placeholder="Variables comma-separated: customer_name, order_id"
-                  value={newTpl.variables}
-                  onChange={(e) => setNewTpl((s) => ({ ...s, variables: e.target.value }))}
-                  style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border)" }}
-                />
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ width: "auto" }}
-                  onClick={() => void createTemplate(detail.lead.id)}
-                >
-                  Save template
-                </button>
-              </div>
-            </div>
 
             {apiSecretOnce ? (
               <p style={{ fontSize: 12, color: "var(--warn)" }}>API secret was shown once on approval.</p>

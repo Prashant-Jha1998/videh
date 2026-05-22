@@ -196,7 +196,7 @@ export function DeveloperPortal() {
                 Message templates ({data.approvedCount} approved)
               </p>
               {data.templates.length === 0 ? (
-                <p className="text-sm text-[#667781]">No templates yet. Videh admin adds them during template review.</p>
+                <p className="text-sm text-[#667781]">No templates yet. Submit them in the Developer console (#dashboard).</p>
               ) : (
                 <ul className="space-y-3">
                   {data.templates.map((t) => (

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { ConversationPricing } from "./ConversationPricing";
 import { OnboardingConsoleLayout } from "./OnboardingConsoleLayout";
+import { devFetch } from "../lib/devFetch";
 
 declare global {
   interface Window {
@@ -59,6 +60,7 @@ type Plan = { id: string; name: string; amountInr: number };
 type DocReq = { key: string; label: string; required: boolean };
 
 const STORAGE_KEY = "videh_dev_lead_id";
+const REF_STORAGE_KEY = "videh_dev_reference";
 
 /** Uploaded files are served from api-server at /uploads (proxied on developer.videh.co.in). */
 function resolveUploadUrl(url: string): string {
@@ -67,9 +69,9 @@ function resolveUploadUrl(url: string): string {
   return url.startsWith("/") ? url : `/${url}`;
 }
 
-type Props = { onClose: () => void };
+type Props = { onClose: () => void; onNeedAuth?: () => void };
 
-export function OnboardingWizard({ onClose }: Props) {
+export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
   const [step, setStep] = useState<Step>("plan");
   const [leadId, setLeadId] = useState<number | null>(null);
   const [reference, setReference] = useState("");
@@ -116,21 +118,23 @@ export function OnboardingWizard({ onClose }: Props) {
   const selectedPlan = plans.find((p) => p.id === planId) ?? { id: "starter", name: "Starter", amountInr: 2999 };
 
   const loadDocs = useCallback(async (entity: string) => {
-    const r = await fetch(`/api/developer-leads/document-types?entity=${entity}`);
+    const r = await devFetch(`/api/developer-leads/document-types?entity=${entity}`);
     const d = (await r.json()) as { documents?: DocReq[] };
     setDocs(d.documents ?? []);
   }, []);
 
   const loadLead = useCallback(
     async (id: number) => {
-      const r = await fetch(`/api/developer-leads/${id}`);
+      const r = await devFetch(`/api/developer-leads/${id}`);
       const d = (await r.json()) as {
         lead?: Record<string, unknown>;
         documents?: { doc_type: string }[];
       };
       if (!d.lead) return;
       const L = d.lead;
-      setReference(String(L.reference_code ?? ""));
+      const ref = String(L.reference_code ?? "");
+      setReference(ref);
+      if (ref) localStorage.setItem(REF_STORAGE_KEY, ref);
       setPlanId(String(L.plan_id ?? "starter"));
       const ws = String(L.wizard_step ?? "plan");
       if (STEPS.includes(ws as Step)) {
@@ -173,27 +177,47 @@ export function OnboardingWizard({ onClose }: Props) {
   );
 
   useEffect(() => {
-    fetch("/api/developer-leads")
+    devFetch("/api/developer-auth/me")
+      .then((r) => r.json())
+      .then((auth: { success?: boolean; activeLead?: { id: number; reference_code: string }; user?: { email: string } }) => {
+        if (!auth.success) {
+          onNeedAuth?.();
+          return;
+        }
+        if (auth.user?.email && !company.email) {
+          setCompany((c) => ({ ...c, email: auth.user!.email }));
+        }
+        if (auth.activeLead?.id) {
+          setLeadId(auth.activeLead.id);
+          setReference(auth.activeLead.reference_code);
+          localStorage.setItem(STORAGE_KEY, String(auth.activeLead.id));
+          localStorage.setItem(REF_STORAGE_KEY, auth.activeLead.reference_code);
+          void loadLead(auth.activeLead.id);
+          return;
+        }
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const id = Number(saved);
+          if (id) {
+            setLeadId(id);
+            void loadLead(id);
+          }
+        }
+      })
+      .catch(() => onNeedAuth?.());
+    devFetch("/api/developer-leads")
       .then((r) => r.json())
       .then((d: { plans?: Plan[] }) => {
         if (d.plans?.length) setPlans(d.plans);
       })
       .catch(() => {});
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const id = Number(saved);
-      if (id) {
-        setLeadId(id);
-        void loadLead(id);
-      }
-    }
     void loadDocs("pvt_ltd");
-  }, [loadDocs, loadLead]);
+  }, [loadDocs, loadLead, onNeedAuth]);
 
   async function patchLead(body: Record<string, unknown>, idOverride?: number) {
     const id = idOverride ?? leadId;
     if (!id) throw new Error("Application not started");
-    const r = await fetch(`/api/developer-leads/${id}`, {
+    const r = await devFetch(`/api/developer-leads/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -206,7 +230,7 @@ export function OnboardingWizard({ onClose }: Props) {
     setBusy(true);
     setError("");
     try {
-      const r = await fetch("/api/developer-leads/draft", {
+      const r = await devFetch("/api/developer-leads/draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ planId }),
@@ -222,8 +246,10 @@ export function OnboardingWizard({ onClose }: Props) {
         throw new Error(d.message ?? d.detail ?? "Could not start application");
       }
       setLeadId(d.leadId);
-      setReference(d.reference ?? "");
+      const ref = d.reference ?? "";
+      setReference(ref);
       localStorage.setItem(STORAGE_KEY, String(d.leadId));
+      if (ref) localStorage.setItem(REF_STORAGE_KEY, ref);
       await patchLead({ wizardStep: "company", planId }, d.leadId);
       setStep("company");
     } catch (e) {
@@ -273,7 +299,7 @@ export function OnboardingWizard({ onClose }: Props) {
       const fd = new FormData();
       fd.append("docType", docType);
       fd.append("file", file);
-      const r = await fetch(`/api/developer-leads/${leadId}/documents`, { method: "POST", body: fd });
+      const r = await devFetch(`/api/developer-leads/${leadId}/documents`, { method: "POST", body: fd });
       const d = (await r.json()) as { success?: boolean; message?: string };
       if (!r.ok || !d.success) throw new Error(d.message ?? "Upload failed");
       setUploaded((prev) => new Set(prev).add(docType));
@@ -309,7 +335,7 @@ export function OnboardingWizard({ onClose }: Props) {
     try {
       const fd = new FormData();
       fd.append("logo", file);
-      const r = await fetch(`/api/developer-leads/${leadId}/logo`, { method: "POST", body: fd });
+      const r = await devFetch(`/api/developer-leads/${leadId}/logo`, { method: "POST", body: fd });
       const d = (await r.json()) as { success?: boolean; logoUrl?: string; message?: string };
       if (!r.ok || !d.success) throw new Error(d.message ?? "Logo upload failed");
       setLogoUrl(resolveUploadUrl(d.logoUrl ?? ""));
@@ -342,7 +368,7 @@ export function OnboardingWizard({ onClose }: Props) {
           razorpay_signature: string;
         }) => {
           try {
-            const verify = await fetch("/api/developer-leads/verify-payment", {
+            const verify = await devFetch("/api/developer-leads/verify-payment", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -370,7 +396,7 @@ export function OnboardingWizard({ onClose }: Props) {
     setBusy(true);
     setError("");
     try {
-      const r = await fetch(`/api/developer-leads/${leadId}/start-payment`, { method: "POST" });
+      const r = await devFetch(`/api/developer-leads/${leadId}/start-payment`, { method: "POST" });
       const d = (await r.json()) as {
         success?: boolean;
         needsPayment?: boolean;
@@ -397,7 +423,7 @@ export function OnboardingWizard({ onClose }: Props) {
     setError("");
     setDevOtpHint(null);
     try {
-      const r = await fetch(`/api/developer-leads/${leadId}/channel/send-otp`, {
+      const r = await devFetch(`/api/developer-leads/${leadId}/channel/send-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ channelPhone: channelPhone.trim() }),
@@ -418,7 +444,7 @@ export function OnboardingWizard({ onClose }: Props) {
     setBusy(true);
     setError("");
     try {
-      const r = await fetch(`/api/developer-leads/${leadId}/channel/verify-otp`, {
+      const r = await devFetch(`/api/developer-leads/${leadId}/channel/verify-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ channelPhone: channelPhone.trim(), otp: channelOtp.trim() }),
@@ -1021,7 +1047,10 @@ export function OnboardingWizard({ onClose }: Props) {
               <div className="rounded-xl bg-[#f0f2f5] p-4 text-sm text-[#667781]">
                 <p className="font-semibold text-[#111b21] mb-1">What happens next?</p>
                 <ul className="list-disc pl-5 space-y-1 text-xs">
-                  <li>Save your reference code — you will need it to track templates in the developer portal.</li>
+                  <li>
+                    Open <a href="#dashboard" className="text-[#00a884] font-semibold hover:underline">Developer console</a>{" "}
+                    to submit message templates for approval and track API keys &amp; billing.
+                  </li>
                   <li>After API approval, use GET /v1/templates to list approved template names for your website.</li>
                   <li>Questions: developer@videh.co.in</li>
                 </ul>

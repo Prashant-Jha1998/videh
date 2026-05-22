@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useState, type MouseEvent } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
@@ -18,7 +18,9 @@ import { TemplateMessagePreview } from "./components/TemplateMessagePreview";
 import { OnboardingRequirements } from "./components/OnboardingRequirements";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { ConversationPricing } from "./components/ConversationPricing";
-import { DeveloperPortal } from "./components/DeveloperPortal";
+import { DeveloperDashboard } from "./components/DeveloperDashboard";
+import { DeveloperAuth, type AuthMode } from "./components/DeveloperAuth";
+import { devFetch } from "./lib/devFetch";
 
 const NAV = [
   { href: "#requirements", label: "Verification" },
@@ -26,7 +28,7 @@ const NAV = [
   { href: "#how-it-works", label: "How it works" },
   { href: "#pricing", label: "Pricing" },
   { href: "#api", label: "API" },
-  { href: "#portal", label: "My templates" },
+  { href: "#dashboard", label: "Developer console" },
   { href: "#get-api", label: "Apply", action: "apply" as const },
 ];
 
@@ -184,20 +186,64 @@ function FaqItem({ q, a }: { q: string; a: string }) {
   );
 }
 
-function openApplyWizard(e: MouseEvent) {
-  e.preventDefault();
-  window.location.hash = "#apply";
+function authModeFromHash(): AuthMode | null {
+  const h = window.location.hash.replace("#", "");
+  if (h === "login" || h === "signup") return h;
+  if (h === "forgot-password") return "forgot";
+  if (h === "reset-password") return "reset";
+  return null;
+}
+
+function setAuthHash(mode: AuthMode) {
+  const map: Record<AuthMode, string> = {
+    login: "#login",
+    signup: "#signup",
+    forgot: "#forgot-password",
+    reset: "#reset-password",
+  };
+  window.location.hash = map[mode];
 }
 
 export default function App() {
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode | null>(null);
+  const [session, setSession] = useState<{ email: string } | null>(null);
+
+  const refreshSession = useCallback(async () => {
+    try {
+      const r = await devFetch("/api/developer-auth/me");
+      const d = (await r.json()) as { success?: boolean; user?: { email: string } };
+      if (r.ok && d.success && d.user) setSession({ email: d.user.email });
+      else setSession(null);
+    } catch {
+      setSession(null);
+    }
+  }, []);
 
   useEffect(() => {
-    const sync = () => setWizardOpen(window.location.hash === "#apply");
+    const sync = () => {
+      const hash = window.location.hash;
+      setWizardOpen(hash === "#apply");
+      setAuthMode(authModeFromHash());
+      if (hash === "#apply" && !session) {
+        sessionStorage.setItem("videh_auth_next", "apply");
+      }
+    };
     sync();
+    void refreshSession();
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
-  }, []);
+  }, [refreshSession]);
+
+  const openApplyWizard = (e?: MouseEvent) => {
+    e?.preventDefault();
+    if (!session) {
+      sessionStorage.setItem("videh_auth_next", "apply");
+      window.location.hash = "#signup";
+      return;
+    }
+    window.location.hash = "#apply";
+  };
 
   const closeWizard = () => {
     if (window.location.hash === "#apply") {
@@ -206,10 +252,39 @@ export default function App() {
     setWizardOpen(false);
   };
 
+  const onAuthSuccess = () => {
+    void refreshSession();
+    const next = sessionStorage.getItem("videh_auth_next");
+    sessionStorage.removeItem("videh_auth_next");
+    if (next === "apply") {
+      window.location.hash = "#apply";
+    } else {
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+      setAuthMode(null);
+    }
+  };
+
+  const logout = async () => {
+    await devFetch("/api/developer-auth/logout", { method: "POST" });
+    setSession(null);
+    history.replaceState(null, "", window.location.pathname);
+  };
+
   return (
     <div className="min-h-screen">
-      {wizardOpen ? <OnboardingWizard onClose={closeWizard} /> : null}
-      {!wizardOpen ? (
+      {authMode ? (
+        <DeveloperAuth
+          mode={authMode}
+          onClose={() => {
+            history.replaceState(null, "", window.location.pathname + window.location.search);
+            setAuthMode(null);
+          }}
+          onSuccess={onAuthSuccess}
+          onSwitchMode={setAuthHash}
+        />
+      ) : null}
+      {wizardOpen ? <OnboardingWizard onClose={closeWizard} onNeedAuth={() => { window.location.hash = "#signup"; }} /> : null}
+      {!wizardOpen && !authMode ? (
       <>
       <header className="fixed top-0 inset-x-0 z-50 glass border-b border-white/10">
         <div className="max-w-6xl mx-auto px-4 h-[4.5rem] md:h-20 flex items-center justify-between gap-3">
@@ -247,13 +322,42 @@ export default function App() {
               ),
             )}
           </nav>
-          <a
-            href="#get-api"
-            onClick={openApplyWizard}
-            className="shrink-0 text-sm font-semibold bg-[#00a884] hover:bg-[#008f6f] text-white px-4 py-2.5 rounded-lg transition-colors shadow-md shadow-[#00a884]/25 whitespace-nowrap"
-          >
-            Get API access
-          </a>
+          <div className="shrink-0 flex items-center gap-2">
+            {session ? (
+              <>
+                <span className="hidden md:inline text-xs text-white/70 truncate max-w-[140px]">{session.email}</span>
+                <button
+                  type="button"
+                  onClick={() => void logout()}
+                  className="text-sm font-semibold text-white/90 px-3 py-2 rounded-lg border border-white/20 hover:bg-white/10"
+                >
+                  Sign out
+                </button>
+              </>
+            ) : (
+              <>
+                <a
+                  href="#login"
+                  className="text-sm font-semibold text-white/90 px-3 py-2 rounded-lg border border-white/20 hover:bg-white/10"
+                >
+                  Sign in
+                </a>
+                <a
+                  href="#signup"
+                  className="text-sm font-semibold text-[#00a884] px-3 py-2 rounded-lg bg-white hover:bg-white/90"
+                >
+                  Sign up
+                </a>
+              </>
+            )}
+            <a
+              href="#get-api"
+              onClick={openApplyWizard}
+              className="text-sm font-semibold bg-[#00a884] hover:bg-[#008f6f] text-white px-4 py-2.5 rounded-lg transition-colors shadow-md shadow-[#00a884]/25 whitespace-nowrap"
+            >
+              Get API access
+            </a>
+          </div>
         </div>
       </header>
 
@@ -440,7 +544,7 @@ export default function App() {
         </div>
       </section>
 
-      <DeveloperPortal />
+      <DeveloperDashboard />
 
       <section id="pricing" className="py-20 px-4 bg-[#111b21] text-white">
         <div className="max-w-6xl mx-auto">
