@@ -252,17 +252,8 @@ export function DeveloperBillingInvoices({
             : "No previous bills on file yet."}
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className="w-full text-sm table-fixed min-w-[720px]">
-            <colgroup>
-              <col className="w-12" />
-              <col className="w-[28%]" />
-              <col className="w-[14%]" />
-              <col className="w-[14%]" />
-              <col className="w-[12%]" />
-              <col className="w-[12%]" />
-              <col className="w-[18%]" />
-            </colgroup>
+        <div className="overflow-x-auto rounded-xl border border-gray-200 w-full">
+          <table className="w-full text-sm">
             <thead className="bg-[#f0f2f5] text-left text-xs uppercase tracking-wide text-[#667781]">
               <tr>
                 <th className="px-3 py-3 font-semibold text-center">S.No</th>

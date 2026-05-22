@@ -671,6 +671,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       progressSteps={workspaceUnlocked ? [] : [...SETUP_STEPS]}
       stepIndex={setupStepIndex}
       submitted={workspaceUnlocked}
+      fullWidth={workspaceUnlocked}
     >
       {error ? (
         <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</p>

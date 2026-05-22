@@ -41,7 +41,7 @@ export function DeveloperChannelPanel({ data, busy, error, onRefresh }: PanelPro
   const channelStatus = data?.channel?.channel_status ?? "pending";
 
   return (
-    <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-5">
+    <section className="w-full min-h-[calc(100dvh-10rem)] rounded-2xl bg-white p-6 md:p-8 lg:p-10 shadow-sm border border-gray-200 space-y-5">
       <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Business channel</p>
       <h2 className="text-2xl font-bold text-[#111b21]">Phone &amp; channel IDs</h2>
       <p className="text-sm text-[#667781]">
@@ -155,7 +155,7 @@ export function DeveloperApiPanel({ data, busy, error, leadId, reference, onRefr
   const business = businessId(data);
 
   return (
-    <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-5">
+    <section className="w-full min-h-[calc(100dvh-10rem)] rounded-2xl bg-white p-6 md:p-8 lg:p-10 shadow-sm border border-gray-200 space-y-5">
       <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">API access</p>
       <h2 className="text-2xl font-bold text-[#111b21] flex items-center gap-2">
         <Key className="h-7 w-7 text-[#00a884]" />
@@ -252,10 +252,10 @@ export function DeveloperBillingPanel({
   }
 
   return (
-    <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-5">
+    <section className="w-full min-h-[calc(100dvh-10rem)] rounded-2xl bg-white p-6 md:p-8 lg:p-10 shadow-sm border border-gray-200 space-y-5 flex flex-col">
       <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Billing &amp; usage</p>
-      <h2 className="text-2xl font-bold text-[#111b21] flex items-center gap-2">
-        <BarChart3 className="h-7 w-7 text-[#00a884]" />
+      <h2 className="text-2xl md:text-3xl font-bold text-[#111b21] flex items-center gap-2">
+        <BarChart3 className="h-7 w-7 md:h-8 md:w-8 text-[#00a884]" />
         Usage &amp; invoices
       </h2>
 

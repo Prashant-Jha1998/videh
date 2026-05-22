@@ -24,6 +24,8 @@ type Props = {
   stepIndex: number;
   /** Application submitted — hide setup modules and onboarding progress bar */
   submitted?: boolean;
+  /** Use full main area width (workspace modules with tables) */
+  fullWidth?: boolean;
   children: ReactNode;
 };
 
@@ -85,6 +87,7 @@ export function OnboardingConsoleLayout({
   progressSteps,
   stepIndex,
   submitted = false,
+  fullWidth = false,
   children,
 }: Props) {
   return (
@@ -189,8 +192,8 @@ export function OnboardingConsoleLayout({
           </div>
         </div>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8" data-console-main>
-          <div className="max-w-3xl mx-auto">
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8" data-console-main>
+          <div className={fullWidth ? "w-full max-w-none" : "max-w-3xl mx-auto w-full"}>
             <div className="md:hidden mb-4">
               <h1 className="text-xl font-bold text-[#111b21]">{currentModule.label}</h1>
               <p className="text-sm text-[#667781]">{currentModule.subtitle}</p>
