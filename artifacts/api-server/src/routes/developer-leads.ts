@@ -244,7 +244,11 @@ router.get("/:id", async (req, res) => {
     await ensureDeveloperPlatformTables();
     const lead = await query(`SELECT * FROM developer_leads WHERE id = $1`, [id]);
     if (!lead.rows[0]) {
-      res.status(404).json({ success: false, message: "Not found" });
+      res.status(404).json({
+        success: false,
+        message: "Application not found",
+        code: "lead_not_found",
+      });
       return;
     }
     const docs = await query(`SELECT * FROM developer_lead_documents WHERE lead_id = $1 ORDER BY doc_type`, [id]);
@@ -318,7 +322,11 @@ router.patch("/:id", async (req: Request, res: Response) => {
       params,
     );
     if (!r.rows[0]) {
-      res.status(404).json({ success: false, message: "Not found" });
+      res.status(404).json({
+        success: false,
+        message: "Application not found",
+        code: "lead_not_found",
+      });
       return;
     }
     res.json({ success: true, lead: r.rows[0] });

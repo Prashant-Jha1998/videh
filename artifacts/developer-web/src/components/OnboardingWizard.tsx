@@ -159,15 +159,39 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
   const onNeedAuthRef = useRef(onNeedAuth);
   onNeedAuthRef.current = onNeedAuth;
 
+  const clearApplicationCache = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(REF_STORAGE_KEY);
+    hydratedLeadIdRef.current = null;
+    setLeadId(null);
+    setReference("");
+    setStep("plan");
+    setMaxReachedIndex(0);
+    setLeadStatus("draft");
+  }, []);
+
   const loadLead = useCallback(
     async (id: number, opts?: { force?: boolean }) => {
       if (!opts?.force && hydratedLeadIdRef.current === id) return;
       const r = await devFetch(`/api/developer-leads/${id}`);
       const d = (await r.json()) as {
+        success?: boolean;
+        message?: string;
         lead?: Record<string, unknown>;
         documents?: { doc_type: string }[];
       };
-      if (!d.lead) return;
+      if (!r.ok || !d.lead) {
+        hydratedLeadIdRef.current = null;
+        if (r.status === 404) {
+          clearApplicationCache();
+          setError(
+            d.message === "Not found"
+              ? "Your previous application was removed or no longer exists. Start again below — your progress will be saved on the server after you continue."
+              : (d.message ?? "Application not found. Start again below."),
+          );
+        }
+        return;
+      }
       const L = d.lead;
       const ref = String(L.reference_code ?? "");
       setReference(ref);
@@ -181,7 +205,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
         if (submitted && (isSetupStep(initial) || initial === "done")) initial = DEFAULT_WORKSPACE_STEP;
         setStep(initial);
         const wsIdx = STEPS.indexOf(initial);
-        setMaxReachedIndex(Math.max(wsIdx, submitted ? STEPS.indexOf("done") : STEPS.indexOf("plan")));
+        setMaxReachedIndex(Math.max(wsIdx, submitted ? STEPS.indexOf("done") : wsIdx));
       }
       setLeadStatus(status);
       const chPhone = String(L.channel_phone ?? "");
@@ -215,8 +239,12 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       setUploaded(new Set((d.documents ?? []).map((x) => x.doc_type)));
       await loadDocs(String(L.entity_type ?? "pvt_ltd"));
       hydratedLeadIdRef.current = id;
+      setLeadId(id);
+      setError((prev) =>
+        prev.includes("removed") || prev.includes("not found") || prev.includes("no longer exists") ? "" : prev,
+      );
     },
-    [loadDocs],
+    [loadDocs, clearApplicationCache],
   );
 
   useEffect(() => {
@@ -233,20 +261,20 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
           setCompany((c) => (c.email ? c : { ...c, email: auth.user!.email }));
         }
         if (auth.activeLead?.id) {
-          setLeadId(auth.activeLead.id);
           setReference(auth.activeLead.reference_code);
           localStorage.setItem(STORAGE_KEY, String(auth.activeLead.id));
           localStorage.setItem(REF_STORAGE_KEY, auth.activeLead.reference_code);
-          void loadLead(auth.activeLead.id);
+          void loadLead(auth.activeLead.id, { force: true });
           return;
         }
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
           const id = Number(saved);
-          if (id) {
-            setLeadId(id);
-            void loadLead(id);
-          }
+          if (id) void loadLead(id, { force: true });
+          else clearApplicationCache();
+        } else {
+          const staleRef = localStorage.getItem(REF_STORAGE_KEY);
+          if (staleRef) localStorage.removeItem(REF_STORAGE_KEY);
         }
       })
       .catch(() => {
@@ -255,7 +283,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [loadLead]);
+  }, [loadLead, clearApplicationCache]);
 
   useEffect(() => {
     devFetch("/api/developer-leads")
@@ -276,7 +304,27 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       body: JSON.stringify(body),
     });
     const d = (await r.json()) as { success?: boolean; message?: string };
+    if (r.status === 404) {
+      clearApplicationCache();
+      throw new Error("Application not found — it may have been removed. Please start again.");
+    }
     if (!r.ok || !d.success) throw new Error(d.message ?? "Save failed");
+  }
+
+  async function persistWizardStep(target: Step) {
+    if (!leadId) return;
+    try {
+      await patchLead({ wizardStep: target });
+      const idx = STEPS.indexOf(target);
+      if (idx >= 0) setMaxReachedIndex((m) => Math.max(m, idx));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save progress");
+    }
+  }
+
+  function isMissingApplicationError(err: unknown): boolean {
+    const msg = err instanceof Error ? err.message.toLowerCase() : "";
+    return msg.includes("not found") || msg.includes("removed");
   }
 
   async function startDraft() {
@@ -292,22 +340,27 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
         success?: boolean;
         leadId?: number;
         reference?: string;
+        resumed?: boolean;
         message?: string;
         detail?: string;
       };
       if (!r.ok || !d.success || !d.leadId) {
         throw new Error(d.message ?? d.detail ?? "Could not start application");
       }
-      setLeadId(d.leadId);
       const ref = d.reference ?? "";
       setReference(ref);
       localStorage.setItem(STORAGE_KEY, String(d.leadId));
       if (ref) localStorage.setItem(REF_STORAGE_KEY, ref);
+      if (d.resumed) {
+        await loadLead(d.leadId, { force: true });
+        return;
+      }
+      setLeadId(d.leadId);
       await patchLead({ wizardStep: "company", planId }, d.leadId);
       setStep("company");
+      setMaxReachedIndex(STEPS.indexOf("company"));
     } catch (e) {
-      localStorage.removeItem(STORAGE_KEY);
-      setLeadId(null);
+      clearApplicationCache();
       setError(e instanceof Error ? e.message : "Failed");
     } finally {
       setBusy(false);
@@ -337,6 +390,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       });
       await loadDocs(company.entityType);
       setStep("documents");
+      setMaxReachedIndex((m) => Math.max(m, STEPS.indexOf("documents")));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -375,6 +429,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
         wizardStep: "channel",
       });
       setStep("channel");
+      setMaxReachedIndex((m) => Math.max(m, STEPS.indexOf("channel")));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -467,9 +522,13 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       if (d.needsPayment && d.checkout) {
         await openRazorpay(d.checkout);
       }
-      localStorage.removeItem(STORAGE_KEY);
       setLeadStatus("paid");
       setStep("done");
+      setMaxReachedIndex(STEPS.indexOf("done"));
+      if (leadId) {
+        localStorage.setItem(STORAGE_KEY, String(leadId));
+        await loadLead(leadId, { force: true });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Payment failed");
     } finally {
@@ -519,6 +578,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       setPhoneNumberId(d.channel?.phone_number_id ?? "");
       setBusinessAccountId(d.channel?.business_account_id ?? "");
       setStep("payment");
+      setMaxReachedIndex((m) => Math.max(m, STEPS.indexOf("payment")));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Verification failed");
     } finally {
@@ -672,9 +732,14 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                       try {
                         await patchLead({ wizardStep: "company", planId }, leadId);
                         setStep("company");
+                        setMaxReachedIndex((m) => Math.max(m, STEPS.indexOf("company")));
                       } catch (e) {
-                        localStorage.removeItem(STORAGE_KEY);
-                        setLeadId(null);
+                        if (isMissingApplicationError(e)) {
+                          clearApplicationCache();
+                          setError("Previous application was removed. Creating a new one…");
+                          await startDraft();
+                          return;
+                        }
                         setError(e instanceof Error ? e.message : "Could not resume application");
                       } finally {
                         setBusy(false);
@@ -867,7 +932,11 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                 <button
                   type="button"
                   disabled={busy || requiredMissing.length > 0}
-                  onClick={() => setStep("profile")}
+                  onClick={() => {
+                    void persistWizardStep("profile");
+                    setStep("profile");
+                    setMaxReachedIndex((m) => Math.max(m, STEPS.indexOf("profile")));
+                  }}
                   className="flex-1 bg-[#00a884] text-white font-semibold py-2.5 rounded-xl disabled:opacity-60"
                 >
                   {requiredMissing.length > 0
@@ -1047,7 +1116,10 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setStep("payment")}
+                    onClick={() => {
+                      void persistWizardStep("payment");
+                      setStep("payment");
+                    }}
                     className="flex-1 bg-[#00a884] text-white font-semibold py-2.5 rounded-xl"
                   >
                     Continue to payment
