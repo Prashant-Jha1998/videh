@@ -361,8 +361,8 @@ export default function App() {
         </div>
       </header>
 
-      <section className="gradient-hero pt-32 md:pt-36 pb-20 px-4 text-white">
-        <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
+      <section className="gradient-hero pt-28 md:pt-32 pb-16 md:pb-20 px-4 text-white overflow-x-hidden">
+        <div className="max-w-6xl mx-auto grid lg:grid-cols-[1fr_minmax(300px,400px)] gap-10 lg:gap-14 items-start">
           <motion.div
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
@@ -413,11 +413,14 @@ export default function App() {
           </motion.div>
 
           <motion.div
+            className="w-full flex justify-center lg:justify-end lg:sticky lg:top-28"
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.55, delay: 0.1 }}
           >
-            <TemplateMessagePreview />
+            <div className="w-full max-w-[380px]">
+              <TemplateMessagePreview />
+            </div>
           </motion.div>
         </div>
       </section>
