@@ -19,7 +19,7 @@ function buildEnvSnippet(p: {
 }): string {
   const secretLine = p.secret ?? "vsec_CLICK_SHOW_ABOVE_THEN_COPY";
   return `# Videh Business API — your website / app .env (server-side only, never in browser)
-VIDEH_API_BASE_URL=https://api.videh.co.in
+VIDEH_API_BASE_URL=https://developer.videh.co.in
 VIDEH_API_KEY_ID=${p.apiKeyId}
 VIDEH_API_SECRET=${secretLine}
 VIDEH_PHONE_NUMBER_ID=${p.phoneNumberId ?? "YOUR_PHONE_NUMBER_ID"}

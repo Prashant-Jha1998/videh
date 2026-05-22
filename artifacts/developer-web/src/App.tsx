@@ -144,13 +144,13 @@ const FAQ = [
   },
 ];
 
-const API_ME = `curl https://api.videh.co.in/v1/me \\
+const API_ME = `curl https://developer.videh.co.in/v1/me \\
   -H "Authorization: Bearer vsec_YOUR_SECRET"`;
 
-const API_LIST_TEMPLATES = `curl https://api.videh.co.in/v1/templates \\
+const API_LIST_TEMPLATES = `curl https://developer.videh.co.in/v1/templates \\
   -H "Authorization: Bearer vsec_YOUR_SECRET"`;
 
-const API_SAMPLE = `curl -X POST https://api.videh.co.in/v1/PHONE_NUMBER_ID/messages \\
+const API_SAMPLE = `curl -X POST https://developer.videh.co.in/v1/PHONE_NUMBER_ID/messages \\
   -H "Authorization: Bearer vsec_YOUR_SECRET" \\
   -H "Content-Type: application/json" \\
   -d '{
