@@ -11,6 +11,7 @@ import crypto from "node:crypto";
 import { DEVELOPER_STATUSES, ensureDeveloperLeadsTable } from "./developer-leads";
 import { documentsForEntity } from "../lib/developerPlatform";
 import { ensureDeveloperTemplateTables, linkTemplatesToAccount } from "../lib/developerTemplates";
+import { encryptApiSecret, hashApiSecret } from "../lib/developerApiSecretVault";
 import {
   copyChannelToAccount,
   ensureDeveloperChannelColumns,
@@ -899,11 +900,17 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
           }
           const apiKeyId = `vsk_${crypto.randomBytes(8).toString("hex")}`;
           const apiSecret = `vsec_${crypto.randomBytes(24).toString("hex")}`;
-          const secretHash = crypto.createHash("sha256").update(apiSecret).digest("hex");
+          const secretHash = hashApiSecret(apiSecret);
+          let secretEnc: string | null = null;
+          try {
+            secretEnc = encryptApiSecret(apiSecret);
+          } catch {
+            secretEnc = null;
+          }
           const billingStatus = paymentOk ? "active" : "hold";
           const ins = await query(
             `INSERT INTO developer_api_accounts
-             (lead_id, reference_code, company_name, display_name, logo_url, api_key_id, api_key_secret_hash,
+             (lead_id, reference_code, company_name, display_name, logo_url, api_key_id, api_key_secret_hash, api_key_secret_enc,
               billing_status, plan_id, amount_inr_monthly, total_billed_inr, last_payment_at, next_billing_at, approved_by,
               channel_phone, channel_status, channel_verified_at, videh_phone_number_id, videh_business_account_id)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW() + INTERVAL '30 days', $13,
@@ -917,6 +924,7 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
               row.logo_url,
               apiKeyId,
               secretHash,
+              secretEnc,
               billingStatus,
               row.plan_id,
               row.amount_inr,

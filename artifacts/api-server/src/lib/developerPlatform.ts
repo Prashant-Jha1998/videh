@@ -1,6 +1,7 @@
 import { query } from "./db";
 import { ensureDeveloperTemplateTables } from "./developerTemplates";
 import { ensureDeveloperChannelColumns } from "./developerChannel";
+import { ensureApiSecretEncColumn } from "./developerApiSecretVault";
 
 export type EntityType = "pvt_ltd" | "llp" | "proprietorship" | "partnership" | "other";
 
@@ -200,6 +201,7 @@ export async function ensureDeveloperPlatformTables(): Promise<void> {
 
   await ensureDeveloperTemplateTables();
   await ensureDeveloperChannelColumns();
+  await ensureApiSecretEncColumn();
 }
 
 export function documentsForEntity(entityType: string): DocRequirement[] {

@@ -35,6 +35,11 @@ import {
   ensureDeveloperPortalUsersTable,
   getActiveLeadForPortalUser,
 } from "../lib/developerPortalUsers";
+import {
+  decryptApiSecret,
+  ensureApiSecretEncColumn,
+  rotateApiSecretForAccount,
+} from "../lib/developerApiSecretVault";
 
 const router = Router();
 
@@ -838,6 +843,116 @@ router.post("/:id/templates", async (req, res) => {
   } catch (err) {
     logger.error({ err }, "developer submit template");
     res.status(500).json({ success: false, message: "Could not submit template" });
+  }
+});
+
+type PortalAccountRow = {
+  id: number;
+  api_key_id: string;
+  billing_status: string;
+  api_key_secret_enc?: string | null;
+};
+
+async function getPortalAccountForLead(
+  leadId: number,
+  reference: string,
+  req: Request,
+): Promise<{ lead: { status?: string }; account: PortalAccountRow | null } | null> {
+  await ensureDeveloperPlatformTables();
+  await ensureApiSecretEncColumn();
+  const lead = await query(
+    `SELECT id, reference_code, portal_user_id, status FROM developer_leads WHERE id = $1`,
+    [leadId],
+  );
+  const row = lead.rows[0] as
+    | { reference_code?: string; portal_user_id?: number | null; status?: string }
+    | undefined;
+  if (!row || !portalAuth(row, reference, req)) return null;
+  const account = await query(
+    `SELECT id, api_key_id, billing_status, api_key_secret_enc FROM developer_api_accounts WHERE lead_id = $1`,
+    [leadId],
+  );
+  const acct = account.rows[0] as PortalAccountRow | undefined;
+  if (!acct) return { lead: row, account: null };
+  return { lead: row, account: acct };
+}
+
+/** GET /api/developer-leads/:id/credentials/secret — reveal API secret (portal owner only) */
+router.get("/:id/credentials/secret", async (req, res) => {
+  const leadId = Number(req.params.id);
+  const reference = String(req.query.reference ?? "").trim();
+  if (!leadId) {
+    res.status(400).json({ success: false, message: "Invalid lead id" });
+    return;
+  }
+  if (!reference && !getDeveloperPortalUser(req)) {
+    res.status(401).json({ success: false, message: "Sign in required" });
+    return;
+  }
+  try {
+    const ctx = await getPortalAccountForLead(leadId, reference, req);
+    if (!ctx) {
+      res.status(404).json({ success: false, message: "Application not found" });
+      return;
+    }
+    if (!ctx.account) {
+      res.status(404).json({ success: false, message: "API account not active yet" });
+      return;
+    }
+    const plain = decryptApiSecret(ctx.account.api_key_secret_enc);
+    if (!plain) {
+      res.json({
+        success: true,
+        hasStoredSecret: false,
+        message:
+          "No viewable secret on file (older accounts). Click Reset secret to generate a new one you can show or hide anytime.",
+      });
+      return;
+    }
+    res.json({ success: true, hasStoredSecret: true, apiSecret: plain });
+  } catch (err) {
+    logger.error({ err }, "developer credentials secret");
+    res.status(500).json({ success: false, message: "Could not load API secret" });
+  }
+});
+
+/** POST /api/developer-leads/:id/credentials/rotate — rotate API secret */
+router.post("/:id/credentials/rotate", async (req, res) => {
+  const leadId = Number(req.params.id);
+  const body = req.body as { reference?: string };
+  const reference = String(body.reference ?? req.query.reference ?? "").trim();
+  if (!leadId) {
+    res.status(400).json({ success: false, message: "Invalid lead id" });
+    return;
+  }
+  if (!reference && !getDeveloperPortalUser(req)) {
+    res.status(401).json({ success: false, message: "Sign in required" });
+    return;
+  }
+  try {
+    const ctx = await getPortalAccountForLead(leadId, reference, req);
+    if (!ctx) {
+      res.status(404).json({ success: false, message: "Application not found" });
+      return;
+    }
+    if (!ctx.account) {
+      res.status(404).json({ success: false, message: "API account not active yet" });
+      return;
+    }
+    if (ctx.account.billing_status === "suspended") {
+      res.status(403).json({ success: false, message: "API access is suspended. Contact developer@videh.co.in" });
+      return;
+    }
+    const apiSecret = await rotateApiSecretForAccount(ctx.account.id);
+    res.json({
+      success: true,
+      apiSecret,
+      message: "API secret rotated. Update your servers immediately; the old secret no longer works.",
+    });
+  } catch (err) {
+    logger.error({ err }, "developer credentials rotate");
+    const msg = err instanceof Error ? err.message : "Could not rotate API secret";
+    res.status(500).json({ success: false, message: msg });
   }
 });
 

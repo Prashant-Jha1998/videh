@@ -3,6 +3,7 @@ import { BarChart3, CheckCircle2, Key, Loader2, Phone, RefreshCw, Send } from "l
 import { devFetch } from "../lib/devFetch";
 import type { PortalData } from "../hooks/useDeveloperPortal";
 import { PORTAL_STATUS_LABELS } from "../hooks/useDeveloperPortal";
+import { DeveloperApiCredentials } from "./DeveloperApiCredentials";
 
 const emptyTpl = {
   templateKey: "",
@@ -283,7 +284,7 @@ export function DeveloperTemplatesPanel({
   );
 }
 
-export function DeveloperApiPanel({ data, busy, error, onRefresh }: PanelProps) {
+export function DeveloperApiPanel({ data, busy, error, leadId, reference, onRefresh }: PanelProps) {
   const phone = phoneId(data);
   const business = businessId(data);
 
@@ -325,30 +326,32 @@ export function DeveloperApiPanel({ data, busy, error, onRefresh }: PanelProps) 
       </div>
 
       {data?.account ? (
-        <div className="rounded-xl border border-[#00a884]/30 bg-[#00a884]/5 p-4 space-y-2 text-sm">
-          <p className="font-semibold text-[#111b21]">Production API credentials</p>
-          <p>
-            API Key ID: <code className="bg-white px-1.5 py-0.5 rounded text-xs">{data.account.api_key_id}</code>
-          </p>
-          <p className="text-[#667781]">
-            Billing status: <strong>{data.account.billing_status}</strong>. API secret was shown once at approval —
-            email developer@videh.co.in to rotate.
-          </p>
-          {phone ? (
-            <p>
-              Phone Number ID: <code className="text-[#00a884] text-xs">{phone}</code>
-            </p>
+        <>
+          <DeveloperApiCredentials
+            leadId={leadId}
+            reference={reference}
+            apiKeyId={data.account.api_key_id}
+            billingStatus={data.account.billing_status}
+          />
+          {phone || business ? (
+            <div className="rounded-xl bg-[#f0f2f5] p-4 space-y-2 text-sm">
+              {phone ? (
+                <p>
+                  Phone Number ID: <code className="text-[#00a884] text-xs">{phone}</code>
+                </p>
+              ) : null}
+              {business ? (
+                <p>
+                  Business Account ID: <code className="text-[#00a884] text-xs">{business}</code>
+                </p>
+              ) : null}
+              <p className="text-xs text-[#667781] pt-1">
+                Base URL: <code>/v1</code> · <code>GET /v1/me</code> ·{" "}
+                <code>POST /v1/&#123;phone-number-id&#125;/messages</code>
+              </p>
+            </div>
           ) : null}
-          {business ? (
-            <p>
-              Business Account ID: <code className="text-[#00a884] text-xs">{business}</code>
-            </p>
-          ) : null}
-          <p className="text-xs text-[#667781] pt-2">
-            Base URL: <code>/v1</code> · <code>GET /v1/me</code> ·{" "}
-            <code>POST /v1/&#123;phone-number-id&#125;/messages</code>
-          </p>
-        </div>
+        </>
       ) : (
         <p className="text-sm text-[#667781] rounded-xl bg-[#f0f2f5] p-4">
           API keys will appear here after full approval. You can still submit templates and track channel setup in the
