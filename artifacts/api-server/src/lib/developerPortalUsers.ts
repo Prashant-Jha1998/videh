@@ -95,7 +95,7 @@ export async function updatePortalUserPassword(userId: number, password: string)
   ]);
 }
 
-export async function getActiveLeadForPortalUser(userId: number): Promise<{
+type ActiveLeadSummary = {
   id: number;
   reference_code: string;
   wizard_step: string;
@@ -103,7 +103,44 @@ export async function getActiveLeadForPortalUser(userId: number): Promise<{
   company_name: string;
   payment_method_verified: boolean;
   has_api_account: boolean;
-} | null> {
+};
+
+function mapActiveLeadRow(row: Record<string, unknown>): ActiveLeadSummary {
+  return {
+    id: Number(row.id),
+    reference_code: String(row.reference_code),
+    wizard_step: String(row.wizard_step),
+    status: String(row.status),
+    company_name: String(row.company_name),
+    payment_method_verified: Boolean(row.payment_method_verified),
+    has_api_account: Boolean(row.has_api_account),
+  };
+}
+
+/** Attach orphan applications (same email, no portal_user_id) to the signed-in developer account */
+export async function linkLeadToPortalUserIfNeeded(
+  leadId: number,
+  userId: number,
+  email: string,
+): Promise<void> {
+  await ensureDeveloperPortalUsersTable();
+  const norm = normalizePortalEmail(email);
+  await query(
+    `UPDATE developer_leads
+     SET portal_user_id = $1, updated_at = NOW()
+     WHERE id = $2
+       AND status NOT IN ('rejected')
+       AND (portal_user_id IS NULL OR portal_user_id = $1)
+       AND LOWER(TRIM(email)) = $3`,
+    [userId, leadId, norm],
+  );
+}
+
+export async function getActiveLeadForPortalUser(
+  userId: number,
+  email?: string,
+): Promise<ActiveLeadSummary | null> {
+  await ensureDeveloperPortalUsersTable();
   const r = await query(
     `SELECT l.id, l.reference_code, l.wizard_step, l.status, l.company_name,
             COALESCE(l.payment_method_verified, false) AS payment_method_verified,
@@ -114,21 +151,23 @@ export async function getActiveLeadForPortalUser(userId: number): Promise<{
      LIMIT 1`,
     [userId],
   );
-  const row = r.rows[0] as
-    | {
-        id: number;
-        reference_code: string;
-        wizard_step: string;
-        status: string;
-        company_name: string;
-        payment_method_verified: boolean;
-        has_api_account: boolean;
-      }
-    | undefined;
+  if (r.rows[0]) return mapActiveLeadRow(r.rows[0] as Record<string, unknown>);
+
+  const norm = email ? normalizePortalEmail(email) : "";
+  if (!norm) return null;
+
+  const orphan = await query(
+    `SELECT l.id, l.reference_code, l.wizard_step, l.status, l.company_name,
+            COALESCE(l.payment_method_verified, false) AS payment_method_verified,
+            EXISTS(SELECT 1 FROM developer_api_accounts a WHERE a.lead_id = l.id) AS has_api_account
+     FROM developer_leads l
+     WHERE l.portal_user_id IS NULL AND l.status NOT IN ('rejected') AND LOWER(TRIM(l.email)) = $1
+     ORDER BY l.updated_at DESC
+     LIMIT 1`,
+    [norm],
+  );
+  const row = orphan.rows[0] as Record<string, unknown> | undefined;
   if (!row) return null;
-  return {
-    ...row,
-    payment_method_verified: Boolean(row.payment_method_verified),
-    has_api_account: Boolean(row.has_api_account),
-  };
+  await query(`UPDATE developer_leads SET portal_user_id = $1, updated_at = NOW() WHERE id = $2`, [userId, row.id]);
+  return mapActiveLeadRow(row);
 }

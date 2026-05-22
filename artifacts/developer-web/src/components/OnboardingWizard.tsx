@@ -173,7 +173,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       const submitted = isSubmittedLead(status, ws, Boolean(L.payment_method_verified));
       if (STEPS.includes(ws as Step)) {
         let initial: Step = ws as Step;
-        if (submitted && isSetupStep(initial)) initial = DEFAULT_WORKSPACE_STEP;
+        if (submitted && (isSetupStep(initial) || initial === "done")) initial = DEFAULT_WORKSPACE_STEP;
         setStep(initial);
         const wsIdx = STEPS.indexOf(initial);
         setMaxReachedIndex(Math.max(wsIdx, submitted ? STEPS.indexOf("done") : STEPS.indexOf("plan")));
@@ -529,7 +529,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
   const portal = useDeveloperPortal({
     leadId: leadId ? String(leadId) : "",
     reference,
-    enabled: workspaceUnlocked && isWorkspaceStep && step !== "done",
+    enabled: workspaceUnlocked && Boolean(leadId),
   });
 
   const portalPanelProps = {
@@ -560,6 +560,14 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
     setStep(target);
     setError("");
     portal.setError("");
+    if (leadId && workspaceUnlocked) {
+      void patchLead({ wizardStep: target }, leadId).catch(() => {});
+    }
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        document.querySelector("[data-console-main]")?.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    }
   }
 
   function moduleStatus(mod: (typeof MODULES)[number]): "current" | "done" | "available" | "locked" {
@@ -590,6 +598,15 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
     >
       {error ? (
         <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</p>
+      ) : null}
+      {portal.error && step !== "done" ? (
+        <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{portal.error}</p>
+      ) : null}
+      {portal.busy && isWorkspaceStep && step !== "done" && !portal.data ? (
+        <p className="mb-4 text-sm text-[#667781] flex items-center gap-2">
+          <Loader2 className="h-4 w-4 animate-spin text-[#00a884]" />
+          Loading your account data…
+        </p>
       ) : null}
 
           {step === "plan" && (
@@ -1081,8 +1098,10 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                 <ol className="space-y-0">
                   {REVIEW_PIPELINE.map((phase, i) => {
                     const phaseIdx = statusOrder.indexOf(phase.key);
-                    const done = statusIdx >= 0 && statusIdx >= phaseIdx;
-                    const active = leadStatus === phase.key || (statusIdx + 1 === phaseIdx && !done);
+                    const hasApiAccount = Boolean(portal.data?.account);
+                    let done = statusIdx >= 0 && statusIdx >= phaseIdx;
+                    if (phase.key === "approved" && hasApiAccount) done = true;
+                    const active = !done && (leadStatus === phase.key || statusIdx + 1 === phaseIdx);
                     return (
                       <li key={phase.key} className="flex gap-4">
                         <div className="flex flex-col items-center">

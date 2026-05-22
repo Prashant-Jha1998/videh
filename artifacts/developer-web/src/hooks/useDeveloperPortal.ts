@@ -127,7 +127,14 @@ export function useDeveloperPortal(opts: {
       };
       const tpl = (await tplRes.json()) as { templates?: PortalTemplate[]; approvedCount?: number };
       if (!portalRes.ok || !portal.success) {
-        setError(portal.message ?? "Could not load application data.");
+        setError(
+          portal.message ??
+            (portalRes.status === 401
+              ? "Session expired — sign out and sign in again."
+              : portalRes.status === 404
+                ? "Application not linked to your account. Sign in with the same email you used to apply."
+                : "Could not load application data."),
+        );
         setData(null);
         return;
       }

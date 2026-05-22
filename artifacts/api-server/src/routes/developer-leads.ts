@@ -34,6 +34,8 @@ import { getDeveloperPortalUser } from "../lib/developerPortalSession";
 import {
   ensureDeveloperPortalUsersTable,
   getActiveLeadForPortalUser,
+  linkLeadToPortalUserIfNeeded,
+  normalizePortalEmail,
 } from "../lib/developerPortalUsers";
 import {
   decryptApiSecret,
@@ -626,9 +628,19 @@ router.post("/:id/channel/verify-otp", async (req, res) => {
   }
 });
 
-function portalAuth(lead: { reference_code?: string; portal_user_id?: number | null }, reference: string, req?: Request): boolean {
-  const portalUser = req ? getDeveloperPortalUser(req) : null;
-  if (portalUser && lead.portal_user_id === portalUser.userId) return true;
+async function assertPortalLeadAccess(
+  leadId: number,
+  lead: { reference_code?: string; portal_user_id?: number | null; email?: string },
+  reference: string,
+  req: Request,
+): Promise<boolean> {
+  const portalUser = getDeveloperPortalUser(req);
+  if (portalUser) {
+    await linkLeadToPortalUserIfNeeded(leadId, portalUser.userId, portalUser.email);
+    if (lead.portal_user_id === portalUser.userId) return true;
+    const leadEmail = normalizePortalEmail(String(lead.email ?? ""));
+    if (leadEmail && leadEmail === normalizePortalEmail(portalUser.email)) return true;
+  }
   return Boolean(reference && lead.reference_code && lead.reference_code === reference);
 }
 
@@ -648,7 +660,15 @@ router.get("/:id/portal", async (req, res) => {
     await ensureDeveloperPlatformTables();
     const lead = await query(`SELECT * FROM developer_leads WHERE id = $1`, [leadId]);
     const row = lead.rows[0] as { reference_code?: string } | undefined;
-    if (!row || !portalAuth(row as { reference_code?: string; portal_user_id?: number | null }, reference, req)) {
+    if (
+      !row ||
+      !(await assertPortalLeadAccess(
+        leadId,
+        row as { reference_code?: string; portal_user_id?: number | null; email?: string },
+        reference,
+        req,
+      ))
+    ) {
       res.status(404).json({ success: false, message: "Application not found" });
       return;
     }
@@ -719,8 +739,10 @@ router.get("/:id/templates", async (req, res) => {
       `SELECT reference_code, status, portal_user_id FROM developer_leads WHERE id = $1`,
       [leadId],
     );
-    const row = lead.rows[0] as { reference_code?: string; status?: string; portal_user_id?: number | null } | undefined;
-    if (!row || !portalAuth(row, reference, req)) {
+    const row = lead.rows[0] as
+      | { reference_code?: string; status?: string; portal_user_id?: number | null; email?: string }
+      | undefined;
+    if (!row || !(await assertPortalLeadAccess(leadId, row, reference, req))) {
       res.status(404).json({ success: false, message: "Application not found" });
       return;
     }
@@ -779,8 +801,10 @@ router.post("/:id/templates", async (req, res) => {
       `SELECT reference_code, status, portal_user_id FROM developer_leads WHERE id = $1`,
       [leadId],
     );
-    const row = lead.rows[0] as { reference_code?: string; status?: string; portal_user_id?: number | null } | undefined;
-    if (!row || !portalAuth(row, reference, req)) {
+    const row = lead.rows[0] as
+      | { reference_code?: string; status?: string; portal_user_id?: number | null; email?: string }
+      | undefined;
+    if (!row || !(await assertPortalLeadAccess(leadId, row, reference, req))) {
       res.status(404).json({ success: false, message: "Application not found" });
       return;
     }
@@ -867,7 +891,7 @@ async function getPortalAccountForLead(
   const row = lead.rows[0] as
     | { reference_code?: string; portal_user_id?: number | null; status?: string }
     | undefined;
-  if (!row || !portalAuth(row, reference, req)) return null;
+  if (!row || !(await assertPortalLeadAccess(leadId, row, reference, req))) return null;
   const account = await query(
     `SELECT id, api_key_id, billing_status, api_key_secret_enc FROM developer_api_accounts WHERE lead_id = $1`,
     [leadId],

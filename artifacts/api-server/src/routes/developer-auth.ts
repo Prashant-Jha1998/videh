@@ -38,7 +38,7 @@ router.get("/me", async (req, res) => {
     return;
   }
   try {
-    const activeLead = await getActiveLeadForPortalUser(identity.userId);
+    const activeLead = await getActiveLeadForPortalUser(identity.userId, identity.email);
     res.json({
       success: true,
       user: { id: identity.userId, email: identity.email },
@@ -126,7 +126,7 @@ router.post("/login", async (req: Request, res: Response) => {
       return;
     }
     setDeveloperPortalCookie(res, token);
-    const activeLead = await getActiveLeadForPortalUser(user.id);
+    const activeLead = await getActiveLeadForPortalUser(user.id, user.email);
     res.json({
       success: true,
       user: { id: user.id, email: user.email, fullName: user.full_name },
