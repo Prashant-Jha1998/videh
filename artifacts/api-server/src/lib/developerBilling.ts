@@ -102,7 +102,7 @@ export async function billConversation(input: BillConversationInput): Promise<Bi
 
 export async function assertApiBillingActive(accountId: number): Promise<{ ok: boolean; reason?: string }> {
   const r = await query(
-    `SELECT a.billing_status, l.payment_status, l.payment_method_verified
+    `SELECT a.billing_status, l.status AS lead_status, l.payment_status, l.payment_method_verified
      FROM developer_api_accounts a
      JOIN developer_leads l ON l.id = a.lead_id
      WHERE a.id = $1`,
@@ -110,12 +110,16 @@ export async function assertApiBillingActive(accountId: number): Promise<{ ok: b
   );
   const row = r.rows[0] as {
     billing_status?: string;
+    lead_status?: string;
     payment_status?: string;
     payment_method_verified?: boolean;
   } | undefined;
   if (!row) return { ok: false, reason: "account_not_found" };
-  if (row.billing_status === "hold" || row.billing_status === "past_due") {
-    return { ok: false, reason: "billing_on_hold" };
+  if (row.lead_status === "suspended") {
+    return { ok: false, reason: "account_suspended" };
+  }
+  if (row.billing_status === "hold" || row.billing_status === "past_due" || row.billing_status === "suspended") {
+    return { ok: false, reason: row.billing_status === "suspended" ? "account_suspended" : "billing_on_hold" };
   }
   if (
     !row.payment_method_verified &&

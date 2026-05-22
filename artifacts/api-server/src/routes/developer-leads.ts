@@ -60,6 +60,7 @@ export const DEVELOPER_STATUSES = [
   "channel_setup",
   "templates_review",
   "approved",
+  "suspended",
   "rejected",
 ] as const;
 

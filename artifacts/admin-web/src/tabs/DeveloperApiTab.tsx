@@ -92,12 +92,23 @@ type ApiAccount = {
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
   payment_pending: "Awaiting payment",
-  paid: "Paid — needs review",
+  paid: "Paid — review",
   documents_review: "Documents review",
   channel_setup: "Channel setup",
   templates_review: "Templates review",
   approved: "Approved",
+  suspended: "Suspended",
   rejected: "Rejected",
+};
+
+const FILTER_LABELS: Record<string, string> = {
+  pending: "Pending review",
+  paid: "Paid",
+  documents_review: "Documents",
+  approved: "Approved",
+  suspended: "Suspended",
+  rejected: "Rejected",
+  all: "All",
 };
 
 const NEXT_STATUS: Record<string, string> = {
@@ -106,6 +117,175 @@ const NEXT_STATUS: Record<string, string> = {
   channel_setup: "templates_review",
   templates_review: "approved",
 };
+
+function statusBadgeClass(status: string): string {
+  if (status === "approved") return "dev-badge dev-badge--ok";
+  if (status === "suspended") return "dev-badge dev-badge--warn";
+  if (status === "rejected") return "dev-badge dev-badge--err";
+  if (status === "paid" || status === "documents_review" || status === "templates_review") {
+    return "dev-badge dev-badge--info";
+  }
+  return "dev-badge dev-badge--muted";
+}
+
+function paymentLabel(lead: Lead): string {
+  if (lead.payment_method_verified) return "Verified";
+  const map: Record<string, string> = {
+    method_verified: "Verified",
+    pending: "Pending",
+    paid: "Paid",
+    waived: "Waived",
+    failed: "Failed",
+    none: "Not started",
+  };
+  const raw = lead.payment_status ?? "";
+  return map[raw] ?? (raw.replace(/_/g, " ") || "—");
+}
+
+function wizardStepLabel(step?: string): string {
+  const map: Record<string, string> = {
+    plan: "Plan",
+    company: "Company",
+    documents: "Documents",
+    profile: "Profile",
+    channel: "Phone",
+    payment: "Payment",
+    done: "Submitted",
+  };
+  return map[step ?? ""] ?? step?.replace(/_/g, " ") ?? "—";
+}
+
+function entityLabel(t?: string): string {
+  const map: Record<string, string> = {
+    pvt_ltd: "Pvt Ltd",
+    llp: "LLP",
+    proprietorship: "Proprietorship",
+    partnership: "Partnership",
+    other: "Other",
+  };
+  return map[t ?? ""] ?? t ?? "";
+}
+
+function billingLabel(s: string): string {
+  const map: Record<string, string> = {
+    active: "Active",
+    hold: "On hold",
+    past_due: "Past due",
+    suspended: "Suspended",
+  };
+  return map[s] ?? s;
+}
+
+function planLabel(id?: string): string {
+  if (!id) return "—";
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+function StatusBadge({ status }: { status: string }) {
+  return <span className={statusBadgeClass(status)}>{STATUS_LABELS[status] ?? status}</span>;
+}
+
+function ApplicationCard({
+  lead,
+  onDetail,
+  onAdvance,
+  onReject,
+  onSuspend,
+  onReactivate,
+  onDelete,
+}: {
+  lead: Lead;
+  onDetail: () => void;
+  onAdvance: () => void;
+  onReject: () => void;
+  onSuspend: () => void;
+  onReactivate: () => void;
+  onDelete: () => void;
+}) {
+  const name = lead.company_name || lead.display_name || "(Unnamed company)";
+  const initial = name.charAt(0).toUpperCase();
+  const payOk = lead.payment_method_verified || lead.payment_status === "method_verified";
+
+  return (
+    <article className="dev-app-card">
+      <div className="dev-app-card__head">
+        <div className="dev-app-card__title">
+          {lead.logo_url ? (
+            <img src={lead.logo_url} alt="" className="dev-app-logo" />
+          ) : (
+            <div className="dev-app-logo dev-app-logo--placeholder" aria-hidden>
+              {initial}
+            </div>
+          )}
+          <div style={{ minWidth: 0 }}>
+            <h3>{name}</h3>
+            <span className="dev-app-card__ref">{lead.reference_code}</span>
+          </div>
+        </div>
+        <StatusBadge status={lead.status} />
+      </div>
+
+      <div className="dev-meta-row">
+        {lead.contact_name ? (
+          <span className="dev-meta-chip">
+            <strong>{lead.contact_name}</strong>
+          </span>
+        ) : null}
+        <span className="dev-meta-chip">{lead.email}</span>
+        {lead.phone ? <span className="dev-meta-chip">{lead.phone}</span> : null}
+        {lead.entity_type ? <span className="dev-meta-chip">{entityLabel(lead.entity_type)}</span> : null}
+      </div>
+
+      <div className="dev-metrics">
+        <div className="dev-metric">
+          <b>{planLabel(lead.plan_id)}</b>
+          <span>Plan</span>
+        </div>
+        <div className={`dev-metric${payOk ? " dev-metric--ok" : ""}`}>
+          <b>{paymentLabel(lead)}</b>
+          <span>Payment</span>
+        </div>
+        <div className="dev-metric">
+          <b>{wizardStepLabel(lead.wizard_step)}</b>
+          <span>Onboarding</span>
+        </div>
+      </div>
+
+      <div className="dev-actions">
+        <div className="dev-actions__group">
+          <button type="button" className="btn-sm btn-sm-primary" onClick={onDetail}>
+            View details
+          </button>
+          {NEXT_STATUS[lead.status] ? (
+            <button type="button" className="btn-sm" onClick={onAdvance}>
+              Advance → {STATUS_LABELS[NEXT_STATUS[lead.status]!]}
+            </button>
+          ) : null}
+          {lead.status === "suspended" ? (
+            <button type="button" className="btn-sm btn-sm-primary" onClick={onReactivate}>
+              Reactivate
+            </button>
+          ) : null}
+          {lead.status === "approved" ? (
+            <button type="button" className="btn-sm btn-sm-warn" onClick={onSuspend}>
+              Suspend API
+            </button>
+          ) : null}
+          {lead.status !== "rejected" && lead.status !== "approved" && lead.status !== "suspended" ? (
+            <button type="button" className="btn-sm btn-sm-warn" onClick={onReject}>
+              Reject
+            </button>
+          ) : null}
+        </div>
+        <div className="dev-actions__danger">
+          <button type="button" className="btn-sm btn-sm-danger" onClick={onDelete}>
+            Delete
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
 
 export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
   const [view, setView] = useState<"applications" | "accounts">("applications");
@@ -208,6 +388,45 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
     void updateLead(lead.id, { status: "rejected", adminNotes: note });
   };
 
+  const suspendLead = (lead: Lead) => {
+    const note = window.prompt("Suspend reason (optional)")?.trim();
+    if (!window.confirm(`Suspend ${lead.reference_code}? API access will be blocked until you reactivate.`)) return;
+    void updateLead(lead.id, {
+      status: "suspended",
+      adminNotes: note ? `${lead.admin_notes ? `${lead.admin_notes}\n` : ""}[Suspended] ${note}` : lead.admin_notes,
+    });
+  };
+
+  const reactivateLead = (lead: Lead) => {
+    if (!window.confirm(`Reactivate ${lead.reference_code} and restore API access?`)) return;
+    void updateLead(lead.id, { status: "approved" });
+  };
+
+  const deleteLead = async (lead: Lead) => {
+    if (
+      !window.confirm(
+        `Permanently delete "${lead.company_name || lead.reference_code}" (${lead.reference_code})?\n\nThis removes the application, API account, templates, and files. Cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    const typed = window.prompt(`Type DELETE to confirm removal of ${lead.reference_code}`)?.trim();
+    if (typed !== "DELETE") {
+      onErr("Deletion cancelled — type DELETE to confirm.");
+      return;
+    }
+    try {
+      await adminApi(`/admin/developer-leads/${lead.id}`, { method: "DELETE" });
+      if (detailId === lead.id) {
+        setDetail(null);
+        setDetailId(null);
+      }
+      await load();
+    } catch (err) {
+      onErr(err instanceof Error ? err.message : "Delete failed");
+    }
+  };
+
   const manualVerifyChannel = async (leadId: number) => {
     const phone = window.prompt("Channel phone (10 digits)", "")?.trim();
     if (!phone) return;
@@ -235,358 +454,419 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
     }
   };
 
-  return (
-    <div>
-      <h2 style={{ marginTop: 0 }}>Developer API</h2>
-      <p className="muted">
-        Review applications (documents, profile, payment) and manage live API accounts (usage, billing hold).
-      </p>
+  const countLabel =
+    view === "applications"
+      ? loading
+        ? "Loading…"
+        : `${leads.length} application${leads.length === 1 ? "" : "s"}`
+      : loading
+        ? "Loading…"
+        : `${accounts.length} live account${accounts.length === 1 ? "" : "s"}`;
 
-      <div className="card" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        <button
-          type="button"
-          className={view === "applications" ? "nav-btn active" : "nav-btn"}
-          style={{ width: "auto", padding: "6px 12px" }}
-          onClick={() => setView("applications")}
-        >
-          Applications
-        </button>
-        <button
-          type="button"
-          className={view === "accounts" ? "nav-btn active" : "nav-btn"}
-          style={{ width: "auto", padding: "6px 12px" }}
-          onClick={() => setView("accounts")}
-        >
-          Live APIs
-        </button>
-        <button type="button" className="btn" style={{ width: "auto", marginLeft: "auto" }} onClick={() => void load()}>
-          Refresh
+  return (
+    <div className="dev-api-page">
+      <header className="dev-api-header">
+        <h2>Developer API</h2>
+        <p className="muted" style={{ margin: 0, maxWidth: 560 }}>
+          Review partner applications, approve templates, and manage live API keys, billing, and access.
+        </p>
+      </header>
+
+      <div className="dev-api-toolbar">
+        <div className="dev-segment">
+          <button
+            type="button"
+            className={view === "applications" ? "active" : ""}
+            onClick={() => setView("applications")}
+          >
+            Applications
+          </button>
+          <button type="button" className={view === "accounts" ? "active" : ""} onClick={() => setView("accounts")}>
+            Live APIs
+          </button>
+        </div>
+        <span className="dev-count">{countLabel}</span>
+        <button type="button" className="btn-sm btn-sm-ghost" style={{ marginLeft: "auto" }} onClick={() => void load()}>
+          ↻ Refresh
         </button>
       </div>
 
       {view === "applications" ? (
         <>
-          <div className="card" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-            {(["pending", "paid", "documents_review", "approved", "rejected", "all"] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={filter === s ? "nav-btn active" : "nav-btn"}
-                style={{ width: "auto", padding: "6px 12px" }}
-                onClick={() => setFilter(s)}
-              >
-                {s === "pending" ? "Pending" : s.replace(/_/g, " ")}
-              </button>
-            ))}
+          <div className="dev-filters">
+            {(["pending", "paid", "documents_review", "approved", "suspended", "rejected", "all"] as const).map(
+              (s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`dev-filter-chip${filter === s ? " active" : ""}`}
+                  onClick={() => setFilter(s)}
+                >
+                  {FILTER_LABELS[s] ?? s}
+                </button>
+              ),
+            )}
           </div>
 
           {loading ? (
-            <p className="muted">Loading…</p>
+            <div className="dev-loading">Loading applications…</div>
           ) : leads.length === 0 ? (
-            <p className="muted">No applications in this filter.</p>
+            <div className="dev-empty">
+              <h3>No applications here</h3>
+              <p className="muted" style={{ margin: 0 }}>
+                Try another filter, or wait for a new partner signup on developer.videh.co.in.
+              </p>
+            </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="dev-list">
               {leads.map((lead) => (
-                <div key={lead.id} className="card">
-                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                    <div>
-                      <strong>{lead.company_name || "(no name yet)"}</strong>
-                      <span className="muted" style={{ marginLeft: 8 }}>
-                        {lead.reference_code}
-                      </span>
-                    </div>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)" }}>
-                      {STATUS_LABELS[lead.status] ?? lead.status}
-                    </span>
-                  </div>
-                  <p className="muted" style={{ margin: "8px 0", fontSize: 13 }}>
-                    {lead.contact_name} · {lead.email} · {lead.phone}
-                    {lead.entity_type ? ` · ${lead.entity_type}` : ""}
-                  </p>
-                  <div className="grid-stats" style={{ marginTop: 8, gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))" }}>
-                    <div className="stat">
-                      <b>{lead.plan_id ?? "—"}</b>
-                      <span>Plan</span>
-                    </div>
-                    <div className="stat">
-                      <b>{lead.payment_status ?? "—"}</b>
-                      <span>Payment</span>
-                    </div>
-                    <div className="stat">
-                      <b>{lead.wizard_step ?? "—"}</b>
-                      <span>Wizard step</span>
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-                    <button type="button" className="btn btn-primary" style={{ width: "auto" }} onClick={() => void loadDetail(lead.id)}>
-                      View details
-                    </button>
-                    {NEXT_STATUS[lead.status] ? (
-                      <button type="button" className="btn" style={{ width: "auto" }} onClick={() => advance(lead)}>
-                        Approve → {STATUS_LABELS[NEXT_STATUS[lead.status]!]}
-                      </button>
-                    ) : null}
-                    {lead.status !== "rejected" && lead.status !== "approved" ? (
-                      <button type="button" className="btn" style={{ width: "auto" }} onClick={() => reject(lead)}>
-                        Reject
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
+                <ApplicationCard
+                  key={lead.id}
+                  lead={lead}
+                  onDetail={() => void loadDetail(lead.id)}
+                  onAdvance={() => advance(lead)}
+                  onReject={() => reject(lead)}
+                  onSuspend={() => suspendLead(lead)}
+                  onReactivate={() => reactivateLead(lead)}
+                  onDelete={() => void deleteLead(lead)}
+                />
               ))}
             </div>
           )}
         </>
       ) : loading ? (
-        <p className="muted">Loading…</p>
+        <div className="dev-loading">Loading live accounts…</div>
       ) : accounts.length === 0 ? (
-        <p className="muted">No live API accounts yet. Approve an application to create keys.</p>
+        <div className="dev-empty">
+          <h3>No live API accounts</h3>
+          <p className="muted" style={{ margin: 0 }}>
+            Approve an application to issue API keys and show it here.
+          </p>
+        </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="dev-list">
           {accounts.map((a) => (
-            <div key={a.id} className="card">
-              <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                <div>
-                  <strong>{a.display_name ?? a.company_name}</strong>
-                  <span className="muted" style={{ marginLeft: 8 }}>
-                    {a.reference_code}
-                  </span>
+            <article key={a.id} className="dev-app-card">
+              <div className="dev-app-card__head">
+                <div className="dev-app-card__title">
+                  <div className="dev-app-logo dev-app-logo--placeholder" aria-hidden>
+                    {(a.display_name ?? a.company_name).charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <h3>{a.display_name ?? a.company_name}</h3>
+                    <span className="dev-app-card__ref">{a.reference_code}</span>
+                  </div>
                 </div>
                 <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: a.billing_status === "active" ? "var(--ok)" : "var(--err)",
-                  }}
+                  className={`dev-badge ${
+                    a.billing_status === "active" ? "dev-badge--ok" : a.billing_status === "suspended" ? "dev-badge--warn" : "dev-badge--err"
+                  }`}
                 >
-                  Billing: {a.billing_status}
+                  {billingLabel(a.billing_status)}
                 </span>
               </div>
-              <p className="muted" style={{ fontSize: 13, margin: "8px 0" }}>
-                Key: <code>{a.api_key_id}</code>
-                {a.email ? ` · ${a.email}` : ""}
-              </p>
-              <div className="grid-stats" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))" }}>
-                <div className="stat">
+              <div className="dev-meta-row">
+                <span className="dev-meta-chip">
+                  Key: <code style={{ fontSize: "0.75rem" }}>{a.api_key_id}</code>
+                </span>
+                {a.email ? <span className="dev-meta-chip">{a.email}</span> : null}
+                <StatusBadge status={a.lead_status ?? "approved"} />
+              </div>
+              <div className="dev-metrics" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
+                <div className="dev-metric">
                   <b>{a.messages_sent_total ?? 0}</b>
-                  <span>Messages total</span>
+                  <span>Sent (total)</span>
                 </div>
-                <div className="stat">
+                <div className="dev-metric">
                   <b>{a.messages_sent_month ?? 0}</b>
                   <span>This month</span>
                 </div>
-                <div className="stat">
-                  <b>₹{((a.usage_billing_month_inr ?? 0) / 100).toFixed(2)}</b>
-                  <span>Usage (mo)</span>
+                <div className="dev-metric">
+                  <b>₹{((a.usage_billing_month_inr ?? 0) / 100).toFixed(0)}</b>
+                  <span>Usage bill</span>
                 </div>
-                <div className="stat">
-                  <b>{a.conv_free_user_used_month ?? 0}/100</b>
-                  <span>Free tier used</span>
+                <div className="dev-metric">
+                  <b>
+                    {a.conv_free_user_used_month ?? 0}/100
+                  </b>
+                  <span>Free tier</span>
                 </div>
-                <div className="stat">
-                  <b>{a.plan_id ?? "—"}</b>
+                <div className="dev-metric">
+                  <b>{planLabel(a.plan_id)}</b>
                   <span>Plan</span>
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                <button type="button" className="btn" style={{ width: "auto" }} onClick={() => void loadDetail(a.lead_id)}>
-                  Application
-                </button>
-                {a.billing_status !== "active" ? (
+              <div className="dev-actions">
+                <div className="dev-actions__group">
+                  <button type="button" className="btn-sm" onClick={() => void loadDetail(a.lead_id)}>
+                    Application
+                  </button>
+                  {a.billing_status !== "active" ? (
+                    <button
+                      type="button"
+                      className="btn-sm btn-sm-primary"
+                      onClick={() => void updateAccountBilling(a.id, "active")}
+                    >
+                      Activate billing
+                    </button>
+                  ) : (
+                    <button type="button" className="btn-sm btn-sm-warn" onClick={() => void updateAccountBilling(a.id, "hold")}>
+                      Hold billing
+                    </button>
+                  )}
+                  {a.lead_status === "approved" ? (
+                    <button
+                      type="button"
+                      className="btn-sm btn-sm-warn"
+                      onClick={() => {
+                        const lead = leads.find((l) => l.id === a.lead_id);
+                        if (lead) suspendLead(lead);
+                        else void updateLead(a.lead_id, { status: "suspended" });
+                      }}
+                    >
+                      Suspend
+                    </button>
+                  ) : null}
+                </div>
+                <div className="dev-actions__danger">
                   <button
                     type="button"
-                    className="btn btn-primary"
-                    style={{ width: "auto" }}
-                    onClick={() => void updateAccountBilling(a.id, "active")}
+                    className="btn-sm btn-sm-danger"
+                    onClick={() => {
+                      const lead =
+                        leads.find((l) => l.id === a.lead_id) ??
+                        ({
+                          id: a.lead_id,
+                          reference_code: a.reference_code,
+                          company_name: a.company_name,
+                          entity_type: a.entity_type ?? "",
+                          contact_name: "",
+                          email: a.email ?? "",
+                          phone: a.phone ?? "",
+                          status: a.lead_status ?? "approved",
+                          created_at: "",
+                        } as Lead);
+                      void deleteLead(lead);
+                    }}
                   >
-                    Release API (active)
+                    Delete
                   </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn"
-                    style={{ width: "auto" }}
-                    onClick={() => void updateAccountBilling(a.id, "hold")}
-                  >
-                    Hold API (payment failed)
-                  </button>
-                )}
+                </div>
               </div>
-            </div>
+            </article>
           ))}
         </div>
       )}
 
       {detail && detailId ? (
         <div
+          className="modal-backdrop"
           role="dialog"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            zIndex: 1000,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-          }}
+          aria-modal="true"
           onClick={() => {
             setDetail(null);
             setDetailId(null);
           }}
         >
-          <div
-            className="card"
-            style={{ maxWidth: 720, width: "100%", maxHeight: "90vh", overflow: "auto" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ marginTop: 0 }}>
-              {detail.lead.company_name} <span className="muted">{detail.lead.reference_code}</span>
-            </h3>
-            {detail.lead.logo_url ? (
-              <img src={detail.lead.logo_url} alt="" style={{ height: 48, borderRadius: 8, marginBottom: 12 }} />
-            ) : null}
-
-            <p className="muted" style={{ fontSize: 13 }}>
-              Status: <strong>{detail.lead.status}</strong> · Payment: <strong>{detail.lead.payment_status}</strong>
-              {detail.lead.payment_method_verified ? " ✓ verified" : " ✗ not verified"} · Entity:{" "}
-              <strong>{detail.lead.entity_type}</strong>
-            </p>
-
-            <h4>Business profile</h4>
-            <ul style={{ fontSize: 13, margin: "0 0 12px" }}>
-              <li>Display name: {detail.lead.display_name ?? "—"}</li>
-              <li>Category: {detail.lead.business_category ?? "—"}</li>
-              <li>GSTIN: {detail.lead.gstin ?? "—"}</li>
-              <li>CIN / LLPIN / Udyam: {[detail.lead.cin, detail.lead.llpin, detail.lead.udyam].filter(Boolean).join(" · ") || "—"}</li>
-              <li>Address: {detail.lead.business_address ?? "—"}</li>
-              <li>Description: {detail.lead.business_description ?? "—"}</li>
-            </ul>
-
-            <h4>Business channel (Phone Number ID)</h4>
-            <p style={{ fontSize: 13, marginBottom: 8 }}>
-              Status: <strong>{detail.lead.channel_status ?? "none"}</strong>
-              {detail.lead.channel_phone ? ` · Phone: ${detail.lead.channel_phone}` : ""}
-            </p>
-            {detail.lead.videh_phone_number_id ? (
-              <ul style={{ fontSize: 13, margin: "0 0 12px" }}>
-                <li>
-                  Phone Number ID: <code>{detail.lead.videh_phone_number_id}</code>
-                </li>
-                <li>
-                  Business Account ID: <code>{detail.lead.videh_business_account_id}</code>
-                </li>
-              </ul>
-            ) : (
-              <p className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
-                Applicant must verify dedicated number via OTP in the application console.
-              </p>
-            )}
-            {detail.lead.channel_status !== "verified" ? (
+          <div className="modal-card" style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                {detail.lead.logo_url ? (
+                  <img src={detail.lead.logo_url} alt="" className="dev-app-logo" />
+                ) : null}
+                <div>
+                  <h3>{detail.lead.company_name || "(Unnamed)"}</h3>
+                  <span className="dev-app-card__ref">{detail.lead.reference_code}</span>
+                  <div style={{ marginTop: 8 }}>
+                    <StatusBadge status={detail.lead.status} />
+                  </div>
+                </div>
+              </div>
               <button
                 type="button"
-                className="btn"
-                style={{ width: "auto", marginBottom: 12 }}
-                onClick={() => void manualVerifyChannel(detail.lead.id)}
+                className="btn-sm btn-sm-ghost modal-close"
+                onClick={() => {
+                  setDetail(null);
+                  setDetailId(null);
+                }}
               >
-                Admin: mark channel verified
+                ✕ Close
               </button>
-            ) : null}
+            </div>
 
-            <h4>Documents</h4>
-            <ul style={{ fontSize: 13 }}>
-              {detail.requiredDocuments.map((req) => {
-                const doc = detail.documents.find((d) => d.doc_type === req.key);
-                return (
-                  <li key={req.key} style={{ marginBottom: 6 }}>
-                    {req.label} {req.required ? "*" : ""}:{" "}
-                    {doc ? (
-                      <a href={doc.file_path} target="_blank" rel="noreferrer">
-                        {doc.file_name}
-                      </a>
-                    ) : (
-                      <span style={{ color: "var(--err)" }}>Missing</span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+            <div className="dev-detail-section">
+              <h4>Overview</h4>
+              <dl className="dev-detail-grid">
+                <dt>Payment</dt>
+                <dd>{paymentLabel(detail.lead)}</dd>
+                <dt>Entity</dt>
+                <dd>{entityLabel(detail.lead.entity_type)}</dd>
+                <dt>Contact</dt>
+                <dd>
+                  {detail.lead.contact_name || "—"} · {detail.lead.email} · {detail.lead.phone || "—"}
+                </dd>
+                <dt>Onboarding step</dt>
+                <dd>{wizardStepLabel(detail.lead.wizard_step)}</dd>
+                <dt>Display name</dt>
+                <dd>{detail.lead.display_name ?? "—"}</dd>
+                <dt>GSTIN</dt>
+                <dd>{detail.lead.gstin ?? "—"}</dd>
+              </dl>
+            </div>
 
-            {detail.account ? (
-              <>
-                <h4>API account</h4>
-                <p style={{ fontSize: 13 }}>
-                  Key ID: <code>{detail.account.api_key_id}</code> · Billing: {detail.account.billing_status} · Sent:{" "}
-                  {detail.account.messages_sent_total ?? 0} · Billed: ₹{detail.account.total_billed_inr ?? 0}
-                </p>
-              </>
-            ) : null}
-
-            <h4>Message templates</h4>
-            <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-              Developers submit templates from <strong>developer.videh.co.in → Developer console</strong>. You only
-              approve or reject. Approved <code>template_key</code> values are used in POST /v1/business-messages.
-            </p>
-            {detail.templates.length === 0 ? (
-              <p className="muted" style={{ fontSize: 13 }}>
-                No templates submitted yet. Developer adds them in their console after onboarding.
-              </p>
-            ) : (
-              <ul style={{ fontSize: 13, marginBottom: 12 }}>
-                {detail.templates.map((t) => (
-                  <li key={t.id} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
-                    <strong className="font-mono">{t.template_key}</strong> — {t.name}{" "}
-                    <span className="muted">
-                      ({t.category}, {t.language}) · {t.status}
-                    </span>
-                    <p className="muted" style={{ margin: "4px 0" }}>
-                      {t.body_preview ?? t.body_text.slice(0, 100)}
-                    </p>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {t.status !== "approved" ? (
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          style={{ width: "auto", padding: "4px 10px", fontSize: 12 }}
-                          onClick={() => void patchTemplate(t.id, "approved")}
-                        >
-                          Approve
-                        </button>
-                      ) : null}
-                      {t.status !== "rejected" ? (
-                        <button
-                          type="button"
-                          className="btn"
-                          style={{ width: "auto", padding: "4px 10px", fontSize: 12 }}
-                          onClick={() => void patchTemplate(t.id, "rejected")}
-                        >
-                          Reject
-                        </button>
-                      ) : null}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {apiSecretOnce ? (
-              <p style={{ fontSize: 12, color: "var(--warn)" }}>API secret was shown once on approval.</p>
-            ) : null}
-
-            <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-              {NEXT_STATUS[detail.lead.status] ? (
+            <div className="dev-detail-section">
+              <h4>Business channel</h4>
+              <dl className="dev-detail-grid">
+                <dt>Status</dt>
+                <dd>{detail.lead.channel_status ?? "none"}</dd>
+                <dt>Phone</dt>
+                <dd>{detail.lead.channel_phone ?? "—"}</dd>
+                <dt>Phone Number ID</dt>
+                <dd>
+                  <code>{detail.lead.videh_phone_number_id ?? "—"}</code>
+                </dd>
+                <dt>Business Account ID</dt>
+                <dd>
+                  <code>{detail.lead.videh_business_account_id ?? "—"}</code>
+                </dd>
+              </dl>
+              {detail.lead.channel_status !== "verified" ? (
                 <button
                   type="button"
-                  className="btn btn-primary"
-                  style={{ width: "auto" }}
-                  onClick={() => void updateLead(detail.lead.id, { status: NEXT_STATUS[detail.lead.status] })}
+                  className="btn-sm"
+                  style={{ marginTop: 8 }}
+                  onClick={() => void manualVerifyChannel(detail.lead.id)}
                 >
-                  Approve next step
+                  Mark channel verified (admin)
                 </button>
               ) : null}
-              <button type="button" className="btn" style={{ width: "auto" }} onClick={() => setDetail(null)}>
-                Close
-              </button>
+            </div>
+
+            <div className="dev-detail-section">
+              <h4>Compliance documents</h4>
+              <ul style={{ fontSize: "0.85rem", margin: 0, paddingLeft: 18 }}>
+                {detail.requiredDocuments.map((req) => {
+                  const doc = detail.documents.find((d) => d.doc_type === req.key);
+                  return (
+                    <li key={req.key} style={{ marginBottom: 6 }}>
+                      {req.label}
+                      {req.required ? " *" : ""}:{" "}
+                      {doc ? (
+                        <a href={doc.file_path} target="_blank" rel="noreferrer">
+                          {doc.file_name}
+                        </a>
+                      ) : (
+                        <span style={{ color: "var(--err)" }}>Missing</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+
+            {detail.account ? (
+              <div className="dev-detail-section">
+                <h4>API account</h4>
+                <dl className="dev-detail-grid">
+                  <dt>Key ID</dt>
+                  <dd>
+                    <code>{detail.account.api_key_id}</code>
+                  </dd>
+                  <dt>Billing</dt>
+                  <dd>{billingLabel(detail.account.billing_status)}</dd>
+                  <dt>Messages sent</dt>
+                  <dd>{detail.account.messages_sent_total ?? 0}</dd>
+                </dl>
+              </div>
+            ) : null}
+
+            <div className="dev-detail-section">
+              <h4>Message templates</h4>
+              <p className="muted" style={{ fontSize: "0.8rem", margin: "0 0 10px" }}>
+                Developers submit from developer.videh.co.in → Developer console. You approve or reject only.
+              </p>
+              {detail.templates.length === 0 ? (
+                <p className="muted" style={{ fontSize: "0.85rem" }}>No templates submitted yet.</p>
+              ) : (
+                <ul style={{ fontSize: "0.85rem", margin: 0, padding: 0, listStyle: "none" }}>
+                  {detail.templates.map((t) => (
+                    <li
+                      key={t.id}
+                      style={{
+                        marginBottom: 10,
+                        padding: 10,
+                        background: "var(--bg)",
+                        borderRadius: 8,
+                        border: "1px solid var(--border)",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                        <strong className="font-mono">{t.template_key}</strong>
+                        <span className={statusBadgeClass(t.status)} style={{ textTransform: "capitalize" }}>
+                          {t.status}
+                        </span>
+                      </div>
+                      <p className="muted" style={{ margin: "6px 0", fontSize: "0.8rem" }}>
+                        {t.name} · {t.category} · {t.language}
+                      </p>
+                      <p className="muted" style={{ margin: "0 0 8px", fontSize: "0.78rem" }}>
+                        {t.body_preview ?? t.body_text.slice(0, 120)}
+                      </p>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        {t.status !== "approved" ? (
+                          <button
+                            type="button"
+                            className="btn-sm btn-sm-primary"
+                            onClick={() => void patchTemplate(t.id, "approved")}
+                          >
+                            Approve
+                          </button>
+                        ) : null}
+                        {t.status !== "rejected" ? (
+                          <button type="button" className="btn-sm btn-sm-danger" onClick={() => void patchTemplate(t.id, "rejected")}>
+                            Reject
+                          </button>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {apiSecretOnce ? (
+              <p style={{ fontSize: "0.8rem", color: "var(--warn)", marginBottom: 12 }}>
+                API secret was shown once on approval.
+              </p>
+            ) : null}
+
+            <div className="dev-actions" style={{ borderRadius: 8, marginTop: 8 }}>
+              <div className="dev-actions__group">
+                {NEXT_STATUS[detail.lead.status] ? (
+                  <button
+                    type="button"
+                    className="btn-sm btn-sm-primary"
+                    onClick={() => void updateLead(detail.lead.id, { status: NEXT_STATUS[detail.lead.status] })}
+                  >
+                    Advance → {STATUS_LABELS[NEXT_STATUS[detail.lead.status]!]}
+                  </button>
+                ) : null}
+                {detail.lead.status === "approved" ? (
+                  <button type="button" className="btn-sm btn-sm-warn" onClick={() => suspendLead(detail.lead)}>
+                    Suspend API
+                  </button>
+                ) : null}
+                {detail.lead.status === "suspended" ? (
+                  <button type="button" className="btn-sm btn-sm-primary" onClick={() => reactivateLead(detail.lead)}>
+                    Reactivate
+                  </button>
+                ) : null}
+              </div>
+              <div className="dev-actions__danger">
+                <button type="button" className="btn-sm btn-sm-danger" onClick={() => void deleteLead(detail.lead)}>
+                  Delete permanently
+                </button>
+              </div>
             </div>
           </div>
         </div>

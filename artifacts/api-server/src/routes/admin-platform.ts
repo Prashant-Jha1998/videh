@@ -17,6 +17,7 @@ import {
   generateBusinessAccountId,
   generatePhoneNumberId,
 } from "../lib/developerChannel";
+import { deleteDeveloperLeadById } from "../lib/deleteDeveloperLead";
 
 function adminEmail(req: Request): string {
   const a = req.admin as AdminIdentity | undefined;
@@ -750,7 +751,7 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
       const params: unknown[] = [];
       let where = "1=1";
       if (status === "pending") {
-        where = "status NOT IN ('approved', 'rejected')";
+        where = "status NOT IN ('approved', 'rejected', 'suspended')";
       } else if (status !== "all") {
         where = "status = $1";
         params.push(status);
@@ -843,38 +844,58 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
         return;
       }
 
+      if (body.status === "suspended") {
+        await query(`UPDATE developer_api_accounts SET billing_status = 'suspended' WHERE lead_id = $1`, [id]);
+        await query(
+          `UPDATE developer_leads SET channel_status = 'suspended', updated_at = NOW() WHERE id = $1`,
+          [id],
+        );
+      }
+
       let apiSecretOnce: string | null = null;
       if (body.status === "approved") {
         const row = r.rows[0] as Record<string, unknown>;
-        const paymentOk =
-          row.payment_method_verified === true ||
-          row.payment_status === "method_verified" ||
-          row.payment_status === "paid" ||
-          row.payment_status === "waived";
-        if (!paymentOk) {
-          res.status(400).json({
-            success: false,
-            message: "Cannot approve: payment method not verified. Applicant must complete Razorpay verification.",
-          });
-          return;
-        }
-        if (row.channel_status !== "verified" || !row.videh_phone_number_id) {
-          res.status(400).json({
-            success: false,
-            message: "Cannot approve: business channel phone not verified. Applicant must complete dedicated number OTP.",
-          });
-          return;
-        }
         const existing = await query(`SELECT id FROM developer_api_accounts WHERE lead_id = $1`, [id]);
-        if (!existing.rows[0]) {
-          const apiKeyId = `vsk_${crypto.randomBytes(8).toString("hex")}`;
-          const apiSecret = `vsec_${crypto.randomBytes(24).toString("hex")}`;
-          const secretHash = crypto.createHash("sha256").update(apiSecret).digest("hex");
+        if (existing.rows[0]) {
+          await query(
+            `UPDATE developer_api_accounts SET billing_status = 'active' WHERE lead_id = $1 AND billing_status = 'suspended'`,
+            [id],
+          );
+          await query(
+            `UPDATE developer_leads SET channel_status = CASE
+               WHEN videh_phone_number_id IS NOT NULL THEN 'verified'
+               ELSE channel_status
+             END,
+             updated_at = NOW()
+             WHERE id = $1 AND channel_status = 'suspended'`,
+            [id],
+          );
+          const acct = existing.rows[0] as { id: number };
+          await linkTemplatesToAccount(id, acct.id);
+          await copyChannelToAccount(id, acct.id);
+        } else {
           const paymentOk =
             row.payment_method_verified === true ||
             row.payment_status === "method_verified" ||
             row.payment_status === "paid" ||
             row.payment_status === "waived";
+          if (!paymentOk) {
+            res.status(400).json({
+              success: false,
+              message: "Cannot approve: payment method not verified. Applicant must complete Razorpay verification.",
+            });
+            return;
+          }
+          if (row.channel_status !== "verified" || !row.videh_phone_number_id) {
+            res.status(400).json({
+              success: false,
+              message: "Cannot approve: business channel phone not verified. Applicant must complete dedicated number OTP.",
+            });
+            return;
+          }
+          const apiKeyId = `vsk_${crypto.randomBytes(8).toString("hex")}`;
+          const apiSecret = `vsec_${crypto.randomBytes(24).toString("hex")}`;
+          const secretHash = crypto.createHash("sha256").update(apiSecret).digest("hex");
           const billingStatus = paymentOk ? "active" : "hold";
           const ins = await query(
             `INSERT INTO developer_api_accounts
@@ -909,10 +930,6 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
           await linkTemplatesToAccount(id, newAccountId);
           await copyChannelToAccount(id, newAccountId);
           apiSecretOnce = apiSecret;
-        } else {
-          const acct = existing.rows[0] as { id: number };
-          await linkTemplatesToAccount(id, acct.id);
-          await copyChannelToAccount(id, acct.id);
         }
       }
 
@@ -929,6 +946,30 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
     } catch (err) {
       logger.error({ err }, "admin developer-lead patch");
       res.status(500).json({ success: false, message: "Update failed" });
+    }
+  });
+
+  router.delete("/developer-leads/:id", requireAdmin, requirePermission("developer.manage"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) {
+      res.status(400).json({ success: false, message: "Invalid id" });
+      return;
+    }
+    try {
+      await ensureDeveloperLeadsTable();
+      const ok = await deleteDeveloperLeadById(id);
+      if (!ok) {
+        res.status(404).json({ success: false, message: "Application not found" });
+        return;
+      }
+      await logAdminAction(
+        { action: "developer_lead_delete", entityType: "developer_lead", entityId: id },
+        req,
+      );
+      res.json({ success: true, deleted: true });
+    } catch (err) {
+      logger.error({ err }, "admin developer-lead delete");
+      res.status(500).json({ success: false, message: "Delete failed" });
     }
   });
 
@@ -956,7 +997,7 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
       res.status(400).json({ success: false, message: "Invalid id" });
       return;
     }
-    const allowed = new Set(["active", "hold", "past_due"]);
+    const allowed = new Set(["active", "hold", "past_due", "suspended"]);
     if (body.billingStatus && !allowed.has(body.billingStatus)) {
       res.status(400).json({ success: false, message: "Invalid billing status" });
       return;
