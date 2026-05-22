@@ -1,6 +1,7 @@
 import { BarChart3, Key, Loader2, Phone, RefreshCw } from "lucide-react";
 import type { PortalData } from "../hooks/useDeveloperPortal";
 import { PORTAL_STATUS_LABELS } from "../hooks/useDeveloperPortal";
+import { BillingUsageMetrics } from "./BillingUsageMetrics";
 import { DeveloperApiCredentials } from "./DeveloperApiCredentials";
 import { DeveloperTemplateBuilder } from "./DeveloperTemplateBuilder";
 
@@ -250,42 +251,8 @@ export function DeveloperBillingPanel({ data, busy, error, onRefresh }: PanelPro
       </button>
 
       {data?.account ? (
-        <div className="space-y-4 text-sm">
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <div className="rounded-xl bg-[#f0f2f5] p-4">
-              <p className="text-xs text-[#667781]">Messages (month)</p>
-              <p className="text-xl font-bold text-[#111b21]">{data.account.messages_sent_month ?? 0}</p>
-            </div>
-            <div className="rounded-xl bg-[#f0f2f5] p-4">
-              <p className="text-xs text-[#667781]">Messages (total)</p>
-              <p className="text-xl font-bold text-[#111b21]">{data.account.messages_sent_total ?? 0}</p>
-            </div>
-            <div className="rounded-xl bg-[#f0f2f5] p-4">
-              <p className="text-xs text-[#667781]">Usage billed (month)</p>
-              <p className="text-xl font-bold text-[#111b21]">₹{data.account.usage_billing_month_inr ?? 0}</p>
-            </div>
-            <div className="rounded-xl bg-[#f0f2f5] p-4">
-              <p className="text-xs text-[#667781]">Total billed</p>
-              <p className="text-xl font-bold text-[#111b21]">₹{data.account.total_billed_inr ?? 0}</p>
-            </div>
-            <div className="rounded-xl bg-[#f0f2f5] p-4">
-              <p className="text-xs text-[#667781]">Platform plan / mo</p>
-              <p className="text-xl font-bold text-[#111b21]">
-                {data.account.amount_inr_monthly
-                  ? `₹${data.account.amount_inr_monthly}`
-                  : data.account.plan_id ?? "—"}
-              </p>
-            </div>
-            <div className="rounded-xl bg-[#f0f2f5] p-4">
-              <p className="text-xs text-[#667781]">Billing status</p>
-              <p className="text-lg font-bold text-[#111b21]">{data.account.billing_status}</p>
-            </div>
-          </div>
-          <p className="text-xs text-[#667781]">
-            Conversations this month — user-initiated: {data.account.conv_user_initiated_month ?? 0}, marketing:{" "}
-            {data.account.conv_business_marketing_month ?? 0}, utility: {data.account.conv_business_utility_month ?? 0},
-            free tier used: {data.account.conv_free_user_used_month ?? 0}
-          </p>
+        <div className="text-sm">
+          <BillingUsageMetrics account={data.account} />
         </div>
       ) : (
         <p className="text-sm text-[#667781] rounded-xl bg-[#f0f2f5] p-4">

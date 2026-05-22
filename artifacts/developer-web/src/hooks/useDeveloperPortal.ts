@@ -42,7 +42,15 @@ export type PortalAccount = {
   conv_user_initiated_month?: number;
   conv_business_marketing_month?: number;
   conv_business_utility_month?: number;
+  conv_business_auth_month?: number;
+  conv_business_service_month?: number;
   conv_free_user_used_month?: number;
+  api_hits_month?: number;
+  api_hits_total?: number;
+  api_usage_inr_month?: number;
+  platform_plan_inr_month?: number;
+  estimated_monthly_bill_inr?: number;
+  messages_delivered_month?: number;
   videh_phone_number_id?: string;
   videh_business_account_id?: string;
 };

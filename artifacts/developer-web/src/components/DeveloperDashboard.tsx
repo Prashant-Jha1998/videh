@@ -10,6 +10,7 @@ import {
   Send,
 } from "lucide-react";
 import { devFetch } from "../lib/devFetch";
+import { BillingUsageMetrics } from "./BillingUsageMetrics";
 import { DeveloperApiCredentials } from "./DeveloperApiCredentials";
 import { isLeadConsoleReady } from "../lib/developerPortalState";
 
@@ -43,7 +44,14 @@ type PortalAccount = {
   conv_user_initiated_month?: number;
   conv_business_marketing_month?: number;
   conv_business_utility_month?: number;
+  conv_business_auth_month?: number;
+  conv_business_service_month?: number;
   conv_free_user_used_month?: number;
+  api_hits_month?: number;
+  api_hits_total?: number;
+  api_usage_inr_month?: number;
+  estimated_monthly_bill_inr?: number;
+  messages_delivered_month?: number;
   videh_phone_number_id?: string;
   videh_business_account_id?: string;
 };
@@ -517,44 +525,7 @@ export function DeveloperDashboard() {
               {tab === "usage" && (
                 <div className="space-y-4 text-sm">
                   {data.account ? (
-                    <>
-                      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        <div className="rounded-xl bg-[#f0f2f5] p-4">
-                          <p className="text-xs text-[#667781]">Messages (month)</p>
-                          <p className="text-xl font-bold text-[#111b21]">{data.account.messages_sent_month ?? 0}</p>
-                        </div>
-                        <div className="rounded-xl bg-[#f0f2f5] p-4">
-                          <p className="text-xs text-[#667781]">Messages (total)</p>
-                          <p className="text-xl font-bold text-[#111b21]">{data.account.messages_sent_total ?? 0}</p>
-                        </div>
-                        <div className="rounded-xl bg-[#f0f2f5] p-4">
-                          <p className="text-xs text-[#667781]">Usage billed (month)</p>
-                          <p className="text-xl font-bold text-[#111b21]">₹{data.account.usage_billing_month_inr ?? 0}</p>
-                        </div>
-                        <div className="rounded-xl bg-[#f0f2f5] p-4">
-                          <p className="text-xs text-[#667781]">Total billed</p>
-                          <p className="text-xl font-bold text-[#111b21]">₹{data.account.total_billed_inr ?? 0}</p>
-                        </div>
-                        <div className="rounded-xl bg-[#f0f2f5] p-4">
-                          <p className="text-xs text-[#667781]">Platform plan / mo</p>
-                          <p className="text-xl font-bold text-[#111b21]">
-                            {data.account.amount_inr_monthly
-                              ? `₹${data.account.amount_inr_monthly}`
-                              : data.account.plan_id ?? "—"}
-                          </p>
-                        </div>
-                        <div className="rounded-xl bg-[#f0f2f5] p-4">
-                          <p className="text-xs text-[#667781]">Billing status</p>
-                          <p className="text-lg font-bold text-[#111b21]">{data.account.billing_status}</p>
-                        </div>
-                      </div>
-                      <p className="text-xs text-[#667781]">
-                        Conversations this month — user-initiated: {data.account.conv_user_initiated_month ?? 0},
-                        marketing: {data.account.conv_business_marketing_month ?? 0}, utility:{" "}
-                        {data.account.conv_business_utility_month ?? 0}, free tier used:{" "}
-                        {data.account.conv_free_user_used_month ?? 0}
-                      </p>
-                    </>
+                    <BillingUsageMetrics account={data.account} />
                   ) : (
                     <p className="text-[#667781]">
                       Billing and usage metrics appear after your application is approved and the API account is

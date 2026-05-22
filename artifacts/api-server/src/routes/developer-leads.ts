@@ -18,6 +18,7 @@ import {
   PAYMENT_VERIFICATION_INR,
   SERVICE_REPLY_FREE_HOURS,
 } from "../lib/developerBilling";
+import { getDeveloperApiUsageSnapshot } from "../lib/developerApiUsage";
 import {
   documentsForEntity,
   ensureDeveloperPlatformTables,
@@ -689,6 +690,8 @@ router.get("/:id/portal", async (req, res) => {
     }
     const account = await query(`SELECT * FROM developer_api_accounts WHERE lead_id = $1`, [leadId]);
     const acct = account.rows[0] as Record<string, unknown> | undefined;
+    const accountId = acct?.id != null ? Number(acct.id) : NaN;
+    const usage = acct && Number.isFinite(accountId) ? await getDeveloperApiUsageSnapshot(accountId, acct) : null;
     res.json({
       success: true,
       lead: {
@@ -715,10 +718,13 @@ router.get("/:id/portal", async (req, res) => {
             conv_user_initiated_month: acct.conv_user_initiated_month,
             conv_business_marketing_month: acct.conv_business_marketing_month,
             conv_business_utility_month: acct.conv_business_utility_month,
+            conv_business_auth_month: acct.conv_business_auth_month,
+            conv_business_service_month: acct.conv_business_service_month,
             conv_free_user_used_month: acct.conv_free_user_used_month,
             last_payment_at: acct.last_payment_at,
             videh_phone_number_id: (acct as { videh_phone_number_id?: string }).videh_phone_number_id,
             videh_business_account_id: (acct as { videh_business_account_id?: string }).videh_business_account_id,
+            ...(usage ?? {}),
           }
         : null,
       channel: channelPublicFromRow(row as Record<string, unknown>),
