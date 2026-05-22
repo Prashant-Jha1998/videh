@@ -1,14 +1,30 @@
 import { useCallback, useEffect, useState } from "react";
 import { devFetch } from "../lib/devFetch";
 
+export type PortalTemplateButton = {
+  type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER";
+  text: string;
+  url?: string;
+  phone_number?: string;
+};
+
 export type PortalTemplate = {
   id: number;
   name: string;
   display_name: string;
   category: string;
   language: string;
+  header_format?: string;
+  header_type?: string | null;
+  header_text?: string;
+  header_media_url?: string;
+  body_text?: string;
   body_preview: string;
+  footer_text?: string;
+  buttons?: PortalTemplateButton[];
   variables: string[];
+  variable_indexes?: string[];
+  variable_samples?: Record<string, string>;
   status: string;
   approved?: boolean;
   rejection_reason?: string | null;

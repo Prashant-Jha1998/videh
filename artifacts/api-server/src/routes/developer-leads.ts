@@ -23,7 +23,14 @@ import {
   ensureDeveloperPlatformTables,
   WIZARD_STEPS,
 } from "../lib/developerPlatform";
-import { ensureDeveloperTemplateTables, templateToPublic, type MessageTemplateRow } from "../lib/developerTemplates";
+import {
+  buildTemplateInsertParams,
+  ensureDeveloperTemplateTables,
+  templateToPublic,
+  type MessageTemplateRow,
+  type TemplateSubmitPayload,
+} from "../lib/developerTemplates";
+import { validateTemplateComponents } from "../lib/templateComponents";
 import {
   channelPublicFromRow,
   ensureDeveloperChannelColumns,
@@ -767,15 +774,7 @@ router.get("/:id/templates", async (req, res) => {
 /** POST /api/developer-leads/:id/templates — developer submits template for admin approval */
 router.post("/:id/templates", async (req, res) => {
   const leadId = Number(req.params.id);
-  const body = req.body as {
-    reference?: string;
-    templateKey?: string;
-    name?: string;
-    category?: string;
-    language?: string;
-    bodyText?: string;
-    variables?: string[];
-  };
+  const body = req.body as TemplateSubmitPayload & { reference?: string };
   const reference = String(body.reference ?? req.query.reference ?? "").trim();
   if (!leadId) {
     res.status(400).json({ success: false, message: "Invalid lead id" });
@@ -787,6 +786,18 @@ router.post("/:id/templates", async (req, res) => {
   }
   if (!body.templateKey?.trim() || !body.bodyText?.trim()) {
     res.status(400).json({ success: false, message: "templateKey and bodyText required" });
+    return;
+  }
+  const componentCheck = validateTemplateComponents({
+    headerFormat: body.headerFormat,
+    headerText: body.headerText,
+    headerMediaUrl: body.headerMediaUrl,
+    bodyText: body.bodyText,
+    footerText: body.footerText,
+    buttons: body.buttons,
+  });
+  if (!componentCheck.ok) {
+    res.status(400).json({ success: false, message: componentCheck.message });
     return;
   }
   const category = body.category ?? "utility";
@@ -815,13 +826,11 @@ router.post("/:id/templates", async (req, res) => {
 
     const account = await query(`SELECT id FROM developer_api_accounts WHERE lead_id = $1`, [leadId]);
     const accountId = (account.rows[0] as { id?: number } | undefined)?.id ?? null;
-    const key = body.templateKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
-    const vars = Array.isArray(body.variables) ? body.variables : [];
-    const preview = body.bodyText.slice(0, 160);
+    const built = buildTemplateInsertParams(leadId, accountId, body);
 
     const existing = await query(
       `SELECT id, status FROM developer_message_templates WHERE lead_id = $1 AND template_key = $2`,
-      [leadId, key],
+      [leadId, built.key],
     );
     const prev = existing.rows[0] as { id?: number; status?: string } | undefined;
     if (prev?.status === "approved") {
@@ -835,32 +844,29 @@ router.post("/:id/templates", async (req, res) => {
 
     const r = await query(
       `INSERT INTO developer_message_templates
-       (lead_id, account_id, template_key, name, category, language, body_text, body_preview, variables_json, status, rejection_reason, submitted_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',NULL,NOW())
+       (lead_id, account_id, template_key, name, category, language, header_type, header_text, header_media_url,
+        body_text, body_preview, variables_json, variable_samples_json, footer_text, buttons_json, status, rejection_reason, submitted_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending',NULL,NOW())
        ON CONFLICT (lead_id, template_key) DO UPDATE SET
          name = EXCLUDED.name,
          category = EXCLUDED.category,
          language = EXCLUDED.language,
+         header_type = EXCLUDED.header_type,
+         header_text = EXCLUDED.header_text,
+         header_media_url = EXCLUDED.header_media_url,
          body_text = EXCLUDED.body_text,
          body_preview = EXCLUDED.body_preview,
          variables_json = EXCLUDED.variables_json,
+         variable_samples_json = EXCLUDED.variable_samples_json,
+         footer_text = EXCLUDED.footer_text,
+         buttons_json = EXCLUDED.buttons_json,
          account_id = COALESCE(EXCLUDED.account_id, developer_message_templates.account_id),
          status = 'pending',
          rejection_reason = NULL,
          submitted_at = NOW(),
          updated_at = NOW()
        RETURNING *`,
-      [
-        leadId,
-        accountId,
-        key,
-        body.name?.trim() || key,
-        category,
-        body.language ?? "en",
-        body.bodyText.trim(),
-        preview,
-        JSON.stringify(vars),
-      ],
+      [...built.values],
     );
     const tpl = r.rows[0] as MessageTemplateRow;
     res.json({ success: true, template: { ...templateToPublic(tpl), status: tpl.status } });

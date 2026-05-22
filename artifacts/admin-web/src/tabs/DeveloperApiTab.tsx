@@ -63,12 +63,28 @@ type MessageTemplate = {
   name: string;
   category: string;
   language: string;
+  header_type?: string | null;
+  header_text?: string | null;
+  header_media_url?: string | null;
   body_text: string;
   body_preview?: string;
+  footer_text?: string | null;
+  buttons_json?: unknown;
+  variable_samples_json?: unknown;
   variables_json?: unknown;
   status: string;
   rejection_reason?: string;
 };
+
+function templateMetaLine(t: MessageTemplate): string {
+  const parts: string[] = [];
+  const h = String(t.header_type ?? "").toUpperCase();
+  if (h && h !== "NONE") parts.push(`${h} header`);
+  if (t.footer_text?.trim()) parts.push("footer");
+  const buttons = Array.isArray(t.buttons_json) ? t.buttons_json.length : 0;
+  if (buttons) parts.push(`${buttons} button(s)`);
+  return parts.join(" · ");
+}
 
 type ApiAccount = {
   id: number;
@@ -613,6 +629,12 @@ export function DeveloperApiTab({
                   <p className="muted" style={{ margin: 0, fontSize: "0.8rem" }}>
                     {t.body_preview ?? t.body_text.slice(0, 200)}
                   </p>
+                  {templateMetaLine(t) ? (
+                    <p className="muted" style={{ margin: "6px 0 0", fontSize: "0.75rem" }}>
+                      {templateMetaLine(t)}
+                      {t.header_type?.toUpperCase() === "TEXT" && t.header_text ? ` — “${t.header_text.slice(0, 40)}”` : ""}
+                    </p>
+                  ) : null}
                   {t.submitted_at ? (
                     <p className="muted" style={{ margin: "8px 0 0", fontSize: "0.75rem" }}>
                       Submitted {new Date(t.submitted_at).toLocaleString()}

@@ -10,7 +10,11 @@ import { requirePermission, type RequireAdmin } from "./admin-rbac";
 import crypto from "node:crypto";
 import { DEVELOPER_STATUSES, ensureDeveloperLeadsTable } from "./developer-leads";
 import { documentsForEntity } from "../lib/developerPlatform";
-import { ensureDeveloperTemplateTables, linkTemplatesToAccount } from "../lib/developerTemplates";
+import {
+  buildTemplateInsertParams,
+  ensureDeveloperTemplateTables,
+  linkTemplatesToAccount,
+} from "../lib/developerTemplates";
 import { encryptApiSecret, hashApiSecret } from "../lib/developerApiSecretVault";
 import {
   copyChannelToAccount,
@@ -1094,9 +1098,13 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
         category?: string;
         language?: string;
         headerType?: string;
+        headerText?: string;
+        headerMediaUrl?: string;
         bodyText?: string;
         variables?: string[];
         footerText?: string;
+        buttons?: unknown;
+        variableSamples?: Record<string, string>;
       };
       if (!leadId || !body.templateKey?.trim() || !body.bodyText?.trim()) {
         res.status(400).json({ success: false, message: "templateKey and bodyText required" });
@@ -1117,38 +1125,42 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
         }
         const account = await query(`SELECT id FROM developer_api_accounts WHERE lead_id = $1`, [leadId]);
         const accountId = (account.rows[0] as { id?: number } | undefined)?.id ?? null;
-        const key = body.templateKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
-        const vars = Array.isArray(body.variables) ? body.variables : [];
-        const preview = body.bodyText.slice(0, 160);
+        const built = buildTemplateInsertParams(leadId, accountId, {
+          templateKey: body.templateKey,
+          name: body.name,
+          category,
+          language: body.language,
+          headerFormat: body.headerType,
+          headerText: body.headerText,
+          headerMediaUrl: body.headerMediaUrl,
+          bodyText: body.bodyText,
+          footerText: body.footerText,
+          buttons: body.buttons,
+          variables: body.variables,
+          variableSamples: body.variableSamples,
+        });
         const r = await query(
           `INSERT INTO developer_message_templates
-           (lead_id, account_id, template_key, name, category, language, header_type, body_text, body_preview, variables_json, footer_text, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending')
+           (lead_id, account_id, template_key, name, category, language, header_type, header_text, header_media_url,
+            body_text, body_preview, variables_json, variable_samples_json, footer_text, buttons_json, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending')
            ON CONFLICT (lead_id, template_key) DO UPDATE SET
              name = EXCLUDED.name,
              category = EXCLUDED.category,
              language = EXCLUDED.language,
              header_type = EXCLUDED.header_type,
+             header_text = EXCLUDED.header_text,
+             header_media_url = EXCLUDED.header_media_url,
              body_text = EXCLUDED.body_text,
              body_preview = EXCLUDED.body_preview,
              variables_json = EXCLUDED.variables_json,
+             variable_samples_json = EXCLUDED.variable_samples_json,
              footer_text = EXCLUDED.footer_text,
+             buttons_json = EXCLUDED.buttons_json,
              account_id = COALESCE(EXCLUDED.account_id, developer_message_templates.account_id),
              updated_at = NOW()
            RETURNING *`,
-          [
-            leadId,
-            accountId,
-            key,
-            body.name?.trim() || key,
-            category,
-            body.language ?? "en",
-            body.headerType ?? null,
-            body.bodyText.trim(),
-            preview,
-            JSON.stringify(vars),
-            body.footerText ?? null,
-          ],
+          [...built.values],
         );
         await logAdminAction(
           { action: "developer_template_create", entityType: "developer_template", entityId: (r.rows[0] as { id: number }).id },
