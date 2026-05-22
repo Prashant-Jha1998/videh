@@ -39,6 +39,20 @@ const STEPS = [...SETUP_STEPS, ...WORKSPACE_STEPS] as const;
 type Step = (typeof STEPS)[number];
 type SetupStep = (typeof SETUP_STEPS)[number];
 
+const DEFAULT_WORKSPACE_STEP: Step = "channel-console";
+
+function isSetupStep(s: string): s is SetupStep {
+  return (SETUP_STEPS as readonly string[]).includes(s);
+}
+
+function isSubmittedLead(status: string, wizardStep: string, paymentVerified?: boolean) {
+  return (
+    wizardStep === "done" ||
+    !["draft", "payment_pending"].includes(status) ||
+    Boolean(paymentVerified)
+  );
+}
+
 const MODULES: {
   id: Step;
   label: string;
@@ -156,14 +170,13 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       setPlanId(String(L.plan_id ?? "starter"));
       const ws = String(L.wizard_step ?? "plan");
       const status = String(L.status ?? "draft");
+      const submitted = isSubmittedLead(status, ws, Boolean(L.payment_method_verified));
       if (STEPS.includes(ws as Step)) {
-        setStep(ws as Step);
-        const wsIdx = STEPS.indexOf(ws as Step);
-        const submitted =
-          ws === "done" || !["draft", "payment_pending"].includes(status) || Boolean(L.payment_method_verified);
-        setMaxReachedIndex(
-          Math.max(wsIdx, submitted ? STEPS.indexOf("done") : STEPS.indexOf("plan")),
-        );
+        let initial: Step = ws as Step;
+        if (submitted && isSetupStep(initial)) initial = DEFAULT_WORKSPACE_STEP;
+        setStep(initial);
+        const wsIdx = STEPS.indexOf(initial);
+        setMaxReachedIndex(Math.max(wsIdx, submitted ? STEPS.indexOf("done") : STEPS.indexOf("plan")));
       }
       setLeadStatus(status);
       const chPhone = String(L.channel_phone ?? "");
@@ -505,6 +518,13 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
   const currentModule = MODULES.find((m) => m.id === step) ?? MODULES[0]!;
   const workspaceUnlocked = maxReachedIndex >= STEPS.indexOf("done");
   const isWorkspaceStep = (WORKSPACE_STEPS as readonly string[]).includes(step);
+  const visibleModules = workspaceUnlocked ? MODULES.filter((m) => m.section !== "setup") : MODULES;
+
+  useEffect(() => {
+    if (workspaceUnlocked && isSetupStep(step)) {
+      setStep(DEFAULT_WORKSPACE_STEP);
+    }
+  }, [workspaceUnlocked, step]);
 
   const portal = useDeveloperPortal({
     leadId: leadId ? String(leadId) : "",
@@ -528,9 +548,11 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
   }, [stepIndex, maxReachedIndex]);
 
   function canGoTo(target: Step): boolean {
+    if (workspaceUnlocked && isSetupStep(target)) return false;
     if (target === "done") return workspaceUnlocked || maxReachedIndex >= STEPS.indexOf("payment");
     if ((WORKSPACE_STEPS as readonly string[]).includes(target) && target !== "done") return workspaceUnlocked;
-    return STEPS.indexOf(target) <= maxReachedIndex;
+    if (!workspaceUnlocked) return STEPS.indexOf(target) <= maxReachedIndex;
+    return false;
   }
 
   function goToModule(target: Step) {
@@ -556,14 +578,15 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
     <OnboardingConsoleLayout
       reference={reference}
       currentModule={currentModule}
-      modules={MODULES}
+      modules={visibleModules}
       step={step}
       canGoTo={(id) => canGoTo(id as Step)}
       moduleStatus={(mod) => moduleStatus(mod as (typeof MODULES)[number])}
       onGoTo={(id) => goToModule(id as Step)}
       onClose={onClose}
-      progressSteps={[...SETUP_STEPS]}
+      progressSteps={workspaceUnlocked ? [] : [...SETUP_STEPS]}
       stepIndex={setupStepIndex}
+      submitted={workspaceUnlocked}
     >
       {error ? (
         <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</p>

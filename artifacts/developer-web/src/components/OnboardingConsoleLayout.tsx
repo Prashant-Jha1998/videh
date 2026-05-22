@@ -22,6 +22,8 @@ type Props = {
   onClose: () => void;
   progressSteps: string[];
   stepIndex: number;
+  /** Application submitted — hide setup modules and onboarding progress bar */
+  submitted?: boolean;
   children: ReactNode;
 };
 
@@ -82,6 +84,7 @@ export function OnboardingConsoleLayout({
   onClose,
   progressSteps,
   stepIndex,
+  submitted = false,
   children,
 }: Props) {
   return (
@@ -94,24 +97,30 @@ export function OnboardingConsoleLayout({
             </span>
             <div className="min-w-0">
               <p className="font-bold text-sm leading-tight">Videh Business API</p>
-              <p className="text-[10px] uppercase tracking-wider text-white/45 mt-0.5">Application console</p>
+              <p className="text-[10px] uppercase tracking-wider text-white/45 mt-0.5">
+                {submitted ? "Developer console" : "Application console"}
+              </p>
             </div>
           </div>
           {reference ? (
             <p className="mt-3 text-xs font-mono text-[#00a884] bg-[#00a884]/10 px-2 py-1 rounded-md truncate">{reference}</p>
           ) : (
-            <p className="mt-3 text-xs text-white/40">Complete each module to submit</p>
+            <p className="mt-3 text-xs text-white/40">
+              {submitted ? "Manage templates, channel & API" : "Complete each module to submit"}
+            </p>
           )}
         </div>
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-6">
-          <div>
-            <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-white/35 mb-2">Application setup</p>
-            <ul className="space-y-0.5">
-              {modules.filter((m) => m.section === "setup").map((mod) => (
-                <SidebarModule key={mod.id} mod={mod} status={moduleStatus(mod)} onGo={() => onGoTo(mod.id)} />
-              ))}
-            </ul>
-          </div>
+          {!submitted && modules.some((m) => m.section === "setup") ? (
+            <div>
+              <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-white/35 mb-2">Application setup</p>
+              <ul className="space-y-0.5">
+                {modules.filter((m) => m.section === "setup").map((mod) => (
+                  <SidebarModule key={mod.id} mod={mod} status={moduleStatus(mod)} onGo={() => onGoTo(mod.id)} />
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {modules.some((m) => m.section === "review") ? (
             <div>
               <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-white/35 mb-2">After submission</p>
@@ -186,11 +195,13 @@ export function OnboardingConsoleLayout({
               <h1 className="text-xl font-bold text-[#111b21]">{currentModule.label}</h1>
               <p className="text-sm text-[#667781]">{currentModule.subtitle}</p>
             </div>
-            <div className="flex gap-1 mb-6">
-              {progressSteps.map((s, i) => (
-                <div key={s} className={`h-1 flex-1 rounded-full ${i <= stepIndex ? "bg-[#00a884]" : "bg-gray-200"}`} />
-              ))}
-            </div>
+            {!submitted && progressSteps.length > 0 ? (
+              <div className="flex gap-1 mb-6">
+                {progressSteps.map((s, i) => (
+                  <div key={s} className={`h-1 flex-1 rounded-full ${i <= stepIndex ? "bg-[#00a884]" : "bg-gray-200"}`} />
+                ))}
+              </div>
+            ) : null}
             {children}
           </div>
         </main>
