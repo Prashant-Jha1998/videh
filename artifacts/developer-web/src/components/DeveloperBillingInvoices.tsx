@@ -1,14 +1,14 @@
 import { ArrowLeft, Download, Loader2, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { devFetch } from "../lib/devFetch";
+import { formatBillDate, formatInrRupees, sortInvoicesForDisplay } from "../lib/billingDisplay";
+import { getRazorpayLogoUrl } from "../lib/razorpayCheckout";
 
 declare global {
   interface Window {
     Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
   }
 }
-import { useCallback, useEffect, useState } from "react";
-import { devFetch } from "../lib/devFetch";
-import { formatInrRupees } from "../lib/billingDisplay";
-import { getRazorpayLogoUrl } from "../lib/razorpayCheckout";
 
 export type DeveloperInvoice = {
   id: number;
@@ -60,6 +60,7 @@ export function DeveloperBillingInvoices({
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [payingId, setPayingId] = useState<number | null>(null);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [invoices, setInvoices] = useState<DeveloperInvoice[]>([]);
 
   const qs = reference ? `?reference=${encodeURIComponent(reference)}` : "";
@@ -88,12 +89,38 @@ export function DeveloperBillingInvoices({
     void load();
   }, [load]);
 
-  const visible =
-    filter === "current" ? invoices.filter((i) => i.is_current) : invoices;
+  const visible = useMemo(() => {
+    const filtered =
+      filter === "current" ? invoices.filter((i) => i.is_current) : invoices;
+    return sortInvoicesForDisplay(filtered);
+  }, [invoices, filter]);
 
-  async function downloadBill(inv: DeveloperInvoice) {
-    const url = `/api/developer-leads/${leadId}/invoices/${inv.id}/download${qs}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+  async function downloadBillPdf(inv: DeveloperInvoice) {
+    setDownloadingId(inv.id);
+    onError("");
+    try {
+      const r = await devFetch(`/api/developer-leads/${leadId}/invoices/${inv.id}/download${qs}`);
+      if (!r.ok) {
+        const d = (await r.json().catch(() => ({}))) as { message?: string };
+        throw new Error(d.message ?? "Download failed");
+      }
+      const blob = await r.blob();
+      if (!blob.type.includes("pdf")) {
+        throw new Error("Server did not return a PDF. Redeploy api-server with the latest build.");
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${inv.bill_number.replace(/[^A-Za-z0-9._-]/g, "_")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Download failed");
+    } finally {
+      setDownloadingId(null);
+    }
   }
 
   async function payBill(inv: DeveloperInvoice) {
@@ -206,6 +233,7 @@ export function DeveloperBillingInvoices({
       <h3 className="text-lg font-bold text-[#111b21]">
         {filter === "current" ? "Current bill" : "Previous bills"}
       </h3>
+      <p className="text-xs text-[#667781]">Unpaid bills appear first, then paid bills (by date).</p>
 
       <button
         type="button"
@@ -225,51 +253,67 @@ export function DeveloperBillingInvoices({
         </p>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className="w-full text-sm min-w-[640px]">
+          <table className="w-full text-sm table-fixed min-w-[720px]">
+            <colgroup>
+              <col className="w-12" />
+              <col className="w-[28%]" />
+              <col className="w-[14%]" />
+              <col className="w-[14%]" />
+              <col className="w-[12%]" />
+              <col className="w-[12%]" />
+              <col className="w-[18%]" />
+            </colgroup>
             <thead className="bg-[#f0f2f5] text-left text-xs uppercase tracking-wide text-[#667781]">
               <tr>
-                <th className="px-4 py-3 font-semibold">Bill No</th>
-                <th className="px-4 py-3 font-semibold">Bill date</th>
-                <th className="px-4 py-3 font-semibold">Due date</th>
-                <th className="px-4 py-3 font-semibold">Amount</th>
-                <th className="px-4 py-3 font-semibold">Status</th>
-                <th className="px-4 py-3 font-semibold text-right">Actions</th>
+                <th className="px-3 py-3 font-semibold text-center">S.No</th>
+                <th className="px-3 py-3 font-semibold">Bill No</th>
+                <th className="px-3 py-3 font-semibold whitespace-nowrap">Bill date</th>
+                <th className="px-3 py-3 font-semibold whitespace-nowrap">Due date</th>
+                <th className="px-3 py-3 font-semibold whitespace-nowrap">Amount</th>
+                <th className="px-3 py-3 font-semibold">Status</th>
+                <th className="px-3 py-3 font-semibold text-right whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {visible.map((inv) => {
+              {visible.map((inv, index) => {
                 const unpaid = inv.status !== "paid";
                 return (
-                  <tr key={inv.id} className="border-t border-gray-100">
-                    <td className="px-4 py-3 font-mono text-[#00a884]">{inv.bill_number}</td>
-                    <td className="px-4 py-3">{inv.bill_date}</td>
-                    <td className="px-4 py-3">{inv.due_date}</td>
-                    <td className="px-4 py-3 font-semibold">{formatInrRupees(inv.amount_inr)}</td>
-                    <td className="px-4 py-3">
+                  <tr key={inv.id} className="border-t border-gray-100 align-middle">
+                    <td className="px-3 py-3 text-center text-[#667781] font-medium">{index + 1}</td>
+                    <td className="px-3 py-3 font-mono text-xs text-[#00a884] break-all">{inv.bill_number}</td>
+                    <td className="px-3 py-3 whitespace-nowrap tabular-nums">{formatBillDate(inv.bill_date)}</td>
+                    <td className="px-3 py-3 whitespace-nowrap tabular-nums">{formatBillDate(inv.due_date)}</td>
+                    <td className="px-3 py-3 font-semibold whitespace-nowrap">{formatInrRupees(inv.amount_inr)}</td>
+                    <td className="px-3 py-3">
                       <span
-                        className={`inline-block px-2.5 py-0.5 rounded-md text-xs font-bold ${statusClass(inv.status)}`}
+                        className={`inline-block whitespace-nowrap px-2.5 py-0.5 rounded-md text-xs font-bold ${statusClass(inv.status)}`}
                       >
                         {statusLabel(inv.status)}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center justify-end gap-2">
+                    <td className="px-3 py-3">
+                      <div className="flex flex-nowrap items-center justify-end gap-2">
                         <button
                           type="button"
-                          onClick={() => void downloadBill(inv)}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-[#00a884] hover:underline"
+                          disabled={downloadingId === inv.id}
+                          onClick={() => void downloadBillPdf(inv)}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#00a884]/40 px-2.5 py-1.5 text-xs font-semibold text-[#00a884] hover:bg-[#e7f9f3] disabled:opacity-60"
                         >
-                          <Download className="h-3.5 w-3.5" />
-                          Download bill
+                          {downloadingId === inv.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Download className="h-3.5 w-3.5" />
+                          )}
+                          PDF
                         </button>
                         {unpaid ? (
                           <button
                             type="button"
                             disabled={payingId === inv.id}
                             onClick={() => void payBill(inv)}
-                            className="rounded-lg bg-[#00a884] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#008f72] disabled:opacity-60"
+                            className="shrink-0 rounded-lg bg-[#00a884] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#008f72] disabled:opacity-60 whitespace-nowrap"
                           >
-                            {payingId === inv.id ? "Processing…" : "Pay"}
+                            {payingId === inv.id ? "…" : "Pay"}
                           </button>
                         ) : null}
                       </div>
@@ -281,10 +325,6 @@ export function DeveloperBillingInvoices({
           </table>
         </div>
       )}
-
-      <p className="text-xs text-[#667781]">
-        Download opens a printable invoice (use Print → Save as PDF in your browser for a PDF copy).
-      </p>
     </div>
   );
 }

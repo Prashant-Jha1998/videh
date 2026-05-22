@@ -23,6 +23,7 @@ import {
   generatePhoneNumberId,
 } from "../lib/developerChannel";
 import { deleteDeveloperLeadById } from "../lib/deleteDeveloperLead";
+import { getAdminBillingHistoryForAccount } from "../lib/developerAdminBilling";
 
 function adminEmail(req: Request): string {
   const a = req.admin as AdminIdentity | undefined;
@@ -1113,6 +1114,30 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
       res.status(500).json({ success: false, message: "Could not load API accounts" });
     }
   });
+
+  router.get(
+    "/developer-accounts/:id/billing-history",
+    requireAdmin,
+    requirePermission("developer.read"),
+    async (req, res) => {
+      const id = Number(req.params.id);
+      if (!id) {
+        res.status(400).json({ success: false, message: "Invalid id" });
+        return;
+      }
+      try {
+        const history = await getAdminBillingHistoryForAccount(id);
+        if (!history) {
+          res.status(404).json({ success: false, message: "Account not found" });
+          return;
+        }
+        res.json({ success: true, history });
+      } catch (err) {
+        logger.error({ err }, "admin developer-account billing-history");
+        res.status(500).json({ success: false, message: "Could not load billing history" });
+      }
+    },
+  );
 
   router.patch("/developer-accounts/:id", requireAdmin, requirePermission("developer.manage"), async (req, res) => {
     const id = Number(req.params.id);

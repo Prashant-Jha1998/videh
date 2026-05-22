@@ -69,15 +69,31 @@ function billNumberFor(accountId: number, periodKey: string, referenceCode?: str
   return `${ref}-INV-${periodKey.replace("-", "")}`;
 }
 
+/** Normalize DB DATE / timestamps to YYYY-MM-DD (no timezone in API/UI). */
+export function formatInvoiceDateOnly(value: string | Date | null | undefined): string {
+  if (value == null || value === "") return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  const s = String(value).trim();
+  const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1]!;
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return s.slice(0, 10);
+}
+
 export function invoiceToPublic(row: DeveloperInvoiceRow) {
+  const billDate = formatInvoiceDateOnly(row.bill_date);
+  const dueDate = formatInvoiceDateOnly(row.due_date);
   const today = new Date().toISOString().slice(0, 10);
   let status = row.status;
-  if (status === "unpaid" && row.due_date < today) status = "overdue";
+  if (status === "unpaid" && dueDate < today) status = "overdue";
   return {
     id: row.id,
     bill_number: row.bill_number,
-    bill_date: row.bill_date,
-    due_date: row.due_date,
+    bill_date: billDate,
+    due_date: dueDate,
     plan_inr: row.plan_inr,
     usage_inr: row.usage_inr,
     amount_inr: row.amount_inr,
@@ -131,7 +147,8 @@ export async function syncCurrentMonthInvoice(
 export async function listInvoicesForAccount(accountId: number): Promise<DeveloperInvoiceRow[]> {
   await ensureDeveloperInvoicesTable();
   const r = await query(
-    `SELECT * FROM developer_invoices WHERE account_id = $1 ORDER BY bill_date DESC, id DESC`,
+    `SELECT * FROM developer_invoices WHERE account_id = $1
+     ORDER BY CASE WHEN status = 'paid' THEN 1 ELSE 0 END ASC, bill_date DESC, id DESC`,
     [accountId],
   );
   return r.rows as DeveloperInvoiceRow[];
@@ -149,36 +166,119 @@ export async function getInvoiceForAccount(
   return (r.rows[0] as DeveloperInvoiceRow) ?? null;
 }
 
+function invoiceStatusLabel(inv: DeveloperInvoiceRow): string {
+  const dueDate = formatInvoiceDateOnly(inv.due_date);
+  if (inv.status === "paid") return "PAID";
+  if (dueDate < new Date().toISOString().slice(0, 10)) return "OVERDUE";
+  return "UNPAID";
+}
+
+function escapePdfText(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+/** Minimal PDF 1.4 generator (no external deps) for invoice download. */
+export function buildInvoicePdf(inv: DeveloperInvoiceRow, companyName: string): Buffer {
+  const billDate = formatInvoiceDateOnly(inv.bill_date);
+  const dueDate = formatInvoiceDateOnly(inv.due_date);
+  const status = invoiceStatusLabel(inv);
+
+  const lines: { size: number; text: string; y: number }[] = [
+    { size: 18, text: "Videh Business API - Tax Invoice", y: 740 },
+    { size: 12, text: companyName.slice(0, 80), y: 712 },
+    { size: 10, text: `Bill No: ${inv.bill_number}`, y: 680 },
+    { size: 10, text: `Period: ${inv.period_key}`, y: 662 },
+    { size: 10, text: `Bill Date: ${billDate}`, y: 644 },
+    { size: 10, text: `Due Date: ${dueDate}`, y: 626 },
+    { size: 10, text: `Status: ${status}`, y: 608 },
+    { size: 10, text: "Description", y: 570 },
+    { size: 10, text: "Amount (INR)", y: 570 },
+    { size: 10, text: "Platform plan (monthly)", y: 548 },
+    { size: 10, text: `Rs. ${inv.plan_inr}`, y: 548 },
+    { size: 10, text: "API usage (conversations)", y: 526 },
+    { size: 10, text: `Rs. ${inv.usage_inr}`, y: 526 },
+    { size: 11, text: "Total", y: 500 },
+    { size: 11, text: `Rs. ${inv.amount_inr}`, y: 500 },
+    { size: 9, text: "Videh - developer@videh.co.in", y: 460 },
+  ];
+
+  const amountX = 480;
+  const textOps = lines
+    .map((line) => {
+      const x = line.text.startsWith("Rs.") || line.text === "Amount (INR)" ? amountX : 48;
+      return `/F1 ${line.size} Tf 1 0 0 1 ${x} ${line.y} Tm (${escapePdfText(line.text)}) Tj`;
+    })
+    .join("\n");
+
+  const stream = `BT\n${textOps}\nET`;
+  const streamLen = Buffer.byteLength(stream, "utf8");
+
+  const objects = [
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n",
+    `4 0 obj\n<< /Length ${streamLen} >>\nstream\n${stream}\nendstream\nendobj\n`,
+    "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+  ];
+
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [0];
+  for (const obj of objects) {
+    offsets.push(Buffer.byteLength(pdf, "utf8"));
+    pdf += obj;
+  }
+
+  const xrefStart = Buffer.byteLength(pdf, "utf8");
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  for (let i = 1; i <= objects.length; i++) {
+    pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
+  pdf += `startxref\n${xrefStart}\n%%EOF`;
+
+  return Buffer.from(pdf, "utf8");
+}
+
 export function buildInvoiceHtml(inv: DeveloperInvoiceRow, companyName: string): string {
-  const status =
-    inv.status === "paid"
-      ? "PAID"
-      : inv.due_date < new Date().toISOString().slice(0, 10)
-        ? "OVERDUE"
-        : "UNPAID";
+  const billDate = formatInvoiceDateOnly(inv.bill_date);
+  const dueDate = formatInvoiceDateOnly(inv.due_date);
+  const status = invoiceStatusLabel(inv);
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/><title>${inv.bill_number}</title>
 <style>
   body{font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#111b21;max-width:720px;margin:0 auto}
-  h1{color:#00a884;font-size:22px} table{width:100%;border-collapse:collapse;margin:16px 0}
+  h1{color:#00a884;font-size:22px;margin-bottom:8px}
+  .meta{line-height:1.7;margin:16px 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0}
   td,th{padding:10px 12px;border-bottom:1px solid #e9edef;text-align:left}
-  .amt{text-align:right;font-weight:600} .tag{display:inline-block;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700}
+  .amt{text-align:right;font-weight:600}
+  .tag{display:inline-block;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700}
   .paid{background:#d1fae5;color:#065f46}.unpaid{background:#fee2e2;color:#991b1b}
+  .toolbar{margin:20px 0;padding:12px;background:#f0f2f5;border-radius:8px;font-size:13px}
+  .btn{background:#00a884;color:#fff;border:none;padding:10px 18px;border-radius:8px;font-weight:700;cursor:pointer;margin-right:8px}
+  @media print{.toolbar{display:none}}
 </style></head><body>
+<div class="toolbar no-print">
+  <button type="button" class="btn" onclick="window.print()">Save as PDF / Print</button>
+  <span>Use your browser print dialog and choose &quot;Save as PDF&quot;.</span>
+</div>
 <h1>Videh Business API — Tax Invoice</h1>
 <p><strong>${companyName}</strong></p>
-<p>Bill No: <strong>${inv.bill_number}</strong><br/>
-Period: ${inv.period_key}<br/>
-Bill Date: ${inv.bill_date}<br/>
-Due Date: ${inv.due_date}<br/>
-Status: <span class="tag ${inv.status === "paid" ? "paid" : "unpaid"}">${status}</span></p>
+<div class="meta">
+  Bill No: <strong>${inv.bill_number}</strong><br/>
+  Period: ${inv.period_key}<br/>
+  Bill Date: ${billDate}<br/>
+  Due Date: ${dueDate}<br/>
+  Status: <span class="tag ${inv.status === "paid" ? "paid" : "unpaid"}">${status}</span>
+</div>
 <table>
 <tr><th>Description</th><th class="amt">Amount (INR)</th></tr>
 <tr><td>Platform plan (monthly)</td><td class="amt">₹${inv.plan_inr}</td></tr>
 <tr><td>API usage (conversations)</td><td class="amt">₹${inv.usage_inr}</td></tr>
 <tr><th>Total</th><th class="amt">₹${inv.amount_inr}</th></tr>
 </table>
-<p style="color:#667781;font-size:12px">Videh · developer@videh.co.in · This document was generated from your developer console.</p>
+<p style="color:#667781;font-size:12px">Videh · developer@videh.co.in</p>
 </body></html>`;
 }
 

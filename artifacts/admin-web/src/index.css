@@ -601,6 +601,28 @@ select {
 .dev-metric--ok b {
   color: var(--ok);
 }
+.dev-billing-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.dev-billing-table th,
+.dev-billing-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.dev-billing-table th {
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+.dev-billing-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
 .dev-actions {
   display: flex;
   flex-wrap: wrap;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { adminApi } from "../adminApi";
+import { adminApi, fmtDate } from "../adminApi";
 
 type Lead = {
   id: number;
@@ -114,6 +114,243 @@ type ApiAccount = {
   payment_status?: string;
   lead_status?: string;
 };
+
+type BillingHistoryPayment = {
+  id: number;
+  event_type: string;
+  event_label: string;
+  amount_inr: number;
+  status: string;
+  razorpay_payment_id: string | null;
+  created_at: string;
+  payer_name: string;
+  payer_email: string;
+  bill_number?: string;
+};
+
+type BillingHistoryInvoice = {
+  id: number;
+  bill_number: string;
+  bill_date: string;
+  due_date: string;
+  amount_inr: number;
+  status: string;
+  period_key: string;
+  plan_inr: number;
+  usage_inr: number;
+  paid_at: string | null;
+};
+
+type BillingHistory = {
+  payer: {
+    contact_name: string;
+    email: string;
+    phone: string;
+    company_name: string;
+    reference_code: string;
+  };
+  usage: {
+    messages_sent_month: number;
+    messages_sent_total: number;
+    api_hits_month: number;
+    api_hits_total: number;
+    usage_inr_month: number;
+    platform_plan_inr_month: number;
+    estimated_monthly_bill_inr: number;
+    conv_user_initiated_month: number;
+    conv_business_marketing_month: number;
+    conv_business_utility_month: number;
+    conv_business_auth_month: number;
+    conv_business_service_month: number;
+    conv_free_user_used_month: number;
+    plan_id: string;
+    total_billed_inr: number;
+    last_payment_at: string | null;
+  };
+  payments: BillingHistoryPayment[];
+  invoices: BillingHistoryInvoice[];
+};
+
+function AccountBillingHistory({
+  accountId,
+  onErr,
+  compact,
+}: {
+  accountId: number;
+  onErr: (msg: string) => void;
+  compact?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<BillingHistory | null>(null);
+
+  const loadHistory = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await adminApi<{ history: BillingHistory }>(
+        `/admin/developer-accounts/${accountId}/billing-history`,
+      );
+      setHistory(data.history);
+    } catch (err) {
+      onErr(err instanceof Error ? err.message : "Could not load billing history");
+    } finally {
+      setLoading(false);
+    }
+  }, [accountId, onErr]);
+
+  useEffect(() => {
+    if (open && !history && !loading) void loadHistory();
+  }, [open, history, loading, loadHistory]);
+
+  return (
+    <div className="dev-detail-section" style={{ marginTop: compact ? 8 : 12, marginBottom: 0 }}>
+      <button
+        type="button"
+        className="btn-sm"
+        style={{ marginBottom: open ? 10 : 0 }}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {open ? "▾" : "▸"} Payment &amp; usage history
+      </button>
+      {open ? (
+        loading && !history ? (
+          <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>
+            Loading…
+          </p>
+        ) : history ? (
+          <div style={{ fontSize: "0.85rem" }}>
+            <p className="muted" style={{ margin: "0 0 10px" }}>
+              <strong>{history.payer.contact_name || history.payer.company_name}</strong> · {history.payer.email}
+              {history.payer.phone ? ` · ${history.payer.phone}` : ""}
+            </p>
+
+            <h5 style={{ margin: "12px 0 6px", fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Usage (this month)
+            </h5>
+            <div className="dev-metrics" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 12 }}>
+              <div className="dev-metric">
+                <b>{history.usage.api_hits_month}</b>
+                <span>API hits</span>
+              </div>
+              <div className="dev-metric">
+                <b>₹{history.usage.usage_inr_month}</b>
+                <span>API usage</span>
+              </div>
+              <div className="dev-metric">
+                <b>₹{history.usage.estimated_monthly_bill_inr}</b>
+                <span>Est. bill</span>
+              </div>
+              <div className="dev-metric">
+                <b>₹{history.usage.total_billed_inr}</b>
+                <span>Paid (lifetime)</span>
+              </div>
+            </div>
+            <p className="muted" style={{ margin: "0 0 12px", fontSize: "0.78rem" }}>
+              Conversations — user: {history.usage.conv_user_initiated_month}, marketing:{" "}
+              {history.usage.conv_business_marketing_month}, utility: {history.usage.conv_business_utility_month}, auth:{" "}
+              {history.usage.conv_business_auth_month}, service: {history.usage.conv_business_service_month}, free tier:{" "}
+              {history.usage.conv_free_user_used_month}/100 · Plan: {planLabel(history.usage.plan_id)}
+            </p>
+
+            <h5 style={{ margin: "12px 0 6px", fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Payments
+            </h5>
+            {history.payments.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }}>No payments recorded yet.</p>
+            ) : (
+              <div style={{ overflowX: "auto", marginBottom: 12 }}>
+                <table className="dev-billing-table">
+                  <thead>
+                    <tr>
+                      <th>S.No</th>
+                      <th>Date</th>
+                      <th>Who paid</th>
+                      <th>Type</th>
+                      <th>Amount</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.payments.map((p, i) => (
+                      <tr key={`${p.id}-${p.created_at}`}>
+                        <td>{i + 1}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{fmtDate(p.created_at)}</td>
+                        <td>
+                          {p.payer_name || "—"}
+                          <br />
+                          <span className="muted" style={{ fontSize: "0.75rem" }}>
+                            {p.payer_email}
+                          </span>
+                        </td>
+                        <td>
+                          {p.event_label}
+                          {p.bill_number ? (
+                            <span className="muted" style={{ display: "block", fontSize: "0.75rem" }}>
+                              {p.bill_number}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td style={{ whiteSpace: "nowrap" }}>₹{p.amount_inr}</td>
+                        <td>{p.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <h5 style={{ margin: "12px 0 6px", fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Invoices
+            </h5>
+            {history.invoices.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }}>No invoices yet.</p>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="dev-billing-table">
+                  <thead>
+                    <tr>
+                      <th>S.No</th>
+                      <th>Bill No</th>
+                      <th>Period</th>
+                      <th>Bill date</th>
+                      <th>Due</th>
+                      <th>Usage</th>
+                      <th>Total</th>
+                      <th>Status</th>
+                      <th>Paid on</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.invoices.map((inv, i) => (
+                      <tr key={inv.id}>
+                        <td>{i + 1}</td>
+                        <td className="font-mono" style={{ fontSize: "0.75rem" }}>
+                          {inv.bill_number}
+                        </td>
+                        <td>{inv.period_key}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{inv.bill_date}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{inv.due_date}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          ₹{inv.plan_inr} + ₹{inv.usage_inr}
+                        </td>
+                        <td style={{ whiteSpace: "nowrap" }}>₹{inv.amount_inr}</td>
+                        <td>{inv.status}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{inv.paid_at ? fmtDate(inv.paid_at) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <button type="button" className="btn-sm btn-sm-ghost" style={{ marginTop: 10 }} onClick={() => void loadHistory()}>
+              ↻ Refresh history
+            </button>
+          </div>
+        ) : null
+      ) : null}
+    </div>
+  );
+}
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
@@ -877,6 +1114,7 @@ export function DeveloperApiTab({
                   <span>Plan</span>
                 </div>
               </div>
+              <AccountBillingHistory accountId={a.id} onErr={onErr} compact />
               <div className="dev-actions">
                 <div className="dev-actions__group">
                   <button type="button" className="btn-sm" onClick={() => void loadDetail(a.lead_id)}>
@@ -1060,6 +1298,7 @@ export function DeveloperApiTab({
                   <dt>Messages sent</dt>
                   <dd>{detail.account.messages_sent_total ?? 0}</dd>
                 </dl>
+                <AccountBillingHistory accountId={detail.account.id} onErr={onErr} />
               </div>
             ) : null}
 

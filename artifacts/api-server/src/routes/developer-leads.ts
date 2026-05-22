@@ -20,7 +20,7 @@ import {
 } from "../lib/developerBilling";
 import { getDeveloperApiUsageSnapshot } from "../lib/developerApiUsage";
 import {
-  buildInvoiceHtml,
+  buildInvoicePdf,
   getInvoiceForAccount,
   invoiceToPublic,
   listInvoicesForAccount,
@@ -1053,10 +1053,12 @@ router.get("/:id/invoices/:invoiceId/download", async (req, res) => {
       res.status(404).json({ success: false, message: "Invoice not found" });
       return;
     }
-    const html = buildInvoiceHtml(inv, String(ctx.lead.company_name ?? "Developer"));
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="${inv.bill_number}.html"`);
-    res.send(html);
+    const pdf = buildInvoicePdf(inv, String(ctx.lead.company_name ?? "Developer"));
+    const safeName = inv.bill_number.replace(/[^A-Za-z0-9._-]/g, "_");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeName}.pdf"`);
+    res.setHeader("Content-Length", String(pdf.length));
+    res.send(pdf);
   } catch (err) {
     logger.error({ err }, "developer invoice download");
     res.status(500).json({ success: false, message: "Download failed" });
