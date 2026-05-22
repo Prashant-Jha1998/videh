@@ -630,16 +630,7 @@ export default function App() {
         {tab === "analytics" ? <AnalyticsTab onErr={setErr} /> : null}
         {tab === "audit" ? <AuditTab onErr={setErr} /> : null}
         {tab === "admins" ? <AdminsTab onErr={setErr} canManage={adminRole === "super_admin"} /> : null}
-        {tab === "developer-api" ? (
-          <DeveloperApiTab
-            onErr={setErr}
-            onPendingTemplatesChange={() => {
-              void api<{ success: boolean; stats: Stats }>("/admin/stats")
-                .then((d) => setStats(d.stats))
-                .catch(() => {});
-            }}
-          />
-        ) : null}
+        {tab === "developer-api" ? <DeveloperApiTab onErr={setErr} onPendingTemplatesChange={loadStats} /> : null}
 
         {tab === "users" && (
           <>

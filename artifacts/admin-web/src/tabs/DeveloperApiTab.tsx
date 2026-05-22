@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { adminApi } from "../adminApi";
 
 type Lead = {
@@ -329,6 +329,12 @@ export function DeveloperApiTab({
   const [apiSecretOnce, setApiSecretOnce] = useState<string | null>(null);
   const [pendingTemplates, setPendingTemplates] = useState<PendingTemplate[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
+  const onPendingChangeRef = useRef(onPendingTemplatesChange);
+  const lastPendingCountRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    onPendingChangeRef.current = onPendingTemplatesChange;
+  }, [onPendingTemplatesChange]);
 
   const loadPendingTemplates = useCallback(async () => {
     try {
@@ -336,18 +342,25 @@ export function DeveloperApiTab({
         "/admin/developer-templates/pending",
       );
       const list = data.templates ?? [];
+      const count = data.count ?? list.length;
       setPendingTemplates(list);
-      setPendingCount(data.count ?? list.length);
-      onPendingTemplatesChange?.();
+      setPendingCount(count);
+      if (lastPendingCountRef.current !== count) {
+        lastPendingCountRef.current = count;
+        onPendingChangeRef.current?.();
+      }
     } catch (err) {
       onErr(err instanceof Error ? err.message : "Could not load pending templates");
     }
-  }, [onErr, onPendingTemplatesChange]);
+  }, [onErr]);
 
   const load = useCallback(async () => {
+    if (view === "template-queue") {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      await loadPendingTemplates();
       if (view === "applications") {
         const data = await adminApi<{ leads: Lead[] }>(`/admin/developer-leads?status=${filter}`);
         setLeads(data.leads ?? []);
@@ -360,7 +373,15 @@ export function DeveloperApiTab({
     } finally {
       setLoading(false);
     }
-  }, [filter, onErr, view, loadPendingTemplates]);
+  }, [filter, onErr, view]);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadPendingTemplates(), load()]);
+  }, [load, loadPendingTemplates]);
+
+  useEffect(() => {
+    void loadPendingTemplates();
+  }, [loadPendingTemplates]);
 
   useEffect(() => {
     void load();
@@ -490,8 +511,7 @@ export function DeveloperApiTab({
         method: "PATCH",
         body: JSON.stringify({ status, rejectionReason: reason }),
       });
-      await loadPendingTemplates();
-      await load();
+      await refreshAll();
       if (detailId) await loadDetail(detailId);
     } catch (err) {
       onErr(err instanceof Error ? err.message : "Template update failed");
@@ -554,7 +574,7 @@ export function DeveloperApiTab({
           </button>
         </div>
         <span className="dev-count">{countLabel}</span>
-        <button type="button" className="btn-sm btn-sm-ghost" style={{ marginLeft: "auto" }} onClick={() => void load()}>
+        <button type="button" className="btn-sm btn-sm-ghost" style={{ marginLeft: "auto" }} onClick={() => void refreshAll()}>
           ↻ Refresh
         </button>
       </div>
