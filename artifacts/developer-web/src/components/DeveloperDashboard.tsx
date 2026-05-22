@@ -356,6 +356,8 @@ export function DeveloperDashboard() {
                         reference={reference}
                         apiKeyId={data.account.api_key_id}
                         billingStatus={data.account.billing_status}
+                        phoneNumberId={phoneId ?? undefined}
+                        businessAccountId={businessId ?? undefined}
                       />
                       {phoneId || businessId ? (
                         <div className="rounded-xl bg-[#f0f2f5] p-4 space-y-2 text-sm">

@@ -333,6 +333,8 @@ export function DeveloperApiPanel({ data, busy, error, leadId, reference, onRefr
             reference={reference}
             apiKeyId={data.account.api_key_id}
             billingStatus={data.account.billing_status}
+            phoneNumberId={phone ?? undefined}
+            businessAccountId={business ?? undefined}
           />
           {phone || business ? (
             <div className="rounded-xl bg-[#f0f2f5] p-4 space-y-2 text-sm">
