@@ -69,34 +69,40 @@ async function issueApiAccountForLead(
     secretEnc = null;
   }
   const billingStatus = paymentOk ? "active" : "hold";
+  const companyName = String(row.company_name ?? row.display_name ?? row.reference_code ?? "Applicant").trim() || "Applicant";
+  const displayName = String(row.display_name ?? companyName).trim() || companyName;
+  const referenceCode = String(row.reference_code ?? `VWA-${leadId}`);
+  const totalBilled =
+    row.payment_status === "paid" && row.amount_inr != null ? Number(row.amount_inr) : 0;
+  const amountMonthly = row.amount_inr != null ? Number(row.amount_inr) : 0;
+
   const ins = await query(
     `INSERT INTO developer_api_accounts
      (lead_id, reference_code, company_name, display_name, logo_url, api_key_id, api_key_secret_hash, api_key_secret_enc,
       billing_status, plan_id, amount_inr_monthly, total_billed_inr, last_payment_at, next_billing_at, approved_by,
       channel_phone, channel_status, channel_verified_at, videh_phone_number_id, videh_business_account_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW() + INTERVAL '30 days', $13,
-      $14,$15,$16,$17,$18)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, NOW() + INTERVAL '30 days', $14,$15,$16,$17,$18,$19)
      RETURNING id`,
     [
       leadId,
-      row.reference_code,
-      row.company_name,
-      row.display_name ?? row.company_name,
-      row.logo_url,
+      referenceCode,
+      companyName,
+      displayName,
+      row.logo_url ?? null,
       apiKeyId,
       secretHash,
       secretEnc,
       billingStatus,
-      row.plan_id,
-      row.amount_inr,
-      row.payment_status === "paid" ? row.amount_inr : 0,
+      row.plan_id ?? "starter",
+      amountMonthly,
+      totalBilled,
       row.paid_at ?? null,
       approvedBy,
-      row.channel_phone,
-      row.channel_status,
-      row.channel_verified_at,
-      row.videh_phone_number_id,
-      row.videh_business_account_id,
+      row.channel_phone ?? null,
+      row.channel_status ?? "verified",
+      row.channel_verified_at ?? null,
+      row.videh_phone_number_id ?? null,
+      row.videh_business_account_id ?? null,
     ],
   );
   const newAccountId = Number((ins.rows[0] as { id: number }).id);
@@ -891,6 +897,57 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
     }
   });
 
+  /** Create API account for an already-approved lead that has no keys yet */
+  router.post(
+    "/developer-leads/:id/issue-api-keys",
+    requireAdmin,
+    requirePermission("developer.manage"),
+    async (req, res) => {
+      const id = Number(req.params.id);
+      if (!id) {
+        res.status(400).json({ success: false, message: "Invalid id" });
+        return;
+      }
+      try {
+        await ensureDeveloperPlatformTables();
+        const lead = await query(`SELECT * FROM developer_leads WHERE id = $1`, [id]);
+        if (!lead.rows[0]) {
+          res.status(404).json({ success: false, message: "Application not found" });
+          return;
+        }
+        const row = lead.rows[0] as Record<string, unknown>;
+        if (String(row.status) !== "approved") {
+          res.status(400).json({ success: false, message: "Application must be Approved before issuing API keys." });
+          return;
+        }
+        const approveErr = assertCanApproveLead(row);
+        if (approveErr) {
+          res.status(400).json({ success: false, message: approveErr });
+          return;
+        }
+        const existing = await query(`SELECT id FROM developer_api_accounts WHERE lead_id = $1`, [id]);
+        if (existing.rows[0]) {
+          res.status(400).json({ success: false, message: "API keys already exist for this application." });
+          return;
+        }
+        const issued = await issueApiAccountForLead(id, row, adminEmail(req));
+        await logAdminAction(
+          { action: "developer_api_keys_issued", entityType: "developer_lead", entityId: id },
+          req,
+        );
+        res.json({ success: true, apiSecretOnce: issued.apiSecretOnce, accountId: issued.accountId });
+      } catch (err) {
+        logger.error({ err, leadId: id }, "admin issue-api-keys");
+        const detail = err instanceof Error ? err.message : String(err);
+        res.status(500).json({
+          success: false,
+          message: "Could not issue API keys",
+          detail: process.env.NODE_ENV === "production" ? undefined : detail,
+        });
+      }
+    },
+  );
+
   router.patch("/developer-leads/:id", requireAdmin, requirePermission("developer.manage"), async (req, res) => {
     const id = Number(req.params.id);
     const body = req.body as { status?: string; adminNotes?: string; approvalPhase?: string };
@@ -990,8 +1047,16 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
       );
       res.json({ success: true, lead: r.rows[0], apiSecretOnce });
     } catch (err) {
-      logger.error({ err }, "admin developer-lead patch");
-      res.status(500).json({ success: false, message: "Update failed" });
+      logger.error({ err, leadId: id }, "admin developer-lead patch");
+      const detail = err instanceof Error ? err.message : String(err);
+      res.status(500).json({
+        success: false,
+        message:
+          detail.includes("duplicate key") || detail.includes("unique")
+            ? "API account or key already exists for this application."
+            : "Update failed",
+        detail: process.env.NODE_ENV === "production" ? undefined : detail,
+      });
     }
   });
 

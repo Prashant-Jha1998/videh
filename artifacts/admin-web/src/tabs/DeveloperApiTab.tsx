@@ -459,6 +459,24 @@ export function DeveloperApiTab({
     }
   };
 
+  const issueApiKeys = async (id: number) => {
+    try {
+      const data = await adminApi<{ success?: boolean; apiSecretOnce?: string | null; message?: string }>(
+        `/admin/developer-leads/${id}/issue-api-keys`,
+        { method: "POST" },
+      );
+      if (data.apiSecretOnce) {
+        setApiSecretOnce(data.apiSecretOnce);
+        window.alert(`API secret (show once): ${data.apiSecretOnce}`);
+      }
+      setView("accounts");
+      await load();
+      if (detailId === id) await loadDetail(id);
+    } catch (err) {
+      onErr(err instanceof Error ? err.message : "Could not issue API keys");
+    }
+  };
+
   const updateLead = async (id: number, patch: { status?: string; adminNotes?: string; approvalPhase?: string }) => {
     try {
       const data = await adminApi<{ lead: Lead; apiSecretOnce?: string | null }>(`/admin/developer-leads/${id}`, {
@@ -786,7 +804,7 @@ export function DeveloperApiTab({
                             : "Channel not verified"
                           : "Create API account"
                       }
-                      onClick={() => void updateLead(l.id, { status: "approved" })}
+                      onClick={() => void issueApiKeys(l.id)}
                     >
                       Issue API keys
                     </button>
@@ -1139,7 +1157,7 @@ export function DeveloperApiTab({
                     type="button"
                     className="btn-sm btn-sm-primary"
                     disabled={!canFullyApprove(detail.lead)}
-                    onClick={() => void updateLead(detail.lead.id, { status: "approved" })}
+                    onClick={() => void issueApiKeys(detail.lead.id)}
                   >
                     Issue API keys
                   </button>
