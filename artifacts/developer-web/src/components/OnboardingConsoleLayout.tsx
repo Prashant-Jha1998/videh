@@ -6,7 +6,7 @@ export type ConsoleModule = {
   label: string;
   subtitle: string;
   icon: LucideIcon;
-  section: "setup" | "review";
+  section: "setup" | "review" | "workspace";
 };
 
 type ModuleStatus = "current" | "done" | "available" | "locked";
@@ -112,14 +112,26 @@ export function OnboardingConsoleLayout({
               ))}
             </ul>
           </div>
-          <div>
-            <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-white/35 mb-2">After submission</p>
-            <ul className="space-y-0.5">
-              {modules.filter((m) => m.section === "review").map((mod) => (
-                <SidebarModule key={mod.id} mod={mod} status={moduleStatus(mod)} onGo={() => onGoTo(mod.id)} />
-              ))}
-            </ul>
-          </div>
+          {modules.some((m) => m.section === "review") ? (
+            <div>
+              <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-white/35 mb-2">After submission</p>
+              <ul className="space-y-0.5">
+                {modules.filter((m) => m.section === "review").map((mod) => (
+                  <SidebarModule key={mod.id} mod={mod} status={moduleStatus(mod)} onGo={() => onGoTo(mod.id)} />
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {modules.some((m) => m.section === "workspace") ? (
+            <div>
+              <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-white/35 mb-2">Manage your account</p>
+              <ul className="space-y-0.5">
+                {modules.filter((m) => m.section === "workspace").map((mod) => (
+                  <SidebarModule key={mod.id} mod={mod} status={moduleStatus(mod)} onGo={() => onGoTo(mod.id)} />
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </nav>
         <div className="p-4 border-t border-white/10 text-xs text-white/45">
           <p className="flex items-center gap-1.5">

@@ -36,6 +36,16 @@ type Lead = {
   channel_status?: string;
   videh_phone_number_id?: string;
   videh_business_account_id?: string;
+  pending_template_count?: number;
+};
+
+type PendingTemplate = MessageTemplate & {
+  reference_code: string;
+  company_name: string;
+  display_name?: string;
+  lead_status: string;
+  lead_email?: string;
+  submitted_at?: string;
 };
 
 type LeadDoc = {
@@ -193,6 +203,7 @@ function ApplicationCard({
   onSuspend,
   onReactivate,
   onDelete,
+  onTemplates,
 }: {
   lead: Lead;
   onDetail: () => void;
@@ -201,6 +212,7 @@ function ApplicationCard({
   onSuspend: () => void;
   onReactivate: () => void;
   onDelete: () => void;
+  onTemplates?: () => void;
 }) {
   const name = lead.company_name || lead.display_name || "(Unnamed company)";
   const initial = name.charAt(0).toUpperCase();
@@ -222,7 +234,14 @@ function ApplicationCard({
             <span className="dev-app-card__ref">{lead.reference_code}</span>
           </div>
         </div>
-        <StatusBadge status={lead.status} />
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+          <StatusBadge status={lead.status} />
+          {(lead.pending_template_count ?? 0) > 0 ? (
+            <button type="button" className="dev-template-pending-badge" onClick={onTemplates}>
+              {lead.pending_template_count} template{(lead.pending_template_count ?? 0) === 1 ? "" : "s"} pending
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="dev-meta-row">
@@ -287,8 +306,14 @@ function ApplicationCard({
   );
 }
 
-export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
-  const [view, setView] = useState<"applications" | "accounts">("applications");
+export function DeveloperApiTab({
+  onErr,
+  onPendingTemplatesChange,
+}: {
+  onErr: (m: string) => void;
+  onPendingTemplatesChange?: () => void;
+}) {
+  const [view, setView] = useState<"applications" | "template-queue" | "accounts">("applications");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [accounts, setAccounts] = useState<ApiAccount[]>([]);
   const [filter, setFilter] = useState("pending");
@@ -302,14 +327,31 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
     templates: MessageTemplate[];
   } | null>(null);
   const [apiSecretOnce, setApiSecretOnce] = useState<string | null>(null);
+  const [pendingTemplates, setPendingTemplates] = useState<PendingTemplate[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  const loadPendingTemplates = useCallback(async () => {
+    try {
+      const data = await adminApi<{ templates: PendingTemplate[]; count: number }>(
+        "/admin/developer-templates/pending",
+      );
+      const list = data.templates ?? [];
+      setPendingTemplates(list);
+      setPendingCount(data.count ?? list.length);
+      onPendingTemplatesChange?.();
+    } catch (err) {
+      onErr(err instanceof Error ? err.message : "Could not load pending templates");
+    }
+  }, [onErr, onPendingTemplatesChange]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      await loadPendingTemplates();
       if (view === "applications") {
         const data = await adminApi<{ leads: Lead[] }>(`/admin/developer-leads?status=${filter}`);
         setLeads(data.leads ?? []);
-      } else {
+      } else if (view === "accounts") {
         const data = await adminApi<{ accounts: ApiAccount[] }>("/admin/developer-accounts");
         setAccounts(data.accounts ?? []);
       }
@@ -318,7 +360,7 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
     } finally {
       setLoading(false);
     }
-  }, [filter, onErr, view]);
+  }, [filter, onErr, view, loadPendingTemplates]);
 
   useEffect(() => {
     void load();
@@ -448,6 +490,8 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
         method: "PATCH",
         body: JSON.stringify({ status, rejectionReason: reason }),
       });
+      await loadPendingTemplates();
+      await load();
       if (detailId) await loadDetail(detailId);
     } catch (err) {
       onErr(err instanceof Error ? err.message : "Template update failed");
@@ -459,9 +503,13 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
       ? loading
         ? "Loading…"
         : `${leads.length} application${leads.length === 1 ? "" : "s"}`
-      : loading
-        ? "Loading…"
-        : `${accounts.length} live account${accounts.length === 1 ? "" : "s"}`;
+      : view === "template-queue"
+        ? loading
+          ? "Loading…"
+          : `${pendingTemplates.length} pending template${pendingTemplates.length === 1 ? "" : "s"}`
+        : loading
+          ? "Loading…"
+          : `${accounts.length} live account${accounts.length === 1 ? "" : "s"}`;
 
   return (
     <div className="dev-api-page">
@@ -472,6 +520,18 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
         </p>
       </header>
 
+      {pendingCount > 0 ? (
+        <div className="dev-template-alert" role="alert">
+          <strong>{pendingCount} message template{pendingCount === 1 ? "" : "s"} awaiting your approval</strong>
+          <span className="muted" style={{ fontSize: "0.85rem" }}>
+            Developers submitted these from the Business API console. Review and approve or reject below.
+          </span>
+          <button type="button" className="btn-sm btn-sm-primary" onClick={() => setView("template-queue")}>
+            Open approval queue →
+          </button>
+        </div>
+      ) : null}
+
       <div className="dev-api-toolbar">
         <div className="dev-segment">
           <button
@@ -480,6 +540,14 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
             onClick={() => setView("applications")}
           >
             Applications
+          </button>
+          <button
+            type="button"
+            className={view === "template-queue" ? "active" : ""}
+            onClick={() => setView("template-queue")}
+          >
+            Template approvals
+            {pendingCount > 0 ? <span className="dev-segment-badge">{pendingCount}</span> : null}
           </button>
           <button type="button" className={view === "accounts" ? "active" : ""} onClick={() => setView("accounts")}>
             Live APIs
@@ -490,6 +558,65 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
           ↻ Refresh
         </button>
       </div>
+
+      {view === "template-queue" ? (
+        loading ? (
+          <div className="dev-loading">Loading pending templates…</div>
+        ) : pendingTemplates.length === 0 ? (
+          <div className="dev-empty">
+            <h3>No templates pending</h3>
+            <p className="muted" style={{ margin: 0 }}>
+              When a developer submits a message template for approval, it will appear here immediately.
+            </p>
+          </div>
+        ) : (
+          <ul className="dev-template-queue">
+            {pendingTemplates.map((t) => (
+              <li key={t.id} className="dev-template-queue__item">
+                <div className="dev-template-queue__head">
+                  <div>
+                    <p className="dev-template-queue__company">{t.company_name || t.display_name || "—"}</p>
+                    <p className="dev-template-queue__ref">
+                      <span className="font-mono">{t.reference_code}</span>
+                      {" · "}
+                      {STATUS_LABELS[t.lead_status] ?? t.lead_status}
+                      {t.lead_email ? ` · ${t.lead_email}` : ""}
+                    </p>
+                  </div>
+                  <span className="dev-badge dev-badge--warn">Pending approval</span>
+                </div>
+                <div className="dev-template-queue__body">
+                  <strong className="font-mono">{t.template_key}</strong>
+                  <p className="muted" style={{ margin: "4px 0", fontSize: "0.85rem" }}>
+                    {t.name} · {t.category} · {t.language}
+                  </p>
+                  <p className="muted" style={{ margin: 0, fontSize: "0.8rem" }}>
+                    {t.body_preview ?? t.body_text.slice(0, 200)}
+                  </p>
+                  {t.submitted_at ? (
+                    <p className="muted" style={{ margin: "8px 0 0", fontSize: "0.75rem" }}>
+                      Submitted {new Date(t.submitted_at).toLocaleString()}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="dev-actions" style={{ marginTop: 10, border: "none", padding: 0 }}>
+                  <div className="dev-actions__group">
+                    <button type="button" className="btn-sm btn-sm-primary" onClick={() => void patchTemplate(t.id, "approved")}>
+                      Approve
+                    </button>
+                    <button type="button" className="btn-sm btn-sm-danger" onClick={() => void patchTemplate(t.id, "rejected")}>
+                      Reject
+                    </button>
+                    <button type="button" className="btn-sm" onClick={() => void loadDetail(t.lead_id)}>
+                      Open application
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : null}
 
       {view === "applications" ? (
         <>
@@ -529,6 +656,10 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
                   onSuspend={() => suspendLead(lead)}
                   onReactivate={() => reactivateLead(lead)}
                   onDelete={() => void deleteLead(lead)}
+                  onTemplates={() => {
+                    setView("template-queue");
+                    void loadDetail(lead.id);
+                  }}
                 />
               ))}
             </div>
@@ -781,9 +912,17 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
             ) : null}
 
             <div className="dev-detail-section">
-              <h4>Message templates</h4>
+              <h4>
+                Message templates
+                {detail.templates.some((t) => t.status === "pending") ? (
+                  <span className="dev-badge dev-badge--warn" style={{ marginLeft: 8, verticalAlign: "middle" }}>
+                    {detail.templates.filter((t) => t.status === "pending").length} pending
+                  </span>
+                ) : null}
+              </h4>
               <p className="muted" style={{ fontSize: "0.8rem", margin: "0 0 10px" }}>
-                Developers submit from developer.videh.co.in → Developer console. You approve or reject only.
+                Developers submit from developer.videh.co.in. Approve or reject each template — pending items also appear
+                in <strong>Template approvals</strong> queue.
               </p>
               {detail.templates.length === 0 ? (
                 <p className="muted" style={{ fontSize: "0.85rem" }}>No templates submitted yet.</p>
@@ -795,9 +934,9 @@ export function DeveloperApiTab({ onErr }: { onErr: (m: string) => void }) {
                       style={{
                         marginBottom: 10,
                         padding: 10,
-                        background: "var(--bg)",
+                        background: t.status === "pending" ? "rgba(245, 158, 11, 0.08)" : "var(--bg)",
                         borderRadius: 8,
-                        border: "1px solid var(--border)",
+                        border: t.status === "pending" ? "1px solid rgba(245, 158, 11, 0.45)" : "1px solid var(--border)",
                       }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>

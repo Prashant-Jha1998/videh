@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Building2, CreditCard, Loader2, Send } from "lucide-react";
+import { getRazorpayLogoUrl } from "../lib/razorpayCheckout";
 
 declare global {
   interface Window {
@@ -77,7 +78,7 @@ export function LeadForm() {
 
   async function openRazorpayCheckout(args: {
     leadId: number;
-    checkout: { orderId: string; amountInr: number; keyId: string; currency: string };
+    checkout: { orderId: string; amountInr: number; keyId: string; currency: string; logoUrl?: string };
   }) {
     return new Promise<void>((resolve, reject) => {
       if (!window.Razorpay) {
@@ -89,6 +90,7 @@ export function LeadForm() {
         amount: args.checkout.amountInr * 100,
         currency: args.checkout.currency,
         name: "Videh",
+        image: getRazorpayLogoUrl(args.checkout.logoUrl),
         description: `${selectedPlan.name} plan — API onboarding`,
         order_id: args.checkout.orderId,
         prefill: {

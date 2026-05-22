@@ -71,6 +71,7 @@ textarea {
   background: transparent;
   color: var(--text);
   cursor: pointer;
+  position: relative;
 }
 .nav-btn:hover {
   background: rgba(0, 168, 132, 0.12);
@@ -78,6 +79,28 @@ textarea {
 .nav-btn.active {
   background: rgba(0, 168, 132, 0.22);
   font-weight: 600;
+}
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 8px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--warn);
+  color: #111;
+  font-size: 0.68rem;
+  font-weight: 800;
+  vertical-align: middle;
+}
+.stat--highlight {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(245, 158, 11, 0.08);
+}
+.stat--highlight b {
+  color: var(--warn);
 }
 main {
   flex: 1;
@@ -677,4 +700,80 @@ select {
   font-size: 0.8rem;
   color: var(--muted);
   margin-left: auto;
+}
+.dev-template-alert {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.1);
+}
+.dev-template-alert strong {
+  color: var(--warn);
+  font-size: 0.95rem;
+}
+.dev-segment-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--warn);
+  color: #111;
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+.dev-template-pending-badge {
+  border: none;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--warn);
+}
+.dev-template-pending-badge:hover {
+  background: rgba(245, 158, 11, 0.32);
+}
+.dev-template-queue {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.dev-template-queue__item {
+  background: var(--card);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.dev-template-queue__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.dev-template-queue__company {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1rem;
+}
+.dev-template-queue__ref {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.dev-template-queue__body {
+  font-size: 0.85rem;
 }

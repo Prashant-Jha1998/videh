@@ -2,19 +2,30 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  BarChart3,
   Building2,
   CheckCircle2,
   CreditCard,
   FileText,
   ImagePlus,
+  Key,
   LayoutDashboard,
   Loader2,
+  MessageSquare,
   Phone,
   Upload,
 } from "lucide-react";
 import { ConversationPricing } from "./ConversationPricing";
 import { OnboardingConsoleLayout } from "./OnboardingConsoleLayout";
+import {
+  DeveloperApiPanel,
+  DeveloperBillingPanel,
+  DeveloperChannelPanel,
+  DeveloperTemplatesPanel,
+} from "./DeveloperPortalPanels";
+import { useDeveloperPortal } from "../hooks/useDeveloperPortal";
 import { devFetch } from "../lib/devFetch";
+import { getRazorpayLogoUrl } from "../lib/razorpayCheckout";
 
 declare global {
   interface Window {
@@ -22,15 +33,18 @@ declare global {
   }
 }
 
-const STEPS = ["plan", "company", "documents", "profile", "channel", "payment", "done"] as const;
+const SETUP_STEPS = ["plan", "company", "documents", "profile", "channel", "payment"] as const;
+const WORKSPACE_STEPS = ["done", "channel-console", "templates", "api", "billing"] as const;
+const STEPS = [...SETUP_STEPS, ...WORKSPACE_STEPS] as const;
 type Step = (typeof STEPS)[number];
+type SetupStep = (typeof SETUP_STEPS)[number];
 
 const MODULES: {
   id: Step;
   label: string;
   subtitle: string;
   icon: typeof Building2;
-  section: "setup" | "review";
+  section: "setup" | "review" | "workspace";
 }[] = [
   { id: "plan", label: "Plan & billing", subtitle: "Partner tier & usage model", icon: CreditCard, section: "setup" },
   { id: "company", label: "Business information", subtitle: "Legal entity & signatory", icon: Building2, section: "setup" },
@@ -38,7 +52,11 @@ const MODULES: {
   { id: "profile", label: "Business profile", subtitle: "Display name & logo", icon: ImagePlus, section: "setup" },
   { id: "channel", label: "Phone & channel", subtitle: "Dedicated number + OTP", icon: Phone, section: "setup" },
   { id: "payment", label: "Payment verification", subtitle: "Card / UPI method check", icon: CreditCard, section: "setup" },
-  { id: "done", label: "Application status", subtitle: "Review pipeline & next steps", icon: LayoutDashboard, section: "review" },
+  { id: "done", label: "Application status", subtitle: "Review pipeline & progress", icon: LayoutDashboard, section: "review" },
+  { id: "channel-console", label: "Business channel", subtitle: "Phone number & channel IDs", icon: Phone, section: "workspace" },
+  { id: "templates", label: "Message templates", subtitle: "Create & submit for approval", icon: MessageSquare, section: "workspace" },
+  { id: "api", label: "API access", subtitle: "Production keys & endpoints", icon: Key, section: "workspace" },
+  { id: "billing", label: "Billing & usage", subtitle: "Usage metrics & plan", icon: BarChart3, section: "workspace" },
 ];
 
 const REVIEW_PIPELINE = [
@@ -137,11 +155,17 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       if (ref) localStorage.setItem(REF_STORAGE_KEY, ref);
       setPlanId(String(L.plan_id ?? "starter"));
       const ws = String(L.wizard_step ?? "plan");
+      const status = String(L.status ?? "draft");
       if (STEPS.includes(ws as Step)) {
         setStep(ws as Step);
-        setMaxReachedIndex(Math.max(STEPS.indexOf(ws as Step), STEPS.indexOf("plan")));
+        const wsIdx = STEPS.indexOf(ws as Step);
+        const submitted =
+          ws === "done" || !["draft", "payment_pending"].includes(status) || Boolean(L.payment_method_verified);
+        setMaxReachedIndex(
+          Math.max(wsIdx, submitted ? STEPS.indexOf("done") : STEPS.indexOf("plan")),
+        );
       }
-      setLeadStatus(String(L.status ?? "draft"));
+      setLeadStatus(status);
       const chPhone = String(L.channel_phone ?? "");
       setChannelPhone(chPhone.startsWith("91") ? chPhone.slice(2) : chPhone);
       setChannelVerified(L.channel_status === "verified");
@@ -346,7 +370,13 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
     }
   }
 
-  async function openRazorpay(checkout: { orderId: string; amountInr: number; keyId: string; currency: string }) {
+  async function openRazorpay(checkout: {
+    orderId: string;
+    amountInr: number;
+    keyId: string;
+    currency: string;
+    logoUrl?: string;
+  }) {
     return new Promise<void>((resolve, reject) => {
       if (!window.Razorpay) {
         reject(new Error("Payment gateway not loaded"));
@@ -357,6 +387,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
         amount: checkout.amountInr * 100,
         currency: checkout.currency,
         name: "Videh",
+        image: getRazorpayLogoUrl(checkout.logoUrl),
         description: `Videh — payment method verification (₹5)`,
         order_id: checkout.orderId,
         prefill: { name: company.contactName, email: company.email, contact: company.phone },
@@ -467,15 +498,38 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
   }
 
   const stepIndex = STEPS.indexOf(step);
+  const setupStepIndex = (SETUP_STEPS as readonly string[]).includes(step)
+    ? SETUP_STEPS.indexOf(step as SetupStep)
+    : SETUP_STEPS.length - 1;
   const requiredMissing = docs.filter((d) => d.required && !uploaded.has(d.key));
   const currentModule = MODULES.find((m) => m.id === step) ?? MODULES[0]!;
+  const workspaceUnlocked = maxReachedIndex >= STEPS.indexOf("done");
+  const isWorkspaceStep = (WORKSPACE_STEPS as readonly string[]).includes(step);
+
+  const portal = useDeveloperPortal({
+    leadId: leadId ? String(leadId) : "",
+    reference,
+    enabled: workspaceUnlocked && isWorkspaceStep && step !== "done",
+  });
+
+  const portalPanelProps = {
+    data: portal.data,
+    busy: portal.busy,
+    error: portal.error,
+    leadId: leadId ? String(leadId) : "",
+    reference,
+    onRefresh: () => void portal.load(),
+    onError: portal.setError,
+    onReload: portal.load,
+  };
 
   useEffect(() => {
     if (stepIndex > maxReachedIndex) setMaxReachedIndex(stepIndex);
   }, [stepIndex, maxReachedIndex]);
 
   function canGoTo(target: Step): boolean {
-    if (target === "done") return step === "done" || maxReachedIndex >= STEPS.indexOf("payment");
+    if (target === "done") return workspaceUnlocked || maxReachedIndex >= STEPS.indexOf("payment");
+    if ((WORKSPACE_STEPS as readonly string[]).includes(target) && target !== "done") return workspaceUnlocked;
     return STEPS.indexOf(target) <= maxReachedIndex;
   }
 
@@ -483,12 +537,14 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
     if (!canGoTo(target)) return;
     setStep(target);
     setError("");
+    portal.setError("");
   }
 
   function moduleStatus(mod: (typeof MODULES)[number]): "current" | "done" | "available" | "locked" {
-    const idx = STEPS.indexOf(mod.id);
     if (step === mod.id) return "current";
     if (!canGoTo(mod.id)) return "locked";
+    if (mod.section === "workspace" || mod.section === "review") return "available";
+    const idx = STEPS.indexOf(mod.id);
     if (idx < stepIndex) return "done";
     return "available";
   }
@@ -506,8 +562,8 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       moduleStatus={(mod) => moduleStatus(mod as (typeof MODULES)[number])}
       onGoTo={(id) => goToModule(id as Step)}
       onClose={onClose}
-      progressSteps={[...STEPS.slice(0, -1)]}
-      stepIndex={stepIndex}
+      progressSteps={[...SETUP_STEPS]}
+      stepIndex={setupStepIndex}
     >
       {error ? (
         <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</p>
@@ -1044,13 +1100,37 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                   })}
                 </ol>
               </div>
+              <div>
+                <h3 className="text-sm font-bold text-[#111b21] uppercase tracking-wide mb-3">Manage your account</h3>
+                <p className="text-sm text-[#667781] mb-4">
+                  Use the sidebar under <strong>Manage your account</strong> — or the shortcuts below — to configure
+                  templates, view channel IDs, API keys, and billing without leaving this console.
+                </p>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {(
+                    [
+                      { id: "channel-console" as Step, label: "Business channel", desc: "Phone number & channel IDs" },
+                      { id: "templates" as Step, label: "Message templates", desc: "Submit templates for approval" },
+                      { id: "api" as Step, label: "API access", desc: "Production keys when approved" },
+                      { id: "billing" as Step, label: "Billing & usage", desc: "Usage metrics & plan" },
+                    ] as const
+                  ).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => goToModule(item.id)}
+                      className="text-left rounded-xl border border-[#00a884]/30 bg-[#00a884]/5 p-4 hover:bg-[#00a884]/10 transition-colors"
+                    >
+                      <p className="font-semibold text-[#111b21] text-sm">{item.label}</p>
+                      <p className="text-xs text-[#667781] mt-1">{item.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="rounded-xl bg-[#f0f2f5] p-4 text-sm text-[#667781]">
                 <p className="font-semibold text-[#111b21] mb-1">What happens next?</p>
                 <ul className="list-disc pl-5 space-y-1 text-xs">
-                  <li>
-                    Open <a href="#dashboard" className="text-[#00a884] font-semibold hover:underline">Developer console</a>{" "}
-                    to submit message templates for approval and track API keys &amp; billing.
-                  </li>
+                  <li>Videh reviews documents, assigns your channel, and approves templates you submit.</li>
                   <li>After API approval, use GET /v1/templates to list approved template names for your website.</li>
                   <li>Questions: developer@videh.co.in</li>
                 </ul>
@@ -1060,6 +1140,11 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
               </button>
             </section>
           )}
+
+          {step === "channel-console" && <DeveloperChannelPanel {...portalPanelProps} />}
+          {step === "templates" && <DeveloperTemplatesPanel {...portalPanelProps} />}
+          {step === "api" && <DeveloperApiPanel {...portalPanelProps} />}
+          {step === "billing" && <DeveloperBillingPanel {...portalPanelProps} />}
     </OnboardingConsoleLayout>
   );
 }

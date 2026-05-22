@@ -43,6 +43,7 @@ type Stats = {
   open_grievances?: number;
   open_dsr?: number;
   pending_developer_leads?: number;
+  pending_developer_templates?: number;
 };
 
 type StatusBoostRow = {
@@ -493,9 +494,10 @@ export default function App() {
     );
   }
 
-  const nav = (id: Tab, label: string) => (
+  const nav = (id: Tab, label: string, badge?: number) => (
     <button type="button" key={id} className={`nav-btn ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}>
       {label}
+      {badge != null && badge > 0 ? <span className="nav-badge">{badge}</span> : null}
     </button>
   );
 
@@ -509,7 +511,7 @@ export default function App() {
         {nav("overview", "Overview")}
         {nav("trust", "Trust & Safety")}
         {nav("compliance", "Compliance")}
-        {nav("developer-api", "Developer API")}
+        {nav("developer-api", "Developer API", stats?.pending_developer_templates)}
         {nav("analytics", "Analytics")}
         {nav("audit", "Audit")}
         {adminRole === "super_admin" ? nav("admins", "Admins") : null}
@@ -606,6 +608,10 @@ export default function App() {
                   <b>{stats.pending_developer_leads ?? 0}</b>
                   <span>Developer API pending</span>
                 </div>
+                <div className={`stat${(stats.pending_developer_templates ?? 0) > 0 ? " stat--highlight" : ""}`}>
+                  <b>{stats.pending_developer_templates ?? 0}</b>
+                  <span>Templates awaiting approval</span>
+                </div>
               </div>
             ) : (
               <p className="muted">Loading stats…</p>
@@ -624,7 +630,16 @@ export default function App() {
         {tab === "analytics" ? <AnalyticsTab onErr={setErr} /> : null}
         {tab === "audit" ? <AuditTab onErr={setErr} /> : null}
         {tab === "admins" ? <AdminsTab onErr={setErr} canManage={adminRole === "super_admin"} /> : null}
-        {tab === "developer-api" ? <DeveloperApiTab onErr={setErr} /> : null}
+        {tab === "developer-api" ? (
+          <DeveloperApiTab
+            onErr={setErr}
+            onPendingTemplatesChange={() => {
+              void api<{ success: boolean; stats: Stats }>("/admin/stats")
+                .then((d) => setStats(d.stats))
+                .catch(() => {});
+            }}
+          />
+        ) : null}
 
         {tab === "users" && (
           <>

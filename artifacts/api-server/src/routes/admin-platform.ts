@@ -756,12 +756,16 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
         where = "status = $1";
         params.push(status);
       }
+      await ensureDeveloperTemplateTables();
       const r = await query(
-        `SELECT * FROM developer_leads
-         WHERE ${where}
+        `SELECT l.*,
+          (SELECT COUNT(*)::int FROM developer_message_templates t
+           WHERE t.lead_id = l.id AND t.status = 'pending') AS pending_template_count
+         FROM developer_leads l
+         WHERE ${where.replace(/\bstatus\b/g, "l.status")}
          ORDER BY
-           CASE WHEN status = 'paid' THEN 0 WHEN status = 'payment_pending' THEN 1 ELSE 2 END,
-           created_at DESC
+           CASE WHEN l.status = 'paid' THEN 0 WHEN l.status = 'payment_pending' THEN 1 ELSE 2 END,
+           l.created_at DESC
          LIMIT 200`,
         params,
       );
@@ -1146,6 +1150,32 @@ export function registerAdminPlatformRoutes(router: Router, requireAdmin: Requir
       } catch (err) {
         logger.error({ err }, "admin create template");
         res.status(500).json({ success: false, message: "Could not save template" });
+      }
+    },
+  );
+
+  router.get(
+    "/developer-templates/pending",
+    requireAdmin,
+    requirePermission("developer.read"),
+    async (_req, res) => {
+      try {
+        await ensureDeveloperTemplateTables();
+        const r = await query(
+          `SELECT t.id, t.lead_id, t.template_key, t.name, t.category, t.language,
+                  t.body_text, t.body_preview, t.variables_json, t.status, t.rejection_reason,
+                  t.submitted_at, t.created_at,
+                  l.reference_code, l.company_name, l.display_name, l.status AS lead_status, l.email AS lead_email
+           FROM developer_message_templates t
+           INNER JOIN developer_leads l ON l.id = t.lead_id
+           WHERE t.status = 'pending'
+           ORDER BY t.submitted_at ASC NULLS LAST, t.created_at ASC
+           LIMIT 200`,
+        );
+        res.json({ success: true, templates: r.rows, count: r.rows.length });
+      } catch (err) {
+        logger.error({ err }, "admin pending developer templates");
+        res.status(500).json({ success: false, message: "Could not load pending templates" });
       }
     },
   );

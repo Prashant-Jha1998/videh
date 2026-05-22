@@ -121,6 +121,14 @@ function referenceCode(): string {
   return `VWA-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 }
 
+function razorpayCheckoutLogoUrl(): string {
+  const base =
+    process.env["DEVELOPER_SITE_URL"]?.trim() ||
+    process.env["DEVELOPER_PUBLIC_URL"]?.trim() ||
+    "https://developer.videh.co.in";
+  return `${base.replace(/\/$/, "")}/videh_icon_foreground.png`;
+}
+
 function publicUploadUrl(filePath: string): string {
   const rel = path.relative(path.join(apiServerDir, "uploads"), filePath).replace(/\\/g, "/");
   return `/uploads/${rel}`;
@@ -434,6 +442,7 @@ router.post("/:id/start-payment", async (req: Request, res: Response) => {
         amountInr: PAYMENT_VERIFICATION_INR,
         keyId: getRazorpayConfig().keyId,
         currency: "INR",
+        logoUrl: razorpayCheckoutLogoUrl(),
       },
     });
   } catch (err) {
