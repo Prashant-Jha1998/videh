@@ -9,16 +9,21 @@ export type ChannelStatus = "none" | "otp_pending" | "verified" | "suspended";
 const CHANNEL_OTP_TTL_MS = 10 * 60 * 1000;
 const channelOtpKey = (leadId: number, phone: string) => `dev-channel-otp:${leadId}:${phone}`;
 
+/** 15-digit numeric string (Meta-style ID). Node randomInt max span is ~2^48, so build digits explicitly. */
+function random15DigitNumeric(): string {
+  let digits = String(crypto.randomInt(1, 10));
+  for (let i = 1; i < 15; i++) digits += String(crypto.randomInt(0, 10));
+  return digits;
+}
+
 /** 15-digit numeric ID (Meta-style Phone Number ID appearance). */
 export function generatePhoneNumberId(): string {
-  const n = crypto.randomInt(100_000_000_000_000, 999_999_999_999_999);
-  return String(n);
+  return random15DigitNumeric();
 }
 
 /** 15-digit numeric Business Account ID (WABA-style). */
 export function generateBusinessAccountId(): string {
-  const n = crypto.randomInt(100_000_000_000_000, 999_999_999_999_999);
-  return String(n);
+  return random15DigitNumeric();
 }
 
 export async function ensureDeveloperChannelColumns(): Promise<void> {

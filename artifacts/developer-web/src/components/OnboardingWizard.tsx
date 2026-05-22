@@ -60,6 +60,13 @@ type DocReq = { key: string; label: string; required: boolean };
 
 const STORAGE_KEY = "videh_dev_lead_id";
 
+/** Uploaded files are served from api-server at /uploads (proxied on developer.videh.co.in). */
+function resolveUploadUrl(url: string): string {
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  return url.startsWith("/") ? url : `/${url}`;
+}
+
 type Props = { onClose: () => void };
 
 export function OnboardingWizard({ onClose }: Props) {
@@ -81,6 +88,7 @@ export function OnboardingWizard({ onClose }: Props) {
   const [phoneNumberId, setPhoneNumberId] = useState("");
   const [businessAccountId, setBusinessAccountId] = useState("");
   const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
+  const [channelOtpSent, setChannelOtpSent] = useState(false);
 
   const [company, setCompany] = useState({
     companyName: "",
@@ -135,7 +143,8 @@ export function OnboardingWizard({ onClose }: Props) {
       setChannelVerified(L.channel_status === "verified");
       setPhoneNumberId(String(L.videh_phone_number_id ?? ""));
       setBusinessAccountId(String(L.videh_business_account_id ?? ""));
-      setLogoUrl(String(L.logo_url ?? ""));
+      setLogoUrl(resolveUploadUrl(String(L.logo_url ?? "")));
+      setChannelOtpSent(L.channel_status === "otp_pending");
       setCompany({
         companyName: String(L.company_name ?? ""),
         entityType: String(L.entity_type ?? "pvt_ltd"),
@@ -303,7 +312,7 @@ export function OnboardingWizard({ onClose }: Props) {
       const r = await fetch(`/api/developer-leads/${leadId}/logo`, { method: "POST", body: fd });
       const d = (await r.json()) as { success?: boolean; logoUrl?: string; message?: string };
       if (!r.ok || !d.success) throw new Error(d.message ?? "Logo upload failed");
-      setLogoUrl(d.logoUrl ?? "");
+      setLogoUrl(resolveUploadUrl(d.logoUrl ?? ""));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Logo failed");
     } finally {
@@ -395,6 +404,7 @@ export function OnboardingWizard({ onClose }: Props) {
       });
       const d = (await r.json()) as { success?: boolean; message?: string; devOtp?: string };
       if (!r.ok || !d.success) throw new Error(d.message ?? "Could not send OTP");
+      setChannelOtpSent(true);
       if (d.devOtp) setDevOtpHint(d.devOtp);
     } catch (e) {
       setError(e instanceof Error ? e.message : "OTP failed");
@@ -740,7 +750,7 @@ export function OnboardingWizard({ onClose }: Props) {
                 <span className="text-sm font-medium">Company logo *</span>
                 <div className="flex items-center gap-4">
                   {logoUrl ? (
-                    <img src={logoUrl} alt="Logo" className="h-16 w-16 rounded-xl object-cover border" />
+                    <img src={resolveUploadUrl(logoUrl)} alt="Logo" className="h-16 w-16 rounded-xl object-cover border" />
                   ) : (
                     <div className="h-16 w-16 rounded-xl bg-gray-100 flex items-center justify-center text-gray-400">
                       <ImagePlus className="h-8 w-8" />
@@ -832,18 +842,22 @@ export function OnboardingWizard({ onClose }: Props) {
                     <span className="text-sm font-medium">Channel phone (10 digits) *</span>
                     <input
                       value={channelPhone}
-                      onChange={(e) => setChannelPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                      onChange={(e) => {
+                        setChannelPhone(e.target.value.replace(/\D/g, "").slice(0, 10));
+                        setChannelOtpSent(false);
+                        setDevOtpHint(null);
+                      }}
                       placeholder="9876543210"
                       className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-mono"
                     />
                   </label>
                   <button
                     type="button"
-                    disabled={busy || channelPhone.length !== 10}
+                    disabled={busy || channelPhone.length !== 10 || channelOtpSent}
                     onClick={() => void sendChannelOtpRequest()}
                     className="w-full border border-[#00a884] text-[#00a884] font-semibold py-2.5 rounded-xl disabled:opacity-50"
                   >
-                    {busy ? "Sending…" : "Send OTP to this number"}
+                    {busy ? "Sending…" : channelOtpSent ? "OTP sent — check your phone" : "Send OTP to this number"}
                   </button>
                   {devOtpHint ? (
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
