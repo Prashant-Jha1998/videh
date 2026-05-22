@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { BarChart3, Key, Loader2, Phone, RefreshCw } from "lucide-react";
 import type { PortalData } from "../hooks/useDeveloperPortal";
 import { PORTAL_STATUS_LABELS } from "../hooks/useDeveloperPortal";
 import { BillingUsageMetrics } from "./BillingUsageMetrics";
+import { DeveloperBillingInvoices } from "./DeveloperBillingInvoices";
 import { DeveloperApiCredentials } from "./DeveloperApiCredentials";
 import { DeveloperTemplateBuilder } from "./DeveloperTemplateBuilder";
 
@@ -229,7 +231,26 @@ export function DeveloperApiPanel({ data, busy, error, leadId, reference, onRefr
   );
 }
 
-export function DeveloperBillingPanel({ data, busy, error, onRefresh }: PanelProps) {
+type BillingView = "usage" | "invoices";
+
+export function DeveloperBillingPanel({
+  data,
+  busy,
+  error,
+  leadId,
+  reference,
+  onRefresh,
+  onError,
+  onReload,
+}: PanelProps) {
+  const [billingView, setBillingView] = useState<BillingView>("usage");
+  const [invoiceFilter, setInvoiceFilter] = useState<"all" | "current">("all");
+
+  function openInvoices(filter: "all" | "current") {
+    setInvoiceFilter(filter);
+    setBillingView("invoices");
+  }
+
   return (
     <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-5">
       <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Billing &amp; usage</p>
@@ -240,26 +261,58 @@ export function DeveloperBillingPanel({ data, busy, error, onRefresh }: PanelPro
 
       {error ? <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p> : null}
 
-      <button
-        type="button"
-        disabled={busy}
-        onClick={onRefresh}
-        className="inline-flex items-center gap-2 text-sm font-semibold text-[#00a884] hover:underline disabled:opacity-60"
-      >
-        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-        Refresh
-      </button>
+      {billingView === "usage" ? (
+        <>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onRefresh}
+            className="inline-flex items-center gap-2 text-sm font-semibold text-[#00a884] hover:underline disabled:opacity-60"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Refresh
+          </button>
 
-      {data?.account ? (
-        <div className="text-sm">
-          <BillingUsageMetrics account={data.account} />
-        </div>
+          {data?.account ? (
+            <div className="text-sm space-y-4">
+              <BillingUsageMetrics account={data.account} />
+              <div className="flex flex-wrap gap-4 pt-1 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => openInvoices("current")}
+                  className="text-sm font-semibold text-[#00a884] hover:underline"
+                >
+                  Current bill
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openInvoices("all")}
+                  className="text-sm font-semibold text-[#00a884] hover:underline"
+                >
+                  See previous bill
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-[#667781] rounded-xl bg-[#f0f2f5] p-4">
+              Billing and usage metrics appear after your application is approved and the API account is created. Your
+              plan: <strong>{data?.lead.plan_id ?? "—"}</strong>
+              {data?.lead.payment_method_verified ? " · Payment method verified" : ""}.
+            </p>
+          )}
+        </>
+      ) : data?.account && leadId ? (
+        <DeveloperBillingInvoices
+          leadId={leadId}
+          reference={reference}
+          companyName={data.lead.company_name}
+          filter={invoiceFilter}
+          onBack={() => setBillingView("usage")}
+          onPaid={() => void onReload()}
+          onError={onError}
+        />
       ) : (
-        <p className="text-sm text-[#667781] rounded-xl bg-[#f0f2f5] p-4">
-          Billing and usage metrics appear after your application is approved and the API account is created. Your plan:{" "}
-          <strong>{data?.lead.plan_id ?? "—"}</strong>
-          {data?.lead.payment_method_verified ? " · Payment method verified" : ""}.
-        </p>
+        <p className="text-sm text-[#667781]">Billing is not available until your API account is active.</p>
       )}
     </section>
   );

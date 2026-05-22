@@ -20,6 +20,14 @@ import {
 } from "../lib/developerBilling";
 import { getDeveloperApiUsageSnapshot } from "../lib/developerApiUsage";
 import {
+  buildInvoiceHtml,
+  getInvoiceForAccount,
+  invoiceToPublic,
+  listInvoicesForAccount,
+  markInvoicePaid,
+  syncCurrentMonthInvoice,
+} from "../lib/developerInvoices";
+import {
   documentsForEntity,
   ensureDeveloperPlatformTables,
   WIZARD_STEPS,
@@ -957,6 +965,228 @@ router.get("/:id/credentials/secret", async (req, res) => {
   } catch (err) {
     logger.error({ err }, "developer credentials secret");
     res.status(500).json({ success: false, message: "Could not load API secret" });
+  }
+});
+
+async function getPortalLeadAndAccountRow(
+  leadId: number,
+  reference: string,
+  req: Request,
+): Promise<{
+  lead: Record<string, unknown>;
+  account: Record<string, unknown>;
+  accountId: number;
+} | null> {
+  await ensureDeveloperPlatformTables();
+  const lead = await query(`SELECT * FROM developer_leads WHERE id = $1`, [leadId]);
+  const row = lead.rows[0] as Record<string, unknown> | undefined;
+  if (
+    !row ||
+    !(await assertPortalLeadAccess(
+      leadId,
+      row as { reference_code?: string; portal_user_id?: number | null; email?: string },
+      reference,
+      req,
+    ))
+  ) {
+    return null;
+  }
+  const account = await query(`SELECT * FROM developer_api_accounts WHERE lead_id = $1`, [leadId]);
+  const acct = account.rows[0] as Record<string, unknown> | undefined;
+  if (!acct?.id) return null;
+  return { lead: row, account: acct, accountId: Number(acct.id) };
+}
+
+/** GET /api/developer-leads/:id/invoices?reference= */
+router.get("/:id/invoices", async (req, res) => {
+  const leadId = Number(req.params.id);
+  const reference = String(req.query.reference ?? "").trim();
+  if (!leadId) {
+    res.status(400).json({ success: false, message: "Invalid lead id" });
+    return;
+  }
+  if (!reference && !getDeveloperPortalUser(req)) {
+    res.status(400).json({ success: false, message: "Sign in or provide reference code" });
+    return;
+  }
+  try {
+    const ctx = await getPortalLeadAndAccountRow(leadId, reference, req);
+    if (!ctx) {
+      res.status(404).json({ success: false, message: "Application not found" });
+      return;
+    }
+    const refCode = String(ctx.lead.reference_code ?? "");
+    await syncCurrentMonthInvoice(ctx.accountId, ctx.account, refCode);
+    const rows = await listInvoicesForAccount(ctx.accountId);
+    res.json({
+      success: true,
+      invoices: rows.map(invoiceToPublic),
+      company_name: String(ctx.lead.company_name ?? "Developer"),
+    });
+  } catch (err) {
+    logger.error({ err }, "developer invoices list");
+    res.status(500).json({ success: false, message: "Could not load invoices" });
+  }
+});
+
+/** GET /api/developer-leads/:id/invoices/:invoiceId/download?reference= */
+router.get("/:id/invoices/:invoiceId/download", async (req, res) => {
+  const leadId = Number(req.params.id);
+  const invoiceId = Number(req.params.invoiceId);
+  const reference = String(req.query.reference ?? "").trim();
+  if (!leadId || !invoiceId) {
+    res.status(400).json({ success: false, message: "Invalid id" });
+    return;
+  }
+  if (!reference && !getDeveloperPortalUser(req)) {
+    res.status(400).json({ success: false, message: "Sign in or provide reference code" });
+    return;
+  }
+  try {
+    const ctx = await getPortalLeadAndAccountRow(leadId, reference, req);
+    if (!ctx) {
+      res.status(404).json({ success: false, message: "Application not found" });
+      return;
+    }
+    const inv = await getInvoiceForAccount(ctx.accountId, invoiceId);
+    if (!inv) {
+      res.status(404).json({ success: false, message: "Invoice not found" });
+      return;
+    }
+    const html = buildInvoiceHtml(inv, String(ctx.lead.company_name ?? "Developer"));
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${inv.bill_number}.html"`);
+    res.send(html);
+  } catch (err) {
+    logger.error({ err }, "developer invoice download");
+    res.status(500).json({ success: false, message: "Download failed" });
+  }
+});
+
+/** POST /api/developer-leads/:id/invoices/:invoiceId/pay */
+router.post("/:id/invoices/:invoiceId/pay", async (req, res) => {
+  const leadId = Number(req.params.id);
+  const invoiceId = Number(req.params.invoiceId);
+  const body = req.body as { reference?: string };
+  const reference = String(body.reference ?? req.query.reference ?? "").trim();
+  if (!leadId || !invoiceId) {
+    res.status(400).json({ success: false, message: "Invalid id" });
+    return;
+  }
+  if (!reference && !getDeveloperPortalUser(req)) {
+    res.status(401).json({ success: false, message: "Sign in required" });
+    return;
+  }
+  try {
+    const ctx = await getPortalLeadAndAccountRow(leadId, reference, req);
+    if (!ctx) {
+      res.status(404).json({ success: false, message: "Application not found" });
+      return;
+    }
+    const inv = await getInvoiceForAccount(ctx.accountId, invoiceId);
+    if (!inv) {
+      res.status(404).json({ success: false, message: "Invoice not found" });
+      return;
+    }
+    if (inv.status === "paid") {
+      res.json({ success: true, needsPayment: false, message: "Invoice already paid" });
+      return;
+    }
+    const amountInr = Math.max(1, Number(inv.amount_inr) || 0);
+    const { configured, keyId } = getRazorpayConfig();
+    if (!configured) {
+      res.status(503).json({ success: false, message: "Payment gateway not configured" });
+      return;
+    }
+    const refCode = String(ctx.lead.reference_code ?? "VIDH");
+    const order = await createRazorpayOrder({
+      amountInr,
+      receipt: `${refCode.slice(0, 24)}-inv-${invoiceId}`,
+      notes: { leadId, invoiceId, accountId: ctx.accountId, purpose: "monthly_invoice" },
+    });
+    await query(
+      `UPDATE developer_invoices SET razorpay_order_id = $1, updated_at = NOW() WHERE id = $2 AND account_id = $3`,
+      [order.id, invoiceId, ctx.accountId],
+    );
+    res.json({
+      success: true,
+      needsPayment: true,
+      checkout: {
+        orderId: order.id,
+        amountInr,
+        keyId,
+        currency: "INR",
+        logoUrl: razorpayCheckoutLogoUrl(),
+        invoiceId,
+        billNumber: inv.bill_number,
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, "developer invoice pay start");
+    res.status(500).json({ success: false, message: "Could not start payment" });
+  }
+});
+
+/** POST /api/developer-leads/:id/invoices/verify-payment */
+router.post("/:id/invoices/verify-payment", async (req, res) => {
+  const leadId = Number(req.params.id);
+  const body = req.body as {
+    reference?: string;
+    invoiceId?: number;
+    razorpayOrderId?: string;
+    razorpayPaymentId?: string;
+    razorpaySignature?: string;
+  };
+  const reference = String(body.reference ?? "").trim();
+  const invoiceId = Number(body.invoiceId);
+  const orderId = String(body.razorpayOrderId ?? "").trim();
+  const paymentId = String(body.razorpayPaymentId ?? "").trim();
+  const signature = String(body.razorpaySignature ?? "").trim();
+
+  if (!leadId || !invoiceId || !orderId || !paymentId || !signature) {
+    res.status(400).json({ success: false, message: "Missing payment fields" });
+    return;
+  }
+  if (!verifyRazorpaySignature(orderId, paymentId, signature)) {
+    res.status(400).json({ success: false, message: "Invalid payment signature" });
+    return;
+  }
+  try {
+    const ctx = await getPortalLeadAndAccountRow(leadId, reference, req);
+    if (!ctx) {
+      res.status(404).json({ success: false, message: "Application not found" });
+      return;
+    }
+    const inv = await getInvoiceForAccount(ctx.accountId, invoiceId);
+    if (!inv) {
+      res.status(404).json({ success: false, message: "Invoice not found" });
+      return;
+    }
+    if (inv.status === "paid") {
+      res.json({ success: true, message: "Invoice already paid" });
+      return;
+    }
+    if (inv.razorpay_order_id && inv.razorpay_order_id !== orderId) {
+      res.status(400).json({ success: false, message: "Order mismatch" });
+      return;
+    }
+    const amountInr = Math.max(1, Number(inv.amount_inr) || 0);
+    await ensureRazorpayPaymentCaptured({ orderId, paymentId, amountInr });
+    await markInvoicePaid(invoiceId, ctx.accountId, paymentId);
+    await query(
+      `INSERT INTO developer_billing_events (account_id, event_type, amount_inr, razorpay_payment_id, status, metadata)
+       VALUES ($1, 'monthly_invoice', $2, $3, 'captured', $4::jsonb)`,
+      [
+        ctx.accountId,
+        inv.amount_inr,
+        paymentId,
+        JSON.stringify({ invoice_id: invoiceId, bill_number: inv.bill_number }),
+      ],
+    ).catch(() => null);
+    res.json({ success: true, message: "Payment successful. Invoice marked as paid." });
+  } catch (err) {
+    logger.error({ err }, "developer invoice verify");
+    res.status(500).json({ success: false, message: "Payment verification failed" });
   }
 });
 
