@@ -2,8 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -107,6 +107,21 @@ export default function ChatsScreen() {
     if (selectedIds.length === 0) setSelectionMenuOpen(false);
   }, [selectedIds.length]);
 
+  /** List delete only hides locally — bring chat back when a new message arrives (e.g. company API). */
+  useEffect(() => {
+    const toRestore = chats.filter((c) => hiddenIds.includes(c.id) && c.unreadCount > 0).map((c) => c.id);
+    if (toRestore.length === 0) return;
+    const next = hiddenIds.filter((id) => !toRestore.includes(id));
+    setHiddenIds(next);
+    AsyncStorage.setItem(HIDDEN_CHATS_KEY, JSON.stringify(next)).catch(() => {});
+  }, [chats, hiddenIds]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshChats();
+    }, [refreshChats]),
+  );
+
   const openChat = (chat: Chat) => {
     if (isSelectionMode) {
       toggleSelect(chat.id);
@@ -203,7 +218,7 @@ export default function ChatsScreen() {
     if (selectedIds.length === 0) return;
     Alert.alert(
       "Delete chats?",
-      "Selected chats will be hidden from this chat list on this device.",
+      "Selected chats will be hidden from this list. They will reappear when you receive a new message.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -265,7 +280,7 @@ export default function ChatsScreen() {
   };
 
   const clearSelectedChats = () => {
-    Alert.alert("Clear chat?", "This clears the selected chats from your chat list on this device.", [
+    Alert.alert("Clear chat?", "This hides selected chats from the list until a new message arrives.", [
       { text: "Cancel", style: "cancel" },
       { text: "Clear", style: "destructive", onPress: () => {
         const next = Array.from(new Set([...hiddenIds, ...selectedIds]));
