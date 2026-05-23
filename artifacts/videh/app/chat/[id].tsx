@@ -38,6 +38,18 @@ import { useColors } from "@/hooks/useColors";
 import { useApp, type Message } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
+import {
+  CHAT_CAMERA_PHOTO_OPTIONS,
+  CHAT_CAMERA_VIDEO_OPTIONS,
+  CHAT_VIDEO_PICKER_OPTIONS,
+  CHAT_VIEW_ONCE_PICKER_OPTIONS,
+  validatePickedMedia,
+  validatePickedAssets,
+} from "@/lib/chatMediaPolicy";
+import { stashBatchMedia } from "@/lib/chatMediaBatch";
+import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
+import { isGifUri } from "@/lib/imageEdit";
+import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { formatChatBubbleTime } from "@/utils/time";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { DropdownMenu } from "@/components/DropdownMenu";
@@ -193,10 +205,11 @@ const ATTACH_SHEET_ITEMS: {
   icon: React.ComponentProps<typeof Ionicons>["name"];
   label: string;
   color: string;
-  type: "document" | "camera" | "gallery" | "audiofile" | "location" | "contact";
+  type: "document" | "camera" | "videocamera" | "gallery" | "audiofile" | "location" | "contact";
 }[] = [
   { key: "doc", icon: "document-text", label: "Document", color: "#8B5CF6", type: "document" },
   { key: "cam", icon: "camera", label: "Camera", color: "#E8558D", type: "camera" },
+  { key: "vidcam", icon: "videocam", label: "Record video", color: "#C2185B", type: "videocamera" },
   { key: "gal", icon: "images", label: "Gallery", color: "#2F80ED", type: "gallery" },
   { key: "aud", icon: "musical-notes", label: "Audio", color: "#F2A742", type: "audiofile" },
   { key: "loc", icon: "location", label: "Location", color: "#25D366", type: "location" },
@@ -497,8 +510,37 @@ function VoiceNotePlayer({
 }
 
 /** In-bubble preview: tap opens full-screen viewer (WhatsApp-style). */
-function ChatVideoThumbnailBubble({ uri, onOpen }: { uri: string; onOpen: () => void }) {
-  const { playableUri, failed, loading } = usePlayableVideoUri(uri);
+function ViewOncePlaceholderBubble({
+  kind,
+  onOpen,
+}: {
+  kind: "image" | "video";
+  onOpen: () => void;
+}) {
+  return (
+    <TouchableOpacity activeOpacity={0.88} onPress={onOpen} style={styles.viewOncePlaceholder}>
+      <Ionicons name={kind === "video" ? "videocam" : "image"} size={32} color="#8696a0" />
+      <View style={styles.viewOncePlaceholderBadge}>
+        <Ionicons name="eye-outline" size={14} color="#fff" />
+        <Text style={styles.viewOnceText}>View once</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function ViewOnceOpenedBubble({ kind }: { kind: "image" | "video" }) {
+  return (
+    <View style={styles.viewOnceOpened}>
+      <Ionicons name={kind === "video" ? "videocam-outline" : "image-outline"} size={22} color="#8696a0" />
+      <Text style={styles.viewOnceOpenedText}>{kind === "video" ? "Video" : "Photo"}</Text>
+      <Text style={styles.viewOnceOpenedSub}>Opened</Text>
+    </View>
+  );
+}
+
+/** In-bubble preview: tap opens full-screen viewer (WhatsApp-style). */
+function ChatVideoThumbnailBubble({ uri, sessionToken, onOpen }: { uri: string; sessionToken?: string | null; onOpen: () => void }) {
+  const { playableUri, failed, loading } = usePlayableVideoUri(uri, sessionToken);
   const [durationSec, setDurationSec] = useState(0);
   const [thumbFailed, setThumbFailed] = useState(false);
 
@@ -558,13 +600,19 @@ function ChatVideoThumbnailBubble({ uri, onOpen }: { uri: string; onOpen: () => 
 
 function ChatImageBubble({
   uri,
+  sessionToken,
   onOpen,
 }: {
   uri: string;
+  sessionToken?: string | null;
   onOpen: () => void;
 }) {
   const [useNativeFallback, setUseNativeFallback] = useState(false);
   const [failed, setFailed] = useState(false);
+  const needsAuth = uri.includes("/api/chats/media/") && sessionToken;
+  const imageSource = needsAuth
+    ? { uri, headers: authFetchHeaders(sessionToken) as Record<string, string> }
+    : { uri };
 
   if (failed) {
     return (
@@ -579,14 +627,14 @@ function ChatImageBubble({
     <TouchableOpacity activeOpacity={0.9} onPress={onOpen}>
       {useNativeFallback ? (
         <NativeImage
-          source={{ uri }}
+          source={imageSource}
           style={styles.msgImage}
           resizeMode="cover"
           onError={() => setFailed(true)}
         />
       ) : (
         <Image
-          source={{ uri }}
+          source={imageSource}
           style={styles.msgImage}
           contentFit="cover"
           onError={() => setUseNativeFallback(true)}
@@ -707,7 +755,7 @@ export default function ChatScreen() {
   }>();
 
   const {
-    chats, user, sendMessage, sendImageMessage, sendAudioMessage,
+    chats, user, sendMessage, sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage,
     setTyping, clearTyping, markAsRead, deleteMessage, deleteForEveryone,
     editMessage, reactToMessage, starMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
@@ -946,7 +994,7 @@ export default function ChatScreen() {
         router.push({
           pathname: "/chat/video-viewer",
           params: {
-            playUri: encodeURIComponent(playUri),
+            remoteUri: encodeURIComponent(playUri),
             senderLabel: senderIsMe ? "You" : peerNameForVideo,
             timestamp: String(ts),
           },
@@ -957,6 +1005,57 @@ export default function ChatScreen() {
     },
     [router, peerNameForVideo],
   );
+
+  const goToMediaCompose = useCallback((
+    picked: { uri: string; kind: "image" | "video" },
+    viewOnce: boolean,
+  ) => {
+    if (!chatId) return;
+    router.push({
+      pathname: "/chat/media-compose",
+      params: {
+        chatId,
+        uri: encodeURIComponent(picked.uri),
+        kind: picked.kind,
+        viewOnce: viewOnce ? "1" : "0",
+      },
+    } as unknown as Parameters<typeof router.push>[0]);
+  }, [chatId, router]);
+
+  const goToMediaComposeBatch = useCallback(async (
+    items: Array<{ uri: string; kind: "image" | "video" }>,
+    viewOnce: boolean,
+  ) => {
+    if (!chatId || items.length === 0) return;
+    await stashBatchMedia({ chatId, viewOnce, items });
+    router.push({ pathname: "/chat/media-compose-batch" } as unknown as Parameters<typeof router.push>[0]);
+  }, [chatId, router]);
+
+  const openViewOnceMedia = useCallback(async (item: Message) => {
+    if (!chatId) return;
+    const kind = item.type === "video" ? "video" : "image";
+    try {
+      let mediaUrl = item.mediaUrl;
+      if (item.senderId !== "me") {
+        mediaUrl = (await consumeViewOnceMessage(chatId, item.id)) ?? undefined;
+      }
+      if (!mediaUrl) {
+        Alert.alert("Unavailable", "This view-once message was already opened.");
+        return;
+      }
+      if (kind === "video") {
+        await openChatVideoFullScreen(mediaUrl, item.senderId === "me", item.timestamp);
+      } else {
+        setMediaPreview({
+          uri: mediaUrl,
+          type: "image",
+          caption: item.text && item.text !== "📷 Photo" && item.text !== "🔁 View once" ? item.text : undefined,
+        });
+      }
+    } catch (e) {
+      Alert.alert("Could not open", e instanceof Error ? e.message : "Try again.");
+    }
+  }, [chatId, consumeViewOnceMessage, openChatVideoFullScreen]);
 
   const [text, setText] = useState("");
   const [replyTo, setReplyTo] = useState<ReplyData>(null);
@@ -1177,7 +1276,7 @@ export default function ChatScreen() {
   }, [chatId, voiceRecMs, sendAudioMessage]);
 
   const sendMediaMessage = async (
-    type: "camera" | "gallery" | "document" | "location" | "contact" | "viewonce" | "audiofile",
+    type: "camera" | "videocamera" | "gallery" | "document" | "location" | "contact" | "viewonce" | "audiofile",
   ) => {
     if (!chatId) return;
     if (!composerEnabled || editTarget) {
@@ -1194,17 +1293,44 @@ export default function ChatScreen() {
     if (type === "camera") {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== "granted") { Alert.alert("Permission required", "Camera access is required."); return; }
-      const result = await ImagePicker.launchCameraAsync({ quality: 0.75, base64: false });
-      if (!result.canceled && result.assets[0]) sendImageMessage(chatId, result.assets[0].uri, undefined, false, "image");
+      const result = await ImagePicker.launchCameraAsync(CHAT_CAMERA_PHOTO_OPTIONS);
+      if (!result.canceled && result.assets[0]) {
+        const picked = await validatePickedMedia(result.assets[0]);
+        if (picked) goToMediaCompose(picked, false);
+      }
+
+    } else if (type === "videocamera") {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") { Alert.alert("Permission required", "Camera access is required."); return; }
+      const result = await ImagePicker.launchCameraAsync(CHAT_CAMERA_VIDEO_OPTIONS);
+      if (!result.canceled && result.assets[0]) {
+        const picked = await validatePickedMedia(result.assets[0]);
+        if (picked) goToMediaCompose(picked, false);
+      }
 
     } else if (type === "gallery" || type === "viewonce") {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") { Alert.alert("Permission required", "Media library access is required."); return; }
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], quality: 0.75, base64: false });
-      if (!result.canceled && result.assets[0]) {
-        const kind = result.assets[0].type === "video" ? "video" : "image";
-        sendImageMessage(chatId, result.assets[0].uri, undefined, isViewOnce, kind);
+      const pickerOpts = isViewOnce ? CHAT_VIEW_ONCE_PICKER_OPTIONS : CHAT_VIDEO_PICKER_OPTIONS;
+      const result = await ImagePicker.launchImageLibraryAsync(pickerOpts);
+      if (result.canceled || !result.assets?.length) return;
+      const picked = await validatePickedAssets(result.assets);
+      if (picked.length === 0) return;
+      const videos = picked.filter((p) => p.kind === "video");
+      const images = picked.filter((p) => p.kind === "image");
+      if (videos.length > 0 && picked.length > 1) {
+        Alert.alert("One video at a time", "Select a single video, or choose photos only.");
+        return;
       }
+      if (videos.length === 1) {
+        goToMediaCompose(videos[0], isViewOnce);
+        return;
+      }
+      if (images.length === 1) {
+        goToMediaCompose(images[0], isViewOnce);
+        return;
+      }
+      void goToMediaComposeBatch(images, isViewOnce);
 
     } else if (type === "audiofile") {
       if (Platform.OS === "web") {
@@ -1390,32 +1516,13 @@ export default function ChatScreen() {
   }, []);
 
   const saveImageToGallery = useCallback(async (uri: string) => {
-    try {
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission required", "Photo library permission is required to save images.");
-        return;
-      }
-      const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
-      if (!cacheDir) throw new Error("No writable cache directory");
-      let fileUri = uri;
-      if (uri.startsWith("data:")) {
-        const mimeMatch = uri.match(/^data:([^;]+);base64,/);
-        const mime = mimeMatch?.[1] ?? "image/jpeg";
-        const ext = MIME_EXTENSION_MAP[mime] ?? "jpg";
-        const base64 = uri.replace(/^data:[^;]+;base64,/, "");
-        fileUri = `${cacheDir}videh_image_${Date.now()}.${ext}`;
-        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-      } else if (/^https?:\/\//i.test(uri)) {
-        const downloaded = await FileSystem.downloadAsync(uri, `${cacheDir}videh_image_${Date.now()}.jpg`);
-        fileUri = downloaded.uri;
-      }
-      await MediaLibrary.saveToLibraryAsync(fileUri);
+    const res = await saveImageUriToLibrary(uri, user?.sessionToken);
+    if (res.ok) {
       Alert.alert("Saved", "Image saved to your gallery.");
-    } catch {
-      Alert.alert("Error", "Could not save this image. Please try again.");
+    } else {
+      Alert.alert("Error", res.message);
     }
-  }, []);
+  }, [user?.sessionToken]);
 
   const [attachVisible, setAttachVisible] = useState(false);
   const [mediaPreview, setMediaPreview] = useState<{ uri: string; caption?: string; type: "image" | "video" } | null>(null);
@@ -1433,6 +1540,9 @@ export default function ChatScreen() {
       { text: "↩ Reply", onPress: () => { setReplyTo({ id: msg.id, text: msg.text, senderId: msg.senderId, senderName: msg.senderName }); inputRef.current?.focus(); } },
       { text: "📋 Copy", onPress: () => { Clipboard.setString(msg.text); } },
       { text: "😊 React", onPress: () => setReactionTarget(msg) },
+      ...(msg.type === "image" && msg.mediaUrl && !msg.isViewOnce && Platform.OS !== "web"
+        ? [{ text: "💾 Save image", onPress: () => { void saveImageToGallery(msg.mediaUrl!); } }]
+        : []),
       ...(!msg.isViewOnce ? [{ text: "↗ Forward to Videh chat", onPress: () => { setForwardSearch(""); setForwardMsg(msg); } }] : []),
       { text: "⭐ Star", onPress: () => { if (chatId) starMessage(chatId, msg.id); } },
       { text: "🌐 Translate", onPress: () => Alert.alert("Translate to:", "", [
@@ -1480,8 +1590,10 @@ export default function ChatScreen() {
   const renderMsg = ({ item }: { item: Message }) => {
     const isMe = item.senderId === "me";
     const isDeleted = item.type === "deleted";
-    const isImage = item.type === "image" && !!item.mediaUrl;
-    const isVideo = item.type === "video" && !!item.mediaUrl;
+    const isViewOnceOpened = (item.type === "image" || item.type === "video") && item.isViewOnce && (item.viewOnceOpened || !item.mediaUrl);
+    const isViewOncePending = (item.type === "image" || item.type === "video") && item.isViewOnce && !!item.mediaUrl && !item.viewOnceOpened && !isMe;
+    const isImage = item.type === "image" && !!item.mediaUrl && !isViewOncePending;
+    const isVideo = item.type === "video" && !!item.mediaUrl && !isViewOncePending;
     const isAudio = item.type === "audio" && !!item.mediaUrl;
     const isDocument = item.type === "document";
     const isLocation = item.type === "location";
@@ -1495,7 +1607,7 @@ export default function ChatScreen() {
         ? "rgba(0,0,0,0.55)"
         : colors.mutedForeground;
 
-    const showSvgTail = !isImage && !isVideo && !isLocation;
+    const showSvgTail = !isImage && !isVideo && !isLocation && !isViewOnceOpened && !isViewOncePending;
 
     // Group reactions by emoji
     const reactionGroups: Record<string, { count: number; mine: boolean }> = {};
@@ -1568,7 +1680,7 @@ export default function ChatScreen() {
               styles.bubble,
               showSvgTail && styles.bubbleWithTailShape,
               { backgroundColor: isMe ? colors.chatBubbleSent : colors.chatBubbleReceived },
-              (isImage || isVideo || isLocation) && styles.bubbleImg,
+              (isImage || isVideo || isLocation || isViewOnceOpened || isViewOncePending) && styles.bubbleImg,
               isDeleted && styles.bubbleDeleted,
             ]}
           >
@@ -1604,12 +1716,24 @@ export default function ChatScreen() {
                 {formatChatBubbleTime(item.timestamp)}
               </Text>
             </View>
+          ) : isViewOnceOpened ? (
+            <ViewOnceOpenedBubble kind={item.type === "video" ? "video" : "image"} />
+          ) : isViewOncePending ? (
+            <ViewOncePlaceholderBubble
+              kind={item.type === "video" ? "video" : "image"}
+              onOpen={() => { void openViewOnceMedia(item); }}
+            />
           ) : isImage ? (
             <>
               <ChatImageBubble
                 uri={item.mediaUrl!}
+                sessionToken={user?.sessionToken}
                 onOpen={() => {
                   if (!item.mediaUrl) return;
+                  if (item.isViewOnce) {
+                    void openViewOnceMedia(item);
+                    return;
+                  }
                   setMediaPreview({
                     uri: item.mediaUrl,
                     type: "image",
@@ -1625,6 +1749,11 @@ export default function ChatScreen() {
                   <Text style={styles.viewOnceText}>View once</Text>
                 </View>
               )}
+              {item.mediaUrl && isGifUri(item.mediaUrl) && (
+                <View style={[styles.viewOnceOverlay, { left: undefined, right: 8 }]}>
+                  <Text style={styles.viewOnceText}>GIF</Text>
+                </View>
+              )}
               {item.text && item.text !== "📷 Photo" && item.text !== "🎥 Video" && item.text !== "🔁 View once" && (
                 <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4 }]}>{item.text}</Text>
               )}
@@ -1633,11 +1762,22 @@ export default function ChatScreen() {
             <>
               <ChatVideoThumbnailBubble
                 uri={item.mediaUrl!}
+                sessionToken={user?.sessionToken}
                 onOpen={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  if (item.isViewOnce) {
+                    void openViewOnceMedia(item);
+                    return;
+                  }
                   void openChatVideoFullScreen(item.mediaUrl!, isMe, item.timestamp);
                 }}
               />
+              {item.isViewOnce && (
+                <View style={styles.viewOnceOverlay}>
+                  <Ionicons name="eye-outline" size={18} color="#fff" />
+                  <Text style={styles.viewOnceText}>View once</Text>
+                </View>
+              )}
               {item.text && item.text !== "🎥 Video" && item.text !== "🔁 View once" && (
                 <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4 }]}>{item.text}</Text>
               )}
@@ -2667,7 +2807,15 @@ export default function ChatScreen() {
             ) : null}
           </View>
           {mediaPreview?.uri ? (
-            <Image source={{ uri: mediaPreview.uri }} style={styles.mediaPreviewImage} contentFit="contain" />
+            <Image
+              source={
+                mediaPreview.uri.includes("/api/chats/media/") && user?.sessionToken
+                  ? { uri: mediaPreview.uri, headers: authFetchHeaders(user.sessionToken) as Record<string, string> }
+                  : { uri: mediaPreview.uri }
+              }
+              style={styles.mediaPreviewImage}
+              contentFit="contain"
+            />
           ) : null}
           {mediaPreview?.caption ? (
             <View style={styles.mediaPreviewCaptionWrap}>
@@ -2780,6 +2928,38 @@ const styles = StyleSheet.create({
   videoErrorText: { color: "#fff", fontSize: 12, fontFamily: "Inter_500Medium" },
   viewOnceOverlay: { position: "absolute", top: 8, left: 8, flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   viewOnceText: { color: "#fff", fontSize: 11, fontFamily: "Inter_500Medium" },
+  viewOncePlaceholder: {
+    width: 220,
+    height: 160,
+    borderRadius: 10,
+    backgroundColor: "#1f2c34",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  viewOncePlaceholderBadge: {
+    position: "absolute",
+    bottom: 10,
+    left: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  viewOnceOpened: {
+    width: 220,
+    minHeight: 72,
+    borderRadius: 10,
+    backgroundColor: "#1f2c34",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 16,
+    gap: 4,
+  },
+  viewOnceOpenedText: { color: "#8696a0", fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  viewOnceOpenedSub: { color: "#667781", fontSize: 12, fontFamily: "Inter_400Regular" },
   translatedBox: { marginTop: 6, paddingTop: 6, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.15)" },
   translatedLabel: { fontSize: 10, color: "#00A884", fontFamily: "Inter_600SemiBold", marginBottom: 3 },
   docCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, minWidth: 220 },

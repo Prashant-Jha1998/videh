@@ -219,6 +219,8 @@ function RootLayoutNav() {
         <Stack.Screen name="chat/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="chat/send-location" options={{ headerShown: false, presentation: "card" }} />
         <Stack.Screen name="chat/message-info" options={{ headerShown: false }} />
+        <Stack.Screen name="chat/media-compose" options={{ headerShown: false, presentation: "fullScreenModal" }} />
+        <Stack.Screen name="chat/media-compose-batch" options={{ headerShown: false, presentation: "fullScreenModal" }} />
         <Stack.Screen name="chat/video-viewer" options={{ headerShown: false, presentation: "fullScreenModal" }} />
         <Stack.Screen name="chat-info/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="call/[id]" options={{ headerShown: false, presentation: "fullScreenModal" }} />

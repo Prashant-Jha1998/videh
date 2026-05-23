@@ -5,6 +5,7 @@ import { DropdownMenu, EmojiPicker, useClickOutside } from "../components/web/We
 import { WebNavRail, type NavTab } from "../components/web/WebNavRail";
 import { WebContactPicker, type ContactPickerMode } from "../components/web/WebContactPicker";
 import { WebContactInfo } from "../components/web/WebContactInfo";
+import { WebChatImage, WebChatVideo } from "../components/web/WebChatMedia";
 import { WebStatusPanel } from "../components/web/WebStatusPanel";
 import { WebStarredPanel } from "../components/web/WebStarredPanel";
 import { Avatar, initials, hue, WA_BG } from "../components/web/webUiShared";
@@ -219,13 +220,22 @@ export default function VidehWeb() {
     } catch {}
   }, [token, loadChats]);
 
-  const handleAttachment = useCallback(async (file: File) => {
+  const handleAttachments = useCallback(async (files: FileList | File[]) => {
     if (!token || !activeChatId) return;
     setUploading(true);
     try {
-      const { url, mimeType } = await webApi.uploadMedia(token, file);
-      const type = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("video/") ? "video" : "document";
-      await webApi.sendMessage(token, activeChatId, { type, mediaUrl: url, content: file.name || "Attachment" });
+      const list = Array.from(files).slice(0, 30);
+      for (let i = 0; i < list.length; i++) {
+        const file = list[i];
+        const { url, mimeType } = await webApi.uploadMedia(token, file);
+        const type = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("video/") ? "video" : "document";
+        const label = file.name || (type === "image" ? "Photo" : type === "video" ? "Video" : "Attachment");
+        await webApi.sendMessage(token, activeChatId, {
+          type,
+          mediaUrl: url,
+          content: i === list.length - 1 ? label : (type === "image" ? "📷 Photo" : label),
+        });
+      }
       await loadMessages(activeChatId);
       loadChats(token);
     } catch (e) {
@@ -719,10 +729,15 @@ export default function VidehWeb() {
                       <div style={{ fontSize: 12, fontWeight: 600, color: `hsl(${hue(msg.sender_name)},60%,40%)`, marginBottom: 2 }}>{msg.sender_name}</div>
                     )}
                     {!isDeleted && msg.type === "image" && msg.media_url ? (
-                      <img src={msg.media_url} alt="" style={{ maxWidth: "100%", borderRadius: 8, marginBottom: 4 }} />
+                      <WebChatImage url={msg.media_url} token={token} />
+                    ) : null}
+                    {!isDeleted && msg.type === "video" && msg.media_url ? (
+                      <WebChatVideo url={msg.media_url} token={token} />
                     ) : null}
                     <p style={{ margin: 0, fontSize: 14.5, color: "#111b21", lineHeight: 1.4, fontStyle: isDeleted ? "italic" : "normal" }}>
-                      {isDeleted ? "🚫 This message was deleted" : (msg.type !== "image" || !msg.media_url ? msg.content : "")}
+                      {isDeleted
+                        ? "🚫 This message was deleted"
+                        : ((msg.type === "image" || msg.type === "video") && msg.media_url ? (msg.content !== "Attachment" && msg.content !== "🎥 Video" && msg.content !== "📷 Photo" ? msg.content : "") : msg.content)}
                     </p>
                     <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 4, marginTop: 3 }}>
                       <span style={{ fontSize: 11, color: "#667781" }}>{formatTime(msg.created_at)}</span>
@@ -741,11 +756,12 @@ export default function VidehWeb() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,video/*,.pdf,.doc,.docx"
+            accept="image/*,video/*,.gif,.pdf,.doc,.docx"
+            multiple
             style={{ display: "none" }}
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void handleAttachment(file);
+              const files = e.target.files;
+              if (files?.length) void handleAttachments(files);
               e.target.value = "";
             }}
           />

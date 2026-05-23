@@ -1,10 +1,11 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { useEffect, useState } from "react";
+import { authFetchHeaders } from "./authenticatedMedia";
 
 /**
- * Resolves `data:video/...;base64,...` into a temp `file://` path; passes through http(s) and file URIs.
+ * Resolves video URIs for expo-av, including auth-protected chat media and data: URLs.
  */
-export function usePlayableVideoUri(uri: string | undefined): {
+export function usePlayableVideoUri(uri: string | undefined, sessionToken?: string | null): {
   playableUri: string | null;
   failed: boolean;
   loading: boolean;
@@ -21,9 +22,35 @@ export function usePlayableVideoUri(uri: string | undefined): {
       return;
     }
     if (!uri.startsWith("data:video")) {
-      setPlayableUri(uri);
-      setFailed(false);
-      return;
+      const needsAuth = uri.includes("/api/chats/media/") && sessionToken;
+      if (!needsAuth) {
+        setPlayableUri(uri);
+        setFailed(false);
+        return;
+      }
+      const prepareAuth = async () => {
+        try {
+          const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
+          if (!cacheDir) throw new Error("No cache");
+          const target = `${cacheDir}auth_vid_${Date.now()}.mp4`;
+          tempFile = target;
+          const res = await FileSystem.downloadAsync(uri, target, { headers: authFetchHeaders(sessionToken) as Record<string, string> });
+          if (!cancelled) {
+            setPlayableUri(res.uri);
+            setFailed(false);
+          }
+        } catch {
+          if (!cancelled) {
+            setFailed(true);
+            setPlayableUri(null);
+          }
+        }
+      };
+      void prepareAuth();
+      return () => {
+        cancelled = true;
+        if (tempFile) FileSystem.deleteAsync(tempFile, { idempotent: true }).catch(() => {});
+      };
     }
     const prepare = async () => {
       try {
@@ -52,7 +79,7 @@ export function usePlayableVideoUri(uri: string | undefined): {
         FileSystem.deleteAsync(tempFile, { idempotent: true }).catch(() => {});
       }
     };
-  }, [uri]);
+  }, [uri, sessionToken]);
 
   const loading = Boolean(uri) && !failed && !playableUri;
   return { playableUri: failed ? null : playableUri, failed, loading };

@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useApp } from "@/context/AppContext";
 import { saveVideoUriToLibrary } from "@/lib/saveVideoToLibrary";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
 import { formatRelativeHeader } from "@/utils/time";
@@ -23,21 +24,27 @@ const { width: W } = Dimensions.get("window");
 export default function ChatVideoViewerScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { playUri: playUriEncoded, senderLabel, timestamp } = useLocalSearchParams<{
+  const { user } = useApp();
+  const { remoteUri: remoteUriEncoded, playUri: playUriEncoded, senderLabel, timestamp } = useLocalSearchParams<{
+    remoteUri?: string;
     playUri?: string;
     senderLabel?: string;
     timestamp?: string;
   }>();
 
-  const playUri = playUriEncoded ? decodeURIComponent(String(playUriEncoded)) : "";
-  const { playableUri, failed, loading } = usePlayableVideoUri(playUri || undefined);
+  const rawUri = remoteUriEncoded
+    ? decodeURIComponent(String(remoteUriEncoded))
+    : playUriEncoded
+      ? decodeURIComponent(String(playUriEncoded))
+      : "";
+  const { playableUri, failed, loading } = usePlayableVideoUri(rawUri || undefined, user?.sessionToken);
   const videoRef = useRef<Video>(null);
   const [saving, setSaving] = useState(false);
   const [ended, setEnded] = useState(false);
 
   useEffect(() => {
-    if (!playUri) router.back();
-  }, [playUri, router]);
+    if (!rawUri) router.back();
+  }, [rawUri, router]);
 
   useEffect(() => {
     void Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
@@ -52,10 +59,10 @@ export default function ChatVideoViewerScreen() {
   const title = senderLabel?.trim() || "Video";
 
   const onDownload = useCallback(async () => {
-    if (!playUri || saving) return;
+    if (!rawUri || saving) return;
     setSaving(true);
     try {
-      const res = await saveVideoUriToLibrary(playUri);
+      const res = await saveVideoUriToLibrary(rawUri, user?.sessionToken);
       if (res.ok) {
         Alert.alert("Saved", "Video saved to your gallery.");
       } else {
@@ -64,7 +71,7 @@ export default function ChatVideoViewerScreen() {
     } finally {
       setSaving(false);
     }
-  }, [playUri, saving]);
+  }, [rawUri, saving, user?.sessionToken]);
 
   const replay = useCallback(async () => {
     setEnded(false);
@@ -90,7 +97,7 @@ export default function ChatVideoViewerScreen() {
           <TouchableOpacity
             onPress={() => { void onDownload(); }}
             style={styles.headerIcon}
-            disabled={saving || !playUri}
+            disabled={saving || !rawUri}
             hitSlop={12}
           >
             {saving ? (

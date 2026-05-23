@@ -28,6 +28,7 @@ import { DismissibleModal } from "@/components/DismissibleModal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { formatTime } from "@/utils/time";
 import { formatPresenceSubtitle } from "@/lib/presence";
 import { getApiUrl } from "@/lib/api";
@@ -148,6 +149,7 @@ export default function ChatInfoScreen() {
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
   const [photoVisible, setPhotoVisible] = useState(false);
+  const [mediaPreviewUri, setMediaPreviewUri] = useState<string | null>(null);
   const [addMemberModal, setAddMemberModal] = useState(false);
   const [searchPhone, setSearchPhone] = useState("");
   const [searchResult, setSearchResult] = useState<any>(null);
@@ -168,6 +170,28 @@ export default function ChatInfoScreen() {
   const initials = (name ?? "?").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = ((name ?? "?").charCodeAt(0) * 37) % 360;
   const avatarBg = `hsl(${hue},50%,40%)`;
+
+  const openSharedMedia = useCallback((m: { type: string; media_url: string }) => {
+    if (!m.media_url) return;
+    if (m.type === "video") {
+      router.push({
+        pathname: "/chat/video-viewer",
+        params: {
+          remoteUri: encodeURIComponent(m.media_url),
+          senderLabel: name ?? "Shared video",
+        },
+      } as unknown as Parameters<typeof router.push>[0]);
+      return;
+    }
+    setMediaPreviewUri(m.media_url);
+  }, [router, name]);
+
+  const mediaImageSource = useCallback((uri: string) => {
+    if (uri.includes("/api/chats/media/") && user?.sessionToken) {
+      return { uri, headers: authFetchHeaders(user.sessionToken) as Record<string, string> };
+    }
+    return { uri };
+  }, [user?.sessionToken]);
 
   const fetchContactInfo = useCallback(async () => {
     if (!id || isGroup) return;
@@ -767,15 +791,20 @@ export default function ChatInfoScreen() {
           {mediaMessages.length > 0 ? (
             <View style={styles.mediaGrid}>
               {mediaMessages.slice(0, 9).map((m) => (
-                <View key={m.id} style={[styles.mediaThumbnail, { backgroundColor: colors.muted }]}>
+                <TouchableOpacity
+                  key={m.id}
+                  style={[styles.mediaThumbnail, { backgroundColor: colors.muted }]}
+                  activeOpacity={0.85}
+                  onPress={() => openSharedMedia(m)}
+                >
                   {m.type === "image" && m.media_url ? (
-                    <Image source={{ uri: m.media_url }} style={styles.mediaThumbnailImg} contentFit="cover" />
+                    <Image source={mediaImageSource(m.media_url)} style={styles.mediaThumbnailImg} contentFit="cover" />
                   ) : (
                     <View style={[styles.mediaThumbnail, { backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }]}>
                       <Ionicons name="videocam" size={24} color={colors.mutedForeground} />
                     </View>
                   )}
-                </View>
+                </TouchableOpacity>
               ))}
               {mediaMessages.length > 9 && (
                 <View style={[styles.mediaThumbnail, { backgroundColor: colors.muted + "cc", alignItems: "center", justifyContent: "center" }]}>
@@ -951,6 +980,17 @@ export default function ChatInfoScreen() {
               <Text style={styles.bigAvatarFullText}>{initials}</Text>
             </View>
           )}
+        </Pressable>
+      </Modal>
+
+      <Modal visible={!!mediaPreviewUri} transparent animationType="fade" onRequestClose={() => setMediaPreviewUri(null)}>
+        <Pressable style={styles.photoModal} onPress={() => setMediaPreviewUri(null)}>
+          <TouchableOpacity style={styles.photoClose} onPress={() => setMediaPreviewUri(null)} activeOpacity={0.8}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+          {mediaPreviewUri ? (
+            <Image source={mediaImageSource(mediaPreviewUri)} style={styles.photoFull} contentFit="contain" />
+          ) : null}
         </Pressable>
       </Modal>
 

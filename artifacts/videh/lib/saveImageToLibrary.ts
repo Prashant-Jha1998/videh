@@ -2,7 +2,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import { Platform } from "react-native";
 
-export async function saveVideoUriToLibrary(
+export async function saveImageUriToLibrary(
   sourceUri: string,
   sessionToken?: string | null,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -11,22 +11,23 @@ export async function saveVideoUriToLibrary(
   }
   const { status } = await MediaLibrary.requestPermissionsAsync();
   if (status !== "granted") {
-    return { ok: false, message: "Photo library access is required to save this video." };
+    return { ok: false, message: "Photo library access is required to save this image." };
   }
   try {
     let localUri = sourceUri;
-    if (sourceUri.startsWith("data:video")) {
+    if (sourceUri.startsWith("data:image")) {
       const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
       if (!cacheDir) return { ok: false, message: "Could not access app storage." };
-      const ext = sourceUri.includes("video/quicktime") ? "mov" : "mp4";
-      const path = `${cacheDir}save_video_${Date.now()}.${ext}`;
+      const ext = sourceUri.includes("image/png") ? "png" : sourceUri.includes("image/gif") ? "gif" : "jpg";
+      const path = `${cacheDir}save_image_${Date.now()}.${ext}`;
       const base64 = sourceUri.replace(/^data:[^;]+;base64,/, "");
       await FileSystem.writeAsStringAsync(path, base64, { encoding: FileSystem.EncodingType.Base64 });
       localUri = path;
     } else if (sourceUri.startsWith("http://") || sourceUri.startsWith("https://")) {
       const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
       if (!cacheDir) return { ok: false, message: "Could not access app storage." };
-      const path = `${cacheDir}download_video_${Date.now()}.mp4`;
+      const ext = sourceUri.toLowerCase().includes(".gif") ? "gif" : sourceUri.toLowerCase().includes(".png") ? "png" : "jpg";
+      const path = `${cacheDir}download_image_${Date.now()}.${ext}`;
       const headers: Record<string, string> = {};
       if (sourceUri.includes("/api/chats/media/") && sessionToken) {
         const { authFetchHeaders } = await import("./authenticatedMedia");
@@ -38,7 +39,7 @@ export async function saveVideoUriToLibrary(
     await MediaLibrary.saveToLibraryAsync(localUri);
     return { ok: true };
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "Could not save video.";
+    const message = e instanceof Error ? e.message : "Could not save image.";
     return { ok: false, message };
   }
 }

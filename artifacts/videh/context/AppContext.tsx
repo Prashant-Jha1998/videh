@@ -7,6 +7,11 @@ import { getApiUrl } from "@/lib/api";
 import { registerPushTokenWithServer } from "@/lib/pushNotifications";
 import { encodeLocationPayload, mapsUrl as buildMapsUrl } from "@/lib/locationMessage";
 import { safeJsonParse } from "@/lib/safeJson";
+import { loadChatMediaSettings } from "@/lib/chatMediaSettings";
+import { shouldAutoDownload } from "@/lib/chatMediaNetwork";
+import { saveVideoUriToLibrary } from "@/lib/saveVideoToLibrary";
+import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
+import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 
 const BASE_URL = getApiUrl();
 const STATUS_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -60,6 +65,7 @@ export interface Message {
   isForwarded?: boolean;
   forwardCount?: number;
   isViewOnce?: boolean;
+  viewOnceOpened?: boolean;
   isEdited?: boolean;
   editedAt?: number;
   reactions?: MessageReaction[];
@@ -174,6 +180,11 @@ interface AppContextType {
   loadMessages: (chatId: string) => Promise<void>;
   refreshChats: () => Promise<void>;
   sendImageMessage: (chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean, mediaKind?: "image" | "video") => void;
+  sendPreparedMediaMessage: (
+    chatId: string,
+    opts: { mediaUrl: string; kind: "image" | "video"; caption?: string; isViewOnce?: boolean },
+  ) => void;
+  consumeViewOnceMessage: (chatId: string, messageId: string) => Promise<string | null>;
   sendAudioMessage: (chatId: string, audioUri: string, durationSecs: number) => void;
   setTyping: (chatId: string) => void;
   clearTyping: (chatId: string) => void;
@@ -295,34 +306,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ? mime.includes("mpeg") ? "mp3" : "m4a"
         : mime.includes("pdf") ? "pdf"
           : mime.includes("png") ? "png" : "jpg";
-    const form = new FormData();
-    form.append("file", {
+    const uploaded = await uploadChatMediaWithProgress({
       uri,
-      name: `chat_${Date.now()}.${ext}`,
-      type: mime,
-    } as any);
-    const res = await fetch(`${BASE_URL}/api/chats/media`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: form,
+      mime,
+      filename: `chat_${Date.now()}.${ext}`,
+      sessionToken: authSessionToken,
     });
-    const data = await res.json().catch(() => ({})) as { success?: boolean; url?: string; message?: string };
-    if (!res.ok || !data.success || !data.url) {
-      throw new Error(data.message ?? "Could not upload media.");
-    }
-    return data.url;
+    return uploaded.url;
   }, []);
 
   const toShareableMediaUri = useCallback(async (uri: string, fallbackMime: string): Promise<string> => {
     if (!uri) return uri;
-    if (!uri.startsWith("data:")) {
-      try {
-        return await uploadChatMedia(uri, fallbackMime);
-      } catch {
-        return uri;
-      }
-    }
     if (uri.startsWith("http://") || uri.startsWith("https://")) return uri;
+    if (!uri.startsWith("data:")) {
+      return uploadChatMedia(uri, fallbackMime);
+    }
+    if (fallbackMime.includes("video")) {
+      throw new Error("Video upload failed. Please try again with a smaller clip.");
+    }
     try {
       const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
       const mime = getMimeTypeFromUri(uri, fallbackMime);
@@ -611,6 +612,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           isForwarded: m.is_forwarded,
           forwardCount: m.forward_count ?? 0,
           isViewOnce: m.is_view_once,
+          viewOnceOpened: !!m.view_once_opened_at,
           isEdited: !!m.edited_at,
           editedAt: m.edited_at ? new Date(m.edited_at).getTime() : undefined,
           reactions: m.reactions ?? [],
@@ -623,6 +625,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setChats((prev) =>
         prev.map((c) => c.id === chatId ? { ...c, messages: msgs } : c)
       );
+
+      const settings = await loadChatMediaSettings().catch(() => null);
+      if (settings && Platform.OS !== "web") {
+        for (const m of msgs) {
+          if (!m.mediaUrl || m.senderId === "me" || m.isViewOnce) continue;
+          if (m.type === "video" && (await shouldAutoDownload("video", settings))) {
+            void saveVideoUriToLibrary(m.mediaUrl, authSessionToken).catch(() => {});
+          }
+          if (m.type === "image" && (await shouldAutoDownload("image", settings))) {
+            void saveImageUriToLibrary(m.mediaUrl, authSessionToken).catch(() => {});
+          }
+        }
+      }
     } catch {}
   }, []);
 
@@ -814,6 +829,88 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     })();
   }, [toShareableMediaUri]);
+
+  const sendPreparedMediaMessage = useCallback((
+    chatId: string,
+    opts: { mediaUrl: string; kind: "image" | "video"; caption?: string; isViewOnce?: boolean },
+  ) => {
+    void (async () => {
+      const u = userRef.current;
+      const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      const isVideo = opts.kind === "video";
+      const text = opts.caption?.trim() || (opts.isViewOnce ? "🔁 View once" : isVideo ? "🎥 Video" : "📷 Photo");
+      const msgType: Message["type"] = isVideo ? "video" : "image";
+      const newMsg: Message = {
+        id: tempId, text, timestamp: Date.now(), senderId: "me",
+        type: msgType, status: "sent", mediaUrl: opts.mediaUrl, isViewOnce: opts.isViewOnce,
+      };
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId
+            ? { ...c, messages: [...c.messages, newMsg], lastMessage: text, lastMessageTime: Date.now() }
+            : c
+        )
+      );
+      if (!u?.dbId) return;
+      const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
+        method: "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          senderId: u.dbId,
+          content: text,
+          type: msgType,
+          mediaUrl: opts.mediaUrl,
+          isViewOnce: opts.isViewOnce ?? false,
+        }),
+      });
+      const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
+      if (res.status === 403) {
+        Alert.alert("Cannot send message", typeof data.message === "string" ? data.message : "Not allowed.");
+        setChats((prev) =>
+          prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
+        );
+        return;
+      }
+      if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
+        const mid = data.message.id;
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered" } : m) }
+              : c,
+          ),
+        );
+      }
+    })();
+  }, []);
+
+  const consumeViewOnceMessage = useCallback(async (chatId: string, messageId: string): Promise<string | null> => {
+    const u = userRef.current;
+    if (!u?.dbId || messageId.startsWith("tmp_")) return null;
+    const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages/${messageId}/consume-view-once`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ userId: u.dbId }),
+    });
+    const data = (await res.json()) as { success?: boolean; mediaUrl?: string | null; message?: string };
+    if (!res.ok || !data.success) {
+      throw new Error(data.message ?? "Could not open message");
+    }
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === chatId
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === messageId ? { ...m, viewOnceOpened: true, mediaUrl: undefined } : m,
+              ),
+            }
+          : c,
+      ),
+    );
+    await loadMessages(chatId);
+    return data.mediaUrl ?? null;
+  }, [loadMessages]);
 
   // Send audio/voice message
   const sendAudioMessage = useCallback((chatId: string, audioUri: string, durationSecs: number) => {
@@ -1338,7 +1435,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, forwardMessage, starredMessages, updateAvatar,
       createDirectChat, loadMessages, refreshChats,
-      sendImageMessage, sendAudioMessage, setTyping, clearTyping,
+      sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage, setTyping, clearTyping,
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, reportUser, setChatDisappear,
       updateLocationOnServer, startLiveLocationSession, stopLiveLocationSession,

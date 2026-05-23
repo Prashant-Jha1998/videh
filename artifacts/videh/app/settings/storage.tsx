@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { loadChatMediaSettings, saveChatMediaSettings } from "@/lib/chatMediaSettings";
 import { getApiUrl } from "@/lib/api";
 const API_URL = `${getApiUrl()}/api`;
 
@@ -34,6 +35,14 @@ export default function StorageScreen() {
   const [autoDownloadImages, setAutoDownloadImages] = useState(true);
   const [autoDownloadVideos, setAutoDownloadVideos] = useState(false);
   const [autoDownloadDocs, setAutoDownloadDocs] = useState(true);
+
+  useEffect(() => {
+    void loadChatMediaSettings().then((s) => {
+      setAutoDownloadImages(s.autoDownloadImages);
+      setAutoDownloadVideos(s.autoDownloadVideos);
+      setAutoDownloadDocs(s.autoDownloadDocs);
+    });
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -66,6 +75,15 @@ export default function StorageScreen() {
     }
   };
 
+  const persistMediaSettings = async (patch: Partial<{ autoDownloadImages: boolean; autoDownloadVideos: boolean; autoDownloadDocs: boolean }>) => {
+    const next = {
+      autoDownloadImages: patch.autoDownloadImages ?? autoDownloadImages,
+      autoDownloadVideos: patch.autoDownloadVideos ?? autoDownloadVideos,
+      autoDownloadDocs: patch.autoDownloadDocs ?? autoDownloadDocs,
+    };
+    await saveChatMediaSettings(next);
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
@@ -94,7 +112,11 @@ export default function StorageScreen() {
             label="Photos"
             value="Mobile data & WiFi"
             enabled={autoDownloadImages}
-            onToggle={() => setAutoDownloadImages(v => !v)}
+            onToggle={() => {
+              const next = !autoDownloadImages;
+              setAutoDownloadImages(next);
+              void persistMediaSettings({ autoDownloadImages: next });
+            }}
             colors={colors}
           />
           <ToggleRow
@@ -102,7 +124,11 @@ export default function StorageScreen() {
             label="Videos"
             value="WiFi only"
             enabled={autoDownloadVideos}
-            onToggle={() => setAutoDownloadVideos(v => !v)}
+            onToggle={() => {
+              const next = !autoDownloadVideos;
+              setAutoDownloadVideos(next);
+              void persistMediaSettings({ autoDownloadVideos: next });
+            }}
             colors={colors}
           />
           <ToggleRow
@@ -110,7 +136,11 @@ export default function StorageScreen() {
             label="Documents"
             value="Mobile data & WiFi"
             enabled={autoDownloadDocs}
-            onToggle={() => setAutoDownloadDocs(v => !v)}
+            onToggle={() => {
+              const next = !autoDownloadDocs;
+              setAutoDownloadDocs(next);
+              void persistMediaSettings({ autoDownloadDocs: next });
+            }}
             colors={colors}
             last
           />

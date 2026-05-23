@@ -1,0 +1,2 @@
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS view_once_opened_at TIMESTAMPTZ;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS view_once_opened_by INTEGER REFERENCES users(id);

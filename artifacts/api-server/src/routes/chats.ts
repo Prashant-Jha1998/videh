@@ -14,6 +14,12 @@ import { publicMediaUrl } from "../lib/mediaStorage";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
 import { ensureMessageUserHidesTable, hideMessageForUser, messageVisibleToUserSql } from "../lib/messageUserHides";
 import { getPresenceForViewer } from "../lib/presencePrivacy";
+import {
+  deleteChatMediaFile,
+  ensureViewOnceColumns,
+  mediaFilenameFromUrl,
+  userCanAccessChatMedia,
+} from "../lib/chatMediaAccess";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -366,11 +372,21 @@ router.post("/group", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/media/:filename", async (req: Request, res: Response) => {
+router.get("/media/:filename", requireAuth, async (req: Request, res: Response) => {
   try {
     await ensureChatMediaTable();
+    const userId = getAuthUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, message: "Sign in required." });
+      return;
+    }
     const rawFilename = Array.isArray(req.params.filename) ? req.params.filename[0] : req.params.filename;
     const filename = path.basename(rawFilename ?? "");
+    const allowed = await userCanAccessChatMedia(userId, filename);
+    if (!allowed) {
+      res.status(403).json({ success: false, message: "Media access denied." });
+      return;
+    }
     const result = await query(
       "SELECT filename, mime_type, size_bytes, data FROM chat_media_files WHERE filename = $1",
       [filename],
@@ -454,13 +470,18 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
   if (!assertSameUser(req, res, userId)) return;
   try {
     await ensureMessageUserHidesTable();
+    await ensureViewOnceColumns();
     const viewerId = Number(userId);
     const viewerParam = before ? "$4" : "$3";
     const result = await query(`
       SELECT
-        m.id, m.chat_id, m.sender_id, m.content, m.type, m.media_url,
+        m.id, m.chat_id, m.sender_id, m.content, m.type,
+        CASE
+          WHEN m.is_view_once AND m.view_once_opened_at IS NOT NULL THEN NULL
+          ELSE m.media_url
+        END AS media_url,
         m.reply_to_id, m.is_deleted, m.is_forwarded, m.forward_count,
-        m.is_starred, m.is_view_once, m.edited_at, m.created_at,
+        m.is_starred, m.is_view_once, m.view_once_opened_at, m.edited_at, m.created_at,
         u.name AS sender_name, u.avatar_url AS sender_avatar,
         rm.content AS reply_content, rm_u.name AS reply_sender_name,
         (
@@ -488,6 +509,65 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "get messages error");
     res.status(500).json({ success: false });
+  }
+});
+
+/** POST /api/chats/:chatId/messages/:messageId/consume-view-once — open view-once media once (recipient). */
+router.post("/:chatId/messages/:messageId/consume-view-once", async (req: Request, res: Response) => {
+  const chatId = Number(req.params.chatId);
+  const messageId = Number(req.params.messageId);
+  const { userId } = req.body as { userId?: number };
+  if (!chatId || !messageId || !userId) {
+    res.status(400).json({ success: false, message: "Invalid request" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    await ensureViewOnceColumns();
+    const row = await query(
+      `SELECT m.id, m.sender_id, m.media_url, m.is_view_once, m.view_once_opened_at
+       FROM messages m
+       JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $2
+       WHERE m.id = $1 AND m.chat_id = $3 AND m.is_deleted = false`,
+      [messageId, userId, chatId],
+    );
+    const msg = row.rows[0] as {
+      sender_id: number;
+      media_url: string | null;
+      is_view_once: boolean;
+      view_once_opened_at: string | null;
+    } | undefined;
+    if (!msg) {
+      res.status(404).json({ success: false, message: "Message not found" });
+      return;
+    }
+    if (!msg.is_view_once || !msg.media_url) {
+      res.status(400).json({ success: false, message: "Not a view-once message" });
+      return;
+    }
+    if (Number(msg.sender_id) === Number(userId)) {
+      res.status(400).json({ success: false, message: "Sender cannot consume own view-once message" });
+      return;
+    }
+    if (msg.view_once_opened_at) {
+      res.status(410).json({ success: false, message: "Already opened", mediaUrl: null });
+      return;
+    }
+    const filename = mediaFilenameFromUrl(msg.media_url);
+    await query(
+      `UPDATE messages SET view_once_opened_at = NOW(), view_once_opened_by = $1, media_url = NULL WHERE id = $2`,
+      [userId, messageId],
+    );
+    if (filename) await deleteChatMediaFile(filename);
+    publishChatEvent({
+      type: "message",
+      chatId: String(chatId),
+      messageId: String(messageId),
+    });
+    res.json({ success: true, mediaUrl: msg.media_url });
+  } catch (err) {
+    req.log.error({ err }, "consume view once");
+    res.status(500).json({ success: false, message: "Could not open message" });
   }
 });
 
