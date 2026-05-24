@@ -1,3 +1,9 @@
 const { getDefaultConfig } = require("expo/metro-config");
 
-module.exports = getDefaultConfig(__dirname);
+const config = getDefaultConfig(__dirname);
+
+if (!config.resolver.assetExts.includes("ogg")) {
+  config.resolver.assetExts.push("ogg");
+}
+
+module.exports = config;
