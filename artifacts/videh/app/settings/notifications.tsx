@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Platform,
@@ -13,8 +13,16 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
+import {
+  callRingtoneIdFromLabel,
+  getCallAudioPrefs,
+  labelForCallRingtone,
+  setCallRingtonePref,
+  setCallVibratePref,
+  type CallRingtoneId,
+} from "@/lib/callAudioPrefs";
 
-const TONES = ["Default", "Chime", "Note", "Pulse", "Ringtone 1", "Ringtone 2", "None"];
+const TONES = ["Default", "Classic", "None"];
 const PREVIEW_OPTIONS = ["Always show preview", "Only show sender name", "No preview"];
 
 export default function NotificationsScreen() {
@@ -35,10 +43,33 @@ export default function NotificationsScreen() {
   const [statusNotifs, setStatusNotifs] = useState(true);
   const [reactionNotifs, setReactionNotifs] = useState(true);
 
+  const loadCallPrefs = useCallback(async () => {
+    const prefs = await getCallAudioPrefs();
+    setCallRingtone(labelForCallRingtone(prefs.ringtone));
+    setCallVibrate(prefs.vibrate);
+  }, []);
+
+  useEffect(() => { void loadCallPrefs(); }, [loadCallPrefs]);
+
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const pickTone = (current: string, onPick: (v: string) => void) => {
     Alert.alert("Notification tone", "", TONES.map((t) => ({ text: t, onPress: () => onPick(t) })));
+  };
+
+  const pickCallRingtone = () => {
+    Alert.alert("Call ringtone", "", TONES.map((t) => ({
+      text: t,
+      onPress: () => {
+        setCallRingtone(t);
+        void setCallRingtonePref(callRingtoneIdFromLabel(t) as CallRingtoneId);
+      },
+    })));
+  };
+
+  const onCallVibrateChange = (value: boolean) => {
+    setCallVibrate(value);
+    void setCallVibratePref(value);
   };
 
   const pickPreview = (current: string, onPick: (v: string) => void) => {
@@ -87,8 +118,8 @@ export default function NotificationsScreen() {
           <SwitchRow label="Call notifications" value={callNotifs} onChange={setCallNotifs} colors={colors} />
           {callNotifs && (
             <>
-              <TappableRow label="Ringtone" value={callRingtone} onPress={() => pickTone(callRingtone, setCallRingtone)} colors={colors} />
-              <SwitchRow label="Vibrate" value={callVibrate} onChange={setCallVibrate} colors={colors} last />
+              <TappableRow label="Ringtone" value={callRingtone} onPress={pickCallRingtone} colors={colors} />
+              <SwitchRow label="Vibrate" value={callVibrate} onChange={onCallVibrateChange} colors={colors} last />
             </>
           )}
         </View>

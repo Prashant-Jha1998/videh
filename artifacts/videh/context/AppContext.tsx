@@ -12,6 +12,7 @@ import { shouldAutoDownload } from "@/lib/chatMediaNetwork";
 import { saveVideoUriToLibrary } from "@/lib/saveVideoToLibrary";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
+import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 
 const BASE_URL = getApiUrl();
 const STATUS_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -58,7 +59,7 @@ export interface Message {
   timestamp: number;
   senderId: string;
   senderName?: string;
-  type: "text" | "image" | "video" | "audio" | "document" | "location" | "contact" | "deleted";
+  type: "text" | "image" | "video" | "audio" | "document" | "location" | "contact" | "deleted" | "call";
   status: "sent" | "delivered" | "read";
   mediaUrl?: string;
   isStarred?: boolean;
@@ -143,6 +144,7 @@ export interface Contact {
 
 export interface CallLog {
   id: string;
+  chatId?: string;
   name: string;
   phone?: string;
   avatar?: string;
@@ -201,6 +203,7 @@ interface AppContextType {
   startLiveLocationSession: (args: { chatId: string; messageId: string; untilMs: number; comment?: string }) => void;
   stopLiveLocationSession: () => void;
   setActiveChatId: (chatId: string | null) => void;
+  refreshCallLogs: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -232,6 +235,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (type === "image") return content && content !== "📷 Photo" ? content : "Photo";
     if (type === "video") return content && content !== "🎥 Video" ? content : "Video";
     if (type === "audio") return "Voice message";
+    if (type === "call") {
+      const { callMessagePreviewText } = require("@/lib/callMessage") as typeof import("@/lib/callMessage");
+      return callMessagePreviewText(content);
+    }
     if (type === "document") return content || "Document";
     return content || undefined;
   };
@@ -243,7 +250,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return {
         id: String(c.id),
         name: c.is_group ? (c.group_name ?? "Group") : (otherUser?.name ?? "Unknown"),
-        avatar: c.is_group ? c.group_avatar_url : otherUser?.avatar_url,
+        avatar: resolvePublicAssetUrl(c.is_group ? c.group_avatar_url : otherUser?.avatar_url),
         lastMessage: formatLastMessagePreview(lastMsg),
         lastMessageTime: lastMsg ? new Date(lastMsg.created_at).getTime() : undefined,
         unreadCount: c.unread_count ?? 0,
@@ -369,6 +376,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!data.success || !data.calls) return;
       const logs: CallLog[] = data.calls.map((c: any) => ({
         id: String(c.id),
+        chatId: c.chat_id != null ? String(c.chat_id) : undefined,
         name: c.other_user_name ?? "Unknown",
         phone: c.other_user_phone,
         avatar: c.other_user_avatar ?? undefined,
@@ -687,6 +695,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     eventSource?.addEventListener("message", onChatEvent as () => void);
+    eventSource?.addEventListener("call", (ev?: { data?: string }) => {
+      runCalls();
+      try {
+        const raw = ev?.data;
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as { payload?: unknown };
+        const { emitCallSignal } = require("@/lib/callEvents") as typeof import("@/lib/callEvents");
+        emitCallSignal((parsed.payload ?? parsed) as any);
+      } catch {
+        /* ignore malformed SSE payload */
+      }
+    });
     const chatTimer = eventSource ? null : setInterval(runChats, 7000);
     const statusTimer = setInterval(runStatuses, 12000);
     const callTimer = setInterval(runCalls, 30000);
@@ -1443,6 +1463,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, [liveLocationSession, loadMessages]);
 
+  const refreshCallLogs = useCallback(async () => {
+    const uid = userRef.current?.dbId;
+    if (!uid) return;
+    await loadCallLogs(uid);
+  }, [loadCallLogs]);
+
   return (
     <AppContext.Provider value={{
       user, isAuthenticated, isInitialized, chats, statuses, contacts, callLogs,
@@ -1454,7 +1480,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, reportUser, setChatDisappear,
       updateLocationOnServer, startLiveLocationSession, stopLiveLocationSession,
-      setActiveChatId,
+      setActiveChatId, refreshCallLogs,
     }}>
       {children}
     </AppContext.Provider>

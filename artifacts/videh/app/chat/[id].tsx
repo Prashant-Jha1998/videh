@@ -63,8 +63,9 @@ import {
   staticMapImageUrl,
 } from "@/lib/locationMessage";
 import { loadEnterIsSend } from "@/lib/chatSettings";
-import { formatPresenceSubtitle, type PresenceView } from "@/lib/presence";
+import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { safeJsonParse } from "@/lib/safeJson";
+import { formatCallMessageLabel, parseCallMessageMeta } from "@/lib/callMessage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Svg, { Path } from "react-native-svg";
 
@@ -535,6 +536,42 @@ function ViewOnceOpenedBubble({ kind }: { kind: "image" | "video" }) {
       <Text style={styles.viewOnceOpenedText}>{kind === "video" ? "Video" : "Photo"}</Text>
       <Text style={styles.viewOnceOpenedSub}>Opened</Text>
     </View>
+  );
+}
+
+function CallMessageBubble({
+  meta,
+  isMe,
+  timestamp,
+  colors,
+  onPress,
+}: {
+  meta: NonNullable<ReturnType<typeof parseCallMessageMeta>>;
+  isMe: boolean;
+  timestamp: number;
+  colors: ReturnType<typeof useColors>;
+  onPress: () => void;
+}) {
+  const missed = meta.result === "missed";
+  const iconName = meta.callType === "video"
+    ? (missed && !isMe ? "videocam-off" : "videocam")
+    : (missed && !isMe ? "call" : "call");
+  const tint = missed && !isMe ? "#ef4444" : isMe ? "#008069" : colors.primary;
+  return (
+    <TouchableOpacity style={styles.callBubble} onPress={onPress} activeOpacity={0.85}>
+      <Ionicons
+        name={iconName as any}
+        size={18}
+        color={tint}
+        style={{ transform: [{ rotate: missed && isMe ? "135deg" : "0deg" }] }}
+      />
+      <Text style={[styles.callBubbleText, { color: colors.foreground }]}>
+        {formatCallMessageLabel(meta, isMe)}
+      </Text>
+      <Text style={[styles.callBubbleTime, { color: colors.mutedForeground }]}>
+        {formatChatBubbleTime(timestamp)}
+      </Text>
+    </TouchableOpacity>
   );
 }
 
@@ -1598,7 +1635,9 @@ export default function ChatScreen() {
     const isDocument = item.type === "document";
     const isLocation = item.type === "location";
     const isContact = item.type === "contact";
-    const isSpecial = isDocument || isLocation || isContact;
+    const isCall = item.type === "call";
+    const callMeta = isCall ? parseCallMessageMeta(item.text) : null;
+    const isSpecial = isDocument || isLocation || isContact || isCall;
     const urls = (!isDeleted && !isImage && !isAudio && !isSpecial) ? extractUrls(item.text) : [];
     const isManyForwarded = (item.forwardCount ?? 0) >= 5;
     const metaTextColor = isImage || isLocation
@@ -1782,6 +1821,19 @@ export default function ChatScreen() {
                 <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4 }]}>{item.text}</Text>
               )}
             </>
+          ) : isCall && callMeta ? (
+            <CallMessageBubble
+              meta={callMeta}
+              isMe={isMe}
+              timestamp={item.timestamp}
+              colors={colors}
+              onPress={() => {
+                router.push({
+                  pathname: "/call/[id]",
+                  params: { id: chatId, name: chat?.name ?? "Contact", type: callMeta.callType === "video" ? "video" : "audio" },
+                });
+              }}
+            />
           ) : isAudio ? (
             <VoiceNotePlayer
               uri={item.mediaUrl!}
@@ -1812,7 +1864,7 @@ export default function ChatScreen() {
               colors={colors}
               isMe={isMe}
               chatId={chatId}
-              userAvatar={isMe ? user?.avatar : (chat?.avatar ?? otherAvatar)}
+              userAvatar={isMe ? user?.avatar : contactAvatar}
               onStopLive={(m) => { void handleStopLiveLocation(m); }}
             />
           ) : isContact ? (
@@ -1950,6 +2002,7 @@ export default function ChatScreen() {
   };
 
   const displayName = name ?? chat?.name ?? "Chat";
+  const contactAvatar = resolvePublicAssetUrl(chat?.avatar ?? otherAvatar);
   const initials = displayName.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = (displayName.charCodeAt(0) * 37) % 360;
   const avatarBg = `hsl(${hue},50%,40%)`;
@@ -2197,8 +2250,8 @@ export default function ChatScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerAvatarWrap}>
-            {chat?.avatar || otherAvatar ? (
-              <Image source={{ uri: chat?.avatar || otherAvatar }} style={styles.headerAvatarImg} contentFit="cover" />
+            {contactAvatar ? (
+              <Image source={{ uri: contactAvatar }} style={styles.headerAvatarImg} contentFit="cover" />
             ) : (
               <View style={[styles.headerAvatarWrap, { backgroundColor: avatarBg }]}>
                 <Text style={styles.headerAvatarText}>{initials}</Text>
@@ -2960,6 +3013,9 @@ const styles = StyleSheet.create({
   },
   viewOnceOpenedText: { color: "#8696a0", fontSize: 14, fontFamily: "Inter_600SemiBold" },
   viewOnceOpenedSub: { color: "#667781", fontSize: 12, fontFamily: "Inter_400Regular" },
+  callBubble: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 10, minWidth: 180 },
+  callBubbleText: { flex: 1, fontSize: 14, fontFamily: "Inter_500Medium" },
+  callBubbleTime: { fontSize: 11, fontFamily: "Inter_400Regular" },
   translatedBox: { marginTop: 6, paddingTop: 6, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.15)" },
   translatedLabel: { fontSize: 10, color: "#00A884", fontFamily: "Inter_600SemiBold", marginBottom: 3 },
   docCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, minWidth: 220 },

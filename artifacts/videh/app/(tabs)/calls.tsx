@@ -91,7 +91,14 @@ export default function CallsScreen() {
               </View>
               <TouchableOpacity
                 style={styles.callBtn}
-                onPress={() => router.push({ pathname: "/call/[id]", params: { id: item.id, name: item.name, type: item.type } })}
+                onPress={() => router.push({
+                  pathname: "/call/[id]",
+                  params: {
+                    id: item.chatId ?? item.id,
+                    name: item.name,
+                    type: item.type,
+                  },
+                })}
               >
                 <Ionicons name={item.type === "video" ? "videocam" : "call"} size={22} color={colors.primary} />
               </TouchableOpacity>

@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type { Response } from "express";
 
 type ChatEvent = {
-  type: "message" | "read" | "archive" | "typing";
+  type: "message" | "read" | "archive" | "typing" | "call";
   chatId: string | number;
   userIds: Array<string | number>;
   payload?: unknown;

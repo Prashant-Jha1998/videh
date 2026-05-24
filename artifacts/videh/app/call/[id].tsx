@@ -9,21 +9,20 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  Vibration,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useVidehCall } from "@/hooks/useVidehCall";
 import { useApp } from "@/context/AppContext";
 import { VidehLocalView, VidehRemoteView } from "@/components/VidehVideoView";
-import { getApiUrl } from "@/lib/api";
-import { startCallRingtone, stopCallRingtone } from "@/lib/callRingtone";
+import { startCallAlert, stopCallAlert } from "@/lib/callRingtone";
+import { webrtcFetch } from "@/lib/webrtcApi";
 
 export default function CallScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, name, type, channel, callId, incoming } = useLocalSearchParams<{ id: string; name: string; type: string; channel?: string; callId?: string; incoming?: string }>();
-  const { user } = useApp();
+  const { user, refreshCallLogs } = useApp();
   const isVideo = type === "video";
 
   const [activeCallId, setActiveCallId] = useState(callId ?? "");
@@ -33,7 +32,7 @@ export default function CallScreen() {
   const [ringingCount, setRingingCount] = useState(0);
   const [acceptedUserIds, setAcceptedUserIds] = useState<number[]>([]);
   const [callerId, setCallerId] = useState<number | null>(null);
-  const numericUid = Math.abs((user?.dbId ?? 0) % 999999) || Math.floor(Math.random() * 99999) + 1;
+  const numericUid = user?.dbId ?? 0;
 
   const isOutgoingCaller = incoming !== "1";
   const remotePeerIds = useMemo(() => {
@@ -48,10 +47,9 @@ export default function CallScreen() {
   useEffect(() => {
     if (!id || !user?.dbId || incoming === "1" || channel) return;
     let cancelled = false;
-    fetch(`${getApiUrl()}/api/webrtc/calls`, {
+    webrtcFetch("/calls", user?.sessionToken, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId: Number(id), callerId: user.dbId, type: isVideo ? "video" : "audio" }),
+      body: JSON.stringify({ chatId: Number(id), type: isVideo ? "video" : "audio" }),
     })
       .then((res) => res.json())
       .then((data: { success?: boolean; call?: { channel?: string; callId?: string; participantCount?: number; acceptedCount?: number; ringingCount?: number } }) => {
@@ -79,7 +77,7 @@ export default function CallScreen() {
     toggleSpeaker,
     leave,
     ...rest
-  } = useVidehCall(activeChannel, numericUid, isVideo, remotePeerIds);
+  } = useVidehCall(activeChannel, numericUid, isVideo, remotePeerIds, user?.sessionToken);
 
   const localStreamUrl = (rest as any).localStreamUrl as string | undefined;
   const remoteStreamUrl = (rest as any).remoteStreamUrl as string | undefined;
@@ -88,31 +86,27 @@ export default function CallScreen() {
   const pulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (incoming === "1" || joined) {
-      if (Platform.OS !== "web") Vibration.cancel();
-      void stopCallRingtone();
+      void stopCallAlert();
       return;
     }
-    if (Platform.OS !== "web") {
-      Vibration.vibrate([0, 450, 500], true);
-      void startCallRingtone();
-    }
+    void startCallAlert();
     const timeout = setTimeout(() => {
       if (!joined) {
-        if (activeCallId) fetch(`${getApiUrl()}/api/webrtc/calls/${activeCallId}/end`, { method: "POST" }).catch(() => {});
+        void stopCallAlert();
+        if (activeCallId) webrtcFetch(`/calls/${activeCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
         router.back();
       }
     }, 60000);
     return () => {
       clearTimeout(timeout);
-      if (Platform.OS !== "web") Vibration.cancel();
-      void stopCallRingtone();
+      void stopCallAlert();
     };
-  }, [incoming, joined, activeCallId]);
+  }, [incoming, joined, activeCallId, router]);
 
   useEffect(() => {
     if (!activeCallId || !user?.dbId) return;
     const timer = setInterval(() => {
-      fetch(`${getApiUrl()}/api/webrtc/calls/${activeCallId}/status?userId=${user.dbId}`)
+      webrtcFetch(`/calls/${activeCallId}/status?userId=${user.dbId}`, user?.sessionToken)
         .then((res) => res.json())
         .then((data: {
           success?: boolean;
@@ -129,10 +123,14 @@ export default function CallScreen() {
           setParticipantCount(data.call?.participantCount ?? participantCount);
           if (Array.isArray(data.acceptedUserIds)) setAcceptedUserIds(data.acceptedUserIds);
           if (typeof data.callerId === "number") setCallerId(data.callerId);
-          if (data.ended) router.back();
+          if (data.ended) {
+            void stopCallAlert();
+            void refreshCallLogs();
+            router.back();
+          }
         })
         .catch(() => {});
-    }, 2500);
+    }, 800);
     return () => clearInterval(timer);
   }, [activeCallId, user?.dbId, participantCount]);
 
@@ -176,13 +174,16 @@ export default function CallScreen() {
 
   const endCall = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    await stopCallRingtone();
+    await stopCallAlert();
     await leave();
     if (activeCallId) {
-      fetch(`${getApiUrl()}/api/webrtc/calls/${activeCallId}/end`, { method: "POST" }).catch(() => {});
+      webrtcFetch(`/calls/${activeCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
     }
+    void refreshCallLogs();
     router.back();
   };
+
+  useEffect(() => () => { void stopCallAlert(); }, []);
 
   const initials = (name ?? "?").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = (name ?? "?").charCodeAt(0) * 37 % 360;
@@ -207,7 +208,7 @@ export default function CallScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: isVideo ? "#0B141A" : "#1A1A2E", paddingTop: topPad, paddingBottom: insets.bottom + 30 }]}>
-      <TouchableOpacity style={styles.backBtn} onPress={router.back}>
+      <TouchableOpacity style={styles.backBtn} onPress={() => void endCall()}>
         <Ionicons name="chevron-down" size={28} color="rgba(255,255,255,0.8)" />
       </TouchableOpacity>
       <Text style={styles.callTypeLabel}>{isVideo ? "Videh video call" : "Videh voice call"}</Text>

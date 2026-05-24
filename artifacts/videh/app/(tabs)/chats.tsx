@@ -651,6 +651,11 @@ function ChatRow({
   const avatarBg = `hsl(${hue},50%,45%)`;
   const statusRing = useMemo(() => getContactStatusRingState(chat, statuses), [chat, statuses]);
 
+  const hasAvatar = Boolean(chat.avatar);
+  const wrapStyle = statusRing
+    ? styles.avatarRingTouchable
+    : [styles.avatarWrap, hasAvatar ? styles.avatarWrapPhoto : { backgroundColor: avatarBg }];
+
   return (
     <View style={[styles.row, { borderBottomColor: colors.border }, selected && { backgroundColor: colors.primary + "14" }]}>
       <TouchableOpacity
@@ -658,7 +663,7 @@ function ChatRow({
         onPress={onAvatarPress}
         activeOpacity={0.85}
       >
-        <View style={statusRing ? styles.avatarRingTouchable : [styles.avatarWrap, { backgroundColor: avatarBg }]}>
+        <View style={wrapStyle}>
           {statusRing ? (
             <View
               style={[
@@ -670,8 +675,8 @@ function ChatRow({
                 },
               ]}
             >
-              {chat.avatar ? (
-                <Image source={{ uri: chat.avatar }} style={styles.statusRingInnerImg} contentFit="cover" />
+              {hasAvatar ? (
+                <Image source={{ uri: chat.avatar! }} style={styles.statusRingInnerImg} contentFit="cover" />
               ) : (
                 <View style={[styles.statusRingInnerFallback, { backgroundColor: avatarBg }]}>
                   <Text style={styles.statusRingInnerText}>{initials}</Text>
@@ -683,8 +688,8 @@ function ChatRow({
                 </View>
               )}
             </View>
-          ) : chat.avatar ? (
-            <Image source={{ uri: chat.avatar }} style={styles.avatarImg} contentFit="cover" />
+          ) : hasAvatar ? (
+            <Image source={{ uri: chat.avatar! }} style={styles.avatarImg} contentFit="cover" />
           ) : (
             <Text style={styles.avatarText}>{initials}</Text>
           )}
@@ -759,6 +764,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 0.5 },
   avatarTapArea: { width: 60, height: 58, marginRight: 10, alignItems: "center", justifyContent: "center", position: "relative", overflow: "visible" },
   avatarWrap: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden" },
+  avatarWrapPhoto: { backgroundColor: "#fff" },
   avatarRingTouchable: {
     width: 56,
     height: 56,
@@ -791,7 +797,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   statusRingCountText: { color: "#fff", fontSize: 10, fontFamily: "Inter_700Bold" },
-  avatarImg: { width: 52, height: 52 },
+  avatarImg: { width: 52, height: 52, borderRadius: 26 },
   avatarText: { color: "#fff", fontSize: 18, fontFamily: "Inter_700Bold" },
   onlineDot: { width: 14, height: 14, borderRadius: 7, position: "absolute", bottom: 4, right: 3, borderWidth: 2, borderColor: "#fff" },
   selectedBadge: {

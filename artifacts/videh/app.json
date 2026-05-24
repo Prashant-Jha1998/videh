@@ -17,7 +17,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.videh.app",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Videh needs microphone access for voice and video calls.",
+        "NSMicrophoneUsageDescription": "Videh needs microphone access for voice calls, Hey Videh assistant, and video calls.",
+        "NSSpeechRecognitionUsageDescription": "Videh uses speech recognition for Hey Videh voice assistant commands.",
         "NSCameraUsageDescription": "Videh needs camera access for video calls.",
         "NSContactsUsageDescription": "Videh uses your contacts to find friends who are already on Videh.",
         "NSBluetoothAlwaysUsageDescription": "Videh uses Bluetooth for audio routing during calls.",

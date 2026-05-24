@@ -1,0 +1,2 @@
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS chat_id INTEGER REFERENCES chats(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_calls_chat_id ON calls(chat_id);

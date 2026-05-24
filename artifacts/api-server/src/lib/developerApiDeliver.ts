@@ -65,15 +65,15 @@ export async function ensureBusinessSenderUser(
 
   const existing = await findVidehUserByPhone(normalized);
   const label = (displayName ?? "").trim() || "Business";
-  const avatar = toPublicAssetUrl(logoUrl);
+  const avatar = logoUrl != null ? toPublicAssetUrl(logoUrl) : null;
   if (existing) {
     await query(
       `UPDATE users SET
          name = COALESCE(NULLIF($1, ''), NULLIF(name, ''), 'Business'),
-         avatar_url = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE avatar_url END,
+         avatar_url = CASE WHEN $4 THEN $2 ELSE avatar_url END,
          updated_at = NOW()
        WHERE id = $3`,
-      [label, avatar, existing.id],
+      [label, avatar, existing.id, logoUrl != null],
     );
     return existing.id;
   }

@@ -4,15 +4,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, TouchableOpacity, Vibration, View } from "react-native";
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { AppProvider, useApp } from "@/context/AppContext";
+import { AssistantProvider } from "@/context/AssistantContext";
 import { UiPreferencesProvider } from "@/context/UiPreferencesContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { AssistantOverlay } from "@/components/AssistantOverlay";
 import { getApiUrl } from "@/lib/api";
+import { onCallSignal } from "@/lib/callEvents";
+import { webrtcAuthHeaders, webrtcFetch } from "@/lib/webrtcApi";
 import { useColors } from "@/hooks/useColors";
 import {
   ensureVidehNotificationSetup,
@@ -23,7 +27,7 @@ import {
   NOTIFICATION_ACTION_REPLY,
   VIDEH_CALLS_CHANNEL_ID,
 } from "@/lib/pushNotifications";
-import { startCallRingtone, stopCallRingtone } from "@/lib/callRingtone";
+import { startCallAlert, stopCallAlert } from "@/lib/callRingtone";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -82,6 +86,7 @@ function RootLayoutNav() {
         && data?.callId
         && user?.dbId
       ) {
+        void stopCallAlert();
         const action = actionId === NOTIFICATION_ACTION_ACCEPT_CALL ? "accept" : "decline";
         void fetch(`${getApiUrl()}/api/webrtc/calls/${data.callId}/respond`, {
           method: "POST",
@@ -138,24 +143,25 @@ function RootLayoutNav() {
     let cancelled = false;
     const poll = async () => {
       try {
-        const res = await fetch(`${getApiUrl()}/api/webrtc/calls/incoming/${user.dbId}`);
+        const res = await fetch(`${getApiUrl()}/api/webrtc/calls/incoming/${user.dbId}`, {
+          headers: webrtcAuthHeaders(user.sessionToken),
+        });
         const data = await res.json() as { success?: boolean; calls?: any[] };
         if (cancelled) return;
         const next = data.calls?.[0] ?? null;
         setIncomingCall((prev) => {
           if (!next) {
-            if (prev) void stopCallRingtone();
+            if (prev) void stopCallAlert();
             return null;
           }
           if (prev?.callId === next.callId) return prev;
           if (Platform.OS !== "web") {
-            Vibration.vibrate([0, 700, 450], true);
-            void startCallRingtone();
+            void startCallAlert();
             Notifications.scheduleNotificationAsync({
               content: {
                 title: `${next.type === "video" ? "Video" : "Voice"} call`,
                 body: `${next.callerName ?? "Videh user"} is calling`,
-                sound: "default",
+                sound: undefined,
                 priority: Notifications.AndroidNotificationPriority.MAX,
                 data: { callId: next.callId, chatId: next.chatId, type: next.type, channel: next.channel, callerName: next.callerName },
                 categoryIdentifier: "incoming_call",
@@ -169,26 +175,48 @@ function RootLayoutNav() {
       } catch {}
     };
     void poll();
-    const timer = setInterval(poll, 2000);
+    const timer = setInterval(poll, 800);
+    const unsubCall = onCallSignal((payload) => {
+      const action = String(payload.action ?? "");
+      const callId = payload.callId ? String(payload.callId) : "";
+      if (action === "ringing" && callId && user.dbId) {
+        setIncomingCall((prev) => {
+          if (prev?.callId === callId) return prev;
+          if (Platform.OS !== "web") void startCallAlert();
+          return {
+            callId,
+            channel: String(payload.channel ?? ""),
+            chatId: Number(payload.chatId),
+            type: payload.type === "video" ? "video" : "audio",
+            callerName: String(payload.callerName ?? "Videh user"),
+            participantCount: Number(payload.participantCount ?? 2),
+          };
+        });
+      }
+      if (action === "declined" || action === "ended" || action === "missed") {
+        setIncomingCall((prev) => {
+          if (!prev) return prev;
+          if (callId && prev.callId !== callId) return prev;
+          void stopCallAlert();
+          return null;
+        });
+      }
+    });
     return () => {
       cancelled = true;
       clearInterval(timer);
-      if (Platform.OS !== "web") Vibration.cancel();
-      void stopCallRingtone();
+      unsubCall();
+      void stopCallAlert();
     };
-  }, [isAuthenticated, user?.dbId]);
+  }, [isAuthenticated, user?.dbId, user?.sessionToken]);
 
   const respondToIncomingCall = async (action: "accept" | "decline") => {
     if (!incomingCall || !user?.dbId) return;
     const call = incomingCall;
     setIncomingCall(null);
-    if (Platform.OS !== "web") {
-      Vibration.cancel();
-      await stopCallRingtone();
-    }
-    await fetch(`${getApiUrl()}/api/webrtc/calls/${call.callId}/respond`, {
+    await stopCallAlert();
+    await webrtcFetch(`/calls/${call.callId}/respond`, user.sessionToken, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId: user.dbId, action }),
     }).catch(() => {});
     if (action === "accept") {
@@ -237,6 +265,7 @@ function RootLayoutNav() {
         <Stack.Screen name="settings/storage" options={{ headerShown: false }} />
         <Stack.Screen name="settings/accessibility" options={{ headerShown: false }} />
         <Stack.Screen name="settings/language" options={{ headerShown: false }} />
+        <Stack.Screen name="settings/assistant" options={{ headerShown: false }} />
         <Stack.Screen name="broadcasts/index" options={{ headerShown: false }} />
       </Stack>
       {incomingCall && (
@@ -258,6 +287,7 @@ function RootLayoutNav() {
           </View>
         </View>
       )}
+      <AssistantOverlay />
     </>
   );
 }
@@ -289,7 +319,9 @@ export default function RootLayout() {
             <GestureHandlerRootView style={{ flex: 1 }}>
               <KeyboardProvider>
                 <AppProvider>
-                  <RootLayoutNav />
+                  <AssistantProvider>
+                    <RootLayoutNav />
+                  </AssistantProvider>
                 </AppProvider>
               </KeyboardProvider>
             </GestureHandlerRootView>
