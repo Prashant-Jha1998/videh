@@ -1,4 +1,7 @@
 import * as Speech from "expo-speech";
+import {
+  ExpoSpeechRecognitionModule,
+} from "expo-speech-recognition";
 import { Platform } from "react-native";
 import {
   normalizeLangCode,
@@ -7,24 +10,25 @@ import {
   type AssistantLangCode,
 } from "./assistantLanguages";
 
-let Voice: {
-  isAvailable: () => Promise<boolean>;
-  start: (locale: string) => Promise<void>;
-  stop: () => Promise<void>;
-  destroy: () => Promise<void>;
-  onSpeechResults: ((e: { value?: string[] }) => void) | null;
-  onSpeechPartialResults: ((e: { value?: string[] }) => void) | null;
-  onSpeechError: ((e: { error?: { message?: string } }) => void) | null;
-} | null = null;
+type Listener = { remove: () => void };
 
-try {
-  Voice = require("@react-native-voice/voice").default;
-} catch {
-  Voice = null;
+let resultListener: Listener | null = null;
+let errorListener: Listener | null = null;
+
+function clearSpeechListeners(): void {
+  resultListener?.remove();
+  errorListener?.remove();
+  resultListener = null;
+  errorListener = null;
 }
 
 export function isSpeechRecognitionAvailable(): boolean {
-  return Platform.OS !== "web" && Voice != null;
+  if (Platform.OS === "web") return false;
+  try {
+    return ExpoSpeechRecognitionModule.isRecognitionAvailable();
+  } catch {
+    return false;
+  }
 }
 
 export async function speakAssistant(
@@ -57,39 +61,54 @@ type ListenOpts = {
 };
 
 export async function startListening(opts: ListenOpts): Promise<void> {
-  if (!Voice) {
+  if (!isSpeechRecognitionAvailable()) {
     opts.onError?.("Speech recognition not available on this device.");
     return;
   }
-  Voice.onSpeechPartialResults = (e) => {
-    const text = e.value?.[0] ?? "";
-    if (text) opts.onPartial?.(text);
-  };
-  Voice.onSpeechResults = (e) => {
-    const text = e.value?.[0] ?? "";
-    if (text) opts.onFinal?.(text);
-  };
-  Voice.onSpeechError = (e) => {
-    opts.onError?.(e.error?.message ?? "Speech error");
-  };
+
+  const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+  if (!perm.granted) {
+    opts.onError?.("Microphone and speech permissions are required.");
+    return;
+  }
+
+  clearSpeechListeners();
+  resultListener = ExpoSpeechRecognitionModule.addListener("result", (event) => {
+    const text = event.results?.[0]?.transcript?.trim() ?? "";
+    if (!text) return;
+    if (event.isFinal) opts.onFinal?.(text);
+    else opts.onPartial?.(text);
+  });
+  errorListener = ExpoSpeechRecognitionModule.addListener("error", (event) => {
+    opts.onError?.(event.message ?? event.error ?? "Speech error");
+  });
+
   const code = normalizeLangCode(
     typeof opts.locale === "string" && opts.locale.includes("-")
       ? opts.locale.split("-")[0]
       : opts.locale,
   );
-  await Voice.start(toRecognitionLocale(code));
+
+  ExpoSpeechRecognitionModule.start({
+    lang: toRecognitionLocale(code),
+    interimResults: true,
+    continuous: true,
+    androidIntentOptions: {
+      EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 12000,
+    },
+  });
 }
 
 export async function stopListening(): Promise<void> {
-  if (!Voice) return;
   try {
-    await Voice.stop();
+    ExpoSpeechRecognitionModule.stop();
   } catch { /* ignore */ }
+  clearSpeechListeners();
 }
 
 export async function destroySpeech(): Promise<void> {
-  if (!Voice) return;
   try {
-    await Voice.destroy();
+    ExpoSpeechRecognitionModule.abort();
   } catch { /* ignore */ }
+  clearSpeechListeners();
 }

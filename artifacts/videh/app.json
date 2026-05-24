@@ -104,6 +104,14 @@
           "color": "#00A884",
           "defaultChannel": "messages"
         }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Videh needs microphone access for Hey Videh voice assistant and calls.",
+          "speechRecognitionPermission": "Videh uses speech recognition for Hey Videh voice commands.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
       ]
     ],
     "experiments": {
