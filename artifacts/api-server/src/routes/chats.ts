@@ -41,6 +41,11 @@ function mediaExtension(mime: string): string {
   if (mime === "audio/mpeg") return ".mp3";
   if (mime === "audio/mp4") return ".m4a";
   if (mime === "audio/aac") return ".aac";
+  if (mime === "application/zip" || mime === "application/x-zip-compressed") return ".zip";
+  if (mime === "application/vnd.rar" || mime === "application/x-rar-compressed") return ".rar";
+  if (mime === "application/x-7z-compressed") return ".7z";
+  if (mime === "text/plain") return ".txt";
+  if (mime === "text/csv") return ".csv";
   return mime.startsWith("image/") ? ".jpg" : ".bin";
 }
 
@@ -59,6 +64,11 @@ function mimeFromFilename(filename: string, fallback: string): string {
   if (ext === ".mp3") return "audio/mpeg";
   if (ext === ".m4a") return "audio/mp4";
   if (ext === ".aac") return "audio/aac";
+  if (ext === ".zip") return "application/zip";
+  if (ext === ".rar") return "application/vnd.rar";
+  if (ext === ".7z") return "application/x-7z-compressed";
+  if (ext === ".txt") return "text/plain";
+  if (ext === ".csv") return "text/csv";
   return fallback || "application/octet-stream";
 }
 

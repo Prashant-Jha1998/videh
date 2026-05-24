@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -46,10 +46,24 @@ export function WhatsAppVoiceMic({ enabled, colors, onSend, onPhaseChange, fullW
   const [cancelHint, setCancelHint] = useState(false);
   const [lockHint, setLockHint] = useState(false);
 
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+  const holdActiveRef = useRef(false);
+  const releasePendingRef = useRef(false);
+  const startingRef = useRef(false);
+
   const recOptions = useMemo(
     () => ({ ...Audio.RecordingOptionsPresets.HIGH_QUALITY, isMeteringEnabled: true as const }),
     [],
   );
+
+  const setPhaseSafe = useCallback((next: "idle" | "holding" | "locked") => {
+    phaseRef.current = next;
+    setPhase(next);
+    onPhaseChange?.(next);
+  }, [onPhaseChange]);
 
   const cleanupRecording = useCallback(async () => {
     const rec = recRef.current;
@@ -61,10 +75,12 @@ export function WhatsAppVoiceMic({ enabled, colors, onSend, onPhaseChange, fullW
     }
     lockedRef.current = false;
     cancelledRef.current = false;
+    holdActiveRef.current = false;
+    releasePendingRef.current = false;
+    startingRef.current = false;
     meteringRef.current = [];
     slideX.setValue(0);
-    setPhase("idle");
-    onPhaseChange?.("idle");
+    setPhaseSafe("idle");
     setMs(0);
     setMeter(0.2);
     setCancelHint(false);
@@ -72,17 +88,30 @@ export function WhatsAppVoiceMic({ enabled, colors, onSend, onPhaseChange, fullW
     try {
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
     } catch { /* ignore */ }
-  }, [slideX, onPhaseChange]);
+  }, [slideX, setPhaseSafe]);
 
-  useEffect(() => {
-    onPhaseChange?.(phase);
-  }, [phase, onPhaseChange]);
+  const waitForRecording = useCallback(async (timeoutMs = 6000): Promise<Audio.Recording | null> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (recRef.current) return recRef.current;
+      if (!holdActiveRef.current && !releasePendingRef.current && !startingRef.current) return null;
+      if (cancelledRef.current) return null;
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    return recRef.current;
+  }, []);
+
+  const finishSendRef = useRef<() => Promise<void>>(async () => {});
+  const cancelRecordingRef = useRef<() => Promise<void>>(async () => {});
+  const startRecordingRef = useRef<() => Promise<void>>(async () => {});
 
   const startRecording = useCallback(async () => {
-    if (!enabled || Platform.OS === "web") {
+    if (!enabledRef.current || Platform.OS === "web") {
       if (Platform.OS === "web") Alert.alert("Not supported on web", "Use the mobile app for voice notes.");
       return;
     }
+    if (startingRef.current || phaseRef.current !== "idle") return;
+    startingRef.current = true;
     try {
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) {
@@ -103,24 +132,38 @@ export function WhatsAppVoiceMic({ enabled, colors, onSend, onPhaseChange, fullW
         },
         80,
       );
+      if (!holdActiveRef.current && !releasePendingRef.current) {
+        try {
+          await recording.stopAndUnloadAsync();
+        } catch { /* ignore */ }
+        return;
+      }
       recRef.current = recording;
       lockedRef.current = false;
       cancelledRef.current = false;
-      setPhase("holding");
-      onPhaseChange?.("holding");
+      setPhaseSafe("holding");
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      if (releasePendingRef.current) {
+        releasePendingRef.current = false;
+        if (cancelledRef.current) await cleanupRecording();
+        else await finishSendRef.current();
+      }
     } catch {
       Alert.alert("Error", "Could not start recording.");
       await cleanupRecording();
+    } finally {
+      startingRef.current = false;
     }
-  }, [enabled, recOptions, cleanupRecording]);
+  }, [recOptions, cleanupRecording, setPhaseSafe]);
 
   const finishSend = useCallback(async () => {
-    const rec = recRef.current;
+    const rec = recRef.current ?? (await waitForRecording());
     if (!rec) {
       await cleanupRecording();
       return;
     }
+    recRef.current = rec;
     try {
       const st = await rec.getStatusAsync();
       const durMs = typeof st.durationMillis === "number" ? st.durationMillis : ms;
@@ -140,22 +183,32 @@ export function WhatsAppVoiceMic({ enabled, colors, onSend, onPhaseChange, fullW
     } finally {
       await cleanupRecording();
     }
-  }, [ms, onSend, cleanupRecording]);
+  }, [ms, onSend, cleanupRecording, waitForRecording]);
 
   const cancelRecording = useCallback(async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     await cleanupRecording();
   }, [cleanupRecording]);
 
-  const panResponder = useMemo(
-    () => PanResponder.create({
-      onStartShouldSetPanResponder: () => enabled && phase === "idle",
-      onMoveShouldSetPanResponder: () => enabled && (phase === "holding" || phase === "locked"),
+  finishSendRef.current = finishSend;
+  cancelRecordingRef.current = cancelRecording;
+  startRecordingRef.current = startRecording;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => enabledRef.current && phaseRef.current === "idle",
+      onMoveShouldSetPanResponder: () =>
+        enabledRef.current && (phaseRef.current === "holding" || phaseRef.current === "locked"),
+      onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => {
-        if (phase === "idle") void startRecording();
+        if (!enabledRef.current || phaseRef.current !== "idle" || startingRef.current) return;
+        holdActiveRef.current = true;
+        releasePendingRef.current = false;
+        cancelledRef.current = false;
+        void startRecordingRef.current();
       },
       onPanResponderMove: (_, g) => {
-        if (phase !== "holding" || lockedRef.current) return;
+        if (phaseRef.current !== "holding" || lockedRef.current) return;
         slideX.setValue(Math.min(0, g.dx));
         const willCancel = g.dx <= CANCEL_SLIDE_DX;
         const willLock = g.dy <= LOCK_SLIDE_DY;
@@ -164,26 +217,31 @@ export function WhatsAppVoiceMic({ enabled, colors, onSend, onPhaseChange, fullW
         if (willCancel) cancelledRef.current = true;
         if (willLock && !lockedRef.current) {
           lockedRef.current = true;
-          setPhase("locked");
-          onPhaseChange?.("locked");
+          setPhaseSafe("locked");
           setLockHint(false);
           setCancelHint(false);
           slideX.setValue(0);
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         }
       },
-      onPanResponderRelease: async () => {
-        if (phase === "holding" && !lockedRef.current) {
-          if (cancelledRef.current) await cancelRecording();
-          else await finishSend();
+      onPanResponderRelease: () => {
+        holdActiveRef.current = false;
+        if (lockedRef.current || phaseRef.current === "locked") return;
+        if (phaseRef.current !== "holding" && !recRef.current && !startingRef.current) return;
+        if (cancelledRef.current) {
+          void cancelRecordingRef.current();
+          return;
         }
+        releasePendingRef.current = true;
+        void finishSendRef.current();
       },
-      onPanResponderTerminate: async () => {
-        if (phase === "holding" && !lockedRef.current) await cancelRecording();
+      onPanResponderTerminate: () => {
+        holdActiveRef.current = false;
+        if (lockedRef.current || phaseRef.current === "locked") return;
+        void cancelRecordingRef.current();
       },
     }),
-    [enabled, phase, startRecording, finishSend, cancelRecording, slideX],
-  );
+  ).current;
 
   const liveBars = useMemo(() => {
     const src = meteringRef.current.length ? meteringRef.current.slice(-VOICE_WAVE_BAR_COUNT) : Array(VOICE_WAVE_BAR_COUNT).fill(meter);
@@ -230,6 +288,7 @@ export function WhatsAppVoiceMic({ enabled, colors, onSend, onPhaseChange, fullW
       )}
 
       <Animated.View
+        collapsable={false}
         style={[styles.micBtn, { backgroundColor: colors.primary, transform: [{ translateX: slideX }] }]}
         {...panResponder.panHandlers}
       >

@@ -15,94 +15,135 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 }
 
 export async function requestForegroundLocationPermission(): Promise<boolean> {
-  const { status } = await Location.requestForegroundPermissionsAsync();
-  return status === "granted";
+  const result = await withTimeout(Location.requestForegroundPermissionsAsync(), 30_000);
+  return result?.status === "granted";
 }
 
 export async function ensureLocationServicesEnabled(): Promise<boolean> {
   try {
-    let enabled = await Location.hasServicesEnabledAsync();
-    if (!enabled && Platform.OS === "android") {
-      await Location.enableNetworkProviderAsync().catch(() => {});
-      enabled = await Location.hasServicesEnabledAsync();
+    const has = await withTimeout(Location.hasServicesEnabledAsync(), 4000);
+    if (has === true) return true;
+    if (has === false && Platform.OS === "android") {
+      await withTimeout(Location.enableNetworkProviderAsync(), 4000);
+      const again = await withTimeout(Location.hasServicesEnabledAsync(), 3000);
+      return again !== false;
     }
-    return enabled;
+    return has !== false;
   } catch {
     return true;
   }
 }
 
+async function readLastKnown(maxAgeMs: number, timeoutMs = 3500): Promise<Location.LocationObject | null> {
+  return withTimeout(Location.getLastKnownPositionAsync({ maxAge: maxAgeMs }), timeoutMs);
+}
+
+async function readCurrentPosition(
+  accuracy: Location.Accuracy,
+  timeoutMs: number,
+): Promise<Location.LocationObject | null> {
+  return withTimeout(
+    Location.getCurrentPositionAsync({
+      accuracy,
+      mayShowUserSettingsDialog: Platform.OS === "android",
+    }),
+    timeoutMs,
+  );
+}
+
+/** One-shot watch — helps when getCurrentPositionAsync never resolves on some Android builds. */
+async function watchOncePosition(timeoutMs: number): Promise<Location.LocationObject | null> {
+  if (Platform.OS === "web") return null;
+
+  return new Promise((resolve) => {
+    let sub: Location.LocationSubscription | null = null;
+    let settled = false;
+
+    const finish = (value: Location.LocationObject | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (sub) void sub.remove();
+      resolve(value);
+    };
+
+    const timer = setTimeout(() => finish(null), timeoutMs);
+
+    void Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.Balanced,
+        distanceInterval: 1,
+        timeInterval: 1000,
+      },
+      (loc) => finish(loc),
+    )
+      .then((subscription) => {
+        sub = subscription;
+      })
+      .catch(() => finish(null));
+  });
+}
+
+function toCoords(loc: Location.LocationObject, fromCache: boolean): DeviceCoords {
+  return {
+    latitude: loc.coords.latitude,
+    longitude: loc.coords.longitude,
+    fromCache,
+  };
+}
+
 /**
- * WhatsApp-style: prefer a recent cached fix for instant UI, then refine with GPS.
+ * WhatsApp-style: cached fix first (fast UI), then GPS / network, then stale cache.
+ * Every native call is time-boxed so the screen cannot spin forever.
  */
 export async function resolveDeviceLocation(opts?: {
   timeoutMs?: number;
   cachedMaxAgeMs?: number;
 }): Promise<DeviceCoords | null> {
-  const timeoutMs = opts?.timeoutMs ?? 12_000;
+  const timeoutMs = opts?.timeoutMs ?? 10_000;
   const cachedMaxAgeMs = opts?.cachedMaxAgeMs ?? 10 * 60 * 1000;
 
-  const recent = await Location.getLastKnownPositionAsync({ maxAge: cachedMaxAgeMs }).catch(() => null);
-  if (recent) {
-    return {
-      latitude: recent.coords.latitude,
-      longitude: recent.coords.longitude,
-      fromCache: true,
-    };
+  const recent = await readLastKnown(cachedMaxAgeMs);
+  if (recent) return toCoords(recent, true);
+
+  const lowAccuracy = Platform.OS === "android" ? Location.Accuracy.Low : Location.Accuracy.Balanced;
+
+  const attempts = await Promise.all([
+    readCurrentPosition(lowAccuracy, timeoutMs),
+    watchOncePosition(timeoutMs),
+  ]);
+  for (const loc of attempts) {
+    if (loc) return toCoords(loc, false);
   }
 
-  const current = await withTimeout(
-    Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-      mayShowUserSettingsDialog: true,
-    }),
-    timeoutMs,
-  );
-  if (current) {
-    return {
-      latitude: current.coords.latitude,
-      longitude: current.coords.longitude,
-      fromCache: false,
-    };
-  }
+  const high = await readCurrentPosition(Location.Accuracy.Balanced, Math.min(timeoutMs, 8000));
+  if (high) return toCoords(high, false);
 
-  const stale = await Location.getLastKnownPositionAsync({ maxAge: 7 * 24 * 60 * 60 * 1000 }).catch(() => null);
-  if (stale) {
-    return {
-      latitude: stale.coords.latitude,
-      longitude: stale.coords.longitude,
-      fromCache: true,
-    };
-  }
+  const stale = await readLastKnown(7 * 24 * 60 * 60 * 1000, 3500);
+  if (stale) return toCoords(stale, true);
 
   return null;
 }
 
-export async function refineDeviceLocation(
-  timeoutMs = 15_000,
-): Promise<DeviceCoords | null> {
-  const current = await withTimeout(
-    Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.High,
-      mayShowUserSettingsDialog: false,
-    }),
-    timeoutMs,
-  );
-  if (!current) return null;
-  return {
-    latitude: current.coords.latitude,
-    longitude: current.coords.longitude,
-    fromCache: false,
-  };
+export async function refineDeviceLocation(timeoutMs = 12_000): Promise<DeviceCoords | null> {
+  const current = await readCurrentPosition(Location.Accuracy.High, timeoutMs);
+  if (current) return toCoords(current, false);
+
+  const watched = await watchOncePosition(Math.min(timeoutMs, 8000));
+  if (watched) return toCoords(watched, false);
+
+  return null;
 }
 
 export async function reverseGeocodeLabel(
   latitude: number,
   longitude: number,
 ): Promise<{ areaLabel: string; nearbyRows: { title: string; subtitle: string }[] }> {
-  const geo = await Location.reverseGeocodeAsync({ latitude, longitude }).catch(
-    () => [] as Location.LocationGeocodedAddress[],
-  );
+  const geo = await withTimeout(
+    Location.reverseGeocodeAsync({ latitude, longitude }),
+    8000,
+  ).then((r) => r ?? []);
+
   const g = geo[0];
   const areaLabel =
     [g?.name, g?.street, g?.district, g?.city].filter(Boolean).join(", ")

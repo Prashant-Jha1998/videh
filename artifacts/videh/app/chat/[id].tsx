@@ -7,7 +7,6 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
-import type { ExistingContact } from "expo-contacts";
 import { Audio, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAvoidingView } from "react-native";
@@ -48,6 +47,11 @@ import {
   validatePickedAssets,
 } from "@/lib/chatMediaPolicy";
 import { WhatsAppVoiceMic } from "@/components/WhatsAppVoiceMic";
+import { DocumentMessageBubble } from "@/components/DocumentMessageBubble";
+import { ContactMessageBubble } from "@/components/ContactMessageBubble";
+import { openChatDocument } from "@/lib/openChatDocument";
+import { parseContactMessage } from "@/lib/contactMessage";
+import { loadDeviceContactsForShare, type ContactShareRow } from "@/lib/loadDeviceContactsForShare";
 import { startVoiceNotePlaybackSession, stopVoiceNotePlaybackSession } from "@/lib/inCallAudio";
 import { claimVoicePlayback, releaseVoicePlayback } from "@/lib/voicePlaybackHub";
 import {
@@ -86,24 +90,6 @@ const BASE_URL = getApiUrl();
 const { width: W } = Dimensions.get("window");
 const REACTION_EMOJIS = ["❤️", "👍", "😂", "😮", "😢", "🙏"];
 const REPLY_SWIPE_ACTION_W = 56;
-
-const MIME_EXTENSION_MAP: Record<string, string> = {
-  "application/pdf": "pdf",
-  "application/vnd.ms-excel": "xls",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-  "application/msword": "doc",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-  "text/plain": "txt",
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-};
-
-function safeFileName(name: string, fallback: string, ext: string) {
-  const cleaned = (name || fallback).replace(/[^\w.-]/g, "_").replace(/^_+|_+$/g, "");
-  if (!cleaned) return `${fallback}.${ext}`;
-  return cleaned.toLowerCase().endsWith(`.${ext.toLowerCase()}`) ? cleaned : `${cleaned}.${ext}`;
-}
 
 type ChatListRow =
   | { rowType: "date"; id: string; label: string }
@@ -174,43 +160,6 @@ function ChatBubbleTail({ fill, side }: { fill: string; side: "left" | "right" }
       <Path d={side === "right" ? rightD : leftD} fill={fill} />
     </Svg>
   );
-}
-
-type ContactShareRow = { id: string; name: string; phone: string };
-
-function buildContactShareRows(data: ExistingContact[]): ContactShareRow[] {
-  const out: ContactShareRow[] = [];
-  for (const c of data) {
-    const nameRaw = (c.name ?? "").trim();
-    const phones = (c.phoneNumbers ?? [])
-      .map((p) => (p.number ?? "").trim())
-      .filter(Boolean);
-    if (!nameRaw && phones.length === 0) continue;
-    const displayName = nameRaw || phones[0]!;
-    const primaryPhone = phones[0] ?? "";
-    out.push({ id: String(c.id), name: displayName, phone: primaryPhone });
-  }
-  out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-  return out;
-}
-
-async function loadAllDeviceContactsForShare(): Promise<ExistingContact[]> {
-  const fields = [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails];
-  const aggregated: ExistingContact[] = [];
-  let pageOffset = 0;
-  const pageSize = 500;
-  for (let guard = 0; guard < 200; guard++) {
-    const res = await Contacts.getContactsAsync({
-      fields,
-      pageSize,
-      pageOffset,
-      sort: Contacts.SortTypes.FirstName,
-    });
-    aggregated.push(...res.data);
-    if (!res.hasNextPage) break;
-    pageOffset += res.data.length;
-  }
-  return aggregated;
 }
 
 /** WhatsApp-style attachment row (coloured circle + label). Order matches common WA layout. */
@@ -342,7 +291,6 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
       shouldDuckAndroid: true,
       playThroughEarpieceAndroid: false,
     });
-    startVoiceNotePlaybackSession();
 
     const { sound: s } = await Audio.Sound.createAsync(
       { uri: playableUri },
@@ -364,6 +312,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
     );
     await applyRate(s, rate);
     soundRef.current = s;
+    startVoiceNotePlaybackSession();
     return s;
   }, [playableUri, rate, applyRate, messageId]);
 
@@ -846,6 +795,7 @@ export default function ChatScreen() {
 
   const {
     chats, user, sendMessage, sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage,
+    sendDocumentMessage, sendContactMessage,
     setTyping, clearTyping, markAsRead, deleteMessage, deleteForEveryone,
     editMessage, reactToMessage, starMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
@@ -881,6 +831,8 @@ export default function ChatScreen() {
   const [contactPickerLoading, setContactPickerLoading] = useState(false);
   const [contactPickerRows, setContactPickerRows] = useState<ContactShareRow[]>([]);
   const [contactPickerQuery, setContactPickerQuery] = useState("");
+  const [contactToConfirm, setContactToConfirm] = useState<ContactShareRow | null>(null);
+  const [viewContactMsg, setViewContactMsg] = useState<Message | null>(null);
 
   // Edit mode
   const [editTarget, setEditTarget] = useState<Message | null>(null);
@@ -1347,23 +1299,19 @@ export default function ChatScreen() {
     } else if (type === "document") {
       if (Platform.OS === "web") { Alert.alert("Not supported on web", "Use the mobile app to share documents."); return; }
       setAttachVisible(false);
-      const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
       const fileSizeMB = (asset.size ?? 0) / 1024 / 1024;
-      if (fileSizeMB > 100) { Alert.alert("File too large", "Maximum allowed file size is 100MB."); return; }
-      try {
-        const mimeType = asset.mimeType ?? guessMimeFromFilename(asset.name ?? "file.bin");
-        const upload = await uploadChatMediaWithProgress({
-          uri: asset.uri,
-          mime: mimeType,
-          filename: asset.name || `document_${Date.now()}`,
-          sessionToken: user?.sessionToken,
-        });
-        sendSpecialMessage(chatId, asset.name ?? "Document", "document", upload.url);
-      } catch (e) {
-        Alert.alert("Error", e instanceof Error ? e.message : "Could not read the selected file. Please try again.");
-      }
+      if (fileSizeMB > 100) { Alert.alert("File too large", "Maximum allowed file size is 100 MB."); return; }
+      const filename = asset.name ?? `document_${Date.now()}`;
+      const mimeType = asset.mimeType ?? guessMimeFromFilename(filename);
+      sendDocumentMessage(chatId, asset.uri, filename, asset.size ?? 0, mimeType);
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 120);
 
     } else if (type === "location") {
       if (!chatId) return;
@@ -1371,23 +1319,28 @@ export default function ChatScreen() {
 
     } else if (type === "contact") {
       if (Platform.OS === "web") { Alert.alert("Not supported on web", "Use the mobile app to share contacts."); return; }
-      const { status } = await Contacts.requestPermissionsAsync();
-      if (status !== "granted") { Alert.alert("Permission required", "Contacts access is required to share contacts."); return; }
       setContactPickerQuery("");
       setContactPickerRows([]);
+      setContactToConfirm(null);
       setContactPickerOpen(true);
       setContactPickerLoading(true);
       try {
-        const data = await loadAllDeviceContactsForShare();
-        if (!data || data.length === 0) {
+        const rows = await loadDeviceContactsForShare();
+        if (!rows.length) {
           setContactPickerOpen(false);
           Alert.alert("No contacts", "No contacts were found on this device.");
           return;
         }
-        setContactPickerRows(buildContactShareRows(data));
-      } catch {
+        setContactPickerRows(rows);
+      } catch (e) {
         setContactPickerOpen(false);
-        Alert.alert("Error", "Could not load contacts. Please try again.");
+        const msg = e instanceof Error ? e.message : "Could not load contacts.";
+        Alert.alert(
+          "Permission required",
+          msg.includes("denied")
+            ? "Allow Contacts access in Settings to share contacts."
+            : "Could not load contacts. Please try again.",
+        );
       } finally {
         setContactPickerLoading(false);
       }
@@ -1426,7 +1379,7 @@ export default function ChatScreen() {
     const filtered = contactPickerRows.filter((r) => {
       if (!qRaw) return true;
       if (r.name.toLowerCase().includes(qRaw)) return true;
-      if (qDigits.length > 0 && r.phone.replace(/\D/g, "").includes(qDigits)) return true;
+      if (qDigits.length > 0 && r.phones.some((p) => p.replace(/\D/g, "").includes(qDigits))) return true;
       return false;
     });
     const groups = new Map<string, ContactShareRow[]>();
@@ -1441,18 +1394,48 @@ export default function ChatScreen() {
     return keys.map((title) => ({ title, data: groups.get(title)! }));
   }, [contactPickerRows, contactPickerQuery]);
 
-  const confirmShareContact = useCallback(
-    (row: ContactShareRow) => {
-      if (!chatId) return;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      const body = row.phone ? `👤 ${row.name}\n${row.phone}` : `👤 ${row.name}`;
-      sendSpecialMessage(chatId, body, "contact");
-      setContactPickerOpen(false);
-      setContactPickerQuery("");
-      setContactPickerRows([]);
-    },
-    [chatId, sendSpecialMessage],
-  );
+  const openContactPickerRow = useCallback((row: ContactShareRow) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setContactPickerOpen(false);
+    setContactToConfirm(row);
+  }, []);
+
+  const confirmShareContact = useCallback(() => {
+    if (!chatId || !contactToConfirm) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    sendContactMessage(chatId, {
+      name: contactToConfirm.name,
+      phones: contactToConfirm.phones,
+      emails: contactToConfirm.emails,
+    });
+    setContactToConfirm(null);
+    setContactPickerQuery("");
+    setContactPickerRows([]);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 150);
+  }, [chatId, contactToConfirm, sendContactMessage]);
+
+  const saveSharedContactToPhone = useCallback(async (text: string) => {
+    const parsed = parseContactMessage(text);
+    if (!parsed) return;
+    try {
+      const { status } = await Contacts.requestPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission required", "Allow Contacts access to save this contact.");
+        return;
+      }
+      const [firstName, ...rest] = parsed.name.split(/\s+/).filter(Boolean);
+      const lastName = rest.join(" ");
+      await Contacts.addContactAsync({
+        firstName: firstName || parsed.name,
+        lastName: lastName || undefined,
+        phoneNumbers: parsed.phones.map((number) => ({ number, label: "mobile" })),
+        emails: parsed.emails?.map((email) => ({ email, label: "work" })),
+      });
+      Alert.alert("Saved", `${parsed.name} was added to your contacts.`);
+    } catch {
+      Alert.alert("Error", "Could not save this contact.");
+    }
+  }, []);
 
   const handleStopLiveLocation = useCallback(async (msg: Message) => {
     if (!chatId) return;
@@ -1463,49 +1446,23 @@ export default function ChatScreen() {
     stopLiveLocationSession();
   }, [chatId, updateLocationOnServer, stopLiveLocationSession]);
 
-  const openDocumentAttachment = useCallback(async (item: Message) => {
-    const uri = item.mediaUrl;
-    if (!uri) return;
-    try {
-      const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
-      if (!cacheDir) throw new Error("No writable cache directory");
-      let fileUri = uri;
-      let mime = "application/octet-stream";
-      if (uri.startsWith("data:")) {
-        const mimeMatch = uri.match(/^data:([^;]+);base64,/);
-        const base64 = uri.replace(/^data:[^;]+;base64,/, "");
-        mime = mimeMatch?.[1] ?? "application/octet-stream";
-        const ext = MIME_EXTENSION_MAP[mime] ?? "bin";
-        fileUri = `${cacheDir}${safeFileName(item.text, `document_${Date.now()}`, ext)}`;
-        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-      } else if (/^https?:\/\//i.test(uri)) {
-        const guessedExt = item.text?.split(".").pop()?.slice(0, 8) || "bin";
-        const downloadTarget = `${cacheDir}${safeFileName(item.text, `document_${Date.now()}`, guessedExt)}`;
-        const downloaded = await FileSystem.downloadAsync(uri, downloadTarget);
-        fileUri = downloaded.uri;
-      }
-      if (Platform.OS !== "web") {
-        const getContentUri = (FileSystem as unknown as { getContentUriAsync?: (uri: string) => Promise<string> }).getContentUriAsync;
-        const openUri = getContentUri ? await getContentUri(fileUri) : fileUri;
-        try {
-          await Linking.openURL(openUri);
-          return;
-        } catch {
-          if (await Sharing.isAvailableAsync()) {
-            await Sharing.shareAsync(fileUri, {
-              mimeType: mime,
-              dialogTitle: item.text || "Open document",
-            });
-            return;
-          }
-          throw new Error("No app available");
-        }
-      }
-      await Linking.openURL(fileUri);
-    } catch {
-      Alert.alert("Error", "Could not open this document on your device.");
+  const handleDocumentPress = useCallback((item: Message) => {
+    if (!chatId || !item.mediaUrl) return;
+    if (item.uploadFailed) {
+      deleteMessage(chatId, item.id);
+      const mime = guessMimeFromFilename(item.text);
+      sendDocumentMessage(chatId, item.mediaUrl, item.text, item.fileSizeBytes ?? 0, mime);
+      return;
     }
-  }, []);
+    if (typeof item.uploadProgress === "number" && item.uploadProgress < 100) return;
+    void openChatDocument({
+      mediaUrl: item.mediaUrl,
+      filename: item.text,
+      sessionToken: user?.sessionToken,
+    }).catch(() => {
+      Alert.alert("Error", "Could not open this document on your device.");
+    });
+  }, [chatId, deleteMessage, sendDocumentMessage, user?.sessionToken]);
 
   const saveImageToGallery = useCallback(async (uri: string) => {
     const res = await saveImageUriToLibrary(uri, user?.sessionToken);
@@ -1801,20 +1758,12 @@ export default function ChatScreen() {
               sessionToken={user?.sessionToken}
             />
           ) : isDocument ? (
-            <TouchableOpacity
-              style={styles.docCard}
-              onPress={() => { void openDocumentAttachment(item); }}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.docIcon, { backgroundColor: isMe ? "rgba(255,255,255,0.2)" : "#00A88420" }]}>
-                <Ionicons name="document-text" size={28} color={isMe ? "#fff" : "#00A884"} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.docName, { color: colors.foreground }]} numberOfLines={2}>{item.text}</Text>
-                <Text style={[styles.docMeta, { color: colors.mutedForeground }]}>Document • Tap to open</Text>
-              </View>
-              <Ionicons name="download-outline" size={20} color={colors.mutedForeground} />
-            </TouchableOpacity>
+            <DocumentMessageBubble
+              item={item}
+              isMe={isMe}
+              colors={colors}
+              onPress={() => handleDocumentPress(item)}
+            />
           ) : isLocation ? (
             <LocationMessageBubble
               item={item}
@@ -1825,32 +1774,13 @@ export default function ChatScreen() {
               onStopLive={(m) => { void handleStopLiveLocation(m); }}
             />
           ) : isContact ? (
-            <View style={styles.contactCard}>
-              <View style={styles.contactCardAvatar}>
-                <Text style={styles.contactCardAvatarTxt}>
-                  {(item.text.split("\n")[0].replace("👤 ", "") || "?")[0].toUpperCase()}
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.contactCardName, { color: colors.foreground }]}>
-                  {item.text.split("\n")[0].replace("👤 ", "")}
-                </Text>
-                {item.text.split("\n")[1] ? (
-                  <Text style={[styles.contactCardPhone, { color: colors.mutedForeground }]}>
-                    {item.text.split("\n")[1]}
-                  </Text>
-                ) : null}
-              </View>
-              <TouchableOpacity
-                onPress={() => {
-                  const phone = item.text.split("\n")[1];
-                  if (phone) Linking.openURL(`tel:${phone}`).catch(() => {});
-                }}
-                style={styles.contactCallBtn}
-              >
-                <Ionicons name="call" size={18} color="#00A884" />
-              </TouchableOpacity>
-            </View>
+            <ContactMessageBubble
+              text={item.text}
+              colors={colors}
+              isMe={isMe}
+              onPress={() => setViewContactMsg(item)}
+              onCall={(phone) => { Linking.openURL(`tel:${phone}`).catch(() => {}); }}
+            />
           ) : (
             <>
               <MentionText text={item.text} style={[styles.msgText, { color: colors.foreground }]} />
@@ -2523,7 +2453,7 @@ export default function ChatScreen() {
       <Modal
         visible={contactPickerOpen}
         animationType="slide"
-        presentationStyle="pageSheet"
+        presentationStyle={Platform.OS === "ios" ? "pageSheet" : "fullScreen"}
         onRequestClose={() => {
           setContactPickerOpen(false);
           setContactPickerQuery("");
@@ -2544,9 +2474,9 @@ export default function ChatScreen() {
               <Ionicons name="arrow-back" size={24} color={colors.foreground} />
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.contactPickerTitle, { color: colors.foreground }]}>Share contact</Text>
+              <Text style={[styles.contactPickerTitle, { color: colors.foreground }]}>Send contacts</Text>
               <Text style={[styles.contactPickerSubtitle, { color: colors.mutedForeground }]}>
-                Select a contact to send
+                Choose a contact from your phone
               </Text>
             </View>
             <View style={{ width: 40 }} />
@@ -2590,7 +2520,7 @@ export default function ChatScreen() {
                 return (
                   <TouchableOpacity
                     style={[styles.contactPickerRow, { borderBottomColor: colors.border }]}
-                    onPress={() => confirmShareContact(item)}
+                    onPress={() => openContactPickerRow(item)}
                     activeOpacity={0.65}
                   >
                     <View style={[styles.contactPickerAvatar, { backgroundColor: `hsl(${hue},42%,42%)` }]}>
@@ -2600,9 +2530,9 @@ export default function ChatScreen() {
                       <Text style={[styles.contactPickerName, { color: colors.foreground }]} numberOfLines={1}>
                         {item.name}
                       </Text>
-                      {item.phone ? (
+                      {item.phones[0] ? (
                         <Text style={[styles.contactPickerPhone, { color: colors.mutedForeground }]} numberOfLines={1}>
-                          {item.phone}
+                          {item.phones[0]}
                         </Text>
                       ) : null}
                     </View>
@@ -2620,6 +2550,108 @@ export default function ChatScreen() {
             />
           )}
         </View>
+      </Modal>
+
+      {/* WhatsApp-style: confirm before sending contact */}
+      <Modal
+        visible={!!contactToConfirm}
+        animationType="slide"
+        presentationStyle={Platform.OS === "ios" ? "pageSheet" : "fullScreen"}
+        onRequestClose={() => setContactToConfirm(null)}
+      >
+        {contactToConfirm ? (
+          <View style={[styles.contactConfirmRoot, { backgroundColor: colors.background, paddingTop: insets.top }]}>
+            <View style={[styles.contactPickerHeader, { borderBottomColor: colors.border }]}>
+              <TouchableOpacity onPress={() => setContactToConfirm(null)} style={styles.contactPickerBack} hitSlop={12}>
+                <Ionicons name="arrow-back" size={24} color={colors.foreground} />
+              </TouchableOpacity>
+              <Text style={[styles.contactPickerTitle, { color: colors.foreground, flex: 1 }]}>Send contact</Text>
+              <TouchableOpacity onPress={() => void confirmShareContact()} hitSlop={12}>
+                <Ionicons name="send" size={22} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.contactConfirmBody}>
+              <View style={[styles.contactConfirmAvatar, { backgroundColor: `${colors.primary}22` }]}>
+                <Text style={[styles.contactConfirmAvatarTxt, { color: colors.primary }]}>
+                  {contactToConfirm.name.split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase()}
+                </Text>
+              </View>
+              <Text style={[styles.contactConfirmName, { color: colors.foreground }]}>{contactToConfirm.name}</Text>
+              {contactToConfirm.phones.map((phone, i) => (
+                <Text key={`${phone}-${i}`} style={[styles.contactConfirmPhone, { color: colors.mutedForeground }]}>
+                  {phone}
+                </Text>
+              ))}
+              {contactToConfirm.emails.map((email, i) => (
+                <Text key={`${email}-${i}`} style={[styles.contactConfirmPhone, { color: colors.mutedForeground }]}>
+                  {email}
+                </Text>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={[styles.contactConfirmSendBtn, { backgroundColor: colors.primary, marginBottom: insets.bottom + 16 }]}
+              onPress={() => void confirmShareContact()}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="send" size={18} color="#fff" />
+              <Text style={styles.contactConfirmSendTxt}>Send</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </Modal>
+
+      {/* View received / sent contact (Save, Call) */}
+      <Modal
+        visible={!!viewContactMsg}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setViewContactMsg(null)}
+      >
+        <Pressable style={styles.contactViewBackdrop} onPress={() => setViewContactMsg(null)}>
+          <Pressable
+            style={[styles.contactViewSheet, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {viewContactMsg ? (() => {
+              const parsed = parseContactMessage(viewContactMsg.text);
+              if (!parsed) return null;
+              return (
+                <>
+                  <View style={[styles.contactConfirmAvatar, { backgroundColor: `${colors.primary}22`, alignSelf: "center" }]}>
+                    <Text style={[styles.contactConfirmAvatarTxt, { color: colors.primary }]}>
+                      {parsed.name.split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={[styles.contactConfirmName, { color: colors.foreground, textAlign: "center" }]}>
+                    {parsed.name}
+                  </Text>
+                  {parsed.phones.map((phone, i) => (
+                    <TouchableOpacity
+                      key={`${phone}-${i}`}
+                      style={[styles.contactViewAction, { borderColor: colors.border }]}
+                      onPress={() => Linking.openURL(`tel:${phone}`).catch(() => {})}
+                    >
+                      <Ionicons name="call-outline" size={20} color={colors.primary} />
+                      <Text style={[styles.contactViewActionTxt, { color: colors.foreground }]}>{phone}</Text>
+                    </TouchableOpacity>
+                  ))}
+                  {Platform.OS !== "web" ? (
+                    <TouchableOpacity
+                      style={[styles.contactViewAction, { borderColor: colors.border }]}
+                      onPress={() => { void saveSharedContactToPhone(viewContactMsg.text); }}
+                    >
+                      <Ionicons name="person-add-outline" size={20} color={colors.primary} />
+                      <Text style={[styles.contactViewActionTxt, { color: colors.foreground }]}>Add to contacts</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  <TouchableOpacity style={styles.contactViewClose} onPress={() => setViewContactMsg(null)}>
+                    <Text style={{ color: colors.mutedForeground, fontFamily: "Inter_500Medium" }}>Close</Text>
+                  </TouchableOpacity>
+                </>
+              );
+            })() : null}
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* Reaction picker modal */}
@@ -3283,4 +3315,33 @@ const styles = StyleSheet.create({
   contactPickerPhone: { fontSize: 14, fontFamily: "Inter_400Regular", marginTop: 2 },
   contactPickerEmpty: { padding: 40, alignItems: "center" },
   contactPickerEmptyText: { fontSize: 15, fontFamily: "Inter_400Regular", textAlign: "center" },
+  contactConfirmRoot: { flex: 1 },
+  contactConfirmBody: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, gap: 8 },
+  contactConfirmAvatar: { width: 96, height: 96, borderRadius: 48, alignItems: "center", justifyContent: "center", marginBottom: 12 },
+  contactConfirmAvatarTxt: { fontSize: 32, fontFamily: "Inter_700Bold" },
+  contactConfirmName: { fontSize: 22, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  contactConfirmPhone: { fontSize: 16, fontFamily: "Inter_400Regular", textAlign: "center" },
+  contactConfirmSendBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 28,
+  },
+  contactConfirmSendTxt: { color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold" },
+  contactViewBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
+  contactViewSheet: { borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingTop: 24, paddingHorizontal: 20, gap: 10 },
+  contactViewAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  contactViewActionTxt: { fontSize: 16, fontFamily: "Inter_500Medium", flex: 1 },
+  contactViewClose: { alignItems: "center", paddingVertical: 14 },
 });

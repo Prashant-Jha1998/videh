@@ -69,8 +69,9 @@ export default function SendLocationScreen() {
   const [sending, setSending] = useState(false);
 
   const geocodeReqRef = useRef(0);
+  const loadGenRef = useRef(0);
 
-  const applyCoords = useCallback(async (latitude: number, longitude: number) => {
+  const applyCoords = useCallback((latitude: number, longitude: number) => {
     setLat(latitude);
     setLng(longitude);
     setErr(null);
@@ -83,6 +84,8 @@ export default function SendLocationScreen() {
   }, []);
 
   const refreshPosition = useCallback(async (opts?: { silent?: boolean }) => {
+    const gen = ++loadGenRef.current;
+
     if (!opts?.silent) {
       setLoading(true);
       setErr(null);
@@ -92,49 +95,56 @@ export default function SendLocationScreen() {
 
     try {
       const granted = await requestForegroundLocationPermission();
+      if (loadGenRef.current !== gen) return;
       if (!granted) {
         setErr("Location permission chahiye. Phone Settings → Videh → Location → Allow.");
-        setLoading(false);
-        setRefining(false);
         return;
       }
 
       const servicesOk = await ensureLocationServicesEnabled();
+      if (loadGenRef.current !== gen) return;
       if (!servicesOk) {
         setErr("Phone ka Location / GPS on karein, phir refresh dabayein.");
-        setLoading(false);
-        setRefining(false);
         return;
       }
 
-      const initial = await resolveDeviceLocation({ timeoutMs: opts?.silent ? 15_000 : 12_000 });
+      const initial = await resolveDeviceLocation({ timeoutMs: opts?.silent ? 12_000 : 8_000 });
+      if (loadGenRef.current !== gen) return;
+
       if (initial) {
-        await applyCoords(initial.latitude, initial.longitude);
-        setLoading(false);
+        applyCoords(initial.latitude, initial.longitude);
 
         if (initial.fromCache) {
           setRefining(true);
-          const refined = await refineDeviceLocation(15_000);
-          if (refined) {
-            await applyCoords(refined.latitude, refined.longitude);
-          }
-          setRefining(false);
+          const refined = await refineDeviceLocation(10_000);
+          if (loadGenRef.current !== gen) return;
+          if (refined) applyCoords(refined.latitude, refined.longitude);
         }
         return;
       }
 
       setErr("Location nahi mil rahi. GPS on karke refresh try karein.");
-      setLoading(false);
     } catch {
+      if (loadGenRef.current !== gen) return;
       setErr("Location load nahi ho payi. Dubara try karein.");
-      setLoading(false);
     } finally {
-      setRefining(false);
+      if (loadGenRef.current === gen) {
+        setLoading(false);
+        setRefining(false);
+      }
     }
   }, [applyCoords]);
 
   useEffect(() => {
     void refreshPosition();
+    const watchdog = setTimeout(() => {
+      setLoading((loading) => {
+        if (!loading) return loading;
+        setErr((prev) => prev ?? "Location bahut der se load ho rahi hai. GPS on karke refresh dabayein.");
+        return false;
+      });
+    }, 14_000);
+    return () => clearTimeout(watchdog);
   }, [refreshPosition]);
 
   const mapUri =

@@ -76,6 +76,11 @@ export interface Message {
   replyToId?: string;
   replyText?: string;
   replySenderName?: string;
+  /** Bytes; shown on document bubbles (WhatsApp-style). */
+  fileSizeBytes?: number;
+  /** 0–99 while uploading; undefined when sent. */
+  uploadProgress?: number;
+  uploadFailed?: boolean;
 }
 
 export interface Chat {
@@ -190,6 +195,14 @@ interface AppContextType {
   ) => void;
   consumeViewOnceMessage: (chatId: string, messageId: string) => Promise<string | null>;
   sendAudioMessage: (chatId: string, audioUri: string, durationSecs: number, waveform?: number[]) => void;
+  sendDocumentMessage: (
+    chatId: string,
+    localUri: string,
+    filename: string,
+    fileSizeBytes: number,
+    mimeType: string,
+  ) => void;
+  sendContactMessage: (chatId: string, contact: { name: string; phones: string[]; emails?: string[] }) => void;
   setTyping: (chatId: string) => void;
   clearTyping: (chatId: string) => void;
   deleteForEveryone: (chatId: string, messageId: string) => void;
@@ -241,6 +254,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return callMessagePreviewText(content);
     }
     if (type === "document") return content || "Document";
+    if (type === "contact") {
+      const { contactChatPreview } = require("@/lib/contactMessage") as typeof import("@/lib/contactMessage");
+      return contactChatPreview(content);
+    }
     return content || undefined;
   };
 
@@ -650,7 +667,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ) {
             return c;
           }
-          return { ...c, messages: msgs };
+          const pendingUploads = prevMsgs.filter(
+            (m) =>
+              m.id.startsWith("tmp_")
+              && m.type === "document"
+              && typeof m.uploadProgress === "number"
+              && m.uploadProgress < 100
+              && !m.uploadFailed,
+          );
+          const merged = [...msgs];
+          for (const p of pendingUploads) {
+            if (!merged.some((m) => m.id === p.id)) merged.push(p);
+          }
+          merged.sort((a, b) => a.timestamp - b.timestamp);
+          return { ...c, messages: merged };
         })
       );
 
@@ -663,6 +693,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
           if (m.type === "image" && (await shouldAutoDownload("image", settings))) {
             void saveImageUriToLibrary(m.mediaUrl, authSessionToken).catch(() => {});
+          }
+          if (m.type === "document" && (await shouldAutoDownload("document", settings))) {
+            const { cacheChatDocument } = await import("@/lib/openChatDocument");
+            void cacheChatDocument({
+              mediaUrl: m.mediaUrl,
+              filename: m.text,
+              sessionToken: authSessionToken,
+            }).catch(() => {});
           }
         }
       }
@@ -1012,6 +1050,164 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     })();
   }, [toShareableMediaUri]);
+
+  const sendDocumentMessage = useCallback((
+    chatId: string,
+    localUri: string,
+    filename: string,
+    fileSizeBytes: number,
+    mimeType: string,
+  ) => {
+    void (async () => {
+      const u = userRef.current;
+      const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      const displayName = filename.trim() || "Document";
+      const patchMsg = (patch: Partial<Message>) => {
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? { ...c, messages: c.messages.map((m) => (m.id === tempId ? { ...m, ...patch } : m)) }
+              : c,
+          ),
+        );
+      };
+
+      const newMsg: Message = {
+        id: tempId,
+        text: displayName,
+        timestamp: Date.now(),
+        senderId: "me",
+        type: "document",
+        status: "sent",
+        mediaUrl: localUri,
+        fileSizeBytes,
+        uploadProgress: 0,
+        uploadFailed: false,
+      };
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId
+            ? { ...c, messages: [...c.messages, newMsg], lastMessage: displayName, lastMessageTime: Date.now() }
+            : c,
+        ),
+      );
+
+      if (!u?.dbId) return;
+
+      try {
+        const upload = await uploadChatMediaWithProgress({
+          uri: localUri,
+          mime: mimeType,
+          filename: displayName,
+          sessionToken: u.sessionToken,
+          onProgress: (p) => patchMsg({ uploadProgress: p.percent }),
+        });
+        patchMsg({ uploadProgress: 100, mediaUrl: upload.url, fileSizeBytes: upload.size || fileSizeBytes });
+
+        const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            senderId: u.dbId,
+            content: displayName,
+            type: "document",
+            mediaUrl: upload.url,
+          }),
+        });
+        const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
+        if (res.status === 403) {
+          const msg = typeof data.message === "string" ? data.message : "You are not allowed to send messages in this chat.";
+          Alert.alert("Cannot send message", msg);
+          setChats((prev) =>
+            prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
+          );
+          return;
+        }
+        if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
+          const mid = data.message.id;
+          patchMsg({
+            id: String(mid),
+            status: "delivered",
+            mediaUrl: upload.url,
+            uploadProgress: undefined,
+            uploadFailed: false,
+          });
+        } else {
+          patchMsg({ uploadProgress: undefined, uploadFailed: false });
+        }
+      } catch (e) {
+        patchMsg({ uploadProgress: undefined, uploadFailed: true });
+        Alert.alert("Couldn't send document", e instanceof Error ? e.message : "Please try again.");
+      }
+    })();
+  }, []);
+
+  const sendContactMessage = useCallback((
+    chatId: string,
+    contact: { name: string; phones: string[]; emails?: string[] },
+  ) => {
+    void (async () => {
+      const u = userRef.current;
+      const { encodeContactMessage, contactChatPreview } = await import("@/lib/contactMessage");
+      const content = encodeContactMessage(contact);
+      const preview = contactChatPreview(content);
+      const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      const newMsg: Message = {
+        id: tempId,
+        text: content,
+        timestamp: Date.now(),
+        senderId: "me",
+        type: "contact",
+        status: "sent",
+      };
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId
+            ? { ...c, messages: [...c.messages, newMsg], lastMessage: preview, lastMessageTime: Date.now() }
+            : c,
+        ),
+      );
+
+      if (!u?.dbId) return;
+
+      try {
+        const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ senderId: u.dbId, content, type: "contact" }),
+        });
+        const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
+        if (res.status === 403) {
+          const msg = typeof data.message === "string" ? data.message : "You are not allowed to send messages in this chat.";
+          Alert.alert("Cannot send message", msg);
+          setChats((prev) =>
+            prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
+          );
+          return;
+        }
+        if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
+          const mid = data.message.id;
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === chatId
+                ? {
+                    ...c,
+                    messages: c.messages.map((m) =>
+                      m.id === tempId ? { ...m, id: String(mid), status: "delivered" } : m,
+                    ),
+                  }
+                : c,
+            ),
+          );
+        }
+      } catch {
+        setChats((prev) =>
+          prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
+        );
+        Alert.alert("Error", "Could not send this contact. Please try again.");
+      }
+    })();
+  }, []);
 
   // Delete for everyone
   const deleteForEveryone = useCallback((chatId: string, messageId: string) => {
@@ -1495,7 +1691,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, forwardMessage, starredMessages, updateAvatar,
       createDirectChat, loadMessages, refreshChats,
-      sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage, setTyping, clearTyping,
+      sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage, sendDocumentMessage,
+      sendContactMessage, setTyping, clearTyping,
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, reportUser, setChatDisappear,
       updateLocationOnServer, startLiveLocationSession, stopLiveLocationSession,
