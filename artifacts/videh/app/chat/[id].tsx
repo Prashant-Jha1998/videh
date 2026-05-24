@@ -38,6 +38,7 @@ import { useColors } from "@/hooks/useColors";
 import { useApp, type Message } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
+import { usePlayableAudioUri } from "@/lib/usePlayableAudioUri";
 import {
   CHAT_CAMERA_PHOTO_OPTIONS,
   CHAT_CAMERA_VIDEO_OPTIONS,
@@ -287,6 +288,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
   messageId,
   durationHintSec,
   avatarUri,
+  sessionToken,
 }: {
   uri: string;
   colors: ReturnType<typeof useColors>;
@@ -294,8 +296,10 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
   messageId: string;
   durationHintSec: number;
   avatarUri?: string;
+  sessionToken?: string | null;
 }) {
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  const { playableUri, failed, loading: uriLoading } = usePlayableAudioUri(uri, sessionToken);
+  const soundRef = useRef<Audio.Sound | null>(null);
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(Math.max(0.1, durationHintSec || 0.1));
   const [position, setPosition] = useState(0);
@@ -303,27 +307,17 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
   const [rate, setRate] = useState(1);
   const [ended, setEnded] = useState(false);
   const [waveW, setWaveW] = useState(0);
-  const resolvedUriRef = useRef<string | null>(null);
   const bars = useMemo(() => voiceWaveHeights(messageId + uri.slice(-24), VOICE_NOTE_WAVE_BARS), [messageId, uri]);
 
-  const resolvePlayableUri = useCallback(async (): Promise<string> => {
-    if (resolvedUriRef.current) return resolvedUriRef.current;
-    if (!uri.startsWith("data:audio")) {
-      resolvedUriRef.current = uri;
-      return uri;
+  const unloadSound = useCallback(async () => {
+    const s = soundRef.current;
+    soundRef.current = null;
+    if (s) {
+      try {
+        await s.unloadAsync();
+      } catch { /* ignore */ }
     }
-    const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
-    if (!cacheDir) throw new Error("No writable cache directory");
-    const ext = uri.includes("audio/mpeg") ? "mp3"
-      : uri.includes("audio/wav") ? "wav"
-      : uri.includes("audio/aac") ? "aac"
-      : "m4a";
-    const target = `${cacheDir}voice_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
-    const base64 = uri.replace(/^data:[^;]+;base64,/, "");
-    await FileSystem.writeAsStringAsync(target, base64, { encoding: FileSystem.EncodingType.Base64 });
-    resolvedUriRef.current = target;
-    return target;
-  }, [uri]);
+  }, []);
 
   const applyRate = useCallback(async (s: Audio.Sound, next: number) => {
     try {
@@ -331,78 +325,109 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
     } catch { /* older platforms */ }
   }, []);
 
-  const toggle = async () => {
-    try {
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
-      if (!sound) {
-        setPreparing(true);
-        const playableUri = await resolvePlayableUri();
-        const { sound: s } = await Audio.Sound.createAsync(
-          { uri: playableUri },
-          { shouldPlay: true, rate: 1 },
-          (status) => {
-            if (status.isLoaded) {
-              setPosition((status.positionMillis ?? 0) / 1000);
-              const d = (status.durationMillis ?? 0) / 1000;
-              if (d > 0.05) setDuration(d);
-              if (status.didJustFinish) {
-                setPlaying(false);
-                setEnded(true);
-                setPosition(0);
-              }
-            }
+  const ensureSound = useCallback(async (): Promise<Audio.Sound | null> => {
+    if (!playableUri) return null;
+    if (soundRef.current) return soundRef.current;
+
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    });
+
+    const { sound: s } = await Audio.Sound.createAsync(
+      { uri: playableUri },
+      { shouldPlay: false, rate: 1, progressUpdateIntervalMillis: 200 },
+      (status) => {
+        if (status.isLoaded) {
+          setPosition((status.positionMillis ?? 0) / 1000);
+          const d = (status.durationMillis ?? 0) / 1000;
+          if (d > 0.05) setDuration(d);
+          if (status.didJustFinish) {
+            setPlaying(false);
+            setEnded(true);
+            setPosition(0);
           }
-        );
-        await applyRate(s, rate);
-        setSound(s);
-        setPlaying(true);
-        setPreparing(false);
-      } else if (playing) {
-        await sound.pauseAsync();
+        }
+      },
+    );
+    await applyRate(s, rate);
+    soundRef.current = s;
+    return s;
+  }, [playableUri, rate, applyRate]);
+
+  const toggle = async () => {
+    if (uriLoading) return;
+    if (!playableUri) {
+      if (failed) Alert.alert("Voice message", "Could not load this voice note. Check your connection and try again.");
+      return;
+    }
+    try {
+      setPreparing(true);
+      const s = await ensureSound();
+      if (!s) return;
+
+      const status = await s.getStatusAsync();
+      if (!status.isLoaded) return;
+
+      if (playing) {
+        await s.pauseAsync();
         setPlaying(false);
-      } else if (ended || position >= duration - 0.25) {
+      } else if (ended || ((status.durationMillis ?? 0) > 0 && (status.positionMillis ?? 0) >= (status.durationMillis ?? 0) - 250)) {
         try {
-          await sound.replayAsync();
+          await s.replayAsync();
         } catch {
-          await sound.stopAsync();
-          await sound.setPositionAsync(0);
-          await sound.playAsync();
+          await s.stopAsync();
+          await s.setPositionAsync(0);
+          await s.playAsync();
         }
         setPosition(0);
         setEnded(false);
         setPlaying(true);
       } else {
-        await sound.playAsync();
+        await s.playAsync();
         setPlaying(true);
       }
     } catch {
-      setPreparing(false);
+      await unloadSound();
       setPlaying(false);
+      Alert.alert("Voice message", "Playback failed. Tap again to retry.");
+    } finally {
+      setPreparing(false);
     }
   };
 
   const cycleRate = async () => {
     const next = rate === 1 ? 1.5 : rate === 1.5 ? 2 : 1;
     setRate(next);
-    if (sound) await applyRate(sound, next);
+    if (soundRef.current) await applyRate(soundRef.current, next);
   };
 
   const seekFromX = async (x: number) => {
-    if (!sound || waveW <= 0 || duration <= 0) return;
+    const s = soundRef.current;
+    if (!s || waveW <= 0 || duration <= 0) return;
     const p = Math.max(0, Math.min(1, x / waveW));
     try {
-      await sound.setPositionAsync(p * duration * 1000);
+      await s.setPositionAsync(p * duration * 1000);
       setPosition(p * duration);
       setEnded(false);
     } catch { /* ignore */ }
   };
 
-  useEffect(() => () => { void sound?.unloadAsync(); }, [sound]);
+  useEffect(() => () => { void unloadSound(); }, [unloadSound]);
 
   useEffect(() => {
-    if (!sound) return;
-    void applyRate(sound, rate);
-  }, [sound, rate, applyRate]);
+    void unloadSound();
+    setPlaying(false);
+    setEnded(false);
+    setPosition(0);
+  }, [playableUri, unloadSound]);
+
+  useEffect(() => {
+    if (!soundRef.current) return;
+    void applyRate(soundRef.current, rate);
+  }, [rate, applyRate]);
 
   const total = Math.max(duration, 0.1);
   const prog = Math.min(Math.max(position / total, 0), 1);
@@ -454,7 +479,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
             justifyContent: "center",
           }}
         >
-          {preparing ? (
+          {preparing || uriLoading ? (
             <Ionicons name="hourglass-outline" size={20} color="#333" />
           ) : (
             <Ionicons name={playing ? "pause" : "play"} size={22} color="#333" style={{ marginLeft: playing ? 0 : 2 }} />
@@ -1863,6 +1888,7 @@ export default function ChatScreen() {
               messageId={item.id}
               durationHintSec={parseVoiceDurationSec(item.text)}
               avatarUri={isMe ? (user?.avatar ?? undefined) : undefined}
+              sessionToken={user?.sessionToken}
             />
           ) : isDocument ? (
             <TouchableOpacity
