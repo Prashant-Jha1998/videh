@@ -21,6 +21,7 @@ import {
   Linking,
   Modal,
   Image as NativeImage,
+  Keyboard,
   Platform,
   Pressable,
   ScrollView,
@@ -47,6 +48,9 @@ import {
   validatePickedAssets,
 } from "@/lib/chatMediaPolicy";
 import { WhatsAppVoiceMic } from "@/components/WhatsAppVoiceMic";
+import { ChatEmojiPanel } from "@/components/ChatEmojiPanel";
+import type { GifMediaItem } from "@/lib/chatGifApi";
+import { uploadRemoteGifOrSticker } from "@/lib/sendChatGifSticker";
 import { DocumentMessageBubble } from "@/components/DocumentMessageBubble";
 import { ContactMessageBubble } from "@/components/ContactMessageBubble";
 import { openChatDocument } from "@/lib/openChatDocument";
@@ -840,6 +844,8 @@ export default function ChatScreen() {
 
   const [voiceRecPhase, setVoiceRecPhase] = useState<"idle" | "holding" | "locked">("idle");
   const [enterIsSend, setEnterIsSend] = useState(false);
+  const [emojiPanelOpen, setEmojiPanelOpen] = useState(false);
+  const [textSelection, setTextSelection] = useState({ start: 0, end: 0 });
 
   const handleVoiceNoteSend = useCallback((uri: string, durationSec: number, waveform: number[]) => {
     if (!chatId) return;
@@ -1149,6 +1155,50 @@ export default function ChatScreen() {
       .catch(() => {});
   }, [chatId, user?.dbId]);
 
+  const insertEmoji = useCallback((emoji: string) => {
+    const current = editTarget ? editText : text;
+    const start = textSelection.start;
+    const end = textSelection.end;
+    const next = current.slice(0, start) + emoji + current.slice(end);
+    const pos = start + emoji.length;
+    if (editTarget) setEditText(next);
+    else setText(next);
+    setTextSelection({ start: pos, end: pos });
+    requestAnimationFrame(() => {
+      inputRef.current?.setNativeProps?.({ selection: { start: pos, end: pos } });
+    });
+  }, [editTarget, editText, text, textSelection]);
+
+  const toggleEmojiPanel = useCallback(() => {
+    if (!composerEnabled || editTarget) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setEmojiPanelOpen((open) => {
+      if (!open) Keyboard.dismiss();
+      return !open;
+    });
+  }, [composerEnabled, editTarget]);
+
+  const sendGifOrSticker = useCallback(async (item: GifMediaItem, kind: "gif" | "sticker") => {
+    if (!chatId || !composerEnabled || editTarget) return;
+    setEmojiPanelOpen(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      const mediaUrl = await uploadRemoteGifOrSticker(item, user?.sessionToken, kind);
+      sendPreparedMediaMessage(chatId, { mediaUrl, kind: "image" });
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 120);
+    } catch (e) {
+      Alert.alert("Error", e instanceof Error ? e.message : kind === "gif" ? "Could not send GIF." : "Could not send sticker.");
+    }
+  }, [chatId, composerEnabled, editTarget, user?.sessionToken, sendPreparedMediaMessage]);
+
+  const handlePickGif = useCallback((item: GifMediaItem) => {
+    void sendGifOrSticker(item, "gif");
+  }, [sendGifOrSticker]);
+
+  const handlePickSticker = useCallback((item: GifMediaItem) => {
+    void sendGifOrSticker(item, "sticker");
+  }, [sendGifOrSticker]);
+
   const handleTextChange = useCallback((val: string) => {
     if (editTarget) { setEditText(val); return; }
     setText(val);
@@ -1346,6 +1396,21 @@ export default function ChatScreen() {
       }
     }
   };
+
+  const showCameraOptions = useCallback(() => {
+    if (!composerEnabled || editTarget || !chatId) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setEmojiPanelOpen(false);
+    if (Platform.OS === "web") {
+      void sendMediaMessage("camera");
+      return;
+    }
+    Alert.alert("Camera", "Choose photo or video", [
+      { text: "Take photo", onPress: () => void sendMediaMessage("camera") },
+      { text: "Record video", onPress: () => void sendMediaMessage("videocamera") },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [composerEnabled, editTarget, chatId, sendMediaMessage]);
 
   const sendSpecialMessage = useCallback((cid: string, text: string, msgType: string, mediaUrl?: string) => {
     const u = user;
@@ -2326,8 +2391,16 @@ export default function ChatScreen() {
             {voiceRecPhase !== "locked" && (
               <>
                 {voiceRecPhase !== "holding" && (
-                  <TouchableOpacity style={styles.inputIcon}>
-                    <Ionicons name="happy-outline" size={24} color={colors.mutedForeground} />
+                  <TouchableOpacity
+                    style={styles.inputIcon}
+                    onPress={toggleEmojiPanel}
+                    disabled={!composerEnabled || !!editTarget}
+                  >
+                    <Ionicons
+                      name={emojiPanelOpen ? "happy" : "happy-outline"}
+                      size={24}
+                      color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"}
+                    />
                   </TouchableOpacity>
                 )}
                 {voiceRecPhase === "holding" ? (
@@ -2351,12 +2424,16 @@ export default function ChatScreen() {
                     placeholderTextColor={colors.mutedForeground}
                     value={inputVal}
                     onChangeText={handleTextChange}
+                    onSelectionChange={(e) => setTextSelection(e.nativeEvent.selection)}
                     multiline={!webEnterSend}
                     blurOnSubmit={webEnterSend}
                     onSubmitEditing={webEnterSend ? () => handleSend() : undefined}
                     maxLength={2000}
                     editable={composerEnabled}
-                    onFocus={() => setAssistantChatInputFocused(true)}
+                    onFocus={() => {
+                      setEmojiPanelOpen(false);
+                      setAssistantChatInputFocused(true);
+                    }}
                     onBlur={() => setAssistantChatInputFocused(false)}
                   />
                 )}
@@ -2372,7 +2449,7 @@ export default function ChatScreen() {
                 {!inputVal.trim() && voiceRecPhase !== "holding" && (
                   <TouchableOpacity
                     style={styles.inputIcon}
-                    onPress={() => sendMediaMessage("camera")}
+                    onPress={showCameraOptions}
                     disabled={!composerEnabled || !!editTarget}
                   >
                     <Ionicons name="camera-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
@@ -2399,6 +2476,17 @@ export default function ChatScreen() {
             )}
           </View>
         )}
+
+        <ChatEmojiPanel
+          visible={emojiPanelOpen && !selectionActive && voiceRecPhase === "idle"}
+          backgroundColor={colors.isDark ? colors.background : "#F0F2F5"}
+          borderColor={colors.isDark ? colors.border : "rgba(0,0,0,0.06)"}
+          mutedColor={colors.mutedForeground}
+          activeTabColor={colors.foreground}
+          onPickEmoji={insertEmoji}
+          onPickGif={handlePickGif}
+          onPickSticker={handlePickSticker}
+        />
       </KeyboardAvoidingView>
 
       {/* Attach menu — WhatsApp-style bottom sheet (coloured circles + grid) */}

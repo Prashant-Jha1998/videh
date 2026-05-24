@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -16,6 +16,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AssistantOverlay } from "@/components/AssistantOverlay";
 import { getApiUrl } from "@/lib/api";
 import { onCallSignal } from "@/lib/callEvents";
+import { IncomingCallOverlay, type IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { webrtcAuthHeaders, webrtcFetch } from "@/lib/webrtcApi";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -47,18 +48,11 @@ if (Platform.OS !== "web") {
 }
 
 function RootLayoutNav() {
-  const { isAuthenticated, isInitialized, user, markAsRead, muteChat, sendMessage } = useApp();
+  const { isAuthenticated, isInitialized, user, markAsRead, muteChat, sendMessage, loadMessages } = useApp();
   const colors = useColors();
   const router = useRouter();
   const notifResponseRef = useRef<Notifications.NotificationResponse | null>(null);
-  const [incomingCall, setIncomingCall] = useState<{
-    callId: string;
-    channel: string;
-    chatId: number;
-    type: "audio" | "video";
-    callerName: string;
-    participantCount: number;
-  } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<IncomingCallInfo | null>(null);
 
   // Navigate to chat when notification is tapped
   useEffect(() => {
@@ -198,6 +192,7 @@ function RootLayoutNav() {
           if (!prev) return prev;
           if (callId && prev.callId !== callId) return prev;
           void stopCallAlert();
+          void loadMessages(String(prev.chatId));
           return null;
         });
       }
@@ -208,16 +203,20 @@ function RootLayoutNav() {
       unsubCall();
       void stopCallAlert();
     };
-  }, [isAuthenticated, user?.dbId, user?.sessionToken]);
+  }, [isAuthenticated, user?.dbId, user?.sessionToken, loadMessages]);
 
-  const respondToIncomingCall = async (action: "accept" | "decline") => {
+  const respondToIncomingCall = async (action: "accept" | "decline", declineMessage?: string) => {
     if (!incomingCall || !user?.dbId) return;
     const call = incomingCall;
     setIncomingCall(null);
     await stopCallAlert();
     await webrtcFetch(`/calls/${call.callId}/respond`, user.sessionToken, {
       method: "POST",
-      body: JSON.stringify({ userId: user.dbId, action }),
+      body: JSON.stringify({
+        userId: user.dbId,
+        action,
+        ...(action === "decline" && declineMessage ? { declineMessage } : {}),
+      }),
     }).catch(() => {});
     if (action === "accept") {
       router.push({
@@ -231,6 +230,8 @@ function RootLayoutNav() {
           incoming: "1",
         },
       });
+    } else {
+      void loadMessages(String(call.chatId));
     }
   };
 
@@ -268,25 +269,14 @@ function RootLayoutNav() {
         <Stack.Screen name="settings/assistant" options={{ headerShown: false }} />
         <Stack.Screen name="broadcasts/index" options={{ headerShown: false }} />
       </Stack>
-      {incomingCall && (
-        <View style={styles.incomingOverlay}>
-          <View style={styles.incomingCard}>
-            <Text style={styles.incomingLabel}>{incomingCall.type === "video" ? "Incoming video call" : "Incoming voice call"}</Text>
-            <Text style={styles.incomingName}>{incomingCall.callerName}</Text>
-            <Text style={styles.incomingSub}>
-              {incomingCall.participantCount > 2 ? `${incomingCall.participantCount} participants conference call` : "Videh call"}
-            </Text>
-            <View style={styles.incomingActions}>
-              <TouchableOpacity style={[styles.callAction, styles.declineAction]} onPress={() => void respondToIncomingCall("decline")}>
-                <Text style={styles.callActionText}>Decline</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.callAction, styles.acceptAction]} onPress={() => void respondToIncomingCall("accept")}>
-                <Text style={styles.callActionText}>Accept</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      )}
+      {incomingCall ? (
+        <IncomingCallOverlay
+          call={incomingCall}
+          onAccept={() => void respondToIncomingCall("accept")}
+          onDecline={() => void respondToIncomingCall("decline")}
+          onDeclineWithMessage={(text) => void respondToIncomingCall("decline", text)}
+        />
+      ) : null}
       <AssistantOverlay />
     </>
   );
@@ -332,30 +322,3 @@ export default function RootLayout() {
   );
 }
 
-const styles = StyleSheet.create({
-  incomingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.72)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-  },
-  incomingCard: {
-    width: "100%",
-    maxWidth: 360,
-    backgroundColor: "#111B21",
-    borderRadius: 24,
-    padding: 24,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-  },
-  incomingLabel: { color: "#00A884", fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 10 },
-  incomingName: { color: "#fff", fontSize: 28, fontFamily: "Inter_700Bold", textAlign: "center" },
-  incomingSub: { color: "rgba(255,255,255,0.65)", fontSize: 14, fontFamily: "Inter_400Regular", marginTop: 8, textAlign: "center" },
-  incomingActions: { flexDirection: "row", gap: 18, marginTop: 28 },
-  callAction: { minWidth: 112, borderRadius: 28, paddingVertical: 14, alignItems: "center" },
-  declineAction: { backgroundColor: "#ef4444" },
-  acceptAction: { backgroundColor: "#00A884" },
-  callActionText: { color: "#fff", fontSize: 15, fontFamily: "Inter_700Bold" },
-});

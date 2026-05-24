@@ -3,6 +3,7 @@ import { PermissionsAndroid, Platform } from "react-native";
 import { applySpeakerRoute, setProximityScreenOff, startInCallSession, stopInCallSession } from "@/lib/inCallAudio";
 import { loadIceServers } from "@/lib/webrtcIce";
 import { webrtcFetch } from "@/lib/webrtcApi";
+import type { CallUiPhase } from "@/lib/callState";
 import type { VidehCallState } from "./videhCallTypes";
 
 export type { VidehCallState } from "./videhCallTypes";
@@ -43,16 +44,29 @@ export function useVidehCall(
   const [localStreamUrl, setLocalStreamUrl] = useState<string | undefined>();
   const [remoteStreamUrl, setRemoteStreamUrl] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
+  const [connectionPhase, setConnectionPhase] = useState<CallUiPhase>("connecting");
 
   const localVideoId = `videh-local-${primaryChannel}`;
   const remoteVideoId = `videh-remote-${primaryChannel}`;
 
   const refreshAggregate = useCallback(() => {
     const pcs = [...pcsRef.current.values()];
-    const connected = pcs.filter((pc) => pc?.connectionState === "connected").length;
+    const states = pcs.map((pc) => pc?.connectionState as string | undefined);
+    const connected = states.filter((s) => s === "connected").length;
+    const failed = states.some((s) => s === "failed" || s === "closed");
+    const reconnecting = states.some((s) => s === "disconnected" || s === "connecting");
     setJoined(connected > 0);
     setRemoteCount(connected);
-    if (connected > 0 && !isVideo) setProximityScreenOff(true);
+    if (connected > 0) {
+      setConnectionPhase("connected");
+      if (!isVideo) setProximityScreenOff(true);
+    } else if (failed) {
+      setConnectionPhase("failed");
+    } else if (reconnecting && pcs.length > 0) {
+      setConnectionPhase("reconnecting");
+    } else if (pcs.length > 0) {
+      setConnectionPhase("connecting");
+    }
   }, [isVideo]);
 
   useEffect(() => {
@@ -200,6 +214,7 @@ export function useVidehCall(
 
   return {
     joined,
+    connectionPhase,
     error,
     muted,
     cameraOff,

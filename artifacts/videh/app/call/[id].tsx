@@ -16,6 +16,7 @@ import { useVidehCall } from "@/hooks/useVidehCall";
 import { useApp } from "@/context/AppContext";
 import { VidehLocalView, VidehRemoteView } from "@/components/VidehVideoView";
 import { startCallAlert, stopCallAlert } from "@/lib/callRingtone";
+import { phaseLabel } from "@/lib/callState";
 import { webrtcFetch } from "@/lib/webrtcApi";
 
 export default function CallScreen() {
@@ -66,6 +67,7 @@ export default function CallScreen() {
 
   const {
     joined,
+    connectionPhase,
     error,
     muted,
     cameraOff,
@@ -197,12 +199,16 @@ export default function CallScreen() {
     : joined
     ? remoteCount > 0
       ? formatDuration(duration)
+      : connectionPhase === "reconnecting"
+      ? phaseLabel("reconnecting", isVideo)
       : acceptedCount > 1
       ? "Connecting participants..."
       : "Waiting for other party..."
+    : incoming === "1"
+    ? phaseLabel("incoming_ringing", isVideo)
     : ringingCount > 1
     ? `Ringing ${ringingCount} people...`
-    : isVideo ? "Video calling..." : "Ringing...";
+    : phaseLabel("outgoing_ringing", isVideo);
 
   const showVideoUI = isVideo;
 

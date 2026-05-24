@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { assertSameUser, requireAuth } from "../lib/auth";
 import { insertCallChatMessage, publishCallSignal } from "../lib/callMessages";
 import { query } from "../lib/db";
+import { publishChatEvent } from "../lib/realtime";
 import { EXPO_INCOMING_CALL_CATEGORY_ID } from "../lib/expoPush";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { stateDelete, stateGetJson, stateKeys, stateSetJson } from "../lib/sharedState";
@@ -278,7 +279,7 @@ router.get("/calls/incoming/:userId", async (req: Request, res: Response) => {
 router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
   await cleanupSessions();
   const call = await getCall(String(req.params.callId));
-  const body = req.body as { userId?: number; action?: "accept" | "decline" };
+  const body = req.body as { userId?: number; action?: "accept" | "decline"; declineMessage?: string };
   const userId = Number(body.userId);
   if (!call || !userId || !call.statuses[userId]) {
     res.status(404).json({ success: false, message: "Call not found." });
@@ -286,6 +287,37 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
   }
   if (!assertSameUser(req, res, userId)) return;
   call.statuses[userId] = body.action === "accept" ? "accepted" : "declined";
+  if (body.action === "decline") {
+    const text = String(body.declineMessage ?? "").trim().slice(0, 500);
+    if (text) {
+      try {
+        const msgRes = await query(
+          `INSERT INTO messages (chat_id, sender_id, content, type) VALUES ($1, $2, $3, 'text') RETURNING id`,
+          [call.chatId, userId, text],
+        );
+        const messageId = msgRes.rows[0]?.id;
+        if (messageId) {
+          const recipientIds = [call.callerId, ...call.participantIds].filter((id) => id !== userId);
+          if (recipientIds.length > 0) {
+            await query(
+              `INSERT INTO message_status (message_id, user_id, status)
+               SELECT $1, unnest($2::int[]), 'delivered'
+               ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'delivered', updated_at = NOW()`,
+              [messageId, recipientIds],
+            );
+          }
+          publishChatEvent({
+            type: "message",
+            chatId: call.chatId,
+            userIds: [call.callerId, ...call.participantIds],
+            payload: { messageId, preview: text },
+          });
+        }
+      } catch (err) {
+        req.log?.error?.({ err }, "decline call message");
+      }
+    }
+  }
   if (body.action === "accept" && !call.connectedAt) {
     call.connectedAt = Date.now();
   }

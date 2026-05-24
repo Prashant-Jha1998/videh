@@ -18,6 +18,7 @@ import developerLeadsRouter from "./developer-leads";
 import developerBillingRouter from "./developer-billing";
 import developerAuthRouter from "./developer-auth";
 import assistantRouter from "./assistant";
+import gifsRouter from "./gifs";
 
 const router: IRouter = Router();
 
@@ -40,5 +41,6 @@ router.use("/developer-auth", developerAuthRouter);
 router.use("/developer-leads", developerLeadsRouter);
 router.use("/developer-billing", developerBillingRouter);
 router.use("/assistant", assistantRouter);
+router.use(gifsRouter);
 
 export default router;

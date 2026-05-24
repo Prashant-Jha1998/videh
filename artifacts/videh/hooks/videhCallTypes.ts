@@ -1,5 +1,8 @@
+import type { CallUiPhase } from "@/lib/callState";
+
 export interface VidehCallState {
   joined: boolean;
+  connectionPhase: CallUiPhase;
   error: string | null;
   muted: boolean;
   cameraOff: boolean;
