@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { AppState, Platform } from "react-native";
+import { AppState, Keyboard, Platform } from "react-native";
 import { useApp } from "./AppContext";
 import {
   fetchAssistantGreeting,
@@ -15,6 +15,7 @@ import {
   patchAssistantPrefs,
   runAssistantCommand,
 } from "@/lib/assistantApi";
+import { shouldPauseAssistantListening, setAssistantChatInputFocused, setAssistantKeyboardVisible } from "@/lib/assistantPause";
 import { localActivationGreeting } from "@/lib/assistantGreeting";
 import {
   detectLocaleFromTranscript,
@@ -225,8 +226,9 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   }, [user?.sessionToken, activateAssistant]);
 
   const startWakeListening = useCallback(async () => {
-    if (!prefs?.enabled || !prefs.voiceEnrolled || !isSpeechRecognitionAvailable()) return;
+    if (!prefs?.enabled || !isSpeechRecognitionAvailable()) return;
     if (phaseRef.current !== "idle") return;
+    if (shouldPauseAssistantListening()) return;
 
     if (listeningRef.current) {
       await stopListening();
@@ -235,7 +237,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
     listeningRef.current = true;
     await startListening({
-      locale: prefs.lastLangCode ?? "hi",
+      locale: "en",
       onPartial: (text) => {
         if (phaseRef.current !== "idle") return;
         if (containsWakePhrase(text)) {
@@ -251,18 +253,14 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       onError: () => {
         listeningRef.current = false;
       },
-    });
-
-    setTimeout(() => {
-      if (listeningRef.current && phaseRef.current === "idle") {
+      onEnd: () => {
         listeningRef.current = false;
-        void stopListening();
-      }
-    }, 10000);
-  }, [prefs?.enabled, prefs?.voiceEnrolled, prefs?.lastLangCode, tryWakeActivation]);
+      },
+    });
+  }, [prefs?.enabled, tryWakeActivation]);
 
   useEffect(() => {
-    if (!isAuthenticated || !prefs?.enabled || !prefs.voiceEnrolled) {
+    if (!isAuthenticated || !prefs?.enabled) {
       void stopListening();
       listeningRef.current = false;
       return;
@@ -270,7 +268,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     if (Platform.OS === "web") return;
 
     const restart = () => {
-      if (AppState.currentState === "active") {
+      if (AppState.currentState === "active" && !shouldPauseAssistantListening()) {
         void startWakeListening();
       }
     };
@@ -280,16 +278,33 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       if (state === "active") restart();
       else void stopListening();
     });
-    const timer = setInterval(restart, 12000);
+    const kbShow = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      () => {
+        setAssistantKeyboardVisible(true);
+        void stopListening();
+        listeningRef.current = false;
+      },
+    );
+    const kbHide = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setAssistantKeyboardVisible(false);
+        if (AppState.currentState === "active") restart();
+      },
+    );
+    const timer = setInterval(restart, 8000);
 
     return () => {
       clearInterval(timer);
       appSub.remove();
+      kbShow.remove();
+      kbHide.remove();
       void stopListening();
       void destroySpeech();
       listeningRef.current = false;
     };
-  }, [isAuthenticated, prefs?.enabled, prefs?.voiceEnrolled, startWakeListening]);
+  }, [isAuthenticated, prefs?.enabled, startWakeListening]);
 
   const setEnabled = useCallback(async (enabled: boolean) => {
     if (!user?.sessionToken) return;

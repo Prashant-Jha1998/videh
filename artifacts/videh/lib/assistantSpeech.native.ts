@@ -14,12 +14,15 @@ type Listener = { remove: () => void };
 
 let resultListener: Listener | null = null;
 let errorListener: Listener | null = null;
+let endListener: Listener | null = null;
 
 function clearSpeechListeners(): void {
   resultListener?.remove();
   errorListener?.remove();
+  endListener?.remove();
   resultListener = null;
   errorListener = null;
+  endListener = null;
 }
 
 export function isSpeechRecognitionAvailable(): boolean {
@@ -58,6 +61,7 @@ type ListenOpts = {
   onPartial?: (text: string) => void;
   onFinal?: (text: string) => void;
   onError?: (message: string) => void;
+  onEnd?: () => void;
 };
 
 export async function startListening(opts: ListenOpts): Promise<void> {
@@ -81,6 +85,9 @@ export async function startListening(opts: ListenOpts): Promise<void> {
   });
   errorListener = ExpoSpeechRecognitionModule.addListener("error", (event) => {
     opts.onError?.(event.message ?? event.error ?? "Speech error");
+  });
+  endListener = ExpoSpeechRecognitionModule.addListener("end", () => {
+    opts.onEnd?.();
   });
 
   const code = normalizeLangCode(

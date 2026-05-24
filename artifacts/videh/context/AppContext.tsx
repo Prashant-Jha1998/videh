@@ -632,7 +632,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       });
 
       setChats((prev) =>
-        prev.map((c) => c.id === chatId ? { ...c, messages: msgs } : c)
+        prev.map((c) => {
+          if (c.id !== chatId) return c;
+          const prevMsgs = c.messages ?? [];
+          if (
+            prevMsgs.length === msgs.length
+            && prevMsgs.every((m, i) => {
+              const n = msgs[i];
+              return m.id === n.id
+                && m.text === n.text
+                && m.status === n.status
+                && m.type === n.type
+                && m.mediaUrl === n.mediaUrl
+                && (m.reactions?.length ?? 0) === (n.reactions?.length ?? 0);
+            })
+          ) {
+            return c;
+          }
+          return { ...c, messages: msgs };
+        })
       );
 
       const settings = await loadChatMediaSettings().catch(() => null);

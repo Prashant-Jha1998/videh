@@ -10,7 +10,7 @@ import * as Contacts from "expo-contacts";
 import type { ExistingContact } from "expo-contacts";
 import { Audio, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { KeyboardAvoidingView } from "react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -67,6 +67,7 @@ import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { safeJsonParse } from "@/lib/safeJson";
 import { formatCallMessageLabel, parseCallMessageMeta } from "@/lib/callMessage";
 import { formatPresenceSubtitle, type PresenceView } from "@/lib/presence";
+import { setAssistantChatInputFocused } from "@/lib/assistantPause";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Svg, { Path } from "react-native-svg";
 
@@ -279,7 +280,7 @@ function formatVoiceClock(sec: number): string {
 }
 
 /** WhatsApp-style voice note: waveform, scrub, 1x / 1.5x / 2x, optional avatar on sent notes */
-function VoiceNotePlayer({
+const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
   uri,
   colors,
   isMe,
@@ -332,6 +333,7 @@ function VoiceNotePlayer({
 
   const toggle = async () => {
     try {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
       if (!sound) {
         setPreparing(true);
         const playableUri = await resolvePlayableUri();
@@ -358,18 +360,24 @@ function VoiceNotePlayer({
       } else if (playing) {
         await sound.pauseAsync();
         setPlaying(false);
-      } else {
-        if (ended || position >= duration - 0.25) {
-          await sound.setStatusAsync({ positionMillis: 0, shouldPlay: true });
-          setPosition(0);
-          setEnded(false);
-        } else {
+      } else if (ended || position >= duration - 0.25) {
+        try {
+          await sound.replayAsync();
+        } catch {
+          await sound.stopAsync();
+          await sound.setPositionAsync(0);
           await sound.playAsync();
         }
+        setPosition(0);
+        setEnded(false);
+        setPlaying(true);
+      } else {
+        await sound.playAsync();
         setPlaying(true);
       }
     } catch {
       setPreparing(false);
+      setPlaying(false);
     }
   };
 
@@ -509,7 +517,7 @@ function VoiceNotePlayer({
       </View>
     </View>
   );
-}
+});
 
 /** In-bubble preview: tap opens full-screen viewer (WhatsApp-style). */
 function ViewOncePlaceholderBubble({
@@ -936,6 +944,17 @@ export default function ChatScreen() {
 
   const listRows = useMemo(() => messagesWithDateRows(messages), [messages]);
 
+  useEffect(() => {
+    if (searching) return;
+    const count = messages.length;
+    if (count > prevMessageCountRef.current) {
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd({ animated: count - prevMessageCountRef.current <= 3 });
+      });
+    }
+    prevMessageCountRef.current = count;
+  }, [messages.length, searching]);
+
   const peerNameForVideo = name ?? chat?.name ?? "Chat";
 
   const videhForwardTargets = useMemo(() => {
@@ -1108,6 +1127,7 @@ export default function ChatScreen() {
   const inputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevMessageCountRef = useRef(0);
 
   // @mentions state
   const [groupMembers, setGroupMembers] = useState<{ id: number; name: string }[]>([]);
@@ -2335,10 +2355,10 @@ export default function ChatScreen() {
           keyExtractor={(row) => (row.rowType === "date" ? row.id : row.message.id)}
           renderItem={renderChatListRow}
           contentContainerStyle={{ paddingVertical: 12, paddingHorizontal: 10 }}
-          keyboardDismissMode="interactive"
+          keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          onContentSizeChange={() => !searching && listRef.current?.scrollToEnd({ animated: false })}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           ListEmptyComponent={
             initializing ? (
               <View style={styles.initWrap}>
@@ -2495,6 +2515,8 @@ export default function ChatScreen() {
               onSubmitEditing={webEnterSend ? () => handleSend() : undefined}
               maxLength={2000}
               editable={composerEnabled}
+              onFocus={() => setAssistantChatInputFocused(true)}
+              onBlur={() => setAssistantChatInputFocused(false)}
             />
             {!inputVal.trim() && (
               <TouchableOpacity

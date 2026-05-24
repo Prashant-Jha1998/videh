@@ -126,7 +126,6 @@ export default function AssistantSettingsScreen() {
             <Switch
               value={Boolean(prefs?.enabled)}
               onValueChange={(v) => void setEnabled(v)}
-              disabled={!prefs?.voiceEnrolled}
               trackColor={{ true: "#00A884" }}
             />
           </View>
@@ -198,11 +197,9 @@ export default function AssistantSettingsScreen() {
           ].map((cmd) => (
             <Text key={cmd} style={[styles.cmd, { color: colors.mutedForeground }]}>• {cmd}</Text>
           ))}
-          {prefs?.voiceEnrolled ? (
-            <TouchableOpacity style={[styles.secondaryBtn, { borderColor: colors.border }]} onPress={() => void activateManually()}>
-              <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>Abhi test karein</Text>
-            </TouchableOpacity>
-          ) : null}
+          <TouchableOpacity style={[styles.secondaryBtn, { borderColor: colors.border }]} onPress={() => void activateManually()}>
+            <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>Abhi test karein (button se)</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </View>
