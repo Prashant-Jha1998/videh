@@ -47,7 +47,8 @@ import {
   validatePickedMedia,
   validatePickedAssets,
 } from "@/lib/chatMediaPolicy";
-import { stashBatchMedia } from "@/lib/chatMediaBatch";
+import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
+import { guessMimeFromFilename } from "@/lib/prepareFileUpload";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { isGifUri } from "@/lib/imageEdit";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
@@ -1420,41 +1421,47 @@ export default function ChatScreen() {
         Alert.alert("Not supported on web", "Use the mobile app to send audio files.");
         return;
       }
+      setAttachVisible(false);
       const result = await DocumentPicker.getDocumentAsync({
         type: ["audio/*", "audio/mpeg", "audio/mp4", "audio/mp3", "audio/wav", "audio/x-wav", "audio/aac"],
         copyToCacheDirectory: true,
         multiple: false,
       });
       if (result.canceled || !result.assets?.[0]) return;
-      sendAudioMessage(chatId, result.assets[0].uri, 1);
+      const asset = result.assets[0];
+      try {
+        const mimeType = asset.mimeType ?? guessMimeFromFilename(asset.name ?? "audio.m4a", "audio/mp4");
+        const upload = await uploadChatMediaWithProgress({
+          uri: asset.uri,
+          mime: mimeType,
+          filename: asset.name || `audio_${Date.now()}.m4a`,
+          sessionToken: user?.sessionToken,
+        });
+        sendSpecialMessage(chatId, asset.name ?? "Audio", "audio", upload.url);
+      } catch (e) {
+        Alert.alert("Error", e instanceof Error ? e.message : "Could not send this audio file.");
+      }
 
     } else if (type === "document") {
       if (Platform.OS === "web") { Alert.alert("Not supported on web", "Use the mobile app to share documents."); return; }
+      setAttachVisible(false);
       const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
       const fileSizeMB = (asset.size ?? 0) / 1024 / 1024;
-      if (fileSizeMB > 16) { Alert.alert("File too large", "Maximum allowed file size is 16MB."); return; }
+      if (fileSizeMB > 100) { Alert.alert("File too large", "Maximum allowed file size is 100MB."); return; }
       try {
-        const mimeType = asset.mimeType ?? "application/octet-stream";
-        const ext = asset.name?.split(".").pop() ?? "bin";
-        const form = new FormData();
-        form.append("file", {
+        const mimeType = asset.mimeType ?? guessMimeFromFilename(asset.name ?? "file.bin");
+        const upload = await uploadChatMediaWithProgress({
           uri: asset.uri,
-          name: asset.name || `document_${Date.now()}.${ext}`,
-          type: mimeType,
-        } as any);
-        const uploadRes = await fetch(`${BASE_URL}/api/chats/media`, {
-          method: "POST",
-          headers: user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : undefined,
-          body: form,
+          mime: mimeType,
+          filename: asset.name || `document_${Date.now()}`,
+          sessionToken: user?.sessionToken,
         });
-        const upload = await uploadRes.json().catch(() => ({})) as { success?: boolean; url?: string; message?: string };
-        if (!uploadRes.ok || !upload.success || !upload.url) {
-          throw new Error(upload.message ?? "Upload failed");
-        }
-        sendSpecialMessage(chatId, asset.name, "document", upload.url);
-      } catch { Alert.alert("Error", "Could not read the selected file. Please try again."); }
+        sendSpecialMessage(chatId, asset.name ?? "Document", "document", upload.url);
+      } catch (e) {
+        Alert.alert("Error", e instanceof Error ? e.message : "Could not read the selected file. Please try again.");
+      }
 
     } else if (type === "location") {
       if (!chatId) return;

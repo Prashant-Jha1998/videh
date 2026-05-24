@@ -1,4 +1,5 @@
 import { getApiUrl } from "./api";
+import { ensureUploadableFileUri } from "./prepareFileUpload";
 
 export type UploadProgress = {
   loaded: number;
@@ -19,7 +20,7 @@ export function uploadChatMediaWithProgress(opts: UploadChatMediaOptions): Promi
   const { uri, mime, filename, sessionToken, onProgress, signal } = opts;
   const base = getApiUrl();
 
-  return new Promise((resolve, reject) => {
+  return ensureUploadableFileUri(uri, filename).then((uploadUri) => new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${base}/api/chats/media`);
     if (sessionToken) xhr.setRequestHeader("Authorization", `Bearer ${sessionToken}`);
@@ -42,7 +43,7 @@ export function uploadChatMediaWithProgress(opts: UploadChatMediaOptions): Promi
         return;
       }
       if (xhr.status < 200 || xhr.status >= 300 || !data.success || !data.url) {
-        reject(new Error(data.message ?? "Could not upload media."));
+        reject(new Error(data.message ?? "Could not upload file."));
         return;
       }
       resolve({ url: data.url, mimeType: data.mimeType ?? mime, size: data.size ?? 0 });
@@ -60,7 +61,7 @@ export function uploadChatMediaWithProgress(opts: UploadChatMediaOptions): Promi
     }
 
     const form = new FormData();
-    form.append("file", { uri, name: filename, type: mime } as unknown as Blob);
+    form.append("file", { uri: uploadUri, name: filename, type: mime } as unknown as Blob);
     xhr.send(form);
-  });
+  }));
 }
