@@ -70,7 +70,7 @@ export async function ensureBusinessSenderUser(
     await query(
       `UPDATE users SET
          name = COALESCE(NULLIF($1, ''), NULLIF(name, ''), 'Business'),
-         avatar_url = COALESCE($2, avatar_url),
+         avatar_url = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE avatar_url END,
          updated_at = NOW()
        WHERE id = $3`,
       [label, avatar, existing.id],
@@ -118,7 +118,7 @@ function applyVariables(text: string, values: string[]): string {
 export function buildTemplateDeliveryContent(
   tmpl: MessageTemplateRow,
   body: SendMessageBody,
-  businessLogoUrl: string | null,
+  _businessLogoUrl: string | null,
 ): TemplateDeliveryContent {
   const components = body.template?.components;
   const headerParams = textParamsFromComponents(components, "header");
@@ -127,9 +127,7 @@ export function buildTemplateDeliveryContent(
 
   let imageUrl: string | null = null;
   if (headerType === "IMAGE") {
-    imageUrl = toPublicAssetUrl(tmpl.header_media_url) || toPublicAssetUrl(businessLogoUrl);
-  } else if (businessLogoUrl) {
-    imageUrl = toPublicAssetUrl(businessLogoUrl);
+    imageUrl = toPublicAssetUrl(tmpl.header_media_url);
   }
 
   const textParts: string[] = [];

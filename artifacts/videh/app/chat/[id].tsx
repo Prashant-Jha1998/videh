@@ -2062,7 +2062,7 @@ export default function ChatScreen() {
         { text: "Cancel", style: "cancel" as const },
       ]) },
     { label: "Schedule Message ⏰", icon: "time-outline", onPress: () => chatId && router.push({ pathname: "/scheduled/[chatId]", params: { chatId, name: displayName } }) },
-    { label: "Ledger 💰", icon: "cash-outline", onPress: () => chatId && router.push({ pathname: "/khata/[chatId]", params: { chatId, name: displayName } }) },
+    { label: "Khata 📒", icon: "cash-outline", onPress: () => chatId && router.push({ pathname: "/khata/[chatId]", params: { chatId, name: displayName } }) },
     { label: "Mute notifications", icon: "notifications-off-outline", onPress: () => chatId && muteChat(chatId) },
     { label: "Search", icon: "search-outline", onPress: () => { clearSelection(); setSearching(true); setSearchQuery(""); } },
     ...(!chat?.isGroup && directContactId ? [

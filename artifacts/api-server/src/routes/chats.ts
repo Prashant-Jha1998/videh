@@ -1063,6 +1063,31 @@ router.post("/:chatId/messages/:messageId/react", async (req: Request, res: Resp
   }
 });
 
+// Mark all chats as read for the current user
+router.post("/read-all", async (req: Request, res: Response) => {
+  const { userId } = req.body as { userId?: number };
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    await query(
+      "UPDATE chat_members SET last_read_at = NOW() WHERE user_id = $1",
+      [userId],
+    );
+    await query(
+      `INSERT INTO message_status (message_id, user_id, status, updated_at)
+       SELECT m.id, $1, 'read', NOW()
+       FROM messages m
+       JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1
+       WHERE m.sender_id != $1
+       ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'read', updated_at = NOW()`,
+      [userId],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "mark all chats read error");
+    res.status(500).json({ success: false });
+  }
+});
+
 // Mark chat as read (also updates message_status to 'read')
 router.post("/:chatId/read", async (req: Request, res: Response) => {
   const { chatId } = req.params;

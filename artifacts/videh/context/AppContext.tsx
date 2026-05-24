@@ -166,6 +166,7 @@ interface AppContextType {
   sendMessage: (chatId: string, text: string, replyToId?: string) => void;
   createGroup: (name: string, memberIds: number[], groupAvatarUrl?: string) => void;
   markAsRead: (chatId: string) => void;
+  markAllAsRead: () => Promise<void>;
   addStatus: (content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string, videoDurationMs?: number | null, editorData?: StoryEditorData) => Promise<void> | undefined;
   deleteStatus: (statusId: string) => Promise<void>;
   deleteMessage: (chatId: string, messageId: string) => void;
@@ -769,6 +770,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }).catch(() => {});
     }
   }, []);
+
+  const markAllAsRead = useCallback(async () => {
+    setChats((prev) => prev.map((c) => ({ ...c, unreadCount: 0 })));
+    const u = userRef.current;
+    if (!u?.dbId) return;
+    try {
+      await api("/chats/read-all", {
+        method: "POST",
+        body: JSON.stringify({ userId: u.dbId }),
+      });
+    } catch {
+      if (u.dbId) await loadChats(u.dbId);
+    }
+  }, [loadChats]);
 
   // Send image/video message in chat
   const sendImageMessage = useCallback((chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean, mediaKind?: "image" | "video") => {
@@ -1431,7 +1446,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <AppContext.Provider value={{
       user, isAuthenticated, isInitialized, chats, statuses, contacts, callLogs,
-      setUser, logout, sendMessage, createGroup, markAsRead,
+      setUser, logout, sendMessage, createGroup, markAsRead, markAllAsRead,
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, forwardMessage, starredMessages, updateAvatar,
       createDirectChat, loadMessages, refreshChats,

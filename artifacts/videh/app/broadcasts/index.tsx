@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
@@ -17,7 +17,16 @@ import { DismissibleModal } from "@/components/DismissibleModal";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+import { loadVidehContacts, type VidehContact } from "@/lib/videhContacts";
+
 const API_URL = `${getApiUrl()}/api`;
+
+function authHeaders(token?: string) {
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
 
 interface BroadcastList {
   id: number;
@@ -33,18 +42,12 @@ interface Recipient {
   avatar_url?: string;
 }
 
-interface Contact {
-  id: string | number;
-  name: string;
-  phone: string;
-  avatar_url?: string;
-}
-
 export default function BroadcastsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, contacts } = useApp();
+  const { listId: listIdParam } = useLocalSearchParams<{ listId?: string }>();
+  const { user } = useApp();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const [lists, setLists] = useState<BroadcastList[]>([]);
@@ -57,12 +60,16 @@ export default function BroadcastsScreen() {
   const [sendModal, setSendModal] = useState(false);
   const [sendText, setSendText] = useState("");
   const [addContactModal, setAddContactModal] = useState(false);
+  const [videhContacts, setVidehContacts] = useState<VidehContact[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
 
   const fetchLists = useCallback(async () => {
-    if (!user) return;
+    if (!user?.dbId) return;
     setLoading(true);
     try {
-      const r = await fetch(`${API_URL}/broadcasts/user/${user.dbId}`);
+      const r = await fetch(`${API_URL}/broadcasts/user/${user.dbId}`, {
+        headers: authHeaders(user.sessionToken),
+      });
       const d = await r.json();
       if (d.success) setLists(d.lists);
     } catch {}
@@ -71,48 +78,77 @@ export default function BroadcastsScreen() {
 
   useEffect(() => { fetchLists(); }, [fetchLists]);
 
+  const loadContacts = useCallback(async () => {
+    if (!user?.phone) return;
+    setContactsLoading(true);
+    try {
+      setVidehContacts(await loadVidehContacts(getApiUrl(), user.phone));
+    } catch {}
+    setContactsLoading(false);
+  }, [user?.phone]);
+
+  useEffect(() => {
+    if (addContactModal) loadContacts();
+  }, [addContactModal, loadContacts]);
+
+  const openDetail = useCallback(async (list: BroadcastList) => {
+    setSelectedList(list);
+    setDetailModal(true);
+    if (!user) return;
+    try {
+      const r = await fetch(`${API_URL}/broadcasts/${list.id}/recipients`, {
+        headers: authHeaders(user.sessionToken),
+      });
+      const d = await r.json();
+      if (d.success) setRecipients(d.recipients);
+    } catch {}
+  }, [user]);
+
+  useEffect(() => {
+    if (!listIdParam || lists.length === 0) return;
+    const match = lists.find((l) => String(l.id) === String(listIdParam));
+    if (match) void openDetail(match);
+  }, [listIdParam, lists, openDetail]);
+
   const createList = async () => {
     if (!newName.trim() || !user) return;
     try {
       const r = await fetch(`${API_URL}/broadcasts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ creatorId: user.dbId, name: newName.trim() }),
+        headers: authHeaders(user.sessionToken),
+        body: JSON.stringify({ name: newName.trim() }),
       });
       const d = await r.json();
       if (d.success) {
         setCreateModal(false);
         setNewName("");
         fetchLists();
-      }
-    } catch {}
-  };
-
-  const openDetail = async (list: BroadcastList) => {
-    setSelectedList(list);
-    setDetailModal(true);
-    try {
-      const r = await fetch(`${API_URL}/broadcasts/${list.id}/recipients`);
-      const d = await r.json();
-      if (d.success) setRecipients(d.recipients);
-    } catch {}
+      } else Alert.alert("Error", d.message ?? "Could not create list");
+    } catch {
+      Alert.alert("Error", "Network error");
+    }
   };
 
   const removeRecipient = async (userId: number) => {
-    if (!selectedList) return;
-    await fetch(`${API_URL}/broadcasts/${selectedList.id}/recipients/${userId}`, { method: "DELETE" });
+    if (!selectedList || !user) return;
+    await fetch(`${API_URL}/broadcasts/${selectedList.id}/recipients/${userId}`, {
+      method: "DELETE",
+      headers: authHeaders(user.sessionToken),
+    });
     setRecipients((prev) => prev.filter((r) => r.user_id !== userId));
     fetchLists();
   };
 
-  const addContact = async (contact: Contact) => {
-    if (!selectedList) return;
+  const addContact = async (contact: VidehContact) => {
+    if (!selectedList || !user) return;
     await fetch(`${API_URL}/broadcasts/${selectedList.id}/recipients`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: Number(contact.id) }),
+      headers: authHeaders(user.sessionToken),
+      body: JSON.stringify({ userId: contact.videhId }),
     });
-    const r = await fetch(`${API_URL}/broadcasts/${selectedList.id}/recipients`);
+    const r = await fetch(`${API_URL}/broadcasts/${selectedList.id}/recipients`, {
+      headers: authHeaders(user.sessionToken),
+    });
     const d = await r.json();
     if (d.success) setRecipients(d.recipients);
     setAddContactModal(false);
@@ -124,8 +160,8 @@ export default function BroadcastsScreen() {
     try {
       const r = await fetch(`${API_URL}/broadcasts/${selectedList.id}/send`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ senderId: user.dbId, content: sendText.trim() }),
+        headers: authHeaders(user.sessionToken),
+        body: JSON.stringify({ content: sendText.trim() }),
       });
       const d = await r.json();
       if (d.success) {
@@ -144,15 +180,19 @@ export default function BroadcastsScreen() {
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete", style: "destructive", onPress: async () => {
-          await fetch(`${API_URL}/broadcasts/${list.id}`, { method: "DELETE" });
+          if (!user) return;
+          await fetch(`${API_URL}/broadcasts/${list.id}`, {
+            method: "DELETE",
+            headers: authHeaders(user.sessionToken),
+          });
           fetchLists();
         }
       }
     ]);
   };
 
-  const availableContacts = contacts.filter(
-    (c) => c.id && !recipients.find((r) => r.user_id === Number(c.id))
+  const availableContacts = videhContacts.filter(
+    (c) => !recipients.find((r) => r.user_id === c.videhId)
   );
 
   return (
@@ -170,12 +210,14 @@ export default function BroadcastsScreen() {
       <FlatList
         data={lists}
         keyExtractor={(i) => String(i.id)}
+        refreshing={loading}
+        onRefresh={fetchLists}
         ListEmptyComponent={() => (
           <View style={styles.empty}>
             <Ionicons name="radio-outline" size={60} color={colors.mutedForeground} />
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No broadcast lists yet</Text>
             <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
-              Send one message to many people at once. Only people on Videh receive it.
+              Send one message to many people at once. Each person gets it in their individual chat with you — just like WhatsApp.
             </Text>
             <TouchableOpacity style={[styles.emptyBtn, { backgroundColor: colors.primary }]} onPress={() => setCreateModal(true)}>
               <Text style={styles.emptyBtnText}>Create new list</Text>
@@ -254,14 +296,14 @@ export default function BroadcastsScreen() {
                   <Text style={styles.sendBtnText}>Send broadcast</Text>
                 </TouchableOpacity>
                 <Text style={[styles.sendHint, { color: colors.mutedForeground }]}>
-                  {recipients.length} recipients — only Videh users receive broadcasts
+                  {recipients.length} recipients — delivered as individual chats
                 </Text>
               </View>
             )}
             ListEmptyComponent={() => (
               <View style={styles.empty}>
                 <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No recipients selected</Text>
-                <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>Use the + button to add contacts</Text>
+                <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>Use the + button to add contacts from your phone book</Text>
               </View>
             )}
             renderItem={({ item }) => (
@@ -323,16 +365,20 @@ export default function BroadcastsScreen() {
             <Text style={styles.headerTitle}>Add contact</Text>
             <View style={{ width: 40 }} />
           </View>
-          {availableContacts.length === 0 ? (
+          {contactsLoading ? (
+            <View style={styles.empty}>
+              <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>Loading contacts…</Text>
+            </View>
+          ) : availableContacts.length === 0 ? (
             <View style={styles.empty}>
               <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
-                All contacts are already in this list or are not using Videh yet.
+                All your Videh contacts are already in this list, or no contacts found on Videh yet.
               </Text>
             </View>
           ) : (
             <FlatList
               data={availableContacts}
-              keyExtractor={(i) => String(i.id)}
+              keyExtractor={(i) => String(i.videhId)}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={[styles.recipientRow, { backgroundColor: colors.card, borderBottomColor: colors.border }]}
@@ -340,11 +386,11 @@ export default function BroadcastsScreen() {
                   activeOpacity={0.7}
                 >
                   <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-                    <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
+                    <Text style={styles.avatarText}>{item.videhName.charAt(0).toUpperCase()}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.listName, { color: colors.foreground }]}>{item.name}</Text>
-                    <Text style={[styles.listSub, { color: colors.mutedForeground }]}>+91 {item.phone}</Text>
+                    <Text style={[styles.listName, { color: colors.foreground }]}>{item.videhName}</Text>
+                    <Text style={[styles.listSub, { color: colors.mutedForeground }]}>{item.phone}</Text>
                   </View>
                   <Ionicons name="add-circle-outline" size={24} color={colors.primary} />
                 </TouchableOpacity>

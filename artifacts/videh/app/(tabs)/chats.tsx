@@ -22,6 +22,13 @@ import { formatTime } from "@/utils/time";
 import { DropdownMenu } from "@/components/DropdownMenu";
 import { ThemedHeader } from "@/components/ThemedHeader";
 import { safeJsonArray } from "@/lib/safeJson";
+import { getApiUrl } from "@/lib/api";
+
+interface BroadcastListRow {
+  id: number;
+  name: string;
+  recipient_count: number;
+}
 
 /** Status ring for 1:1 chats: green if any update unseen, grey if all seen (like WhatsApp). */
 function getContactStatusRingState(chat: Chat, statuses: Status[]): { count: number; hasUnviewed: boolean } | null {
@@ -46,7 +53,7 @@ export default function ChatsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { chats, pinChat, muteChat, archiveChat, refreshChats, blockUser, markAsRead } = useApp();
+  const { chats, pinChat, muteChat, archiveChat, refreshChats, blockUser, markAsRead, markAllAsRead, user } = useApp();
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"all" | "unread" | "favorites" | "groups">("all");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -60,6 +67,7 @@ export default function ChatsScreen() {
   const [lockedIds, setLockedIds] = useState<string[]>([]);
   const [shortcutIds, setShortcutIds] = useState<string[]>([]);
   const [customListIds, setCustomListIds] = useState<string[]>([]);
+  const [broadcastLists, setBroadcastLists] = useState<BroadcastListRow[]>([]);
 
   const selectedChats = chats.filter((c) => selectedIds.includes(c.id));
   const isSelectionMode = selectedIds.length > 0;
@@ -119,7 +127,18 @@ export default function ChatsScreen() {
   useFocusEffect(
     useCallback(() => {
       void refreshChats();
-    }, [refreshChats]),
+      if (!user?.dbId) return;
+      void fetch(`${getApiUrl()}/api/broadcasts/user/${user.dbId}`, {
+        headers: user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {},
+      })
+        .then((r) => r.json())
+        .then((d) => { if (d.success) setBroadcastLists(d.lists ?? []); })
+        .catch(() => {});
+    }, [refreshChats, user?.dbId, user?.sessionToken]),
+  );
+
+  const filteredBroadcasts = broadcastLists.filter((b) =>
+    b.name.toLowerCase().includes(search.toLowerCase()),
   );
 
   const openChat = (chat: Chat) => {
@@ -323,7 +342,7 @@ export default function ChatsScreen() {
     { label: "New broadcast", icon: "radio-outline", onPress: () => router.push("/broadcasts") },
     { label: "Linked devices", icon: "phone-portrait-outline", onPress: () => router.push("/linked-devices") },
     { label: "Starred messages", icon: "star-outline", onPress: () => router.push("/starred") },
-    { label: "Read all", icon: "checkmark-done-outline", onPress: () => refreshChats() },
+    { label: "Read all", icon: "checkmark-done-outline", onPress: () => { void markAllAsRead(); setMenuOpen(false); } },
     { label: "Settings", icon: "settings-outline", onPress: () => router.push("/(tabs)/settings") },
   ];
 
@@ -475,6 +494,30 @@ export default function ChatsScreen() {
       <FlatList
         data={sorted}
         keyExtractor={(item) => item.id}
+        ListHeaderComponent={
+          !isSelectionMode && !showArchived && tab === "all" && filteredBroadcasts.length > 0 ? (
+            <View>
+              {filteredBroadcasts.map((item) => (
+                <TouchableOpacity
+                  key={`broadcast-${item.id}`}
+                  style={[styles.row, { borderBottomColor: colors.border }]}
+                  onPress={() => router.push(`/broadcasts?listId=${item.id}`)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.avatarWrap, { backgroundColor: colors.primary + "22" }]}>
+                    <Ionicons name="radio-outline" size={22} color={colors.primary} />
+                  </View>
+                  <View style={styles.rowContent}>
+                    <Text style={[styles.name, { color: colors.foreground }]} numberOfLines={1}>{item.name}</Text>
+                    <Text style={[styles.lastMsg, { color: colors.mutedForeground }]} numberOfLines={1}>
+                      {item.recipient_count} {item.recipient_count === 1 ? "recipient" : "recipients"}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : null
+        }
         renderItem={({ item }) => (
           <ChatRow
             chat={item}

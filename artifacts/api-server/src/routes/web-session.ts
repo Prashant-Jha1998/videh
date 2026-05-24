@@ -876,6 +876,10 @@ router.post("/:token/chats/read-all", async (req: Request, res: Response) => {
   if (!session) return;
   try {
     await query(
+      "UPDATE chat_members SET last_read_at = NOW() WHERE user_id = $1",
+      [session.userId],
+    );
+    await query(
       `INSERT INTO message_status (message_id, user_id, status, updated_at)
        SELECT m.id, $1, 'read', NOW()
        FROM messages m
