@@ -14,7 +14,6 @@ import {
   fetchAssistantPrefs,
   patchAssistantPrefs,
   runAssistantCommand,
-  verifyAssistantVoice,
 } from "@/lib/assistantApi";
 import { localActivationGreeting } from "@/lib/assistantGreeting";
 import {
@@ -37,7 +36,6 @@ import {
   stopListening,
   stopSpeaking,
 } from "@/lib/assistantSpeech";
-import { recordVoiceSample } from "@/lib/voiceEnrollment";
 
 type AssistantPhase = "idle" | "listening" | "wake" | "active" | "processing" | "speaking";
 
@@ -221,31 +219,32 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
   const tryWakeActivation = useCallback(async () => {
     if (!user?.sessionToken || phaseRef.current !== "idle") return;
-    setPhaseSafe("wake");
-    try {
-      const fp = await recordVoiceSample(1800);
-      const { match } = await verifyAssistantVoice(user.sessionToken, fp);
-      if (!match) {
-        setPhaseSafe("idle");
-        return;
-      }
-      await activateAssistant();
-    } catch {
-      setPhaseSafe("idle");
-    }
-  }, [user?.sessionToken, setPhaseSafe, activateAssistant]);
+    listeningRef.current = false;
+    await stopListening();
+    await activateAssistant();
+  }, [user?.sessionToken, activateAssistant]);
 
   const startWakeListening = useCallback(async () => {
     if (!prefs?.enabled || !prefs.voiceEnrolled || !isSpeechRecognitionAvailable()) return;
-    if (listeningRef.current || phaseRef.current !== "idle") return;
+    if (phaseRef.current !== "idle") return;
+
+    if (listeningRef.current) {
+      await stopListening();
+      listeningRef.current = false;
+    }
+
     listeningRef.current = true;
     await startListening({
       locale: prefs.lastLangCode ?? "hi",
       onPartial: (text) => {
         if (phaseRef.current !== "idle") return;
         if (containsWakePhrase(text)) {
-          listeningRef.current = false;
-          void stopListening();
+          void tryWakeActivation();
+        }
+      },
+      onFinal: (text) => {
+        if (phaseRef.current !== "idle") return;
+        if (containsWakePhrase(text)) {
           void tryWakeActivation();
         }
       },
@@ -253,6 +252,13 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         listeningRef.current = false;
       },
     });
+
+    setTimeout(() => {
+      if (listeningRef.current && phaseRef.current === "idle") {
+        listeningRef.current = false;
+        void stopListening();
+      }
+    }, 10000);
   }, [prefs?.enabled, prefs?.voiceEnrolled, prefs?.lastLangCode, tryWakeActivation]);
 
   useEffect(() => {

@@ -66,6 +66,7 @@ import { loadEnterIsSend } from "@/lib/chatSettings";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { safeJsonParse } from "@/lib/safeJson";
 import { formatCallMessageLabel, parseCallMessageMeta } from "@/lib/callMessage";
+import { formatPresenceSubtitle, type PresenceView } from "@/lib/presence";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Svg, { Path } from "react-native-svg";
 
