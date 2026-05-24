@@ -48,3 +48,18 @@ export function setProximityScreenOff(enabled: boolean): void {
   if (enabled) InCallManager.turnScreenOff();
   else InCallManager.turnScreenOn();
 }
+
+/** Route voice-note playback through earpiece when phone is near face (WhatsApp-style). */
+export function startVoiceNotePlaybackSession(): void {
+  if (!InCallManager) return;
+  InCallManager.start({ media: "audio" });
+  InCallManager.setSpeakerphoneOn(false);
+  InCallManager.setForceSpeakerphoneOn(false);
+}
+
+export function stopVoiceNotePlaybackSession(): void {
+  if (!InCallManager) return;
+  InCallManager.setSpeakerphoneOn(false);
+  InCallManager.setForceSpeakerphoneOn(false);
+  InCallManager.stop();
+}

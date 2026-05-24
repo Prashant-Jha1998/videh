@@ -13,6 +13,7 @@ import { saveVideoUriToLibrary } from "@/lib/saveVideoToLibrary";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
+import { encodeVoiceMessageText } from "@/lib/voiceWaveform";
 
 const BASE_URL = getApiUrl();
 const STATUS_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -188,7 +189,7 @@ interface AppContextType {
     opts: { mediaUrl: string; kind: "image" | "video"; caption?: string; isViewOnce?: boolean },
   ) => void;
   consumeViewOnceMessage: (chatId: string, messageId: string) => Promise<string | null>;
-  sendAudioMessage: (chatId: string, audioUri: string, durationSecs: number) => void;
+  sendAudioMessage: (chatId: string, audioUri: string, durationSecs: number, waveform?: number[]) => void;
   setTyping: (chatId: string) => void;
   clearTyping: (chatId: string) => void;
   deleteForEveryone: (chatId: string, messageId: string) => void;
@@ -966,11 +967,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [loadMessages]);
 
   // Send audio/voice message
-  const sendAudioMessage = useCallback((chatId: string, audioUri: string, durationSecs: number) => {
+  const sendAudioMessage = useCallback((chatId: string, audioUri: string, durationSecs: number, waveform?: number[]) => {
     void (async () => {
     const u = userRef.current;
     const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    const text = `🎤 Voice message (${Math.round(durationSecs)}s)`;
+    const text = encodeVoiceMessageText(durationSecs, waveform);
     const shareableAudioUri = await toShareableMediaUri(audioUri, "audio/mp4");
     const newMsg: Message = {
       id: tempId, text, timestamp: Date.now(), senderId: "me",

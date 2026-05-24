@@ -47,8 +47,17 @@ import {
   validatePickedMedia,
   validatePickedAssets,
 } from "@/lib/chatMediaPolicy";
-import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
+import { WhatsAppVoiceMic } from "@/components/WhatsAppVoiceMic";
+import { startVoiceNotePlaybackSession, stopVoiceNotePlaybackSession } from "@/lib/inCallAudio";
+import { claimVoicePlayback, releaseVoicePlayback } from "@/lib/voicePlaybackHub";
+import {
+  fallbackVoiceWaveHeights,
+  parseVoiceDurationSec,
+  parseVoiceWaveform,
+  VOICE_WAVE_BAR_COUNT,
+} from "@/lib/voiceWaveform";
 import { guessMimeFromFilename } from "@/lib/prepareFileUpload";
+import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { isGifUri } from "@/lib/imageEdit";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
@@ -251,28 +260,7 @@ function TickIcon({ status, color }: { status: Message["status"]; color: string 
   return <Ionicons name="checkmark" size={14} color={color} />;
 }
 
-const VOICE_NOTE_WAVE_BARS = 26;
-
-function parseVoiceDurationSec(text: string): number {
-  const m = text.match(/Voice message\s*\((\d+)s\)/i) ?? text.match(/\((\d+)\s*s\)/i);
-  return m ? Number(m[1]) : 0;
-}
-
-function hashSeed(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
-  return h >>> 0;
-}
-
-function voiceWaveHeights(seed: string, count: number): number[] {
-  let h = hashSeed(seed || "0");
-  const out: number[] = [];
-  for (let i = 0; i < count; i++) {
-    h = Math.imul(h ^ (h << 13), 1274126177) >>> 0;
-    out.push(0.28 + ((h % 1000) / 1000) * 0.72);
-  }
-  return out;
-}
+const VOICE_NOTE_WAVE_BARS = VOICE_WAVE_BAR_COUNT;
 
 function formatVoiceClock(sec: number): string {
   const s = Math.max(0, Math.floor(sec));
@@ -287,6 +275,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
   colors,
   isMe,
   messageId,
+  messageText,
   durationHintSec,
   avatarUri,
   sessionToken,
@@ -295,6 +284,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
   colors: ReturnType<typeof useColors>;
   isMe: boolean;
   messageId: string;
+  messageText: string;
   durationHintSec: number;
   avatarUri?: string;
   sessionToken?: string | null;
@@ -308,9 +298,25 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
   const [rate, setRate] = useState(1);
   const [ended, setEnded] = useState(false);
   const [waveW, setWaveW] = useState(0);
-  const bars = useMemo(() => voiceWaveHeights(messageId + uri.slice(-24), VOICE_NOTE_WAVE_BARS), [messageId, uri]);
+  const bars = useMemo(() => {
+    const recorded = parseVoiceWaveform(messageText, VOICE_NOTE_WAVE_BARS);
+    return recorded ?? fallbackVoiceWaveHeights(messageId + uri.slice(-24), VOICE_NOTE_WAVE_BARS);
+  }, [messageText, messageId, uri]);
+
+  const stopPlayback = useCallback(async () => {
+    const s = soundRef.current;
+    if (s) {
+      try {
+        await s.stopAsync();
+      } catch { /* ignore */ }
+    }
+    setPlaying(false);
+    stopVoiceNotePlaybackSession();
+    releaseVoicePlayback(messageId);
+  }, [messageId]);
 
   const unloadSound = useCallback(async () => {
+    await stopPlayback();
     const s = soundRef.current;
     soundRef.current = null;
     if (s) {
@@ -318,7 +324,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
         await s.unloadAsync();
       } catch { /* ignore */ }
     }
-  }, []);
+  }, [stopPlayback]);
 
   const applyRate = useCallback(async (s: Audio.Sound, next: number) => {
     try {
@@ -336,6 +342,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
       shouldDuckAndroid: true,
       playThroughEarpieceAndroid: false,
     });
+    startVoiceNotePlaybackSession();
 
     const { sound: s } = await Audio.Sound.createAsync(
       { uri: playableUri },
@@ -349,6 +356,8 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
             setPlaying(false);
             setEnded(true);
             setPosition(0);
+            stopVoiceNotePlaybackSession();
+            releaseVoicePlayback(messageId);
           }
         }
       },
@@ -356,7 +365,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
     await applyRate(s, rate);
     soundRef.current = s;
     return s;
-  }, [playableUri, rate, applyRate]);
+  }, [playableUri, rate, applyRate, messageId]);
 
   const toggle = async () => {
     if (uriLoading) return;
@@ -375,19 +384,28 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
       if (playing) {
         await s.pauseAsync();
         setPlaying(false);
-      } else if (ended || ((status.durationMillis ?? 0) > 0 && (status.positionMillis ?? 0) >= (status.durationMillis ?? 0) - 250)) {
-        try {
-          await s.replayAsync();
-        } catch {
-          await s.stopAsync();
-          await s.setPositionAsync(0);
+        stopVoiceNotePlaybackSession();
+        releaseVoicePlayback(messageId);
+      } else {
+        await claimVoicePlayback(messageId, async () => {
+          await s.pauseAsync();
+          setPlaying(false);
+          stopVoiceNotePlaybackSession();
+        });
+        startVoiceNotePlaybackSession();
+        if (ended || ((status.durationMillis ?? 0) > 0 && (status.positionMillis ?? 0) >= (status.durationMillis ?? 0) - 250)) {
+          try {
+            await s.replayAsync();
+          } catch {
+            await s.stopAsync();
+            await s.setPositionAsync(0);
+            await s.playAsync();
+          }
+          setPosition(0);
+          setEnded(false);
+        } else {
           await s.playAsync();
         }
-        setPosition(0);
-        setEnded(false);
-        setPlaying(true);
-      } else {
-        await s.playAsync();
         setPlaying(true);
       }
     } catch {
@@ -440,16 +458,16 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
   return (
     <View style={{ minWidth: 240, maxWidth: W * 0.78, paddingVertical: 4 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        {isMe ? (
-          <View style={{ width: 36, alignItems: "center", justifyContent: "center" }}>
-            <View style={{ position: "relative" }}>
-              {avatarUri ? (
-                <Image source={{ uri: avatarUri }} style={{ width: 34, height: 34, borderRadius: 17 }} contentFit="cover" />
-              ) : (
-                <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#00A884", alignItems: "center", justifyContent: "center" }}>
-                  <Ionicons name="person" size={18} color="#fff" />
-                </View>
-              )}
+        <View style={{ width: 36, alignItems: "center", justifyContent: "center" }}>
+          <View style={{ position: "relative" }}>
+            {avatarUri ? (
+              <Image source={{ uri: avatarUri }} style={{ width: 34, height: 34, borderRadius: 17 }} contentFit="cover" />
+            ) : (
+              <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#00A884", alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="person" size={18} color="#fff" />
+              </View>
+            )}
+            {isMe ? (
               <View style={{
                 position: "absolute",
                 right: -2,
@@ -466,9 +484,9 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
               >
                 <Ionicons name="mic" size={9} color="#fff" />
               </View>
-            </View>
+            ) : null}
           </View>
-        ) : null}
+        </View>
         <TouchableOpacity
           onPress={() => { void toggle(); }}
           style={{
@@ -868,14 +886,13 @@ export default function ChatScreen() {
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [editText, setEditText] = useState("");
 
-  // Voice recording — WhatsApp-style panel (tap mic → record → pause / delete / send)
-  const voiceRecRef = useRef<Audio.Recording | null>(null);
-  const [voiceRecording, setVoiceRecording] = useState<Audio.Recording | null>(null);
-  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
-  const [voiceRecPaused, setVoiceRecPaused] = useState(false);
-  const [voiceRecMs, setVoiceRecMs] = useState(0);
-  const [voiceRecMeter, setVoiceRecMeter] = useState(0.25);
+  const [voiceRecPhase, setVoiceRecPhase] = useState<"idle" | "holding" | "locked">("idle");
   const [enterIsSend, setEnterIsSend] = useState(false);
+
+  const handleVoiceNoteSend = useCallback((uri: string, durationSec: number, waveform: number[]) => {
+    if (!chatId) return;
+    sendAudioMessage(chatId, uri, durationSec, waveform);
+  }, [chatId, sendAudioMessage]);
 
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -1243,121 +1260,6 @@ export default function ChatScreen() {
     setReplyTo(null);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
   }, [text, chatId, sendMessage, replyTo, clearTyping, editTarget, editText, editMessage, composerEnabled, chat?.isGroup, groupSendPermission?.policy]);
-
-  const voiceRecOptions = useMemo(
-    () => ({ ...Audio.RecordingOptionsPresets.HIGH_QUALITY, isMeteringEnabled: true as const }),
-    [],
-  );
-
-  const closeVoicePanel = useCallback(async () => {
-    const rec = voiceRecRef.current;
-    if (rec) {
-      try {
-        await rec.stopAndUnloadAsync();
-      } catch { /* ignore */ }
-      voiceRecRef.current = null;
-      setVoiceRecording(null);
-    }
-    setVoicePanelOpen(false);
-    setVoiceRecPaused(false);
-    setVoiceRecMs(0);
-    setVoiceRecMeter(0.25);
-    try {
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
-    } catch { /* ignore */ }
-  }, []);
-
-  const openVoiceRecorder = useCallback(async () => {
-    if (Platform.OS === "web") {
-      Alert.alert("Not supported on web", "Use the mobile app to send voice messages.");
-      return;
-    }
-    if (!composerEnabled || editTarget) {
-      Alert.alert(
-        "Cannot send message",
-        chat?.isGroup && groupSendPermission?.policy === "admins_only"
-          ? "Only admins can send messages in this group."
-          : "You do not have permission to send voice messages here.",
-      );
-      return;
-    }
-    if (voicePanelOpen) return;
-    try {
-      const perm = await Audio.requestPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert("Permission required", "Microphone permission is required for voice notes.");
-        return;
-      }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording: rec } = await Audio.Recording.createAsync(
-        voiceRecOptions,
-        (st) => {
-          if (st.isRecording && typeof st.durationMillis === "number") {
-            setVoiceRecMs(st.durationMillis);
-          }
-          if (st.isRecording && typeof st.metering === "number") {
-            const n = Math.max(0, Math.min(1, (st.metering + 55) / 60));
-            setVoiceRecMeter(n);
-          }
-        },
-        100,
-      );
-      voiceRecRef.current = rec;
-      setVoiceRecording(rec);
-      setVoiceRecPaused(false);
-      setVoiceRecMs(0);
-      setVoicePanelOpen(true);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch {
-      Alert.alert("Error", "Could not start recording. Please try again.");
-    }
-  }, [composerEnabled, editTarget, voicePanelOpen, voiceRecOptions, chat?.isGroup, groupSendPermission?.policy]);
-
-  const cancelVoiceRecording = useCallback(() => {
-    void closeVoicePanel();
-  }, [closeVoicePanel]);
-
-  const toggleVoicePause = useCallback(async () => {
-    if (!voiceRecording) return;
-    try {
-      if (voiceRecPaused) {
-        await voiceRecording.startAsync();
-        setVoiceRecPaused(false);
-      } else {
-        await voiceRecording.pauseAsync();
-        setVoiceRecPaused(true);
-      }
-    } catch { /* ignore */ }
-  }, [voiceRecording, voiceRecPaused]);
-
-  const sendVoiceRecording = useCallback(async () => {
-    const rec = voiceRecRef.current;
-    if (!rec || !chatId) return;
-    try {
-      const st = await rec.getStatusAsync();
-      const durMs =
-        typeof st.durationMillis === "number" && st.durationMillis > 200
-          ? st.durationMillis
-          : voiceRecMs;
-      await rec.stopAndUnloadAsync();
-      const uri = rec.getURI();
-      voiceRecRef.current = null;
-      setVoiceRecording(null);
-      setVoicePanelOpen(false);
-      setVoiceRecPaused(false);
-      setVoiceRecMs(0);
-      const durSec = Math.max(0.4, durMs / 1000);
-      if (uri) {
-        sendAudioMessage(chatId, uri, durSec);
-      }
-    } catch {
-      Alert.alert("Error", "Could not send this voice message.");
-    } finally {
-      try {
-        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
-      } catch { /* ignore */ }
-    }
-  }, [chatId, voiceRecMs, sendAudioMessage]);
 
   const sendMediaMessage = async (
     type: "camera" | "videocamera" | "gallery" | "document" | "location" | "contact" | "viewonce" | "audiofile",
@@ -1893,8 +1795,9 @@ export default function ChatScreen() {
               colors={colors}
               isMe={isMe}
               messageId={item.id}
+              messageText={item.text}
               durationHintSec={parseVoiceDurationSec(item.text)}
-              avatarUri={isMe ? (user?.avatar ?? undefined) : undefined}
+              avatarUri={isMe ? (user?.avatar ?? undefined) : (contactAvatar ?? undefined)}
               sessionToken={user?.sessionToken}
             />
           ) : isDocument ? (
@@ -2456,42 +2359,6 @@ export default function ChatScreen() {
           </View>
         )}
 
-        {/* Voice record panel — timer, live bars, delete / pause / send */}
-        {!selectionActive && voicePanelOpen && (
-          <View style={[styles.voiceRecordPanel, { backgroundColor: colors.isDark ? "#1a2329" : "#DCF8C6", borderTopColor: colors.border }]}>
-            <Text style={[styles.voiceRecTimer, { color: colors.foreground }]}>
-              {formatVoiceClock(voiceRecMs / 1000)}
-            </Text>
-            <View style={styles.voiceRecWaveRow}>
-              {Array.from({ length: 36 }).map((_, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.voiceRecBar,
-                    {
-                      height: 5 + voiceRecMeter * 16 + ((i * 17) % 9),
-                      backgroundColor: colors.isDark ? "rgba(0,168,132,0.55)" : "rgba(0,168,132,0.45)",
-                    },
-                  ]}
-                />
-              ))}
-            </View>
-            <TouchableOpacity onPress={cancelVoiceRecording} style={styles.voiceRecIconBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityLabel="Delete recording">
-              <Ionicons name="trash-outline" size={24} color="#c62828" />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => { void toggleVoicePause(); }} style={styles.voiceRecIconBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityLabel={voiceRecPaused ? "Resume recording" : "Pause recording"}>
-              <Ionicons name={voiceRecPaused ? "play" : "pause"} size={26} color={voiceRecPaused ? colors.primary : "#c62828"} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => { void sendVoiceRecording(); }}
-              style={[styles.voiceRecSendFab, { backgroundColor: colors.primary }]}
-              accessibilityLabel="Send voice message"
-            >
-              <Ionicons name="send" size={18} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        )}
-
         {!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe) && !editTarget && (
           <View style={[styles.groupLockBanner, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
             <Ionicons name="ban-outline" size={18} color={colors.mutedForeground} />
@@ -2526,50 +2393,64 @@ export default function ChatScreen() {
               },
             ]}
           >
-            <TouchableOpacity style={styles.inputIcon}>
-              <Ionicons name="happy-outline" size={24} color={colors.mutedForeground} />
-            </TouchableOpacity>
-            <TextInput
-              ref={inputRef}
-              style={[
-                styles.inputField,
-                {
-                  backgroundColor: colors.isDark ? colors.card : "#FFFFFF",
-                  color: colors.foreground,
-                  borderColor: colors.isDark ? colors.border : "rgba(0,0,0,0.06)",
-                },
-              ]}
-              placeholder={editTarget ? "Edit message..." : "Message"}
-              placeholderTextColor={colors.mutedForeground}
-              value={inputVal}
-              onChangeText={handleTextChange}
-              multiline={!webEnterSend}
-              blurOnSubmit={webEnterSend}
-              onSubmitEditing={webEnterSend ? () => handleSend() : undefined}
-              maxLength={2000}
-              editable={composerEnabled}
-              onFocus={() => setAssistantChatInputFocused(true)}
-              onBlur={() => setAssistantChatInputFocused(false)}
-            />
-            {!inputVal.trim() && (
-              <TouchableOpacity
-                style={styles.inputIcon}
-                onPress={showAttachMenu}
-                disabled={!composerEnabled || !!editTarget}
-              >
-                <Ionicons name="attach-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
-              </TouchableOpacity>
+            {voiceRecPhase !== "locked" && (
+              <>
+                {voiceRecPhase !== "holding" && (
+                  <TouchableOpacity style={styles.inputIcon}>
+                    <Ionicons name="happy-outline" size={24} color={colors.mutedForeground} />
+                  </TouchableOpacity>
+                )}
+                {voiceRecPhase === "holding" ? (
+                  <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 8 }}>
+                    <Text style={{ textAlign: "center", color: colors.mutedForeground, fontFamily: "Inter_500Medium" }}>
+                      Recording… slide left to cancel, up to lock
+                    </Text>
+                  </View>
+                ) : (
+                  <TextInput
+                    ref={inputRef}
+                    style={[
+                      styles.inputField,
+                      {
+                        backgroundColor: colors.isDark ? colors.card : "#FFFFFF",
+                        color: colors.foreground,
+                        borderColor: colors.isDark ? colors.border : "rgba(0,0,0,0.06)",
+                      },
+                    ]}
+                    placeholder={editTarget ? "Edit message..." : "Message"}
+                    placeholderTextColor={colors.mutedForeground}
+                    value={inputVal}
+                    onChangeText={handleTextChange}
+                    multiline={!webEnterSend}
+                    blurOnSubmit={webEnterSend}
+                    onSubmitEditing={webEnterSend ? () => handleSend() : undefined}
+                    maxLength={2000}
+                    editable={composerEnabled}
+                    onFocus={() => setAssistantChatInputFocused(true)}
+                    onBlur={() => setAssistantChatInputFocused(false)}
+                  />
+                )}
+                {!inputVal.trim() && voiceRecPhase !== "holding" && (
+                  <TouchableOpacity
+                    style={styles.inputIcon}
+                    onPress={showAttachMenu}
+                    disabled={!composerEnabled || !!editTarget}
+                  >
+                    <Ionicons name="attach-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
+                  </TouchableOpacity>
+                )}
+                {!inputVal.trim() && voiceRecPhase !== "holding" && (
+                  <TouchableOpacity
+                    style={styles.inputIcon}
+                    onPress={() => sendMediaMessage("camera")}
+                    disabled={!composerEnabled || !!editTarget}
+                  >
+                    <Ionicons name="camera-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
+                  </TouchableOpacity>
+                )}
+              </>
             )}
-            {!inputVal.trim() && (
-              <TouchableOpacity
-                style={styles.inputIcon}
-                onPress={() => sendMediaMessage("camera")}
-                disabled={!composerEnabled || !!editTarget}
-              >
-                <Ionicons name="camera-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
-              </TouchableOpacity>
-            )}
-            {inputVal.trim() ? (
+            {inputVal.trim() && voiceRecPhase === "idle" ? (
               <TouchableOpacity
                 style={[styles.sendBtn, { backgroundColor: colors.primary }, (!composerEnabled || initializing) && { opacity: 0.5 }]}
                 disabled={!composerEnabled || initializing}
@@ -2578,13 +2459,13 @@ export default function ChatScreen() {
                 <Ionicons name="send" size={18} color="#fff" />
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity
-                style={[styles.sendBtn, { backgroundColor: colors.primary }, (!composerEnabled || !!editTarget || voicePanelOpen) && { opacity: 0.45 }]}
-                onPress={() => { void openVoiceRecorder(); }}
-                disabled={!composerEnabled || !!editTarget || voicePanelOpen}
-              >
-                <Ionicons name="mic-outline" size={18} color="#fff" />
-              </TouchableOpacity>
+              <WhatsAppVoiceMic
+                enabled={composerEnabled && !editTarget}
+                colors={colors}
+                onSend={handleVoiceNoteSend}
+                onPhaseChange={setVoiceRecPhase}
+                fullWidth={voiceRecPhase === "locked"}
+              />
             )}
           </View>
         )}
