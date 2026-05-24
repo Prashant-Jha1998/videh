@@ -1,23 +1,43 @@
 import type { PlannedAction } from "./assistantIntents";
 import { intentToPlanned, parseAssistantIntent } from "./assistantIntents";
 import type { AssistantUserContext } from "./assistantExecutor";
+import type { AssistantLangCode } from "./assistantLanguages";
+import { firstName, INDIAN_LANGUAGE_LABELS } from "./assistantLanguages";
+import { VIDEH_PRODUCT_KNOWLEDGE } from "./assistantKnowledge";
 
 const ACTION_SCHEMA = `{
-  "intent": "send_message|messages_today|messages_from|last_message_from|unread_count|important_messages|chat_summary|list_contacts|reply",
-  "contactName": "optional string",
-  "messageText": "optional string",
-  "speak": "short Hindi spoken reply using user's first name"
+  "intent": "send_message|messages_today|messages_from|last_message_from|unread_count|important_messages|chat_summary|list_contacts|mark_read|mark_all_read|call_contact|open_chat|search_messages|recent_calls|list_broadcasts|send_broadcast|khata_summary|khata_add|project_qa|reply|unknown",
+  "contactName": "ANY contact/group name from user's chat list — not a fixed example name",
+  "messageText": "string optional",
+  "broadcastListName": "string optional",
+  "callType": "audio|video optional",
+  "searchQuery": "string optional",
+  "amount": "number optional for khata",
+  "note": "string optional",
+  "speak": "string optional — reply/unknown only, in user's language"
 }`;
+
+function isLikelyProjectQuestion(text: string): boolean {
+  const n = text.toLowerCase();
+  return (
+    /\b(videh|hey\s+videh|assistant|khata|broadcast|business\s+api|developer\s+portal)\b/i.test(n)
+    || /\b(app|messenger|feature|setting|call|group)\b/i.test(n) && /\b(kya|kaise|how|what|kahan|where)\b/i.test(n)
+  );
+}
 
 export async function planAssistantAction(
   text: string,
   ctx: AssistantUserContext,
-  locale: "hi" | "en",
+  lang: AssistantLangCode,
 ): Promise<PlannedAction | null> {
   const openAiKey = process.env["OPENAI_API_KEY"]?.trim();
   if (!openAiKey) return null;
 
-  const firstName = ctx.userName.split(/\s+/)[0] || ctx.userName;
+  const first = firstName(ctx.userName);
+  const langLabel = INDIAN_LANGUAGE_LABELS[lang];
+  const allChats = ctx.chats.map((c) => c.displayName).join(", ");
+  const broadcasts = ctx.broadcastLists.map((b) => b.name).join(", ");
+
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -32,22 +52,37 @@ export async function planAssistantAction(
         messages: [
           {
             role: "system",
-            content: `You are Videh voice assistant planner for Indian users. Logged-in user name: ${ctx.userName} (call them ${firstName} ji in Hindi replies).
-Contacts: ${ctx.contactNames.join(", ") || "none"}.
-Groups: ${ctx.groupNames.join(", ") || "none"}.
-Map user voice command to ONE action. Always respond valid JSON only matching: ${ACTION_SCHEMA}
-Rules:
-- send_message when user asks to message/text someone
-- messages_today when user asks who messaged today / aaj kahan se message aaya
-- messages_from / last_message_from for reading someone's messages
-- important_messages for unread/important
-- chat_summary for summary of all chats
-- list_contacts for listing chats
-- reply with helpful speak in Hindi-English mix, always mention user first name for personal touch`,
+            content: `You are Videh AI planner — India's advanced voice assistant inside Videh Messenger.
+User: ${ctx.userName} (${first}). JSON only: ${ACTION_SCHEMA}
+Language for speak: ${langLabel} (${lang}).
+
+User's REAL chats (use exact or closest name for contactName — can be ANY person or group):
+${allChats || "none yet"}
+
+Broadcast lists: ${broadcasts || "none"}
+
+${VIDEH_PRODUCT_KNOWLEDGE}
+
+You can plan ANY of these real actions:
+- send_message: message ANY contact or group by their actual name
+- call_contact: voice/video call ANY contact (callType audio or video)
+- open_chat: open a chat
+- messages_today, messages_from, last_message_from, unread_count, important_messages, chat_summary
+- list_contacts: list all chats
+- mark_read / mark_all_read
+- search_messages: search text in chats
+- recent_calls, list_broadcasts, send_broadcast
+- khata_summary, khata_add (amount in rupees)
+- project_qa: Videh app help (not secrets)
+- reply: polite answer or refusal
+
+IMPORTANT: contactName must match one of the user's actual chat names when possible. Never hardcode example names like Rahul — use who the user said.
+
+Never plan: sexual/illegal/terror content, or revealing API keys/source code/passwords.`,
           },
           { role: "user", content: text },
         ],
-        max_tokens: 200,
+        max_tokens: 320,
       }),
     });
     const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
@@ -64,12 +99,18 @@ Rules:
 export async function resolveAssistantPlan(
   text: string,
   ctx: AssistantUserContext,
-  locale: "hi" | "en",
+  lang: AssistantLangCode,
 ): Promise<PlannedAction> {
-  const aiPlan = await planAssistantAction(text, ctx, locale);
+  const aiPlan = await planAssistantAction(text, ctx, lang);
+
+  if (aiPlan?.intent === "project_qa") {
+    return { intent: "project_qa", speak: aiPlan.speak };
+  }
+
   if (aiPlan && aiPlan.intent !== "reply" && aiPlan.intent !== "unknown") {
     return aiPlan;
   }
+
   if (aiPlan?.intent === "reply" && aiPlan.speak) {
     return aiPlan;
   }
@@ -79,7 +120,11 @@ export async function resolveAssistantPlan(
     return intentToPlanned(ruleIntent);
   }
 
+  if (isLikelyProjectQuestion(text)) {
+    return { intent: "project_qa" };
+  }
+
   if (aiPlan?.speak) return aiPlan;
 
-  return { intent: "unknown", speak: undefined };
+  return { intent: "unknown" };
 }

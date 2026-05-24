@@ -2,10 +2,10 @@ export function isSpeechRecognitionAvailable(): boolean {
   return false;
 }
 
-export async function speakAssistant(text: string): Promise<void> {
+export async function speakAssistant(text: string, langOrLocale = "hi-IN"): Promise<void> {
   if (typeof window !== "undefined" && "speechSynthesis" in window) {
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = "hi-IN";
+    u.lang = langOrLocale.includes("-") ? langOrLocale : "hi-IN";
     window.speechSynthesis.speak(u);
   }
 }

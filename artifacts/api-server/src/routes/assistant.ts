@@ -1,9 +1,18 @@
 import { Router, type Request, type Response } from "express";
 import { assertSameUser, requireAuth } from "../lib/auth";
 import { executeAssistantAction, loadAssistantUserContext } from "../lib/assistantExecutor";
+import { answerVidehQuestion, finalizeAssistantSpeak } from "../lib/assistantFinalize";
 import { buildActivationGreeting } from "../lib/assistantGreeting";
 import { parseAssistantIntent } from "../lib/assistantIntents";
+import {
+  detectAssistantLanguage,
+  firstName,
+  normalizeLangCode,
+  toSpeechLocale,
+  type AssistantLangCode,
+} from "../lib/assistantLanguages";
 import { resolveAssistantPlan } from "../lib/assistantPlanner";
+import { evaluateAssistantSafety, safetyRefusal } from "../lib/assistantSafety";
 import {
   compareVoiceFingerprints,
   normalizeFingerprint,
@@ -22,6 +31,10 @@ async function loadEnrolledFingerprints(userId: number): Promise<VoiceFingerprin
   return r.rows
     .map((row: { fingerprint_json: unknown }) => normalizeFingerprint(row.fingerprint_json))
     .filter((fp): fp is VoiceFingerprint => Boolean(fp));
+}
+
+function jsonLang(res: Response, lang: AssistantLangCode, body: Record<string, unknown>) {
+  res.json({ ...body, langCode: lang, speechLocale: toSpeechLocale(lang) });
 }
 
 router.get("/prefs", async (req: Request, res: Response) => {
@@ -125,32 +138,56 @@ router.post("/verify-voice", async (req: Request, res: Response) => {
 
 router.post("/command", async (req: Request, res: Response) => {
   const userId = Number((req as any).authUserId);
-  const body = req.body as { text?: string; locale?: "hi" | "en" };
+  const body = req.body as { text?: string; locale?: string };
   const text = String(body.text ?? "").trim();
-  const locale = body.locale === "en" ? "en" : "hi";
   if (!text) {
     res.status(400).json({ success: false, message: "text is required." });
     return;
   }
 
+  const lang = detectAssistantLanguage(text, body.locale);
+
   try {
     const ctx = await loadAssistantUserContext(userId);
-    const ruleIntent = parseAssistantIntent(text);
-
-    if (ruleIntent.type === "greeting") {
-      res.json({
+    const name = firstName(ctx.userName);
+    const safety = evaluateAssistantSafety(text);
+    if (!safety.safe) {
+      jsonLang(res, lang, {
         success: true,
-        intent: "greeting",
-        speak: buildActivationGreeting(ctx.userName, locale),
+        intent: "blocked",
+        speak: safetyRefusal(lang, safety.category),
         actions: [],
       });
       return;
     }
 
-    const plan = await resolveAssistantPlan(text, ctx, locale);
+    const ruleIntent = parseAssistantIntent(text);
+    if (ruleIntent.type === "greeting") {
+      jsonLang(res, lang, {
+        success: true,
+        intent: "greeting",
+        speak: buildActivationGreeting(ctx.userName, lang),
+        actions: [],
+      });
+      return;
+    }
+
+    const plan = await resolveAssistantPlan(text, ctx, lang);
+
+    if (plan.intent === "project_qa") {
+      const speak = plan.speak
+        ?? await answerVidehQuestion(text, ctx.userName, lang);
+      jsonLang(res, lang, {
+        success: true,
+        intent: "project_qa",
+        speak,
+        actions: [],
+      });
+      return;
+    }
 
     if (plan.intent === "reply" && plan.speak) {
-      res.json({
+      jsonLang(res, lang, {
         success: true,
         intent: "ai_reply",
         speak: plan.speak,
@@ -160,22 +197,33 @@ router.post("/command", async (req: Request, res: Response) => {
     }
 
     if (plan.intent === "unknown") {
-      res.json({
+      const unknownSpeak = lang === "en"
+        ? `${name}, I can message anyone in your chats, make calls, read messages, broadcast, khata, search, and help with Videh. Just say what you need.`
+        : `${name} ji, main aapke kisi bhi contact ko message bhej sakta hoon, call kar sakta hoon, messages padh sakta hoon, broadcast, khata, search — jo chahiye bolein.`;
+      jsonLang(res, lang, {
         success: true,
         intent: "unknown",
-        speak: locale === "hi"
-          ? `${ctx.userName.split(" ")[0]} ji, main ye abhi nahi kar sakta. Aap bolo: kisi ko message bhejo, aaj ke messages, important messages, ya summary.`
-          : "Try asking me to send a message, list today's messages, or summarize your chats.",
+        speak: unknownSpeak,
         actions: [],
       });
       return;
     }
 
-    const result = await executeAssistantAction(ctx, plan, locale);
-    res.json({
+    const result = await executeAssistantAction(ctx, plan, lang);
+    const speak = await finalizeAssistantSpeak({
+      userName: ctx.userName,
+      lang,
+      userCommand: text,
+      intent: result.intent,
+      success: result.success,
+      fallbackSpeak: result.speak,
+      actionDetails: (result.data as Record<string, unknown>) ?? {},
+    });
+
+    jsonLang(res, lang, {
       success: true,
       intent: result.intent,
-      speak: result.speak,
+      speak,
       actions: result.actions,
       data: result.data,
     });
@@ -188,10 +236,13 @@ router.post("/command", async (req: Request, res: Response) => {
 router.get("/greeting/:userId", async (req: Request, res: Response) => {
   const userId = Number(req.params.userId);
   if (!assertSameUser(req, res, userId)) return;
-  const locale = String(req.query.locale ?? "hi") === "en" ? "en" : "hi";
+  const lang = normalizeLangCode(String(req.query.locale ?? "hi"));
   try {
     const ctx = await loadAssistantUserContext(userId);
-    res.json({ success: true, speak: buildActivationGreeting(ctx.userName, locale) });
+    jsonLang(res, lang, {
+      success: true,
+      speak: buildActivationGreeting(ctx.userName, lang),
+    });
   } catch {
     res.status(500).json({ success: false });
   }

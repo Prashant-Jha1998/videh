@@ -16,8 +16,15 @@ import {
   runAssistantCommand,
   verifyAssistantVoice,
 } from "@/lib/assistantApi";
+import { localActivationGreeting } from "@/lib/assistantGreeting";
+import {
+  detectLocaleFromTranscript,
+  normalizeLangCode,
+  type AssistantLangCode,
+} from "@/lib/assistantLanguages";
 import {
   containsWakePhrase,
+  getLocalAssistantPrefs,
   setLocalAssistantPrefs,
   stripWakeFromCommand,
   type AssistantPrefs,
@@ -31,7 +38,6 @@ import {
   stopSpeaking,
 } from "@/lib/assistantSpeech";
 import { recordVoiceSample } from "@/lib/voiceEnrollment";
-import { localActivationGreeting } from "@/lib/assistantGreeting";
 
 type AssistantPhase = "idle" | "listening" | "wake" | "active" | "processing" | "speaking";
 
@@ -40,6 +46,7 @@ type AssistantContextType = {
   phase: AssistantPhase;
   transcript: string;
   lastResponse: string;
+  activeLang: AssistantLangCode;
   refreshPrefs: () => Promise<void>;
   setEnabled: (enabled: boolean) => Promise<void>;
   activateManually: () => Promise<void>;
@@ -55,21 +62,36 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const [phase, setPhase] = useState<AssistantPhase>("idle");
   const [transcript, setTranscript] = useState("");
   const [lastResponse, setLastResponse] = useState("");
+  const [activeLang, setActiveLang] = useState<AssistantLangCode>("hi");
   const listeningRef = useRef(false);
   const phaseRef = useRef<AssistantPhase>("idle");
   const commandBufferRef = useRef("");
+  const listenLocaleRef = useRef<AssistantLangCode>("hi");
 
   const setPhaseSafe = useCallback((p: AssistantPhase) => {
     phaseRef.current = p;
     setPhase(p);
   }, []);
 
+  const persistLang = useCallback(async (lang: AssistantLangCode) => {
+    setActiveLang(lang);
+    listenLocaleRef.current = lang;
+    await setLocalAssistantPrefs({ lastLangCode: lang });
+  }, []);
+
   const refreshPrefs = useCallback(async () => {
     if (!user?.sessionToken) return;
     const p = await fetchAssistantPrefs(user.sessionToken);
     if (p) {
-      setPrefs(p);
-      await setLocalAssistantPrefs(p);
+      const local = await getLocalAssistantPrefs();
+      const finalPrefs: AssistantPrefs = {
+        ...p,
+        lastLangCode: p.lastLangCode ?? local.lastLangCode ?? "hi",
+      };
+      setPrefs(finalPrefs);
+      listenLocaleRef.current = finalPrefs.lastLangCode ?? "hi";
+      setActiveLang(finalPrefs.lastLangCode ?? "hi");
+      await setLocalAssistantPrefs(finalPrefs);
     }
   }, [user?.sessionToken]);
 
@@ -89,45 +111,92 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const handleCommand = useCallback(async (text: string) => {
     const cleaned = stripWakeFromCommand(text.trim());
     if (!user?.sessionToken || !cleaned) return;
+
+    const guessed = detectLocaleFromTranscript(cleaned);
+    const langHint = listenLocaleRef.current !== "hi" ? listenLocaleRef.current : guessed;
+
     setPhaseSafe("processing");
     try {
-      const result = await runAssistantCommand(user.sessionToken, cleaned, "hi");
+      const result = await runAssistantCommand(user.sessionToken, cleaned, langHint);
+      const lang = normalizeLangCode(result.langCode ?? langHint);
+      await persistLang(lang);
+
       setLastResponse(result.speak);
       setPhaseSafe("speaking");
-      await speakAssistant(result.speak, "hi");
+      await speakAssistant(result.speak, result.speechLocale ?? lang);
+
       const openChat = result.actions?.find((a) => a.type === "open_chat" && a.chatId);
       if (openChat?.chatId) {
         router.push({ pathname: "/chat/[id]", params: { id: openChat.chatId } });
       }
+      const startCall = result.actions?.find((a) => a.type === "start_call" && a.chatId);
+      if (startCall?.chatId) {
+        router.push({
+          pathname: "/call/[id]",
+          params: {
+            id: startCall.chatId,
+            type: startCall.callType ?? "audio",
+            name: startCall.contactName ?? "",
+          },
+        });
+      }
+      const openKhata = result.actions?.find((a) => a.type === "open_khata" && a.chatId);
+      if (openKhata?.chatId) {
+        router.push({ pathname: "/khata/[chatId]", params: { chatId: openKhata.chatId } });
+      }
+      if (result.actions?.some((a) => a.type === "open_broadcasts")) {
+        router.push("/broadcasts");
+      }
+      if (result.actions?.some((a) => a.type === "open_calls_tab")) {
+        router.push("/(tabs)/calls");
+      }
     } catch {
-      setLastResponse("Maaf kijiye, abhi ye command process nahi ho payi.");
-      await speakAssistant("Maaf kijiye, abhi ye command process nahi ho payi.", "hi");
+      const err = listenLocaleRef.current === "en"
+        ? "Sorry, I could not process that command."
+        : "Maaf kijiye, abhi ye command process nahi ho payi.";
+      setLastResponse(err);
+      await speakAssistant(err, listenLocaleRef.current);
     } finally {
       dismiss();
     }
-  }, [user?.sessionToken, setPhaseSafe, dismiss, router]);
+  }, [user?.sessionToken, setPhaseSafe, dismiss, router, persistLang]);
 
   const activateAssistant = useCallback(async () => {
     if (!user?.sessionToken || !user.dbId) return;
+    const lang = prefs?.lastLangCode ?? "hi";
+    listenLocaleRef.current = lang;
+    setActiveLang(lang);
+
     setPhaseSafe("active");
     const displayName = prefs?.userName || user.name || "User";
-    let greeting = localActivationGreeting(displayName, "hi");
+    let greeting = localActivationGreeting(displayName, lang);
+    let speechLocale: string | undefined;
     try {
-      greeting = await fetchAssistantGreeting(user.sessionToken, user.dbId, "hi");
-    } catch {
-      /* use local greeting with app user name */
-    }
+      const g = await fetchAssistantGreeting(user.sessionToken, user.dbId, lang);
+      greeting = g.speak;
+      if (g.langCode) await persistLang(normalizeLangCode(g.langCode));
+      speechLocale = g.speechLocale;
+    } catch { /* local fallback */ }
+
     setLastResponse(greeting);
     setPhaseSafe("speaking");
-    await speakAssistant(greeting, "hi");
+    await speakAssistant(greeting, speechLocale ?? lang);
     setPhaseSafe("listening");
     setTranscript("");
     commandBufferRef.current = "";
+
     await startListening({
-      locale: "hi",
-      onPartial: (t) => setTranscript(t),
+      locale: listenLocaleRef.current,
+      onPartial: (t) => {
+        setTranscript(t);
+        const detected = detectLocaleFromTranscript(t);
+        if (detected !== listenLocaleRef.current) {
+          listenLocaleRef.current = detected;
+        }
+      },
       onFinal: (t) => {
         commandBufferRef.current = t;
+        listenLocaleRef.current = detectLocaleFromTranscript(t);
       },
       onError: () => {},
     });
@@ -136,8 +205,19 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       const cmd = commandBufferRef.current.trim() || transcript.trim();
       if (cmd) void handleCommand(cmd);
       else dismiss();
-    }, 12000);
-  }, [user?.sessionToken, user?.dbId, user?.name, prefs?.userName, setPhaseSafe, handleCommand, dismiss, transcript]);
+    }, 14000);
+  }, [
+    user?.sessionToken,
+    user?.dbId,
+    user?.name,
+    prefs?.userName,
+    prefs?.lastLangCode,
+    setPhaseSafe,
+    handleCommand,
+    dismiss,
+    transcript,
+    persistLang,
+  ]);
 
   const tryWakeActivation = useCallback(async () => {
     if (!user?.sessionToken || phaseRef.current !== "idle") return;
@@ -160,7 +240,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     if (listeningRef.current || phaseRef.current !== "idle") return;
     listeningRef.current = true;
     await startListening({
-      locale: "hi",
+      locale: prefs.lastLangCode ?? "hi",
       onPartial: (text) => {
         if (phaseRef.current !== "idle") return;
         if (containsWakePhrase(text)) {
@@ -173,7 +253,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         listeningRef.current = false;
       },
     });
-  }, [prefs?.enabled, prefs?.voiceEnrolled, tryWakeActivation]);
+  }, [prefs?.enabled, prefs?.voiceEnrolled, prefs?.lastLangCode, tryWakeActivation]);
 
   useEffect(() => {
     if (!isAuthenticated || !prefs?.enabled || !prefs.voiceEnrolled) {
@@ -221,6 +301,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       phase,
       transcript,
       lastResponse,
+      activeLang,
       refreshPrefs,
       setEnabled,
       activateManually,

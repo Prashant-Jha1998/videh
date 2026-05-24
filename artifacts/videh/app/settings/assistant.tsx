@@ -98,9 +98,10 @@ export default function AssistantSettingsScreen() {
           <View style={styles.heroIcon}>
             <Ionicons name="mic-circle" size={56} color="#00A884" />
           </View>
-          <Text style={[styles.heroTitle, { color: colors.foreground }]}>India ka voice assistant</Text>
+          <Text style={[styles.heroTitle, { color: colors.foreground }]}>India ka AI voice assistant</Text>
           <Text style={[styles.heroSub, { color: colors.mutedForeground }]}>
-            Settings mein apna awaaz set karein. Sirf aapke awaaz se Hey Videh activate hoga — doosre log nahi chala payenge.
+            Hindi, English, Tamil, Telugu, Bengali, Marathi, Gujarati aur aur bhi — jis bhasha mein bologe, usi mein jawab milega.
+            Kaam poora karke batayega "kaam ho gaya". Galat/unsafe sawaal par jawab nahi dega.
           </Text>
         </View>
 
@@ -188,10 +189,12 @@ export default function AssistantSettingsScreen() {
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>TRY COMMANDS</Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           {[
-            "Rahul ko message bhejo ki main 7 baje aaunga",
-            "Aaj kis kis ka message aaya hai",
-            "Important messages sunao",
-            "Sabka summary bana do",
+            "Amit ko message bhejo ki main late aaunga",
+            "Priya ko call karo",
+            "Aaj kahan se message aaya",
+            "Sab messages read kar do",
+            "Meri broadcast lists batao",
+            "Family group ka khata sunao",
           ].map((cmd) => (
             <Text key={cmd} style={[styles.cmd, { color: colors.mutedForeground }]}>• {cmd}</Text>
           ))}

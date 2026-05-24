@@ -1,10 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import type { AssistantLangCode } from "./assistantLanguages";
+
 export type AssistantPrefs = {
   enabled: boolean;
   voiceEnrolled: boolean;
   listenWhenLocked: boolean;
   userName: string;
+  lastLangCode?: AssistantLangCode;
 };
 
 const KEY = "videh_assistant_prefs_v1";

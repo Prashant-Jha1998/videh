@@ -1,5 +1,11 @@
 import * as Speech from "expo-speech";
 import { Platform } from "react-native";
+import {
+  normalizeLangCode,
+  toRecognitionLocale,
+  toSpeechLocale,
+  type AssistantLangCode,
+} from "./assistantLanguages";
 
 let Voice: {
   isAvailable: () => Promise<boolean>;
@@ -21,10 +27,16 @@ export function isSpeechRecognitionAvailable(): boolean {
   return Platform.OS !== "web" && Voice != null;
 }
 
-export async function speakAssistant(text: string, locale: "hi" | "en" = "hi"): Promise<void> {
+export async function speakAssistant(
+  text: string,
+  langOrLocale: AssistantLangCode | string = "hi",
+): Promise<void> {
+  const locale = langOrLocale.includes("-")
+    ? langOrLocale
+    : toSpeechLocale(normalizeLangCode(langOrLocale));
   await new Promise<void>((resolve) => {
     Speech.speak(text, {
-      language: locale === "hi" ? "hi-IN" : "en-IN",
+      language: locale,
       rate: Platform.OS === "ios" ? 0.95 : 1,
       onDone: () => resolve(),
       onStopped: () => resolve(),
@@ -38,7 +50,7 @@ export async function stopSpeaking(): Promise<void> {
 }
 
 type ListenOpts = {
-  locale?: "hi" | "en";
+  locale?: AssistantLangCode | string;
   onPartial?: (text: string) => void;
   onFinal?: (text: string) => void;
   onError?: (message: string) => void;
@@ -60,8 +72,12 @@ export async function startListening(opts: ListenOpts): Promise<void> {
   Voice.onSpeechError = (e) => {
     opts.onError?.(e.error?.message ?? "Speech error");
   };
-  const locale = opts.locale === "en" ? "en-IN" : "hi-IN";
-  await Voice.start(locale);
+  const code = normalizeLangCode(
+    typeof opts.locale === "string" && opts.locale.includes("-")
+      ? opts.locale.split("-")[0]
+      : opts.locale,
+  );
+  await Voice.start(toRecognitionLocale(code));
 }
 
 export async function stopListening(): Promise<void> {

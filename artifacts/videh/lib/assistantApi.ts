@@ -1,4 +1,5 @@
 import { getApiUrl } from "./api";
+import type { AssistantLangCode } from "./assistantLanguages";
 import type { AssistantPrefs, VoiceFingerprint } from "./assistantPrefs";
 
 function authHeaders(token?: string | null): Record<string, string> {
@@ -7,6 +8,14 @@ function authHeaders(token?: string | null): Record<string, string> {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
+
+export type AssistantCommandResult = {
+  speak: string;
+  intent?: string;
+  langCode?: AssistantLangCode;
+  speechLocale?: string;
+  actions?: Array<{ type: string; chatId?: string; callType?: string; contactName?: string }>;
+};
 
 export async function fetchAssistantPrefs(token?: string | null): Promise<AssistantPrefs | null> {
   const res = await fetch(`${getApiUrl()}/api/assistant/prefs`, { headers: authHeaders(token) });
@@ -59,27 +68,27 @@ export async function verifyAssistantVoice(
 export async function runAssistantCommand(
   token: string | null | undefined,
   text: string,
-  locale: "hi" | "en" = "hi",
-): Promise<{
-  speak: string;
-  intent?: string;
-  actions?: Array<{ type: string; chatId?: string }>;
-}> {
+  localeHint?: AssistantLangCode,
+): Promise<AssistantCommandResult> {
   const res = await fetch(`${getApiUrl()}/api/assistant/command`, {
     method: "POST",
     headers: authHeaders(token),
-    body: JSON.stringify({ text, locale }),
+    body: JSON.stringify({ text, locale: localeHint }),
   });
   const data = await res.json() as {
     success?: boolean;
     speak?: string;
     intent?: string;
-    actions?: Array<{ type: string; chatId?: string }>;
+    langCode?: AssistantLangCode;
+    speechLocale?: string;
+    actions?: Array<{ type: string; chatId?: string; callType?: string; contactName?: string }>;
   };
   if (!data.success) throw new Error("Assistant command failed");
   return {
     speak: data.speak ?? "Done.",
     intent: data.intent,
+    langCode: data.langCode,
+    speechLocale: data.speechLocale,
     actions: data.actions,
   };
 }
@@ -87,11 +96,20 @@ export async function runAssistantCommand(
 export async function fetchAssistantGreeting(
   token: string | null | undefined,
   userId: number,
-  locale: "hi" | "en" = "hi",
-): Promise<string> {
+  locale: AssistantLangCode = "hi",
+): Promise<{ speak: string; langCode?: AssistantLangCode; speechLocale?: string }> {
   const res = await fetch(`${getApiUrl()}/api/assistant/greeting/${userId}?locale=${locale}`, {
     headers: authHeaders(token),
   });
-  const data = await res.json() as { success?: boolean; speak?: string };
-  return data.speak ?? "Videh aapki seva mein hazir hai.";
+  const data = await res.json() as {
+    success?: boolean;
+    speak?: string;
+    langCode?: AssistantLangCode;
+    speechLocale?: string;
+  };
+  return {
+    speak: data.speak ?? "Videh aapki seva mein hazir hai.",
+    langCode: data.langCode,
+    speechLocale: data.speechLocale,
+  };
 }
