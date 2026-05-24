@@ -28,7 +28,7 @@ export async function rotateImage(uri: string, quality: MediaQuality): Promise<s
   return result.uri;
 }
 
-/** Center square crop (WhatsApp-style quick crop). */
+/** Center square crop (Videh-style quick crop). */
 export async function squareCropImage(uri: string, quality: MediaQuality): Promise<string> {
   if (isGifUri(uri)) return uri;
   const { width, height } = await getImageDimensions(uri);

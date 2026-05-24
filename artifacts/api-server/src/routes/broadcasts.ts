@@ -3,6 +3,7 @@ import { assertSameUser, getAuthUserId, requireAuth } from "../lib/auth";
 import { query } from "../lib/db";
 import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
 import { enforceModerationForActivity } from "../lib/moderation";
+import { chatMessagePushPreview } from "../lib/chatMessagePreview";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { publishChatEvent } from "../lib/realtime";
 
@@ -230,7 +231,7 @@ router.post("/:listId/send", async (req: Request, res: Response) => {
       const pushToken = r.push_token;
       const tokens = typeof pushToken === "string" && isValidPushToken(pushToken) ? [pushToken] : [];
       if (!isMuted && tokens.length > 0) {
-        const preview = content.length > 60 ? content.slice(0, 60) + "..." : content;
+        const preview = chatMessagePushPreview(type, content);
         await sendChatPush(
           tokens,
           senderName,

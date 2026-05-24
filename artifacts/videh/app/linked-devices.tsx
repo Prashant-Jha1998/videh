@@ -177,7 +177,7 @@ export default function LinkedDevicesScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
-        {/* WhatsApp-style guide */}
+        {/* Videh-style guide */}
         <View style={styles.guideWrap}>
           {/* Laptop illustration */}
           <View style={[styles.illustrationCircle, { backgroundColor: colors.primary + "18" }]}>

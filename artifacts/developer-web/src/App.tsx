@@ -577,7 +577,7 @@ export default function App() {
             <pre className="code-block rounded-2xl bg-[#0b141a] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
               <code>{API_LIST_TEMPLATES}</code>
             </pre>
-            <p className="text-xs font-semibold text-[#667781] uppercase tracking-wide">Send message (Meta-style path)</p>
+            <p className="text-xs font-semibold text-[#667781] uppercase tracking-wide">Send message (Videh API path)</p>
             <pre className="code-block rounded-2xl bg-[#0b141a] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
               <code>{API_SAMPLE}</code>
             </pre>

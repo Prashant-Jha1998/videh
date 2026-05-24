@@ -28,7 +28,7 @@ import {
   NOTIFICATION_ACTION_REPLY,
   VIDEH_CALLS_CHANNEL_ID,
 } from "@/lib/pushNotifications";
-import { startCallAlert, stopCallAlert } from "@/lib/callRingtone";
+import { startIncomingCallAlert, stopCallAlert } from "@/lib/callRingtone";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -150,7 +150,7 @@ function RootLayoutNav() {
           }
           if (prev?.callId === next.callId) return prev;
           if (Platform.OS !== "web") {
-            void startCallAlert();
+            void startIncomingCallAlert();
             Notifications.scheduleNotificationAsync({
               content: {
                 title: `${next.type === "video" ? "Video" : "Voice"} call`,
@@ -176,7 +176,7 @@ function RootLayoutNav() {
       if (action === "ringing" && callId && user.dbId) {
         setIncomingCall((prev) => {
           if (prev?.callId === callId) return prev;
-          if (Platform.OS !== "web") void startCallAlert();
+          if (Platform.OS !== "web") void startIncomingCallAlert();
           return {
             callId,
             channel: String(payload.channel ?? ""),
@@ -187,7 +187,10 @@ function RootLayoutNav() {
           };
         });
       }
-      if (action === "declined" || action === "ended" || action === "missed") {
+      if (action === "accepted") {
+        void stopCallAlert();
+      }
+      if (action === "declined" || action === "ended" || action === "missed" || action === "busy") {
         setIncomingCall((prev) => {
           if (!prev) return prev;
           if (callId && prev.callId !== callId) return prev;

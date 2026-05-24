@@ -15,12 +15,23 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAssistant } from "@/context/AssistantContext";
 import { useApp } from "@/context/AppContext";
-import { enrollAssistantVoice, patchAssistantPrefs } from "@/lib/assistantApi";
+import {
+  deleteAssistantVoice,
+  enrollAssistantVoice,
+  patchAssistantPrefs,
+} from "@/lib/assistantApi";
 import { isSpeechRecognitionAvailable } from "@/lib/assistantSpeech";
-import { recordVoiceSample } from "@/lib/voiceEnrollment";
+import {
+  deleteEnrollmentFile,
+  playEnrollmentSample,
+  recordVoiceSample,
+  type VoiceEnrollmentSample,
+} from "@/lib/voiceEnrollment";
 import { useColors } from "@/hooks/useColors";
 
 const ENROLLMENT_SAMPLES = 3;
+
+type EnrollPhase = "idle" | "recording" | "review";
 
 export default function AssistantSettingsScreen() {
   const colors = useColors();
@@ -30,50 +41,118 @@ export default function AssistantSettingsScreen() {
   const { prefs, refreshPrefs, setEnabled, activateManually } = useAssistant();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const [enrolling, setEnrolling] = useState(false);
+  const [enrollPhase, setEnrollPhase] = useState<EnrollPhase>("idle");
   const [sampleIndex, setSampleIndex] = useState(0);
-  const [samples, setSamples] = useState<Array<{ durationMs: number; rmsLevels: number[]; peakLevel: number }>>([]);
+  const [samples, setSamples] = useState<VoiceEnrollmentSample[]>([]);
   const [meter, setMeter] = useState(0.2);
   const [listenLocked, setListenLocked] = useState(true);
+  const [playingIdx, setPlayingIdx] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (prefs) setListenLocked(prefs.listenWhenLocked);
   }, [prefs]);
+
+  const resetEnrollment = useCallback(async () => {
+    for (const s of samples) {
+      await deleteEnrollmentFile(s.uri);
+    }
+    setSamples([]);
+    setSampleIndex(0);
+    setEnrollPhase("idle");
+    setPlayingIdx(null);
+  }, [samples]);
 
   const startEnrollment = useCallback(async () => {
     if (Platform.OS === "web") {
       Alert.alert("Mobile app required", "Hey Videh voice setup works on the Android/iOS app.");
       return;
     }
-    setEnrolling(true);
-    setSampleIndex(0);
-    setSamples([]);
+    await resetEnrollment();
+    setEnrollPhase("recording");
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  }, []);
+  }, [resetEnrollment]);
 
   const recordNextSample = useCallback(async () => {
     try {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      const fp = await recordVoiceSample(2400, setMeter);
-      const next = [...samples, fp];
+      const sample = await recordVoiceSample(2600, setMeter);
+      const next = [...samples, sample];
       setSamples(next);
+      setMeter(0.2);
       if (next.length >= ENROLLMENT_SAMPLES) {
-        const ok = await enrollAssistantVoice(user?.sessionToken, next);
-        setEnrolling(false);
-        if (ok) {
-          await refreshPrefs();
-          Alert.alert("Voice set!", "Ab sirf aapka awaaz se Hey Videh activate hoga.");
-        } else {
-          Alert.alert("Error", "Voice profile save nahi ho payi. Dubara try karein.");
-        }
+        setEnrollPhase("review");
       } else {
         setSampleIndex(next.length);
       }
-    } catch (e: any) {
-      Alert.alert("Mic error", e?.message ?? "Recording failed");
-      setEnrolling(false);
+    } catch (e: unknown) {
+      Alert.alert("Microphone error", e instanceof Error ? e.message : "Recording failed.");
+      setEnrollPhase("idle");
     }
-  }, [samples, user?.sessionToken, refreshPrefs]);
+  }, [samples]);
+
+  const playSample = useCallback(async (idx: number) => {
+    const uri = samples[idx]?.uri;
+    if (!uri) return;
+    setPlayingIdx(idx);
+    try {
+      await playEnrollmentSample(uri);
+    } finally {
+      setPlayingIdx(null);
+    }
+  }, [samples]);
+
+  const confirmEnrollment = useCallback(async () => {
+    if (samples.length < ENROLLMENT_SAMPLES) return;
+    setSaving(true);
+    try {
+      const ok = await enrollAssistantVoice(
+        user?.sessionToken,
+        samples.map((s) => s.fingerprint),
+      );
+      if (ok) {
+        await refreshPrefs();
+        if (!prefs?.enabled) {
+          await setEnabled(true);
+        }
+        setEnrollPhase("idle");
+        Alert.alert(
+          "Voice saved",
+          "Say \"Hey Videh\" when the app is open (or with Listen when locked on). Keep the phone unlocked first time to confirm it works.",
+        );
+      } else {
+        Alert.alert("Error", "Could not save voice profile. Please try again.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [samples, user?.sessionToken, refreshPrefs, prefs?.enabled, setEnabled]);
+
+  const deleteVoiceProfile = useCallback(async () => {
+    Alert.alert(
+      "Delete voice profile?",
+      "Hey Videh will stop using your voice until you set it up again.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              await resetEnrollment();
+              const ok = await deleteAssistantVoice(user?.sessionToken);
+              if (ok) {
+                await refreshPrefs();
+                Alert.alert("Deleted", "Set up your voice again when ready.");
+              } else {
+                Alert.alert("Error", "Could not delete voice profile.");
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [resetEnrollment, user?.sessionToken, refreshPrefs]);
 
   const toggleListenLocked = async (value: boolean) => {
     setListenLocked(value);
@@ -89,7 +168,7 @@ export default function AssistantSettingsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
-    <Text style={styles.headerTitle}>Hey Videh</Text>
+        <Text style={styles.headerTitle}>Hey Videh</Text>
         <View style={{ width: 36 }} />
       </View>
 
@@ -98,25 +177,21 @@ export default function AssistantSettingsScreen() {
           <View style={styles.heroIcon}>
             <Ionicons name="mic-circle" size={56} color="#00A884" />
           </View>
-          <Text style={[styles.heroTitle, { color: colors.foreground }]}>India ka AI voice assistant</Text>
+          <Text style={[styles.heroTitle, { color: colors.foreground }]}>Videh AI voice assistant</Text>
           <Text style={[styles.heroSub, { color: colors.mutedForeground }]}>
-            Hindi, English, Tamil, Telugu, Bengali, Marathi, Gujarati aur aur bhi — jis bhasha mein bologe, usi mein jawab milega.
-            Kaam poora karke batayega "kaam ho gaya". Galat/unsafe sawaal par jawab nahi dega.
+            Say &quot;Hey Videh&quot; to send messages, call contacts, read chats, and more. Works in Hindi, English, and other Indian languages.
           </Text>
         </View>
 
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>STATUS</Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
-          <Row
-            label="Voice enrolled"
-            value={prefs?.voiceEnrolled ? "Yes" : "No"}
-            colors={colors}
-          />
+          <Row label="Voice enrolled" value={prefs?.voiceEnrolled ? "Yes" : "No"} colors={colors} />
           <Row
             label="Speech recognition"
             value={isSpeechRecognitionAvailable() ? "Ready" : "Needs mobile app"}
             colors={colors}
           />
+          <Row label="Assistant" value={prefs?.enabled ? "On" : "Off"} colors={colors} />
         </View>
 
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>CONTROLS</Text>
@@ -139,26 +214,36 @@ export default function AssistantSettingsScreen() {
             />
           </View>
           <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-            Lock screen par poori tarah sunne ke liye Android par background permission chahiye (Phase 2).
+            Keep Videh open in the background. With this on, listening continues when the screen is locked (Android). If nothing happens, unlock once and use &quot;Test now&quot; below.
           </Text>
         </View>
 
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>VOICE SETUP</Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
-          {!enrolling ? (
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => void startEnrollment()}>
-              <Ionicons name="recording" size={20} color="#fff" />
-              <Text style={styles.primaryBtnText}>
-                {prefs?.voiceEnrolled ? "Voice dubara set karein" : "Hey Videh bol kar voice set karein"}
-              </Text>
-            </TouchableOpacity>
-          ) : (
+          {enrollPhase === "idle" && (
+            <>
+              <TouchableOpacity style={styles.primaryBtn} onPress={() => void startEnrollment()}>
+                <Ionicons name="recording" size={20} color="#fff" />
+                <Text style={styles.primaryBtnText}>
+                  {prefs?.voiceEnrolled ? "Set up voice again" : "Set up voice"}
+                </Text>
+              </TouchableOpacity>
+              {prefs?.voiceEnrolled ? (
+                <TouchableOpacity style={styles.dangerBtn} onPress={() => void deleteVoiceProfile()}>
+                  <Ionicons name="trash-outline" size={18} color="#c62828" />
+                  <Text style={styles.dangerBtnText}>Delete voice profile</Text>
+                </TouchableOpacity>
+              ) : null}
+            </>
+          )}
+
+          {enrollPhase === "recording" && (
             <View style={styles.enrollBox}>
               <Text style={[styles.enrollStep, { color: colors.foreground }]}>
-                Sample {sampleIndex + 1} / {ENROLLMENT_SAMPLES}
+                Sample {sampleIndex + 1} of {ENROLLMENT_SAMPLES}
               </Text>
               <Text style={[styles.enrollHint, { color: colors.mutedForeground }]}>
-                Button dabayein aur clearly bolein: "Hey Videh"
+                Tap Record and say clearly: &quot;Hey Videh&quot;
               </Text>
               <View style={styles.meterRow}>
                 {Array.from({ length: 12 }).map((_, i) => (
@@ -176,10 +261,61 @@ export default function AssistantSettingsScreen() {
               </View>
               <TouchableOpacity style={styles.primaryBtn} onPress={() => void recordNextSample()}>
                 <Ionicons name="mic" size={20} color="#fff" />
-                <Text style={styles.primaryBtnText}>Record karein</Text>
+                <Text style={styles.primaryBtnText}>Record</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setEnrolling(false)} style={{ marginTop: 12 }}>
+              <TouchableOpacity
+                onPress={() => {
+                  void resetEnrollment();
+                }}
+                style={{ marginTop: 12 }}
+              >
                 <Text style={{ color: colors.mutedForeground, textAlign: "center" }}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {enrollPhase === "review" && (
+            <View style={styles.enrollBox}>
+              <Text style={[styles.enrollStep, { color: colors.foreground }]}>Review your voice</Text>
+              <Text style={[styles.enrollHint, { color: colors.mutedForeground }]}>
+                Play each sample. If it sounds wrong, record again.
+              </Text>
+              {samples.map((_, i) => (
+                <View key={i} style={[styles.sampleRow, { borderColor: colors.border }]}>
+                  <Text style={[styles.sampleLabel, { color: colors.foreground }]}>Sample {i + 1}</Text>
+                  <TouchableOpacity
+                    style={styles.playChip}
+                    onPress={() => void playSample(i)}
+                    disabled={playingIdx !== null}
+                  >
+                    <Ionicons
+                      name={playingIdx === i ? "hourglass-outline" : "play"}
+                      size={16}
+                      color="#00A884"
+                    />
+                    <Text style={styles.playChipText}>
+                      {playingIdx === i ? "Playing…" : "Play"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <TouchableOpacity
+                style={[styles.primaryBtn, saving && { opacity: 0.6 }]}
+                onPress={() => void confirmEnrollment()}
+                disabled={saving}
+              >
+                <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                <Text style={styles.primaryBtnText}>{saving ? "Saving…" : "Save voice profile"}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.secondaryBtn, { borderColor: colors.border }]}
+                onPress={() => {
+                  void resetEnrollment();
+                  setEnrollPhase("recording");
+                  setSampleIndex(0);
+                }}
+              >
+                <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>Record again</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -188,17 +324,18 @@ export default function AssistantSettingsScreen() {
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>TRY COMMANDS</Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           {[
-            "Amit ko message bhejo ki main late aaunga",
-            "Priya ko call karo",
-            "Aaj kahan se message aaya",
-            "Sab messages read kar do",
-            "Meri broadcast lists batao",
-            "Family group ka khata sunao",
+            "Send Amit a message that I will be late",
+            "Call Priya",
+            "Who messaged me today",
+            "Mark all messages as read",
           ].map((cmd) => (
             <Text key={cmd} style={[styles.cmd, { color: colors.mutedForeground }]}>• {cmd}</Text>
           ))}
-          <TouchableOpacity style={[styles.secondaryBtn, { borderColor: colors.border }]} onPress={() => void activateManually()}>
-            <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>Abhi test karein (button se)</Text>
+          <TouchableOpacity
+            style={[styles.secondaryBtn, { borderColor: colors.border }]}
+            onPress={() => void activateManually()}
+          >
+            <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>Test now (button)</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -242,11 +379,32 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   primaryBtnText: { color: "#fff", fontSize: 15, fontFamily: "Inter_700Bold" },
-  secondaryBtn: { marginTop: 14, borderWidth: 1, borderRadius: 24, paddingVertical: 12, alignItems: "center" },
+  dangerBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: 12,
+    paddingVertical: 10,
+  },
+  dangerBtnText: { color: "#c62828", fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  secondaryBtn: { marginTop: 12, borderWidth: 1, borderRadius: 24, paddingVertical: 12, alignItems: "center" },
   secondaryBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
   enrollBox: { alignItems: "center" },
   enrollStep: { fontSize: 16, fontFamily: "Inter_700Bold" },
   enrollHint: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 6, marginBottom: 14, textAlign: "center" },
   meterRow: { flexDirection: "row", alignItems: "flex-end", gap: 4, height: 36, marginBottom: 16 },
+  sampleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    marginBottom: 4,
+  },
+  sampleLabel: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  playChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6 },
+  playChipText: { color: "#00A884", fontSize: 13, fontFamily: "Inter_600SemiBold" },
   cmd: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 22 },
 });

@@ -98,7 +98,7 @@ export default function SettingsScreen() {
 
   const rows: SettingRow[] = useMemo(
     () => [
-      { icon: "mic-circle-outline", iconBg: "#00A884", label: "Hey Videh", value: "Voice assistant — India ke liye", onPress: () => router.push("/settings/assistant" as never) },
+      { icon: "mic-circle-outline", iconBg: "#00A884", label: "Hey Videh", value: "Voice assistant", onPress: () => router.push("/settings/assistant" as never) },
       { icon: "key-outline", iconBg: "#2196F3", label: t("settings.row.account"), value: t("settings.row.accountSub"), onPress: () => router.push("/settings/account") },
       { icon: "lock-closed-outline", iconBg: "#9C27B0", label: t("settings.row.privacy"), value: t("settings.row.privacySub"), onPress: () => router.push("/settings/privacy") },
       { icon: "color-palette-outline", iconBg: "#7C3AED", label: "App Theme", value: "20 colors and 30 gradients, free for 1 year", onPress: () => router.push("/settings/theme" as never) },

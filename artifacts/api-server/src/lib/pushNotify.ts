@@ -13,7 +13,7 @@ type ChatPushOptions = {
   isCall?: boolean;
 };
 
-/** FCM (WhatsApp-style on Android) → Web Push (web) → Expo relay fallback. */
+/** FCM (Videh on Android) → Web Push (web) → Expo relay fallback. */
 export async function sendChatPush(
   to: string | string[],
   title: string,

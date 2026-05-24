@@ -12,7 +12,7 @@ export type CallUiPhase =
 export function phaseLabel(phase: CallUiPhase, isVideo: boolean): string {
   switch (phase) {
     case "outgoing_ringing":
-      return isVideo ? "Video calling…" : "Ringing…";
+      return isVideo ? "Calling…" : "Calling…";
     case "incoming_ringing":
       return isVideo ? "Incoming video call" : "Incoming voice call";
     case "connecting":

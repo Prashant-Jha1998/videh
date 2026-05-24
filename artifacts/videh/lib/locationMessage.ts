@@ -1,5 +1,5 @@
 /**
- * Structured location payloads (WhatsApp-style) stored in message `content` as JSON.
+ * Structured location payloads (Videh-style) stored in message `content` as JSON.
  * `mediaUrl` remains a Google Maps link for tap-to-open.
  */
 

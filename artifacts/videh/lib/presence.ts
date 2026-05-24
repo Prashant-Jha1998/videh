@@ -6,7 +6,7 @@ export type PresenceView = {
   lastSeen: string | null;
 };
 
-/** WhatsApp-style subtitle for chat header / contact info. */
+/** Videh-style subtitle for chat header / contact info. */
 export function formatPresenceSubtitle(p: PresenceView | null | undefined): string {
   if (!p?.canSee) return "";
   if (p.isOnline) return "online";

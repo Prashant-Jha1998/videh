@@ -1,6 +1,6 @@
 export type CallMessageMeta = {
   callType: "audio" | "video";
-  result: "answered" | "missed" | "declined";
+  result: "answered" | "missed" | "declined" | "busy" | "unavailable";
   durationSeconds?: number;
 };
 
@@ -25,6 +25,14 @@ export function formatCallMessageLabel(meta: CallMessageMeta, isMe: boolean): st
   }
   if (meta.result === "declined") {
     return meta.callType === "video" ? "Declined video call" : "Declined voice call";
+  }
+  if (meta.result === "busy") {
+    return meta.callType === "video" ? "Busy on another video call" : "Line busy";
+  }
+  if (meta.result === "unavailable") {
+    return isMe
+      ? (meta.callType === "video" ? "Video call unavailable" : "Couldn't place call")
+      : (meta.callType === "video" ? "Missed video call" : "Missed voice call");
   }
   if (isMe) {
     return meta.callType === "video" ? "Unanswered video call" : "Unanswered voice call";

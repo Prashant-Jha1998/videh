@@ -59,7 +59,7 @@ function stringifyData(data: Record<string, unknown>): Record<string, string> {
   return out;
 }
 
-/** Send via Firebase Cloud Messaging (Android FCM / iOS APNs) — same stack as WhatsApp on Android. */
+/** Send via Firebase Cloud Messaging (Android FCM / iOS APNs). */
 export async function sendFcmChatPush(
   to: string | string[],
   title: string,

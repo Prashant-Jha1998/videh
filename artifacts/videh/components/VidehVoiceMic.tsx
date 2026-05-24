@@ -33,7 +33,7 @@ type Props = {
   fullWidth?: boolean;
 };
 
-export function WhatsAppVoiceMic({ enabled, colors, onSend, onPhaseChange, fullWidth }: Props) {
+export function VidehVoiceMic({ enabled, colors, onSend, onPhaseChange, fullWidth }: Props) {
   const recRef = useRef<Audio.Recording | null>(null);
   const lockedRef = useRef(false);
   const cancelledRef = useRef(false);
@@ -54,8 +54,9 @@ export function WhatsAppVoiceMic({ enabled, colors, onSend, onPhaseChange, fullW
   const releasePendingRef = useRef(false);
   const startingRef = useRef(false);
 
+  /** LOW_QUALITY = mono voice preset (clearer/louder speech than HIGH_QUALITY music preset). */
   const recOptions = useMemo(
-    () => ({ ...Audio.RecordingOptionsPresets.HIGH_QUALITY, isMeteringEnabled: true as const }),
+    () => ({ ...Audio.RecordingOptionsPresets.LOW_QUALITY, isMeteringEnabled: true as const }),
     [],
   );
 

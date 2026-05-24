@@ -17,29 +17,19 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useApp, Chat, type Status } from "@/context/AppContext";
+import { useApp, Chat } from "@/context/AppContext";
 import { formatTime } from "@/utils/time";
 import { DropdownMenu } from "@/components/DropdownMenu";
 import { ThemedHeader } from "@/components/ThemedHeader";
 import { safeJsonArray } from "@/lib/safeJson";
 import { getApiUrl } from "@/lib/api";
+import { getContactStatusRingSegments } from "@/lib/statusRingSegments";
+import { StoryRingAvatar } from "@/components/StoryRing";
 
 interface BroadcastListRow {
   id: number;
   name: string;
   recipient_count: number;
-}
-
-/** Status ring for 1:1 chats: green if any update unseen, grey if all seen (like WhatsApp). */
-function getContactStatusRingState(chat: Chat, statuses: Status[]): { count: number; hasUnviewed: boolean } | null {
-  if (chat.isGroup || chat.otherUserId == null) return null;
-  const uid = String(chat.otherUserId);
-  const theirs = statuses.filter((s) => s.userId === uid);
-  if (theirs.length === 0) return null;
-  return {
-    count: theirs.length,
-    hasUnviewed: theirs.some((s) => !s.viewed),
-  };
 }
 
 const FAVORITES_KEY = "videh_favorite_chat_ids";
@@ -414,7 +404,7 @@ export default function ChatsScreen() {
         </View>
       </ThemedHeader>
 
-      {/* WhatsApp-style dropdown */}
+      {/* Videh-style dropdown */}
       <DropdownMenu
         visible={menuOpen}
         onClose={() => setMenuOpen(false)}
@@ -649,10 +639,13 @@ function ChatRow({
   const initials = chat.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = chat.name.charCodeAt(0) * 37 % 360;
   const avatarBg = `hsl(${hue},50%,45%)`;
-  const statusRing = useMemo(() => getContactStatusRingState(chat, statuses), [chat, statuses]);
+  const statusRingSegments = useMemo(
+    () => (chat.isGroup ? null : getContactStatusRingSegments(chat.otherUserId, statuses)),
+    [chat.isGroup, chat.otherUserId, statuses],
+  );
 
   const hasAvatar = Boolean(chat.avatar);
-  const wrapStyle = statusRing
+  const wrapStyle = statusRingSegments
     ? styles.avatarRingTouchable
     : [styles.avatarWrap, hasAvatar ? styles.avatarWrapPhoto : { backgroundColor: avatarBg }];
 
@@ -664,17 +657,8 @@ function ChatRow({
         activeOpacity={0.85}
       >
         <View style={wrapStyle}>
-          {statusRing ? (
-            <View
-              style={[
-                styles.statusRingOuter,
-                {
-                  borderColor: statusRing.hasUnviewed ? "#25D366" : "#8696a0",
-                  borderStyle:
-                    Platform.OS !== "web" && statusRing.count > 1 && !statusRing.hasUnviewed ? "dashed" : "solid",
-                },
-              ]}
-            >
+          {statusRingSegments ? (
+            <StoryRingAvatar segments={statusRingSegments}>
               {hasAvatar ? (
                 <Image source={{ uri: chat.avatar! }} style={styles.statusRingInnerImg} contentFit="cover" />
               ) : (
@@ -682,12 +666,7 @@ function ChatRow({
                   <Text style={styles.statusRingInnerText}>{initials}</Text>
                 </View>
               )}
-              {statusRing.count > 1 && !selected && (
-                <View style={[styles.statusRingCountBadge, { backgroundColor: colors.primary }]}>
-                  <Text style={styles.statusRingCountText}>{statusRing.count > 9 ? "9+" : statusRing.count}</Text>
-                </View>
-              )}
-            </View>
+            </StoryRingAvatar>
           ) : hasAvatar ? (
             <Image source={{ uri: chat.avatar! }} style={styles.avatarImg} contentFit="cover" />
           ) : (
@@ -773,30 +752,9 @@ const styles = StyleSheet.create({
     position: "relative",
     overflow: "visible",
   },
-  statusRingOuter: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    borderWidth: 2.5,
-    padding: 2,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   statusRingInnerImg: { width: 44, height: 44, borderRadius: 22 },
   statusRingInnerFallback: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   statusRingInnerText: { color: "#fff", fontSize: 15, fontFamily: "Inter_700Bold" },
-  statusRingCountBadge: {
-    position: "absolute",
-    bottom: -1,
-    right: -2,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    paddingHorizontal: 4,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  statusRingCountText: { color: "#fff", fontSize: 10, fontFamily: "Inter_700Bold" },
   avatarImg: { width: 52, height: 52, borderRadius: 26 },
   avatarText: { color: "#fff", fontSize: 18, fontFamily: "Inter_700Bold" },
   onlineDot: { width: 14, height: 14, borderRadius: 7, position: "absolute", bottom: 4, right: 3, borderWidth: 2, borderColor: "#fff" },

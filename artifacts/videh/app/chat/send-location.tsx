@@ -20,7 +20,6 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-import { getApiUrl } from "@/lib/api";
 import {
   ensureLocationServicesEnabled,
   refineDeviceLocation,
@@ -29,14 +28,11 @@ import {
   reverseGeocodeLabel,
 } from "@/lib/locationUtils";
 import {
-  encodeLocationPayload,
-  mapsUrl,
   staticMapFallbackUrl,
   staticMapImageUrl,
   type LocationMessagePayload,
 } from "@/lib/locationMessage";
-
-const API_BASE = getApiUrl();
+import { sendChatLocationMessage } from "@/lib/sendChatLocation";
 const { width: SW } = Dimensions.get("window");
 const MAP_H = Math.round(SW * 0.42);
 
@@ -97,14 +93,14 @@ export default function SendLocationScreen() {
       const granted = await requestForegroundLocationPermission();
       if (loadGenRef.current !== gen) return;
       if (!granted) {
-        setErr("Location permission chahiye. Phone Settings → Videh → Location → Allow.");
+        setErr("Location permission is required. Open Settings → Videh → Location → Allow.");
         return;
       }
 
       const servicesOk = await ensureLocationServicesEnabled();
       if (loadGenRef.current !== gen) return;
       if (!servicesOk) {
-        setErr("Phone ka Location / GPS on karein, phir refresh dabayein.");
+        setErr("Turn on Location / GPS on your phone, then tap refresh.");
         return;
       }
 
@@ -123,10 +119,10 @@ export default function SendLocationScreen() {
         return;
       }
 
-      setErr("Location nahi mil rahi. GPS on karke refresh try karein.");
+      setErr("Could not get your location. Turn on GPS and try refresh.");
     } catch {
       if (loadGenRef.current !== gen) return;
-      setErr("Location load nahi ho payi. Dubara try karein.");
+      setErr("Could not load location. Please try again.");
     } finally {
       if (loadGenRef.current === gen) {
         setLoading(false);
@@ -140,7 +136,7 @@ export default function SendLocationScreen() {
     const watchdog = setTimeout(() => {
       setLoading((loading) => {
         if (!loading) return loading;
-        setErr((prev) => prev ?? "Location bahut der se load ho rahi hai. GPS on karke refresh dabayein.");
+        setErr((prev) => prev ?? "Location is taking too long. Turn on GPS and tap refresh.");
         return false;
       });
     }, 14_000);
@@ -154,29 +150,8 @@ export default function SendLocationScreen() {
         : staticMapImageUrl(lat, lng, Math.round(SW * 2), MAP_H * 2, 15))
       : null;
 
-  const postLocation = async (payload: LocationMessagePayload) => {
-    if (!chatId || !user?.dbId) return null;
-    const content = encodeLocationPayload(payload);
-    const url = mapsUrl(payload.lat, payload.lng);
-    const res = await fetch(`${API_BASE}/api/chats/${chatId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ senderId: user.dbId, content, type: "location", mediaUrl: url }),
-    });
-    const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
-    if (res.status === 403) {
-      const msg = typeof data.message === "string" ? data.message : "You are not allowed to send messages in this chat.";
-      Alert.alert("Cannot send message", msg);
-      return null;
-    }
-    if (data?.success && data.message && typeof data.message === "object" && data.message.id != null) {
-      return String(data.message.id);
-    }
-    return null;
-  };
-
   const sendStatic = async (label?: string) => {
-    if (lat == null || lng == null || !chatId) return;
+    if (lat == null || lng == null || !chatId || !user?.dbId) return;
     setSending(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
@@ -187,7 +162,16 @@ export default function SendLocationScreen() {
         lng,
         label: label ?? areaLabel,
       };
-      await postLocation(payload);
+      const result = await sendChatLocationMessage({
+        chatId,
+        senderId: user.dbId,
+        sessionToken: user.sessionToken,
+        payload,
+      });
+      if (!result.ok) {
+        Alert.alert("Location not sent", result.message);
+        return;
+      }
       await loadMessages(chatId);
       router.back();
     } finally {
@@ -196,7 +180,7 @@ export default function SendLocationScreen() {
   };
 
   const sendLive = async () => {
-    if (lat == null || lng == null || !chatId) return;
+    if (lat == null || lng == null || !chatId || !user?.dbId) return;
     setSending(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const until = Date.now() + DURATIONS[durationIdx].ms;
@@ -210,10 +194,24 @@ export default function SendLocationScreen() {
       label: areaLabel,
     };
     try {
-      const mid = await postLocation(payload);
+      const result = await sendChatLocationMessage({
+        chatId,
+        senderId: user.dbId,
+        sessionToken: user.sessionToken,
+        payload,
+      });
+      if (!result.ok) {
+        Alert.alert("Live location not sent", result.message);
+        return;
+      }
       await loadMessages(chatId);
       setLivePanelOpen(false);
-      if (mid) startLiveLocationSession({ chatId, messageId: mid, untilMs: until, comment: comment.trim() || undefined });
+      startLiveLocationSession({
+        chatId,
+        messageId: result.messageId,
+        untilMs: until,
+        comment: comment.trim() || undefined,
+      });
       router.back();
     } finally {
       setSending(false);

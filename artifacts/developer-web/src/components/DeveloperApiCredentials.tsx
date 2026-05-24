@@ -221,7 +221,7 @@ export function DeveloperApiCredentials({
             <p className="text-xs font-semibold text-white">Use on your other website / app</p>
             <p className="text-[11px] text-white/60 mt-0.5 leading-relaxed">
               Copy into <strong className="text-white/90">.env</strong> on your server (Node, PHP, Laravel, Python).
-              Automatic WhatsApp-style messages use{" "}
+              Automatic Videh template messages use{" "}
               <code className="text-[10px] text-[#00a884]">POST /v1/&#123;phone-number-id&#125;/messages</code> with an{" "}
               <strong className="text-white/90">approved template</strong>.
             </p>

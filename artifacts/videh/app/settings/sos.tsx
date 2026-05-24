@@ -288,19 +288,11 @@ export default function SosScreen() {
   const openSosFallbackOptions = (numbers: string[], message: string) => {
     if (!numbers.length) return;
     const smsUrl = `sms:${numbers.join(",")}?body=${encodeURIComponent(message)}`;
-    const whatsappTarget = numbers[0].replace(/[^\d]/g, "");
-    const whatsappUrl = `whatsapp://send?phone=${whatsappTarget}&text=${encodeURIComponent(message)}`;
-    Alert.alert("Send emergency text", "Choose a platform", [
+    Alert.alert("Send emergency text", "Choose how to send", [
       {
         text: "SMS",
         onPress: () => {
           Linking.openURL(smsUrl).catch(() => Alert.alert("Error", "Could not open SMS app."));
-        },
-      },
-      {
-        text: "WhatsApp",
-        onPress: () => {
-          Linking.openURL(whatsappUrl).catch(() => Alert.alert("WhatsApp not found", "Please use SMS option."));
         },
       },
       { text: "Cancel", style: "cancel" },

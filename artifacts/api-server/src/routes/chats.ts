@@ -6,6 +6,7 @@ import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { query } from "../lib/db";
 import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
+import { chatMessagePushPreview } from "../lib/chatMessagePreview";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { enforceModerationForActivity } from "../lib/moderation";
 import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
@@ -747,7 +748,7 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
       .map((m: any) => m.push_token)
       .filter((t: unknown): t is string => isValidPushToken(t));
     if (recipientUserIds.length > 0 || tokens.length > 0) {
-      const preview = (content ?? "").length > 60 ? content!.slice(0, 60) + "..." : (content ?? "");
+      const preview = chatMessagePushPreview(type ?? "text", content ?? "");
       await sendChatPush(
         tokens,
         senderName,
@@ -887,11 +888,11 @@ router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Re
       .map((m: { push_token: string | null }) => m.push_token)
       .filter((t: unknown): t is string => isValidPushToken(t));
     if (tokens.length > 0) {
-      const preview = content.length > 60 ? `${content.slice(0, 60)}...` : content;
+      const preview = chatMessagePushPreview(messageType, content) || "Forwarded message";
       await sendChatPush(
         tokens,
         senderName,
-        preview || "Forwarded message",
+        preview,
         {
           chatId: targetId,
           messageId: String(result.rows[0].id),

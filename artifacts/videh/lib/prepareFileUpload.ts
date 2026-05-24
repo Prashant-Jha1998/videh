@@ -39,7 +39,7 @@ function safeUploadName(name: string): string {
 
 /**
  * Android document picker often returns content:// URIs that fetch/FormData cannot read.
- * Copy to app cache as file:// before upload (WhatsApp-style reliability).
+ * Copy to app cache as file:// before upload (Videh-style reliability).
  */
 export async function ensureUploadableFileUri(uri: string, filename: string): Promise<string> {
   if (!uri) throw new Error("No file selected.");

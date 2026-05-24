@@ -9,14 +9,14 @@ export type ChannelStatus = "none" | "otp_pending" | "verified" | "suspended";
 const CHANNEL_OTP_TTL_MS = 10 * 60 * 1000;
 const channelOtpKey = (leadId: number, phone: string) => `dev-channel-otp:${leadId}:${phone}`;
 
-/** 15-digit numeric string (Meta-style ID). Node randomInt max span is ~2^48, so build digits explicitly. */
+/** 15-digit numeric string (Videh business channel ID). Node randomInt max span is ~2^48, so build digits explicitly. */
 function random15DigitNumeric(): string {
   let digits = String(crypto.randomInt(1, 10));
   for (let i = 1; i < 15; i++) digits += String(crypto.randomInt(0, 10));
   return digits;
 }
 
-/** 15-digit numeric ID (Meta-style Phone Number ID appearance). */
+/** 15-digit numeric ID (Videh phone number ID format). */
 export function generatePhoneNumberId(): string {
   return random15DigitNumeric();
 }

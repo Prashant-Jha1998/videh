@@ -29,7 +29,7 @@ type CallInvite = {
   callerId: number;
   callerName: string | null;
   participantIds: number[];
-  statuses: Record<number, "ringing" | "accepted" | "declined" | "missed" | "ended">;
+  statuses: Record<number, "ringing" | "accepted" | "declined" | "missed" | "ended" | "busy">;
   createdAt: number;
   updatedAt: number;
   connectedAt?: number;
@@ -98,10 +98,25 @@ function isCallEnded(call: CallInvite): boolean {
   if (invitees.length === 0) return false;
   const allResolved = invitees.every((id) => {
     const status = call.statuses[id];
-    return status === "accepted" || status === "declined" || status === "missed";
+    return status === "accepted" || status === "declined" || status === "missed" || status === "busy";
   });
   if (!allResolved) return false;
   return !invitees.some((id) => call.statuses[id] === "accepted");
+}
+
+async function listActiveCalls(): Promise<CallInvite[]> {
+  const keys = await stateKeys("webrtc:call:");
+  const calls = await Promise.all(keys.map((key) => stateGetJson<CallInvite>(key)));
+  return calls.filter((c): c is CallInvite => Boolean(c) && !isCallEnded(c));
+}
+
+/** User is already on a connected call (busy). */
+function userIsOnLiveCall(calls: CallInvite[], userId: number, exceptCallId?: string): boolean {
+  return calls.some((call) => {
+    if (exceptCallId && call.callId === exceptCallId) return false;
+    if (isCallEnded(call)) return false;
+    return call.statuses[userId] === "accepted";
+  });
 }
 
 function isCallParticipant(call: CallInvite, userId: number): boolean {
@@ -113,12 +128,17 @@ async function persistCallHistory(call: CallInvite): Promise<void> {
   const calleeId = call.participantIds[0];
   const calleeStatus = call.statuses[calleeId];
   let status = "missed";
-  if (calleeStatus === "declined") status = "declined";
+  if (calleeStatus === "busy") status = "busy";
+  else if (calleeStatus === "declined") status = "declined";
   else if (call.connectedAt) status = "answered";
   const durationSeconds = call.connectedAt
     ? Math.max(0, Math.round((Date.now() - call.connectedAt) / 1000))
     : 0;
-  const result = status === "answered" ? "answered" : status === "declined" ? "declined" : "missed";
+  const result =
+    status === "answered" ? "answered"
+    : status === "declined" ? "declined"
+    : status === "busy" ? "busy"
+    : "missed";
   try {
     await query(
       `INSERT INTO calls (caller_id, callee_id, chat_id, type, status, duration_seconds, started_at, ended_at)
@@ -137,7 +157,7 @@ async function persistCallHistory(call: CallInvite): Promise<void> {
     publishCallSignal({
       chatId: call.chatId,
       userIds: [call.callerId, ...call.participantIds],
-      action: result === "answered" ? "ended" : result === "declined" ? "declined" : "missed",
+      action: result === "answered" ? "ended" : result === "declined" ? "declined" : result === "busy" ? "busy" : "missed",
       payload: { callId: call.callId, chatId: call.chatId, type: call.type, result, durationSeconds },
     });
   } catch (err) {
@@ -148,6 +168,9 @@ async function persistCallHistory(call: CallInvite): Promise<void> {
 function serializeIncoming(call: CallInvite, userId: number) {
   const acceptedCount = Object.values(call.statuses).filter((status) => status === "accepted").length;
   const ringingCount = Object.values(call.statuses).filter((status) => status === "ringing").length;
+  const busyCount = Object.values(call.statuses).filter((status) => status === "busy").length;
+  const declinedCount = Object.values(call.statuses).filter((status) => status === "declined").length;
+  const missedCount = Object.values(call.statuses).filter((status) => status === "missed").length;
   return {
     callId: call.callId,
     channel: call.channel,
@@ -158,6 +181,9 @@ function serializeIncoming(call: CallInvite, userId: number) {
     participantCount: call.participantIds.length + 1,
     acceptedCount,
     ringingCount,
+    busyCount,
+    declinedCount,
+    missedCount,
     status: call.statuses[userId] ?? null,
     createdAt: new Date(call.createdAt).toISOString(),
   };
@@ -213,8 +239,17 @@ router.post("/calls", async (req: Request, res: Response) => {
 
     const callId = `call_${chatId}_${Date.now()}`;
     const channel = `videh_${chatId}_${Date.now()}`;
+    const liveCalls = await listActiveCalls();
     const statuses: CallInvite["statuses"] = {};
-    callableParticipantIds.forEach((id) => { statuses[id] = "ringing"; });
+    const busyParticipantIds: number[] = [];
+    callableParticipantIds.forEach((id) => {
+      if (userIsOnLiveCall(liveCalls, id)) {
+        statuses[id] = "busy";
+        busyParticipantIds.push(id);
+      } else {
+        statuses[id] = "ringing";
+      }
+    });
     statuses[callerId] = "accepted";
     const invite: CallInvite = {
       callId,
@@ -235,11 +270,20 @@ router.post("/calls", async (req: Request, res: Response) => {
       action: "ringing",
       payload: serializeIncoming(invite, callerId),
     });
+    const ringingIds = callableParticipantIds.filter((id) => statuses[id] === "ringing");
     const pushTokens = members.rows
-      .filter((row: any) => callableParticipantIds.includes(Number(row.user_id)))
+      .filter((row: any) => ringingIds.includes(Number(row.user_id)))
       .map((row: any) => row.push_token)
       .filter((t: unknown): t is string => isValidPushToken(t));
-    if (callableParticipantIds.length > 0 || pushTokens.length > 0) {
+    if (busyParticipantIds.length > 0) {
+      publishCallSignal({
+        chatId,
+        userIds: [callerId, ...busyParticipantIds],
+        action: "busy",
+        payload: { callId, chatId, busyParticipantIds, type: invite.type },
+      });
+    }
+    if (ringingIds.length > 0 && pushTokens.length > 0) {
       await sendChatPush(
         pushTokens,
         body.type === "video" ? "Video call" : "Voice call",
@@ -256,7 +300,17 @@ router.post("/calls", async (req: Request, res: Response) => {
         { categoryId: EXPO_INCOMING_CALL_CATEGORY_ID, threadId: `call-${callId}`, isCall: true },
       );
     }
-    res.json({ success: true, call: serializeIncoming(invite, callerId), participantIds: callableParticipantIds });
+    const allInviteesBusy = callableParticipantIds.length > 0 && ringingIds.length === 0;
+    if (allInviteesBusy) {
+      await persistCallHistory(invite);
+    }
+    res.json({
+      success: true,
+      call: serializeIncoming(invite, callerId),
+      participantIds: callableParticipantIds,
+      busyParticipantIds,
+      allInviteesBusy,
+    });
   } catch (err) {
     req.log?.error?.({ err }, "create webrtc call invite");
     res.status(500).json({ success: false, message: "Could not start call." });
@@ -286,7 +340,27 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
     return;
   }
   if (!assertSameUser(req, res, userId)) return;
-  call.statuses[userId] = body.action === "accept" ? "accepted" : "declined";
+
+  if (body.action === "accept") {
+    const liveCalls = await listActiveCalls();
+    if (userIsOnLiveCall(liveCalls, userId, call.callId)) {
+      call.statuses[userId] = "busy";
+      call.updatedAt = Date.now();
+      publishCallSignal({
+        chatId: call.chatId,
+        userIds: [call.callerId, ...call.participantIds],
+        action: "busy",
+        payload: serializeIncoming(call, userId),
+      });
+      if (isCallEnded(call)) await persistCallHistory(call);
+      await saveCall(call);
+      res.json({ success: true, call: serializeIncoming(call, userId), busy: true });
+      return;
+    }
+    call.statuses[userId] = "accepted";
+  } else {
+    call.statuses[userId] = "declined";
+  }
   if (body.action === "decline") {
     const text = String(body.declineMessage ?? "").trim().slice(0, 500);
     if (text) {
@@ -349,7 +423,11 @@ router.get("/calls/:callId/status", async (req: Request, res: Response) => {
   const ringingCount = Object.values(call.statuses).filter((status) => status === "ringing").length;
   const declinedCount = Object.values(call.statuses).filter((status) => status === "declined").length;
   const missedCount = Object.values(call.statuses).filter((status) => status === "missed").length;
+  const busyCount = Object.values(call.statuses).filter((status) => status === "busy").length;
   const ended = isCallEnded(call);
+  const allInviteesBusy =
+    call.participantIds.length > 0
+    && call.participantIds.every((id) => call.statuses[id] === "busy");
   const acceptedUserIds = Object.entries(call.statuses)
     .filter(([, status]) => status === "accepted")
     .map(([id]) => Number(id))
@@ -361,6 +439,8 @@ router.get("/calls/:callId/status", async (req: Request, res: Response) => {
     ringingCount,
     declinedCount,
     missedCount,
+    busyCount,
+    allInviteesBusy,
     ended,
     statuses: call.statuses,
     acceptedUserIds,

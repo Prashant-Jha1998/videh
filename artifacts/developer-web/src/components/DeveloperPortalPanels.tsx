@@ -118,9 +118,9 @@ export function DeveloperTemplatesPanel({
     <section className="space-y-6">
       <div className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-3">
         <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Message templates</p>
-        <h2 className="text-2xl font-bold text-[#111b21]">WhatsApp template studio</h2>
+        <h2 className="text-2xl font-bold text-[#111b21]">Videh template studio</h2>
         <p className="text-sm text-[#667781] max-w-2xl">
-          Build templates like WhatsApp Business Manager — header, body with {"{{1}}"} variables, footer, and buttons.
+          Build templates for Videh Business — header, body with {"{{1}}"} variables, footer, and buttons.
           Live preview shows exactly how the message will look to your customers. Videh admin approves before production
           send.
         </p>

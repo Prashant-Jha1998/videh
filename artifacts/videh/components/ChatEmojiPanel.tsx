@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Dimensions,
   FlatList,
   ScrollView,
   StyleSheet,
@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { GifStickerTile } from "@/components/GifStickerTile";
 import {
   GIF_QUICK_CATEGORIES,
   fetchTrendingGifs,
@@ -54,6 +55,8 @@ type Props = {
 
 const NUM_COLUMNS = 3;
 const PANEL_HEIGHT = 300;
+const SCREEN_W = Dimensions.get("window").width;
+const CELL_SIZE = Math.floor((SCREEN_W - 12) / NUM_COLUMNS);
 
 export function ChatEmojiPanel({
   visible,
@@ -69,10 +72,13 @@ export function ChatEmojiPanel({
   const [search, setSearch] = useState("");
   const [items, setItems] = useState<GifMediaItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listRef = useRef<FlatList<GifMediaItem>>(null);
 
   const loadMedia = useCallback(async (mode: Tab, query: string, categoryQuery?: string) => {
     setLoading(true);
+    setLoadError(null);
     try {
       const q = (query.trim() || categoryQuery || "").trim();
       let next: GifMediaItem[] = [];
@@ -82,8 +88,10 @@ export function ChatEmojiPanel({
         next = q ? await searchStickers(q) : await fetchTrendingStickers();
       }
       setItems(next);
+      if (next.length === 0) setLoadError("No GIFs found. Check connection or try again.");
     } catch {
       setItems([]);
+      setLoadError("Could not load GIFs. Pull to refresh or try again.");
     } finally {
       setLoading(false);
     }
@@ -108,24 +116,31 @@ export function ChatEmojiPanel({
 
   const onCategory = (query: string) => {
     setSearch("");
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
     void loadMedia("gif", "", query);
   };
 
-  if (!visible) return null;
-
-  const renderMediaCell = ({ item }: { item: GifMediaItem }) => (
-    <TouchableOpacity
-      style={styles.mediaCell}
-      activeOpacity={0.7}
-      onPress={() => (tab === "gif" ? onPickGif(item) : onPickSticker(item))}
-    >
-      <Image source={{ uri: item.previewUrl }} style={styles.mediaThumb} contentFit="cover" />
-    </TouchableOpacity>
+  const onPickMedia = useCallback(
+    (item: GifMediaItem) => {
+      if (tab === "gif") onPickGif(item);
+      else onPickSticker(item);
+    },
+    [tab, onPickGif, onPickSticker],
   );
+
+  const renderMediaCell = useCallback(
+    ({ item }: { item: GifMediaItem }) => (
+      <GifStickerTile item={item} size={CELL_SIZE} onPress={() => onPickMedia(item)} />
+    ),
+    [onPickMedia],
+  );
+
+  const listKey = useMemo(() => `${tab}-${search}`, [tab, search]);
+
+  if (!visible) return null;
 
   return (
     <View style={[styles.panel, { backgroundColor, borderTopColor: borderColor, height: PANEL_HEIGHT }]}>
-      {/* Top bar: search + tabs (WhatsApp-style) */}
       <View style={[styles.topBar, { borderBottomColor: borderColor }]}>
         <Ionicons name="search" size={20} color={mutedColor} style={styles.searchIcon} />
         <TextInput
@@ -139,6 +154,8 @@ export function ChatEmojiPanel({
             if (tab === "emoji" && search.trim()) {
               const match = EMOJI_SECTIONS.flatMap((s) => s.emojis).find((e) => e.includes(search.trim()));
               if (match) onPickEmoji(match);
+            } else if (tab !== "emoji") {
+              void loadMedia(tab, search);
             }
           }}
         />
@@ -197,14 +214,28 @@ export function ChatEmojiPanel({
             </View>
           ) : (
             <FlatList
+              ref={listRef}
+              key={listKey}
               data={items}
               keyExtractor={(it) => it.id}
               numColumns={NUM_COLUMNS}
               renderItem={renderMediaCell}
+              style={styles.flex}
               contentContainerStyle={styles.mediaList}
               keyboardShouldPersistTaps="always"
+              removeClippedSubviews={false}
+              initialNumToRender={12}
+              maxToRenderPerBatch={15}
+              windowSize={7}
+              getItemLayout={(_, index) => ({
+                length: CELL_SIZE,
+                offset: CELL_SIZE * Math.floor(index / NUM_COLUMNS),
+                index,
+              })}
               ListEmptyComponent={
-                <Text style={[styles.emptyText, { color: mutedColor }]}>No results</Text>
+                <Text style={[styles.emptyText, { color: mutedColor }]}>
+                  {loadError ?? "No results"}
+                </Text>
               }
             />
           )}
@@ -262,13 +293,7 @@ const styles = StyleSheet.create({
   },
   categoryEmoji: { fontSize: 14, marginRight: 4 },
   categoryLabel: { fontSize: 13, fontFamily: "Inter_500Medium" },
-  mediaList: { padding: 6 },
-  mediaCell: {
-    width: `${100 / NUM_COLUMNS}%`,
-    aspectRatio: 1,
-    padding: 3,
-  },
-  mediaThumb: { width: "100%", height: "100%", borderRadius: 8, backgroundColor: "rgba(0,0,0,0.04)" },
+  mediaList: { paddingHorizontal: 4, paddingBottom: 8 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  emptyText: { textAlign: "center", marginTop: 24, fontFamily: "Inter_400Regular" },
+  emptyText: { textAlign: "center", marginTop: 24, fontFamily: "Inter_400Regular", paddingHorizontal: 16 },
 });

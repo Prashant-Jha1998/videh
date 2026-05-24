@@ -30,7 +30,7 @@ export function formatFullTime(timestamp: number): string {
   return `${h % 12 || 12}:${m} ${ampm}`;
 }
 
-/** Chat bubbles — WhatsApp-style lowercase am/pm */
+/** Chat bubbles — Videh-style lowercase am/pm */
 export function formatChatBubbleTime(timestamp: number): string {
   const date = new Date(timestamp);
   const h = date.getHours();
@@ -39,7 +39,7 @@ export function formatChatBubbleTime(timestamp: number): string {
   return `${h % 12 || 12}:${m} ${ampm}`;
 }
 
-/** Short relative label for full-screen media headers (WhatsApp-style). */
+/** Short relative label for full-screen media headers (Videh-style). */
 export function formatRelativeHeader(timestamp: number): string {
   const diff = Date.now() - timestamp;
   if (diff < 60_000) return "Just now";

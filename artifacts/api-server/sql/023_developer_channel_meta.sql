@@ -1,4 +1,4 @@
--- Meta-style business channel: dedicated phone, Phone Number ID, Business Account ID
+-- Videh business channel: dedicated phone, Phone Number ID, Business Account ID
 ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS channel_phone TEXT;
 ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS channel_status TEXT NOT NULL DEFAULT 'none';
 ALTER TABLE developer_leads ADD COLUMN IF NOT EXISTS channel_verified_at TIMESTAMPTZ;

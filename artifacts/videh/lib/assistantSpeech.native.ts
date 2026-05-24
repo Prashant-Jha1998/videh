@@ -1,5 +1,8 @@
 import * as Speech from "expo-speech";
 import {
+  AVAudioSessionCategory,
+  AVAudioSessionCategoryOptions,
+  AVAudioSessionMode,
   ExpoSpeechRecognitionModule,
 } from "expo-speech-recognition";
 import { Platform } from "react-native";
@@ -9,6 +12,7 @@ import {
   toSpeechLocale,
   type AssistantLangCode,
 } from "./assistantLanguages";
+import { WAKE_PHRASES } from "./assistantPrefs";
 
 type Listener = { remove: () => void };
 
@@ -58,6 +62,8 @@ export async function stopSpeaking(): Promise<void> {
 
 type ListenOpts = {
   locale?: AssistantLangCode | string;
+  /** Wake-word loop: biased phrases, hands-free Android intent, lock-friendly iOS audio session. */
+  wakeMode?: boolean;
   onPartial?: (text: string) => void;
   onFinal?: (text: string) => void;
   onError?: (message: string) => void;
@@ -97,12 +103,26 @@ export async function startListening(opts: ListenOpts): Promise<void> {
   );
 
   ExpoSpeechRecognitionModule.start({
-    lang: toRecognitionLocale(code),
+    lang: opts.wakeMode ? "en-IN" : toRecognitionLocale(code),
     interimResults: true,
     continuous: true,
+    contextualStrings: opts.wakeMode ? WAKE_PHRASES : undefined,
+    androidIntent: opts.wakeMode ? "android.speech.action.VOICE_SEARCH_HANDS_FREE" : undefined,
     androidIntentOptions: {
-      EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 12000,
+      EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 2500 : 12000,
+      EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 1500 : 5000,
     },
+    iosCategory: opts.wakeMode
+      ? {
+          category: AVAudioSessionCategory.playAndRecord,
+          categoryOptions: [
+            AVAudioSessionCategoryOptions.defaultToSpeaker,
+            AVAudioSessionCategoryOptions.allowBluetooth,
+            AVAudioSessionCategoryOptions.mixWithOthers,
+          ],
+          mode: AVAudioSessionMode.measurement,
+        }
+      : undefined,
   });
 }
 

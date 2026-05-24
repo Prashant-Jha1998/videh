@@ -89,6 +89,21 @@ router.patch("/prefs", async (req: Request, res: Response) => {
   }
 });
 
+router.delete("/enroll", async (req: Request, res: Response) => {
+  const userId = Number((req as any).authUserId);
+  try {
+    await query(`DELETE FROM assistant_voice_samples WHERE user_id = $1`, [userId]);
+    await query(
+      `UPDATE users SET assistant_voice_enrolled = FALSE, updated_at = NOW() WHERE id = $1`,
+      [userId],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    req.log?.error?.({ err }, "assistant enroll delete");
+    res.status(500).json({ success: false });
+  }
+});
+
 router.post("/enroll", async (req: Request, res: Response) => {
   const userId = Number((req as any).authUserId);
   const body = req.body as { samples?: unknown[] };

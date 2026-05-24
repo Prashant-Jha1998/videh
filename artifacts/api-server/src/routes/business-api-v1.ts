@@ -16,7 +16,7 @@ const router = Router();
 
 router.use(requireDeveloperApi);
 
-/** GET /v1/me — Meta-style app credentials overview */
+/** GET /v1/me — Videh Business API credentials overview */
 router.get("/me", async (req, res) => {
   try {
     await ensureDeveloperChannelColumns();
@@ -104,7 +104,7 @@ router.get("/templates/:idOrKey", async (req, res) => {
   }
 });
 
-/** POST /v1/settings/webhook — register delivery webhook (Meta-style) */
+/** POST /v1/settings/webhook — register delivery webhook (Videh Business API) */
 router.post("/settings/webhook", async (req, res) => {
   try {
     await ensureDeveloperChannelColumns();
@@ -161,7 +161,7 @@ router.post("/business-messages", async (req, res) => {
   }
 });
 
-/** POST /v1/:phoneNumberId/messages — Meta Cloud API compatible path */
+/** POST /v1/:phoneNumberId/messages — Videh Business API compatible path */
 router.post("/:phoneNumberId/messages", async (req, res) => {
   try {
     const account = req.developerAccount!;

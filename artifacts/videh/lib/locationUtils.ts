@@ -93,7 +93,7 @@ function toCoords(loc: Location.LocationObject, fromCache: boolean): DeviceCoord
 }
 
 /**
- * WhatsApp-style: cached fix first (fast UI), then GPS / network, then stale cache.
+ * Videh-style: cached fix first (fast UI), then GPS / network, then stale cache.
  * Every native call is time-boxed so the screen cannot spin forever.
  */
 export async function resolveDeviceLocation(opts?: {

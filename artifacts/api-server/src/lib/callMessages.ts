@@ -3,7 +3,7 @@ import { publishChatEvent } from "./realtime";
 
 export type CallMessageMeta = {
   callType: "audio" | "video";
-  result: "answered" | "missed" | "declined";
+  result: "answered" | "missed" | "declined" | "busy" | "unavailable";
   durationSeconds?: number;
 };
 
@@ -17,6 +17,12 @@ export function callMessagePreview(meta: CallMessageMeta): string {
   }
   if (meta.result === "declined") {
     return meta.callType === "video" ? "Declined video call" : "Declined voice call";
+  }
+  if (meta.result === "busy") {
+    return meta.callType === "video" ? "Busy on another video call" : "Line busy";
+  }
+  if (meta.result === "unavailable") {
+    return meta.callType === "video" ? "Video call unavailable" : "Couldn't place call";
   }
   return meta.callType === "video" ? "Missed video call" : "Missed voice call";
 }
@@ -67,7 +73,7 @@ export async function insertCallChatMessage(args: {
 export function publishCallSignal(args: {
   chatId: number;
   userIds: number[];
-  action: "ringing" | "accepted" | "declined" | "ended" | "missed";
+  action: "ringing" | "accepted" | "declined" | "ended" | "missed" | "busy";
   payload: unknown;
 }): void {
   publishChatEvent({

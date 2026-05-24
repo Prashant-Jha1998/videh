@@ -28,7 +28,7 @@ See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and pa
 
 ## Videh App
 
-A full WhatsApp-clone mobile app named "Videh" built with Expo.
+A full-featured mobile messenger named "Videh" built with Expo.
 
 ### Features
 - **Splash screen** with Videh logo and animation
@@ -36,7 +36,7 @@ A full WhatsApp-clone mobile app named "Videh" built with Expo.
 - **Profile setup** after first login
 - **Chats screen** — conversations list with search, filter tabs (All/Unread/Groups), pin, mute, archive
 - **Chat screen** — real-time messaging UI, send/receive bubbles, typing indicator, image/video bubbles, voice messages (record/play), message reactions (❤️👍😂), ticks (single/double/green), delete for me/everyone, edit message, forward with "Forwarded"/"Forwarded many times", in-chat search, link highlight, view-once media, reply strip, attach menu
-- **Status screen** — WhatsApp-style status updates, view/post statuses
+- **Status screen** — Videh-style status updates, view/post statuses
 - **Calls screen** — call logs with All/Missed tabs, call back
 - **Call screen** — full-screen voice/video call UI with mute/speaker/camera controls
 - **Settings screen** — profile card, account/privacy/notification settings, logout
@@ -92,7 +92,7 @@ Phone number → OTP verification (Fast2SMS) → Profile setup → Main app
 - **Push notifications** — `expo-notifications@~0.32.16`; `users.push_token` column; token registered on login; `PUT /api/users/:id/push-token`; message send endpoint calls Expo push API with sender name + preview; foreground alerts enabled; tapping notification navigates to correct chat
 - **Notification tap routing** — `addNotificationResponseReceivedListener` in _layout.tsx routes to the relevant chat on notification tap
 
-### India-Specific Unique Features (WhatsApp mein nahi hain)
+### India-Specific Unique Features (not on typical global messengers)
 - **Scheduled Messages** — `/scheduled/[chatId]` screen; POST /api/scheduled to schedule; background cron job every minute checks due messages and sends them as real messages with push notifications; cancel anytime; accessible via chat ⋮ menu
 - **Khata / Udhar Tracker** — `/khata/[chatId]` screen; track money owed/borrowed within any chat or group; "Mark as Paid" sends a celebration message in chat; total pending balance shown at top; accessible via chat ⋮ menu
 - **Real-time Message Translation** — Long-press any message → Translate → choose from Hindi/English/Bengali/Tamil/Telugu/Marathi; uses Google Translate free API proxied via `/api/translate`; translated text shows inline below original with "🌐 Translated" label
@@ -117,7 +117,7 @@ Phone number → OTP verification (Fast2SMS) → Profile setup → Main app
 ### OTP Demo
 Use "123456" as the OTP to bypass verification in demo mode.
 
-## Videh Web (WhatsApp Web equivalent)
+## Videh Web (browser companion)
 
 A browser-based companion app at `/videh-web/` that mirrors the mobile Videh experience.
 
@@ -136,9 +136,9 @@ A browser-based companion app at `/videh-web/` that mirrors the mobile Videh exp
 7. Sessions expire after 5 minutes if not linked
 
 ### Web UI
-- Landing page: WhatsApp Web-style layout with numbered steps + live QR panel
+- Landing page: Videh Web-style layout with numbered steps + live QR panel
 - Chat interface: sidebar with chat list + search + avatars + unread badges
-- Message view: WhatsApp bubble design, auto-scrolls, auto-refreshes every 5s
+- Message view: Videh bubble design, auto-scrolls, auto-refreshes every 5s
 - Send messages via Enter key or send button
 - Videh green theme (#00a884) throughout
 

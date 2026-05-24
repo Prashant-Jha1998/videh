@@ -1,5 +1,5 @@
-import type { TemplateDraft } from "../lib/whatsappTemplate";
-import { TemplateWhatsAppPreview } from "./TemplateWhatsAppPreview";
+import type { TemplateDraft } from "../lib/videhTemplate";
+import { TemplateVidehPreview } from "./TemplateVidehPreview";
 
 const marketingDemo: TemplateDraft = {
   templateKey: "welcome_offer",
@@ -16,7 +16,7 @@ const marketingDemo: TemplateDraft = {
   variableSamples: { "1": "Rahul" },
 };
 
-/** Marketing hero — static demo; developer console uses live `TemplateWhatsAppPreview`. */
+/** Marketing hero — static demo; developer console uses live `TemplateVidehPreview`. */
 export function TemplateMessagePreview() {
-  return <TemplateWhatsAppPreview draft={marketingDemo} businessName="Your Brand Pvt Ltd" />;
+  return <TemplateVidehPreview draft={marketingDemo} businessName="Your Brand Pvt Ltd" />;
 }

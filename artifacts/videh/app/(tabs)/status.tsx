@@ -16,6 +16,8 @@ import { useColors } from "@/hooks/useColors";
 import { useApp, Status } from "@/context/AppContext";
 import { formatTime } from "@/utils/time";
 import { ThemedHeader } from "@/components/ThemedHeader";
+import { StoryRingAvatar } from "@/components/StoryRing";
+import { getStatusRingSegments } from "@/lib/statusRingSegments";
 
 interface StatusGroup {
   userId: string;
@@ -120,23 +122,35 @@ export default function StatusScreen() {
               activeOpacity={0.7}
             >
               <View style={styles.myStatusLeft}>
-                <View style={[
-                  styles.avatarRingWrap,
-                  myStatuses.length > 0 && { borderColor: colors.primary, borderWidth: 2.5 }
-                ]}>
-                  {user?.avatar ? (
-                    <Image source={{ uri: user.avatar }} style={styles.myAvatar} contentFit="cover" />
-                  ) : (
-                    <View style={[styles.myAvatarFallback, { backgroundColor: colors.primary }]}>
-                      <Text style={styles.myAvatarText}>{initials}</Text>
-                    </View>
-                  )}
-                  {myStatuses.length === 0 && (
+                {myStatuses.length > 0 ? (
+                  <StoryRingAvatar
+                    size={56}
+                    strokeWidth={2.5}
+                    segments={myStatuses.map(() => false)}
+                    activeColor={colors.primary}
+                  >
+                    {user?.avatar ? (
+                      <Image source={{ uri: user.avatar }} style={styles.myAvatar} contentFit="cover" />
+                    ) : (
+                      <View style={[styles.myAvatarFallback, { backgroundColor: colors.primary }]}>
+                        <Text style={styles.myAvatarText}>{initials}</Text>
+                      </View>
+                    )}
+                  </StoryRingAvatar>
+                ) : (
+                  <View style={styles.avatarRingWrap}>
+                    {user?.avatar ? (
+                      <Image source={{ uri: user.avatar }} style={styles.myAvatar} contentFit="cover" />
+                    ) : (
+                      <View style={[styles.myAvatarFallback, { backgroundColor: colors.primary }]}>
+                        <Text style={styles.myAvatarText}>{initials}</Text>
+                      </View>
+                    )}
                     <View style={[styles.addBadge, { backgroundColor: colors.primary }]}>
                       <Ionicons name="add" size={13} color="#fff" />
                     </View>
-                  )}
-                </View>
+                  </View>
+                )}
                 <View>
                   <Text style={[styles.myName, { color: colors.foreground }]}>My status</Text>
                   <Text style={[styles.myHint, { color: colors.mutedForeground }]}>
@@ -228,7 +242,7 @@ function StatusGroupRow({ group, colors, onPress }: { group: StatusGroup; colors
   const initials = (group.userName ?? "?").split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = (group.userName ?? "A").charCodeAt(0) * 37 % 360;
   const count = group.statuses.length;
-  const ringColor = group.hasUnviewed ? "#25D366" : "#94A3B8";
+  const segments = getStatusRingSegments(group.statuses);
 
   return (
     <TouchableOpacity
@@ -236,8 +250,11 @@ function StatusGroupRow({ group, colors, onPress }: { group: StatusGroup; colors
       onPress={onPress}
       activeOpacity={0.7}
     >
-      {/* Ring with segments for multiple statuses */}
-      <View style={[styles.statusRing, { borderColor: ringColor }]}>
+      <StoryRingAvatar
+        segments={segments}
+        badgeCount={count}
+        badgeColor={colors.primary}
+      >
         {group.userAvatar ? (
           <Image source={{ uri: group.userAvatar }} style={styles.statusAvatarImg} contentFit="cover" />
         ) : (
@@ -245,12 +262,7 @@ function StatusGroupRow({ group, colors, onPress }: { group: StatusGroup; colors
             <Text style={styles.statusAvatarText}>{initials}</Text>
           </View>
         )}
-        {count > 1 && (
-          <View style={[styles.countBadge, { backgroundColor: colors.primary }]}>
-            <Text style={styles.countBadgeText}>{count}</Text>
-          </View>
-        )}
-      </View>
+      </StoryRingAvatar>
       <View style={styles.statusInfo}>
         <Text style={[styles.statusName, { color: colors.foreground }]}>{group.userName}</Text>
         <Text style={[styles.statusTime, { color: colors.mutedForeground }]}>
@@ -285,12 +297,9 @@ const styles = StyleSheet.create({
   myHint: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
   sectionLabel: { paddingHorizontal: 16, paddingVertical: 8, fontSize: 12, fontFamily: "Inter_600SemiBold", letterSpacing: 0.5 },
   statusRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, gap: 14 },
-  statusRing: { width: 54, height: 54, borderRadius: 27, borderWidth: 2.5, padding: 2, alignItems: "center", justifyContent: "center" },
   statusAvatarImg: { width: 44, height: 44, borderRadius: 22 },
   statusAvatarFallback: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   statusAvatarText: { color: "#fff", fontSize: 16, fontFamily: "Inter_700Bold" },
-  countBadge: { position: "absolute", bottom: -2, right: -4, width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  countBadgeText: { color: "#fff", fontSize: 10, fontFamily: "Inter_700Bold" },
   statusInfo: { flex: 1 },
   statusName: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
   statusTime: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },

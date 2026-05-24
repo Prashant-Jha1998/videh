@@ -30,7 +30,7 @@ const colors = {
     // Videh-specific
     chatBubbleSent: "#D9FDD3",
     chatBubbleReceived: "#FFFFFF",
-    /** WhatsApp-style chat canvas */
+    /** Videh-style chat canvas */
     chatBackground: "#E5DDD5",
     onlineGreen: "#25D366",
     headerBg: "#00A884",

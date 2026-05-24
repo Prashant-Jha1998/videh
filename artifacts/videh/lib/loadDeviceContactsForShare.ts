@@ -9,69 +9,148 @@ export type ContactShareRow = {
   emails: string[];
 };
 
-function buildRows(data: ExistingContact[]): ContactShareRow[] {
-  const out: ContactShareRow[] = [];
-  const seen = new Set<string>();
+const MAX_CONTACTS = 5000;
+const PAGE_SIZE = 400;
+const LOAD_TIMEOUT_MS = 25_000;
 
-  for (const c of data) {
+const FIELDS = [
+  Contacts.Fields.Name,
+  Contacts.Fields.FirstName,
+  Contacts.Fields.LastName,
+  Contacts.Fields.PhoneNumbers,
+  Contacts.Fields.Emails,
+];
+
+let cachedRows: ContactShareRow[] | null = null;
+let cacheAt = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+let loadPromise: Promise<ContactShareRow[]> | null = null;
+
+function rowFromContact(c: ExistingContact, index: number): ContactShareRow | null {
+  try {
     const name = contactDisplayName(c);
     const phones = (c.phoneNumbers ?? [])
-      .map((p) => (p.number ?? "").trim())
-      .filter(Boolean);
+      .map((p) => String(p.number ?? "").trim())
+      .filter((p) => p.length > 0)
+      .slice(0, 8);
     const emails = (c.emails ?? [])
-      .map((e) => (e.email ?? "").trim())
-      .filter(Boolean);
-    if (!name && phones.length === 0 && emails.length === 0) continue;
+      .map((e) => String(e.email ?? "").trim())
+      .filter((e) => e.length > 0)
+      .slice(0, 4);
+    if (!name && phones.length === 0 && emails.length === 0) return null;
 
-    const key = `${name}|${phones[0] ?? emails[0] ?? c.id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    out.push({
-      id: String(c.id ?? key),
+    const id = c.id != null ? String(c.id) : `c_${index}_${name.slice(0, 12)}`;
+    return {
+      id,
       name: name || phones[0] || emails[0] || "Contact",
       phones,
       emails,
-    });
+    };
+  } catch {
+    return null;
   }
+}
 
+function dedupeAndSort(rows: ContactShareRow[]): ContactShareRow[] {
+  const seen = new Set<string>();
+  const out: ContactShareRow[] = [];
+  for (const r of rows) {
+    const key = `${r.name.toLowerCase()}|${r.phones[0] ?? r.emails[0] ?? r.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+    if (out.length >= MAX_CONTACTS) break;
+  }
   out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   return out;
 }
 
-/** Load phone contacts for WhatsApp-style share picker. */
-export async function loadDeviceContactsForShare(): Promise<ContactShareRow[]> {
-  const { status } = await Contacts.requestPermissionsAsync();
-  if (status !== "granted") {
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise
+      .then((v) => {
+        clearTimeout(timer);
+        resolve(v);
+      })
+      .catch((e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
+  });
+}
+
+async function fetchAllContactsRaw(): Promise<ExistingContact[]> {
+  const { status } = await Contacts.getPermissionsAsync();
+  const granted =
+    status === Contacts.PermissionStatus.GRANTED
+      ? true
+      : (await Contacts.requestPermissionsAsync()).status === Contacts.PermissionStatus.GRANTED;
+  if (!granted) {
     throw new Error("Contacts permission was denied.");
   }
 
-  const fields = [
-    Contacts.Fields.Name,
-    Contacts.Fields.FirstName,
-    Contacts.Fields.LastName,
-    Contacts.Fields.PhoneNumbers,
-    Contacts.Fields.Emails,
-  ];
-
-  const { data } = await Contacts.getContactsAsync({ fields, sort: Contacts.SortTypes.FirstName });
-  if (data.length > 0) return buildRows(data);
-
-  // Large phone books: paginate when the first page is empty
   const aggregated: ExistingContact[] = [];
   let pageOffset = 0;
-  const pageSize = 500;
-  for (let guard = 0; guard < 200; guard++) {
+  let hasNext = true;
+
+  while (hasNext && aggregated.length < MAX_CONTACTS) {
     const res = await Contacts.getContactsAsync({
-      fields,
-      pageSize,
+      fields: FIELDS,
+      pageSize: PAGE_SIZE,
       pageOffset,
       sort: Contacts.SortTypes.FirstName,
     });
-    aggregated.push(...res.data);
-    if (!res.hasNextPage) break;
+    if (res.data?.length) aggregated.push(...res.data);
+    hasNext = Boolean(res.hasNextPage) && res.data.length > 0;
     pageOffset += res.data.length;
+    if (res.data.length === 0) break;
   }
 
-  return buildRows(aggregated);
+  return aggregated;
+}
+
+async function loadFresh(): Promise<ContactShareRow[]> {
+  const raw = await withTimeout(
+    fetchAllContactsRaw(),
+    LOAD_TIMEOUT_MS,
+    "Loading contacts took too long. Try again.",
+  );
+
+  const rows: ContactShareRow[] = [];
+  for (let i = 0; i < raw.length && rows.length < MAX_CONTACTS; i++) {
+    const row = rowFromContact(raw[i]!, i);
+    if (row) rows.push(row);
+  }
+
+  return dedupeAndSort(rows);
+}
+
+/** Load phone contacts for share picker (cached, paginated, crash-safe). */
+export function loadDeviceContactsForShare(opts?: { forceRefresh?: boolean }): Promise<ContactShareRow[]> {
+  const force = opts?.forceRefresh ?? false;
+  const now = Date.now();
+  if (!force && cachedRows && now - cacheAt < CACHE_TTL_MS) {
+    return Promise.resolve(cachedRows);
+  }
+
+  if (!force && loadPromise) return loadPromise;
+
+  loadPromise = loadFresh()
+    .then((rows) => {
+      cachedRows = rows;
+      cacheAt = Date.now();
+      return rows;
+    })
+    .finally(() => {
+      loadPromise = null;
+    });
+
+  return loadPromise;
+}
+
+export function clearContactShareCache(): void {
+  cachedRows = null;
+  cacheAt = 0;
+  loadPromise = null;
 }

@@ -87,7 +87,7 @@ async function requestNotificationPermission(): Promise<boolean> {
 }
 
 /**
- * Native: FCM device token (WhatsApp-style on Android).
+ * Native: FCM device token (Videh-style on Android).
  * Web: optional VAPID subscription.
  * Expo Go fallback: Expo push token.
  */

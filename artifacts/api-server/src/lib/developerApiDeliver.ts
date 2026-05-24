@@ -114,7 +114,7 @@ function applyVariables(text: string, values: string[]): string {
   return out;
 }
 
-/** WhatsApp-style template: logo/image header + text body (caption). */
+/** Videh business template: logo/image header + text body (caption). */
 export function buildTemplateDeliveryContent(
   tmpl: MessageTemplateRow,
   body: SendMessageBody,

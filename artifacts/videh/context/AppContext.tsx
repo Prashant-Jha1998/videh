@@ -12,8 +12,9 @@ import { shouldAutoDownload } from "@/lib/chatMediaNetwork";
 import { saveVideoUriToLibrary } from "@/lib/saveVideoToLibrary";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
+import { ensureUploadableFileUri } from "@/lib/prepareFileUpload";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
-import { encodeVoiceMessageText } from "@/lib/voiceWaveform";
+import { encodeVoiceMessageText, stripWaveformMeta } from "@/lib/voiceWaveform";
 
 const BASE_URL = getApiUrl();
 const STATUS_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -76,11 +77,13 @@ export interface Message {
   replyToId?: string;
   replyText?: string;
   replySenderName?: string;
-  /** Bytes; shown on document bubbles (WhatsApp-style). */
+  /** Bytes; shown on document bubbles (Videh-style). */
   fileSizeBytes?: number;
   /** 0–99 while uploading; undefined when sent. */
   uploadProgress?: number;
   uploadFailed?: boolean;
+  /** Stable on-device copy for documents (open before/without server download). */
+  localMediaUri?: string;
 }
 
 export interface Chat {
@@ -248,7 +251,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const content = String(lastMsg.content ?? "").trim();
     if (type === "image") return content && content !== "📷 Photo" ? content : "Photo";
     if (type === "video") return content && content !== "🎥 Video" ? content : "Video";
-    if (type === "audio") return "Voice message";
+    if (type === "audio") {
+      const clean = stripWaveformMeta(content);
+      return clean || "🎤 Voice message";
+    }
     if (type === "call") {
       const { callMessagePreviewText } = require("@/lib/callMessage") as typeof import("@/lib/callMessage");
       return callMessagePreviewText(content);
@@ -469,7 +475,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     loadUser();
   }, []);
 
-  // WhatsApp-like expiry: hide status locally as soon as the 24-hour window ends.
+  // Videh-like expiry: hide status locally as soon as the 24-hour window ends.
   useEffect(() => {
     const expiryTimer = setInterval(() => {
       setStatuses((prev) => prev.filter(isStatusActive));
@@ -1010,7 +1016,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const u = userRef.current;
     const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
     const text = encodeVoiceMessageText(durationSecs, waveform);
-    const shareableAudioUri = await toShareableMediaUri(audioUri, "audio/mp4");
+    const chatPreview = stripWaveformMeta(text);
+    let shareableAudioUri: string;
+    try {
+      shareableAudioUri = await toShareableMediaUri(audioUri, "audio/mp4");
+    } catch (e) {
+      Alert.alert("Voice message", e instanceof Error ? e.message : "Could not upload voice note.");
+      return;
+    }
     const newMsg: Message = {
       id: tempId, text, timestamp: Date.now(), senderId: "me",
       type: "audio", status: "sent", mediaUrl: shareableAudioUri,
@@ -1018,7 +1031,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setChats((prev) =>
       prev.map((c) =>
         c.id === chatId
-          ? { ...c, messages: [...c.messages, newMsg], lastMessage: text, lastMessageTime: Date.now() }
+          ? { ...c, messages: [...c.messages, newMsg], lastMessage: chatPreview, lastMessageTime: Date.now() }
           : c
       )
     );
@@ -1062,6 +1075,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const u = userRef.current;
       const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
       const displayName = filename.trim() || "Document";
+      let stableLocalUri: string;
+      try {
+        stableLocalUri = await ensureUploadableFileUri(localUri, displayName);
+      } catch (e) {
+        Alert.alert("Couldn't send document", e instanceof Error ? e.message : "Could not read file.");
+        return;
+      }
       const patchMsg = (patch: Partial<Message>) => {
         setChats((prev) =>
           prev.map((c) =>
@@ -1079,7 +1099,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         senderId: "me",
         type: "document",
         status: "sent",
-        mediaUrl: localUri,
+        mediaUrl: stableLocalUri,
+        localMediaUri: stableLocalUri,
         fileSizeBytes,
         uploadProgress: 0,
         uploadFailed: false,
@@ -1096,13 +1117,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const upload = await uploadChatMediaWithProgress({
-          uri: localUri,
+          uri: stableLocalUri,
           mime: mimeType,
           filename: displayName,
           sessionToken: u.sessionToken,
           onProgress: (p) => patchMsg({ uploadProgress: p.percent }),
         });
-        patchMsg({ uploadProgress: 100, mediaUrl: upload.url, fileSizeBytes: upload.size || fileSizeBytes });
+        patchMsg({
+          uploadProgress: 100,
+          mediaUrl: upload.url,
+          localMediaUri: stableLocalUri,
+          fileSizeBytes: upload.size || fileSizeBytes,
+        });
 
         const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
           method: "POST",
@@ -1129,6 +1155,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             id: String(mid),
             status: "delivered",
             mediaUrl: upload.url,
+            localMediaUri: stableLocalUri,
             uploadProgress: undefined,
             uploadFailed: false,
           });

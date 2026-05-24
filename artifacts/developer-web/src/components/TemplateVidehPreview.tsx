@@ -1,6 +1,6 @@
 import { BadgeCheck, ExternalLink, ImageIcon, Phone, Play } from "lucide-react";
-import type { TemplateButton, TemplateDraft } from "../lib/whatsappTemplate";
-import { formatBodyForPreview, renderBodyWithSamples } from "../lib/whatsappTemplate";
+import type { TemplateButton, TemplateDraft } from "../lib/videhTemplate";
+import { formatBodyForPreview, renderBodyWithSamples } from "../lib/videhTemplate";
 
 type Props = {
   draft: TemplateDraft;
@@ -14,7 +14,7 @@ function ButtonIcon({ type }: { type: TemplateButton["type"] }) {
   return null;
 }
 
-export function TemplateWhatsAppPreview({ draft, businessName = "Your Business", compact }: Props) {
+export function TemplateVidehPreview({ draft, businessName = "Your Business", compact }: Props) {
   const bodyRendered = renderBodyWithSamples(draft.bodyText || "Type your message body…", draft.variableSamples);
   const bodyLines = formatBodyForPreview(bodyRendered);
   const hasHeader = draft.headerFormat !== "NONE";
@@ -43,7 +43,7 @@ export function TemplateWhatsAppPreview({ draft, businessName = "Your Business",
 
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 py-3 space-y-2.5">
         <p className="text-center text-[10px] leading-snug text-[#8696a0] bg-[#182229] rounded-lg px-2.5 py-1.5 mx-2">
-          How customers see this template on WhatsApp
+          How customers see this template on Videh
         </p>
 
         <div className="bg-[#1f2c34] rounded-xl overflow-hidden w-full max-w-[340px] mx-auto shadow-md">

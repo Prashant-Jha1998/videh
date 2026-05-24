@@ -3,6 +3,8 @@ import { getApiUrl } from "@/lib/api";
 export type GifMediaItem = {
   id: string;
   previewUrl: string;
+  stillUrl?: string;
+  gifUrl?: string;
   sendUrl: string;
   width: number;
   height: number;
@@ -19,11 +21,23 @@ export const GIF_QUICK_CATEGORIES: { label: string; emoji: string; query: string
   { label: "Yay", emoji: "🥳", query: "celebration party yay" },
 ];
 
+/** Ensure every tile has a JPG fallback even if API omits stillUrl (older server builds). */
+function enrichGifItems(items: GifMediaItem[]): GifMediaItem[] {
+  return items.map((item) => {
+    if (item.stillUrl?.startsWith("https://")) return item;
+    const idMatch = item.previewUrl.match(/\/media\/([^/]+)\//) ?? item.sendUrl.match(/\/media\/([^/]+)\//);
+    if (!idMatch?.[1]) return item;
+    const stillUrl = `https://media.giphy.com/media/${idMatch[1]}/200w.jpg`;
+    const gifUrl = item.gifUrl ?? `https://media.giphy.com/media/${idMatch[1]}/200w.gif`;
+    return { ...item, stillUrl, gifUrl };
+  });
+}
+
 async function fetchGifPath(path: string): Promise<GifMediaItem[]> {
   const res = await fetch(`${BASE}${path}`);
   const data = (await res.json()) as { success?: boolean; items?: GifMediaItem[] };
   if (!data.success || !Array.isArray(data.items)) return [];
-  return data.items;
+  return enrichGifItems(data.items);
 }
 
 export function fetchTrendingGifs(): Promise<GifMediaItem[]> {

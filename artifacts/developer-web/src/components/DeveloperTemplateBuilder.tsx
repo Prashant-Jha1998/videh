@@ -16,8 +16,8 @@ import {
   type TemplateButton,
   type TemplateDraft,
   draftFromPortalTemplate,
-} from "../lib/whatsappTemplate";
-import { TemplateWhatsAppPreview } from "./TemplateWhatsAppPreview";
+} from "../lib/videhTemplate";
+import { TemplateVidehPreview } from "./TemplateVidehPreview";
 
 type Props = {
   leadId: string;
@@ -145,7 +145,7 @@ export function DeveloperTemplateBuilder({
               <h3 className="font-bold text-[#111b21]">Create template</h3>
             </div>
             <p className="text-sm text-[#667781]">
-              Build like WhatsApp Business Manager: header, body with {"{{1}}"} variables, optional footer, and
+              Build like Videh Business templates: header, body with {"{{1}}"} variables, optional footer, and
               buttons. Live preview updates on the right.
             </p>
 
@@ -250,7 +250,7 @@ export function DeveloperTemplateBuilder({
               className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm resize-y font-mono leading-relaxed"
             />
             <p className="text-xs text-[#667781]">
-              Use {"{{1}}"}, {"{{2}}"} for dynamic fields (WhatsApp numbered variables).
+              Use {"{{1}}"}, {"{{2}}"} for dynamic fields (numbered variables).
             </p>
 
             {variableIndexes.length > 0 ? (
@@ -380,7 +380,7 @@ export function DeveloperTemplateBuilder({
             <Eye className="h-4 w-4 text-[#00a884]" />
             Live preview
           </p>
-          <TemplateWhatsAppPreview draft={previewDraft} businessName={businessName} />
+          <TemplateVidehPreview draft={previewDraft} businessName={businessName} />
           <p className="text-[11px] text-[#667781] text-center">
             Category: <strong>{previewDraft.category}</strong> · Language: <strong>{previewDraft.language}</strong>
           </p>
@@ -440,7 +440,7 @@ export function DeveloperTemplateBuilder({
                 </div>
                 {viewId === t.id ? (
                   <div className="px-4 pb-4 grid md:grid-cols-2 gap-4 border-t border-gray-100 pt-4 bg-[#fafafa]">
-                    <TemplateWhatsAppPreview
+                    <TemplateVidehPreview
                       draft={draftFromPortalTemplate(t)}
                       businessName={businessName}
                       compact

@@ -43,7 +43,19 @@ export function buildVoiceFingerprint(
   return { durationMs, rmsLevels, peakLevel };
 }
 
-export const WAKE_PHRASES = ["hey videh", "he videh", "hey vede", "हे विदेह", "hey video"];
+export const WAKE_PHRASES = [
+  "hey videh",
+  "he videh",
+  "hey vede",
+  "hey video",
+  "hay videh",
+  "hi videh",
+  "hello videh",
+  "videh",
+  "हे विदेह",
+  "है विदेह",
+  "वीडेह",
+];
 
 export function containsWakePhrase(text: string): boolean {
   const n = text.toLowerCase().trim();

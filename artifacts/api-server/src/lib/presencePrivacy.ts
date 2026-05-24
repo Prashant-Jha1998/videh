@@ -97,7 +97,7 @@ function allowsByLastSeenPrivacy(
   }
 }
 
-/** If you hide last seen, you cannot see others' (WhatsApp reciprocal rule). */
+/** If you hide last seen, you cannot see others' (Videh reciprocal privacy rule). */
 export function viewerSharesOwnPresence(viewer: PrivacyRow): boolean {
   return viewer.last_seen_privacy !== "nobody";
 }

@@ -3,7 +3,7 @@ import * as ImagePicker from "expo-image-picker";
 import { Alert } from "react-native";
 import { isGifUri } from "./imageEdit";
 
-/** WhatsApp-style limits for chat video (not stories). */
+/** Videh-style limits for chat video (not stories). */
 export const MAX_CHAT_VIDEO_DURATION_MS = 3 * 60 * 1000;
 export const MAX_CHAT_VIDEO_BYTES = 64 * 1024 * 1024;
 export const MAX_CHAT_IMAGE_BYTES = 16 * 1024 * 1024;

@@ -16,7 +16,7 @@ export function AssistantOverlay() {
     : phase === "listening" ? "Sun raha hoon..."
     : phase === "processing" ? "Processing..."
     : phase === "speaking" ? "Videh bol raha hai"
-    : "Hey Videh";
+    : "Say Hey Videh";
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={dismiss}>
@@ -41,7 +41,7 @@ export function AssistantOverlay() {
             </Text>
           ) : null}
           <TouchableOpacity style={styles.closeBtn} onPress={dismiss}>
-            <Text style={styles.closeText}>Band karein</Text>
+            <Text style={styles.closeText}>Close</Text>
           </TouchableOpacity>
         </View>
       </View>

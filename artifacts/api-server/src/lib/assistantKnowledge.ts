@@ -1,6 +1,6 @@
 /** Public product knowledge for Videh — no secrets, keys, or implementation details. */
 export const VIDEH_PRODUCT_KNOWLEDGE = `
-Videh is an India-focused secure messenger (videh.co.in) with WhatsApp-like features.
+Videh is an India-focused secure messenger (videh.co.in) with chats, calls, status, groups, and Khata.
 
 Hey Videh assistant can perform REAL actions for the logged-in user:
 - Send text message to ANY contact or group in their chat list (by name)

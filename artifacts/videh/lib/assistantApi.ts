@@ -39,6 +39,15 @@ export async function patchAssistantPrefs(
   return Boolean(data.success);
 }
 
+export async function deleteAssistantVoice(token: string | null | undefined): Promise<boolean> {
+  const res = await fetch(`${getApiUrl()}/api/assistant/enroll`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+  const data = await res.json() as { success?: boolean };
+  return Boolean(data.success);
+}
+
 export async function enrollAssistantVoice(
   token: string | null | undefined,
   samples: VoiceFingerprint[],

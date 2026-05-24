@@ -15,7 +15,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useVidehCall } from "@/hooks/useVidehCall";
 import { useApp } from "@/context/AppContext";
 import { VidehLocalView, VidehRemoteView } from "@/components/VidehVideoView";
-import { startCallAlert, stopCallAlert } from "@/lib/callRingtone";
+import {
+  playCallBusyTone,
+  playCallUnavailableTone,
+  startOutgoingRingback,
+  stopCallAlert,
+} from "@/lib/callRingtone";
 import { phaseLabel } from "@/lib/callState";
 import { webrtcFetch } from "@/lib/webrtcApi";
 
@@ -53,13 +58,27 @@ export default function CallScreen() {
       body: JSON.stringify({ chatId: Number(id), type: isVideo ? "video" : "audio" }),
     })
       .then((res) => res.json())
-      .then((data: { success?: boolean; call?: { channel?: string; callId?: string; participantCount?: number; acceptedCount?: number; ringingCount?: number } }) => {
+      .then((data: {
+        success?: boolean;
+        allInviteesBusy?: boolean;
+        call?: { channel?: string; callId?: string; participantCount?: number; acceptedCount?: number; ringingCount?: number };
+      }) => {
         if (cancelled || !data.success || !data.call?.channel) return;
         setActiveChannel(data.call.channel);
         setActiveCallId(data.call.callId ?? "");
         setParticipantCount(data.call.participantCount ?? 1);
         setAcceptedCount(data.call.acceptedCount ?? 1);
         setRingingCount(data.call.ringingCount ?? 0);
+        if (data.allInviteesBusy) {
+          void (async () => {
+            await stopCallAlert();
+            await playCallBusyTone();
+            if (data.call?.callId) {
+              await webrtcFetch(`/calls/${data.call.callId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+            }
+            router.back();
+          })();
+        }
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -85,25 +104,33 @@ export default function CallScreen() {
   const remoteStreamUrl = (rest as any).remoteStreamUrl as string | undefined;
 
   const [duration, setDuration] = useState(0);
+  const [statusHint, setStatusHint] = useState<string | null>(null);
+  const endedTonePlayed = useRef(false);
   const pulse = useRef(new Animated.Value(1)).current;
+
   useEffect(() => {
-    if (incoming === "1" || joined) {
+    if (incoming === "1") return;
+    if (joined) {
       void stopCallAlert();
       return;
     }
-    void startCallAlert();
+    void startOutgoingRingback();
     const timeout = setTimeout(() => {
-      if (!joined) {
-        void stopCallAlert();
-        if (activeCallId) webrtcFetch(`/calls/${activeCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+      void (async () => {
+        if (joined) return;
+        await stopCallAlert();
+        await playCallUnavailableTone();
+        if (activeCallId) {
+          await webrtcFetch(`/calls/${activeCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+        }
         router.back();
-      }
+      })();
     }, 60000);
     return () => {
       clearTimeout(timeout);
       void stopCallAlert();
     };
-  }, [incoming, joined, activeCallId, router]);
+  }, [incoming, joined, activeCallId, router, user?.sessionToken]);
 
   useEffect(() => {
     if (!activeCallId || !user?.dbId) return;
@@ -114,6 +141,10 @@ export default function CallScreen() {
           success?: boolean;
           acceptedCount?: number;
           ringingCount?: number;
+          busyCount?: number;
+          declinedCount?: number;
+          missedCount?: number;
+          allInviteesBusy?: boolean;
           call?: { participantCount?: number };
           ended?: boolean;
           acceptedUserIds?: number[];
@@ -125,7 +156,54 @@ export default function CallScreen() {
           setParticipantCount(data.call?.participantCount ?? participantCount);
           if (Array.isArray(data.acceptedUserIds)) setAcceptedUserIds(data.acceptedUserIds);
           if (typeof data.callerId === "number") setCallerId(data.callerId);
+
+          const remoteAccepted = (data.acceptedCount ?? 1) > 1;
+          if (remoteAccepted && !joined) {
+            void stopCallAlert();
+            setStatusHint("Connecting…");
+          }
+
+          if (!joined && !endedTonePlayed.current) {
+            if (data.allInviteesBusy || ((data.busyCount ?? 0) > 0 && (data.ringingCount ?? 0) === 0 && !remoteAccepted)) {
+              endedTonePlayed.current = true;
+              void (async () => {
+                await stopCallAlert();
+                await playCallBusyTone();
+                if (activeCallId) {
+                  await webrtcFetch(`/calls/${activeCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+                }
+                void refreshCallLogs();
+                router.back();
+              })();
+              return;
+            }
+            if ((data.declinedCount ?? 0) > 0 && (data.ringingCount ?? 0) === 0 && !remoteAccepted) {
+              endedTonePlayed.current = true;
+              void (async () => {
+                await stopCallAlert();
+                await playCallBusyTone();
+                if (activeCallId) {
+                  await webrtcFetch(`/calls/${activeCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+                }
+                void refreshCallLogs();
+                router.back();
+              })();
+              return;
+            }
+          }
+
           if (data.ended) {
+            if (!endedTonePlayed.current && !joined) {
+              endedTonePlayed.current = true;
+              const unavailable = (data.missedCount ?? 0) > 0;
+              void (async () => {
+                await stopCallAlert();
+                if (unavailable) await playCallUnavailableTone();
+                void refreshCallLogs();
+                router.back();
+              })();
+              return;
+            }
             void stopCallAlert();
             void refreshCallLogs();
             router.back();
@@ -204,6 +282,8 @@ export default function CallScreen() {
       : acceptedCount > 1
       ? "Connecting participants..."
       : "Waiting for other party..."
+    : statusHint
+    ? statusHint
     : incoming === "1"
     ? phaseLabel("incoming_ringing", isVideo)
     : ringingCount > 1

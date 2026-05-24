@@ -7,7 +7,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
-import { Audio, ResizeMode, Video } from "expo-av";
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAvoidingView } from "react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -25,7 +25,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  SectionList,
   StyleSheet,
   Text,
   TextInput,
@@ -47,7 +46,7 @@ import {
   validatePickedMedia,
   validatePickedAssets,
 } from "@/lib/chatMediaPolicy";
-import { WhatsAppVoiceMic } from "@/components/WhatsAppVoiceMic";
+import { VidehVoiceMic } from "@/components/VidehVoiceMic";
 import { ChatEmojiPanel } from "@/components/ChatEmojiPanel";
 import type { GifMediaItem } from "@/lib/chatGifApi";
 import { uploadRemoteGifOrSticker } from "@/lib/sendChatGifSticker";
@@ -55,7 +54,8 @@ import { DocumentMessageBubble } from "@/components/DocumentMessageBubble";
 import { ContactMessageBubble } from "@/components/ContactMessageBubble";
 import { openChatDocument } from "@/lib/openChatDocument";
 import { parseContactMessage } from "@/lib/contactMessage";
-import { loadDeviceContactsForShare, type ContactShareRow } from "@/lib/loadDeviceContactsForShare";
+import type { ContactShareRow } from "@/lib/loadDeviceContactsForShare";
+import { ContactSharePickerModal } from "@/components/ContactSharePickerModal";
 import { startVoiceNotePlaybackSession, stopVoiceNotePlaybackSession } from "@/lib/inCallAudio";
 import { claimVoicePlayback, releaseVoicePlayback } from "@/lib/voicePlaybackHub";
 import {
@@ -105,7 +105,7 @@ function startOfLocalDay(ts: number): number {
   return d.getTime();
 }
 
-/** WhatsApp-style strip labels: Today, Yesterday, weekday, then dated. */
+/** Videh-style strip labels: Today, Yesterday, weekday, then dated. */
 function formatDateChipLabel(ts: number, nowMs = Date.now()): string {
   const dayMs = 86400000;
   const d0 = startOfLocalDay(ts);
@@ -147,7 +147,7 @@ function messagesWithDateRows(msgs: Message[]): ChatListRow[] {
   return out;
 }
 
-/** Small filled tail under the bubble corner (flat SVG, WhatsApp-ish). */
+/** Small filled tail under the bubble corner (flat SVG, Videh-style). */
 function ChatBubbleTail({ fill, side }: { fill: string; side: "left" | "right" }) {
   const w = 7;
   const h = 10;
@@ -166,7 +166,7 @@ function ChatBubbleTail({ fill, side }: { fill: string; side: "left" | "right" }
   );
 }
 
-/** WhatsApp-style attachment row (coloured circle + label). Order matches common WA layout. */
+/** Videh-style attachment row (coloured circle + label). Order matches common WA layout. */
 const ATTACH_SHEET_ITEMS: {
   key: string;
   icon: React.ComponentProps<typeof Ionicons>["name"];
@@ -222,7 +222,7 @@ function formatVoiceClock(sec: number): string {
   return `${m}:${r.toString().padStart(2, "0")}`;
 }
 
-/** WhatsApp-style voice note: waveform, scrub, 1x / 1.5x / 2x, optional avatar on sent notes */
+/** Videh-style voice note: waveform, scrub, 1x / 1.5x / 2x, optional avatar on sent notes */
 const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
   uri,
   colors,
@@ -268,16 +268,19 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
     releaseVoicePlayback(messageId);
   }, [messageId]);
 
-  const unloadSound = useCallback(async () => {
-    await stopPlayback();
+  const disposeSoundRef = useCallback(async () => {
     const s = soundRef.current;
     soundRef.current = null;
-    if (s) {
-      try {
-        await s.unloadAsync();
-      } catch { /* ignore */ }
-    }
-  }, [stopPlayback]);
+    if (!s) return;
+    try {
+      await s.unloadAsync();
+    } catch { /* ignore */ }
+  }, []);
+
+  const unloadSound = useCallback(async () => {
+    await stopPlayback();
+    await disposeSoundRef();
+  }, [stopPlayback, disposeSoundRef]);
 
   const applyRate = useCallback(async (s: Audio.Sound, next: number) => {
     try {
@@ -285,20 +288,49 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
     } catch { /* older platforms */ }
   }, []);
 
-  const ensureSound = useCallback(async (): Promise<Audio.Sound | null> => {
-    if (!playableUri) return null;
-    if (soundRef.current) return soundRef.current;
-
+  const configureVoicePlaybackAudio = useCallback(async () => {
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
       playsInSilentModeIOS: true,
-      shouldDuckAndroid: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: false,
       playThroughEarpieceAndroid: false,
+      interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+      interruptionModeIOS: InterruptionModeIOS.DoNotMix,
     });
+    startVoiceNotePlaybackSession();
+  }, []);
+
+  const playFromStart = useCallback(async (s: Audio.Sound) => {
+    try {
+      await s.stopAsync();
+    } catch { /* ignore */ }
+    await s.setPositionAsync(0);
+    try {
+      await s.setVolumeAsync(1);
+    } catch { /* ignore */ }
+    await applyRate(s, rate);
+    await s.playAsync();
+    setPosition(0);
+    setEnded(false);
+    setPlaying(true);
+  }, [applyRate, rate]);
+
+  const ensureSound = useCallback(async (): Promise<Audio.Sound | null> => {
+    if (!playableUri) return null;
+
+    const existing = soundRef.current;
+    if (existing) {
+      const st = await existing.getStatusAsync();
+      if (st.isLoaded) return existing;
+      await disposeSoundRef();
+    }
+
+    await configureVoicePlaybackAudio();
 
     const { sound: s } = await Audio.Sound.createAsync(
       { uri: playableUri },
-      { shouldPlay: false, rate: 1, progressUpdateIntervalMillis: 200 },
+      { shouldPlay: false, volume: 1, rate: 1, progressUpdateIntervalMillis: 200 },
       (status) => {
         if (status.isLoaded) {
           setPosition((status.positionMillis ?? 0) / 1000);
@@ -310,15 +342,15 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
             setPosition(0);
             stopVoiceNotePlaybackSession();
             releaseVoicePlayback(messageId);
+            void disposeSoundRef();
           }
         }
       },
     );
     await applyRate(s, rate);
     soundRef.current = s;
-    startVoiceNotePlaybackSession();
     return s;
-  }, [playableUri, rate, applyRate, messageId]);
+  }, [playableUri, rate, applyRate, messageId, configureVoicePlaybackAudio, disposeSoundRef]);
 
   const toggle = async () => {
     if (uriLoading) return;
@@ -328,11 +360,17 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
     }
     try {
       setPreparing(true);
-      const s = await ensureSound();
+      let s = await ensureSound();
       if (!s) return;
 
-      const status = await s.getStatusAsync();
-      if (!status.isLoaded) return;
+      let status = await s.getStatusAsync();
+      if (!status.isLoaded) {
+        await disposeSoundRef();
+        s = await ensureSound();
+        if (!s) return;
+        status = await s.getStatusAsync();
+        if (!status.isLoaded) return;
+      }
 
       if (playing) {
         await s.pauseAsync();
@@ -341,25 +379,33 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
         releaseVoicePlayback(messageId);
       } else {
         await claimVoicePlayback(messageId, async () => {
-          await s.pauseAsync();
+          const active = soundRef.current;
+          if (active) {
+            try {
+              await active.pauseAsync();
+            } catch { /* ignore */ }
+          }
           setPlaying(false);
           stopVoiceNotePlaybackSession();
         });
-        startVoiceNotePlaybackSession();
-        if (ended || ((status.durationMillis ?? 0) > 0 && (status.positionMillis ?? 0) >= (status.durationMillis ?? 0) - 250)) {
-          try {
-            await s.replayAsync();
-          } catch {
-            await s.stopAsync();
-            await s.setPositionAsync(0);
-            await s.playAsync();
-          }
-          setPosition(0);
-          setEnded(false);
+        await configureVoicePlaybackAudio();
+
+        const atEnd =
+          ended
+          || ((status.durationMillis ?? 0) > 0
+            && (status.positionMillis ?? 0) >= (status.durationMillis ?? 0) - 250);
+
+        if (atEnd) {
+          await playFromStart(s);
         } else {
+          try {
+            await s.setVolumeAsync(1);
+          } catch { /* ignore */ }
+          await applyRate(s, rate);
           await s.playAsync();
+          setPlaying(true);
+          setEnded(false);
         }
-        setPlaying(true);
       }
     } catch {
       await unloadSound();
@@ -516,7 +562,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
   );
 });
 
-/** In-bubble preview: tap opens full-screen viewer (WhatsApp-style). */
+/** In-bubble preview: tap opens full-screen viewer (Videh-style). */
 function ViewOncePlaceholderBubble({
   kind,
   onOpen,
@@ -581,7 +627,7 @@ function CallMessageBubble({
   );
 }
 
-/** In-bubble preview: tap opens full-screen viewer (WhatsApp-style). */
+/** In-bubble preview: tap opens full-screen viewer (Videh-style). */
 function ChatVideoThumbnailBubble({ uri, sessionToken, onOpen }: { uri: string; sessionToken?: string | null; onOpen: () => void }) {
   const { playableUri, failed, loading } = usePlayableVideoUri(uri, sessionToken);
   const [durationSec, setDurationSec] = useState(0);
@@ -832,9 +878,6 @@ export default function ChatScreen() {
 
   // Share contact — full-screen picker (Alert.alert only fits ~3 buttons on Android)
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
-  const [contactPickerLoading, setContactPickerLoading] = useState(false);
-  const [contactPickerRows, setContactPickerRows] = useState<ContactShareRow[]>([]);
-  const [contactPickerQuery, setContactPickerQuery] = useState("");
   const [contactToConfirm, setContactToConfirm] = useState<ContactShareRow | null>(null);
   const [viewContactMsg, setViewContactMsg] = useState<Message | null>(null);
 
@@ -1369,31 +1412,9 @@ export default function ChatScreen() {
 
     } else if (type === "contact") {
       if (Platform.OS === "web") { Alert.alert("Not supported on web", "Use the mobile app to share contacts."); return; }
-      setContactPickerQuery("");
-      setContactPickerRows([]);
+      setAttachVisible(false);
       setContactToConfirm(null);
       setContactPickerOpen(true);
-      setContactPickerLoading(true);
-      try {
-        const rows = await loadDeviceContactsForShare();
-        if (!rows.length) {
-          setContactPickerOpen(false);
-          Alert.alert("No contacts", "No contacts were found on this device.");
-          return;
-        }
-        setContactPickerRows(rows);
-      } catch (e) {
-        setContactPickerOpen(false);
-        const msg = e instanceof Error ? e.message : "Could not load contacts.";
-        Alert.alert(
-          "Permission required",
-          msg.includes("denied")
-            ? "Allow Contacts access in Settings to share contacts."
-            : "Could not load contacts. Please try again.",
-        );
-      } finally {
-        setContactPickerLoading(false);
-      }
     }
   };
 
@@ -1438,27 +1459,6 @@ export default function ChatScreen() {
     }
   }, [user, loadMessages]);
 
-  const contactPickerSections = useMemo(() => {
-    const qRaw = contactPickerQuery.trim().toLowerCase();
-    const qDigits = qRaw.replace(/\D/g, "");
-    const filtered = contactPickerRows.filter((r) => {
-      if (!qRaw) return true;
-      if (r.name.toLowerCase().includes(qRaw)) return true;
-      if (qDigits.length > 0 && r.phones.some((p) => p.replace(/\D/g, "").includes(qDigits))) return true;
-      return false;
-    });
-    const groups = new Map<string, ContactShareRow[]>();
-    for (const r of filtered) {
-      const ch = (r.name.charAt(0) || "#").toUpperCase();
-      const section = /[A-Z]/.test(ch) ? ch : "#";
-      const arr = groups.get(section);
-      if (arr) arr.push(r);
-      else groups.set(section, [r]);
-    }
-    const keys = [...groups.keys()].sort((a, b) => (a === "#" ? 1 : b === "#" ? -1 : a.localeCompare(b)));
-    return keys.map((title) => ({ title, data: groups.get(title)! }));
-  }, [contactPickerRows, contactPickerQuery]);
-
   const openContactPickerRow = useCallback((row: ContactShareRow) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setContactPickerOpen(false);
@@ -1474,8 +1474,6 @@ export default function ChatScreen() {
       emails: contactToConfirm.emails,
     });
     setContactToConfirm(null);
-    setContactPickerQuery("");
-    setContactPickerRows([]);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 150);
   }, [chatId, contactToConfirm, sendContactMessage]);
 
@@ -1524,8 +1522,9 @@ export default function ChatScreen() {
       mediaUrl: item.mediaUrl,
       filename: item.text,
       sessionToken: user?.sessionToken,
-    }).catch(() => {
-      Alert.alert("Error", "Could not open this document on your device.");
+      localUri: item.localMediaUri,
+    }).catch((e) => {
+      Alert.alert("Error", e instanceof Error ? e.message : "Could not open this document on your device.");
     });
   }, [chatId, deleteMessage, sendDocumentMessage, user?.sessionToken]);
 
@@ -1864,7 +1863,7 @@ export default function ChatScreen() {
             </>
           )}
 
-          {/* Meta: time + edited + ticks (hidden for deleted — time sits on deleted row like WhatsApp) */}
+          {/* Footer: time + edited + ticks (hidden for deleted — time sits on deleted row) */}
           {!isDeleted ? (
             <View style={[styles.msgMeta, (isImage || isVideo || isLocation) && styles.msgMetaOnMedia]}>
               {item.isEdited && <Text style={[styles.editedLabel, { color: colors.mutedForeground }]}>edited </Text>}
@@ -2466,7 +2465,7 @@ export default function ChatScreen() {
                 <Ionicons name="send" size={18} color="#fff" />
               </TouchableOpacity>
             ) : (
-              <WhatsAppVoiceMic
+              <VidehVoiceMic
                 enabled={composerEnabled && !editTarget}
                 colors={colors}
                 onSend={handleVoiceNoteSend}
@@ -2489,7 +2488,7 @@ export default function ChatScreen() {
         />
       </KeyboardAvoidingView>
 
-      {/* Attach menu — WhatsApp-style bottom sheet (coloured circles + grid) */}
+      {/* Attach menu — Videh-style bottom sheet (coloured circles + grid) */}
       <Modal visible={attachVisible} transparent animationType="fade" onRequestClose={() => setAttachVisible(false)}>
         <View style={styles.attachModalRoot}>
           <Pressable style={styles.attachBackdrop} onPress={() => setAttachVisible(false)} />
@@ -2537,110 +2536,14 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
-      {/* Share contact — full list + search (Alert only shows ~3 options on Android) */}
-      <Modal
+      <ContactSharePickerModal
         visible={contactPickerOpen}
-        animationType="slide"
-        presentationStyle={Platform.OS === "ios" ? "pageSheet" : "fullScreen"}
-        onRequestClose={() => {
-          setContactPickerOpen(false);
-          setContactPickerQuery("");
-          setContactPickerRows([]);
-        }}
-      >
-        <View style={[styles.contactPickerRoot, { backgroundColor: colors.background, paddingTop: insets.top }]}>
-          <View style={[styles.contactPickerHeader, { borderBottomColor: colors.border }]}>
-            <TouchableOpacity
-              onPress={() => {
-                setContactPickerOpen(false);
-                setContactPickerQuery("");
-                setContactPickerRows([]);
-              }}
-              style={styles.contactPickerBack}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            >
-              <Ionicons name="arrow-back" size={24} color={colors.foreground} />
-            </TouchableOpacity>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.contactPickerTitle, { color: colors.foreground }]}>Send contacts</Text>
-              <Text style={[styles.contactPickerSubtitle, { color: colors.mutedForeground }]}>
-                Choose a contact from your phone
-              </Text>
-            </View>
-            <View style={{ width: 40 }} />
-          </View>
-          <View style={[styles.contactPickerSearch, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Ionicons name="search" size={18} color={colors.mutedForeground} />
-            <TextInput
-              style={[styles.contactPickerSearchInput, { color: colors.foreground }]}
-              placeholder="Search name or number"
-              placeholderTextColor={colors.mutedForeground}
-              value={contactPickerQuery}
-              onChangeText={setContactPickerQuery}
-              autoCorrect={false}
-              autoCapitalize="none"
-              clearButtonMode="while-editing"
-            />
-          </View>
-          {contactPickerLoading ? (
-            <View style={styles.contactPickerLoadingWrap}>
-              <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={[styles.contactPickerLoadingText, { color: colors.mutedForeground }]}>Loading contacts…</Text>
-            </View>
-          ) : (
-            <SectionList
-              sections={contactPickerSections}
-              keyExtractor={(item) => item.id}
-              stickySectionHeadersEnabled
-              keyboardShouldPersistTaps="handled"
-              renderSectionHeader={({ section: { title } }) => (
-                <View style={[styles.contactPickerSectionHeader, { backgroundColor: colors.isDark ? "#1e2a30" : "#f0f2f5" }]}>
-                  <Text style={[styles.contactPickerSectionTitle, { color: colors.primary }]}>{title}</Text>
-                </View>
-              )}
-              renderItem={({ item }) => {
-                const parts = item.name.trim().split(/\s+/).filter(Boolean);
-                const initials =
-                  parts.length >= 2
-                    ? `${parts[0]![0]!}${parts[parts.length - 1]![0]!}`.toUpperCase()
-                    : (item.name.replace(/\D/g, "").slice(-2) || item.name.charAt(0) || "?").toUpperCase();
-                const hue = ((item.name.charCodeAt(0) || 32) * 37) % 360;
-                return (
-                  <TouchableOpacity
-                    style={[styles.contactPickerRow, { borderBottomColor: colors.border }]}
-                    onPress={() => openContactPickerRow(item)}
-                    activeOpacity={0.65}
-                  >
-                    <View style={[styles.contactPickerAvatar, { backgroundColor: `hsl(${hue},42%,42%)` }]}>
-                      <Text style={styles.contactPickerAvatarTxt}>{initials.slice(0, 2)}</Text>
-                    </View>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={[styles.contactPickerName, { color: colors.foreground }]} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      {item.phones[0] ? (
-                        <Text style={[styles.contactPickerPhone, { color: colors.mutedForeground }]} numberOfLines={1}>
-                          {item.phones[0]}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </TouchableOpacity>
-                );
-              }}
-              ListEmptyComponent={
-                <View style={styles.contactPickerEmpty}>
-                  <Text style={[styles.contactPickerEmptyText, { color: colors.mutedForeground }]}>
-                    {contactPickerQuery.trim() ? "No contacts match your search." : "No contacts to show."}
-                  </Text>
-                </View>
-              }
-              contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-            />
-          )}
-        </View>
-      </Modal>
+        colors={colors}
+        onClose={() => setContactPickerOpen(false)}
+        onPick={openContactPickerRow}
+      />
 
-      {/* WhatsApp-style: confirm before sending contact */}
+      {/* Videh-style: confirm before sending contact */}
       <Modal
         visible={!!contactToConfirm}
         animationType="slide"
@@ -2661,7 +2564,13 @@ export default function ChatScreen() {
             <View style={styles.contactConfirmBody}>
               <View style={[styles.contactConfirmAvatar, { backgroundColor: `${colors.primary}22` }]}>
                 <Text style={[styles.contactConfirmAvatarTxt, { color: colors.primary }]}>
-                  {contactToConfirm.name.split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase()}
+                  {(() => {
+                    const parts = contactToConfirm.name.trim().split(/\s+/).filter(Boolean);
+                    if (parts.length >= 2) {
+                      return `${parts[0]![0] ?? ""}${parts[parts.length - 1]![0] ?? ""}`.toUpperCase();
+                    }
+                    return (contactToConfirm.name.trim().charAt(0) || contactToConfirm.phones[0]?.charAt(0) || "?").toUpperCase();
+                  })()}
                 </Text>
               </View>
               <Text style={[styles.contactConfirmName, { color: colors.foreground }]}>{contactToConfirm.name}</Text>
@@ -2761,7 +2670,7 @@ export default function ChatScreen() {
         </View>
       </DismissibleModal>
 
-      {/* Delete modal — centered card (WhatsApp-style), not bottom sheet */}
+      {/* Delete modal — centered card (Videh-style), not bottom sheet */}
       <Modal visible={!!deleteTarget} transparent animationType="fade" onRequestClose={() => setDeleteTarget(null)}>
         <View style={styles.deleteModalRoot}>
           <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setDeleteTarget(null)} />
@@ -2860,7 +2769,7 @@ export default function ChatScreen() {
           <View style={[styles.forwardSheet, { backgroundColor: colors.card }]}>
             <Text style={[styles.attachTitle, { color: colors.foreground }]}>Forward to Videh chat</Text>
             <Text style={[styles.forwardHint, { color: colors.mutedForeground }]}>
-              Only your Videh contacts and groups. Not shared to WhatsApp or other apps.
+              Only your Videh contacts and groups. Not shared outside Videh.
             </Text>
             <TextInput
               value={forwardSearch}

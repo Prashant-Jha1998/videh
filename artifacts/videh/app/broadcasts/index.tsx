@@ -217,7 +217,7 @@ export default function BroadcastsScreen() {
             <Ionicons name="radio-outline" size={60} color={colors.mutedForeground} />
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No broadcast lists yet</Text>
             <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
-              Send one message to many people at once. Each person gets it in their individual chat with you — just like WhatsApp.
+              Send one message to many people at once. Each person receives it in their individual chat with you on Videh.
             </Text>
             <TouchableOpacity style={[styles.emptyBtn, { backgroundColor: colors.primary }]} onPress={() => setCreateModal(true)}>
               <Text style={styles.emptyBtnText}>Create new list</Text>
