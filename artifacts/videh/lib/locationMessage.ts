@@ -22,11 +22,17 @@ export function mapsUrl(lat: number, lng: number): string {
   return `https://maps.google.com/?q=${lat},${lng}`;
 }
 
-/** OSM static map image (no API key). */
+/** OSM static map image (no API key) with fallback mirror. */
 export function staticMapImageUrl(lat: number, lng: number, width: number, height: number, zoom = 15): string {
   const w = Math.min(Math.round(width), 640);
   const h = Math.min(Math.round(height), 640);
-  return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=${zoom}&size=${w}x${h}&maptype=mapnik`;
+  return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=${zoom}&size=${w}x${h}&maptype=mapnik&markers=${lat},${lng},red-pushpin`;
+}
+
+export function staticMapFallbackUrl(lat: number, lng: number, width: number, height: number, zoom = 15): string {
+  const w = Math.min(Math.round(width), 640);
+  const h = Math.min(Math.round(height), 640);
+  return `https://staticmap.openstreetmap.fr/staticmap.php?center=${lat},${lng}&zoom=${zoom}&size=${w}x${h}&maptype=mapnik&markers=${lat},${lng},red-pushpin`;
 }
 
 export function encodeLocationPayload(p: LocationMessagePayload): string {

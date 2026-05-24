@@ -1,7 +1,6 @@
 import { Image } from "expo-image";
-import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -23,9 +22,16 @@ import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
 import {
+  ensureLocationServicesEnabled,
+  refineDeviceLocation,
+  requestForegroundLocationPermission,
+  resolveDeviceLocation,
+  reverseGeocodeLabel,
+} from "@/lib/locationUtils";
+import {
   encodeLocationPayload,
-  formatLiveUntil,
   mapsUrl,
+  staticMapFallbackUrl,
   staticMapImageUrl,
   type LocationMessagePayload,
 } from "@/lib/locationMessage";
@@ -50,9 +56,11 @@ export default function SendLocationScreen() {
   const [lat, setLat] = useState<number | null>(null);
   const [lng, setLng] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refining, setRefining] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [areaLabel, setAreaLabel] = useState("");
   const [nearbyRows, setNearbyRows] = useState<{ title: string; subtitle: string }[]>([]);
+  const [mapFallback, setMapFallback] = useState(false);
 
   const [liveIntroOpen, setLiveIntroOpen] = useState(false);
   const [livePanelOpen, setLivePanelOpen] = useState(false);
@@ -60,52 +68,81 @@ export default function SendLocationScreen() {
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
 
-  const mapUri = lat != null && lng != null ? staticMapImageUrl(lat, lng, Math.round(SW * 2), MAP_H * 2, 15) : null;
+  const geocodeReqRef = useRef(0);
 
-  const refreshPosition = useCallback(async () => {
+  const applyCoords = useCallback(async (latitude: number, longitude: number) => {
+    setLat(latitude);
+    setLng(longitude);
     setErr(null);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        setErr("Location permission is required.");
-        setLoading(false);
-        return;
-      }
-      if (Platform.OS === "android") {
-        await Location.enableNetworkProviderAsync().catch(() => {});
-      }
-      let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      if (!loc) {
-        const last = await Location.getLastKnownPositionAsync();
-        if (last) loc = last;
-      }
-      if (!loc) {
-        setErr("Could not get your location.");
-        setLoading(false);
-        return;
-      }
-      const { latitude, longitude } = loc.coords;
-      setLat(latitude);
-      setLng(longitude);
-      const geo = await Location.reverseGeocodeAsync({ latitude, longitude }).catch(() => [] as Location.LocationGeocodedAddress[]);
-      const g = geo[0];
-      const label = [g?.name, g?.street, g?.district].filter(Boolean).join(", ") || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+    const reqId = ++geocodeReqRef.current;
+    void reverseGeocodeLabel(latitude, longitude).then(({ areaLabel: label, nearbyRows: rows }) => {
+      if (geocodeReqRef.current !== reqId) return;
       setAreaLabel(label);
-      const rows: { title: string; subtitle: string }[] = [];
-      if (g?.name && g.name !== label) rows.push({ title: g.name, subtitle: [g.street, g.city].filter(Boolean).join(" · ") });
-      if (g?.street) rows.push({ title: g.street, subtitle: [g.city, g.region].filter(Boolean).join(" · ") });
-      if (g?.city && !rows.some((r) => r.title === g.city)) rows.push({ title: g.city ?? "Area", subtitle: g.region ?? "" });
-      setNearbyRows(rows.slice(0, 6));
-    } catch {
-      setErr("Could not refresh location.");
-    } finally {
-      setLoading(false);
-    }
+      setNearbyRows(rows);
+    });
   }, []);
+
+  const refreshPosition = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) {
+      setLoading(true);
+      setErr(null);
+    } else {
+      setRefining(true);
+    }
+
+    try {
+      const granted = await requestForegroundLocationPermission();
+      if (!granted) {
+        setErr("Location permission chahiye. Phone Settings → Videh → Location → Allow.");
+        setLoading(false);
+        setRefining(false);
+        return;
+      }
+
+      const servicesOk = await ensureLocationServicesEnabled();
+      if (!servicesOk) {
+        setErr("Phone ka Location / GPS on karein, phir refresh dabayein.");
+        setLoading(false);
+        setRefining(false);
+        return;
+      }
+
+      const initial = await resolveDeviceLocation({ timeoutMs: opts?.silent ? 15_000 : 12_000 });
+      if (initial) {
+        await applyCoords(initial.latitude, initial.longitude);
+        setLoading(false);
+
+        if (initial.fromCache) {
+          setRefining(true);
+          const refined = await refineDeviceLocation(15_000);
+          if (refined) {
+            await applyCoords(refined.latitude, refined.longitude);
+          }
+          setRefining(false);
+        }
+        return;
+      }
+
+      setErr("Location nahi mil rahi. GPS on karke refresh try karein.");
+      setLoading(false);
+    } catch {
+      setErr("Location load nahi ho payi. Dubara try karein.");
+      setLoading(false);
+    } finally {
+      setRefining(false);
+    }
+  }, [applyCoords]);
 
   useEffect(() => {
     void refreshPosition();
   }, [refreshPosition]);
+
+  const mapUri =
+    lat != null && lng != null
+      ? (mapFallback
+        ? staticMapFallbackUrl(lat, lng, Math.round(SW * 2), MAP_H * 2, 15)
+        : staticMapImageUrl(lat, lng, Math.round(SW * 2), MAP_H * 2, 15))
+      : null;
 
   const postLocation = async (payload: LocationMessagePayload) => {
     if (!chatId || !user?.dbId) return null;
@@ -177,7 +214,6 @@ export default function SendLocationScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      {/* Header */}
       <View style={[styles.header, { paddingTop: topPad, backgroundColor: colors.background }]}>
         <TouchableOpacity style={styles.headerIcon} onPress={() => router.back()} hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color={colors.foreground} />
@@ -187,20 +223,22 @@ export default function SendLocationScreen() {
           <TouchableOpacity style={styles.headerIcon} onPress={() => {}} hitSlop={12}>
             <Ionicons name="search-outline" size={22} color={colors.foreground} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon} onPress={() => void refreshPosition()} hitSlop={12}>
+          <TouchableOpacity style={styles.headerIcon} onPress={() => void refreshPosition({ silent: lat != null })} hitSlop={12}>
             <Ionicons name="refresh" size={22} color={colors.foreground} />
           </TouchableOpacity>
         </View>
       </View>
 
-      {loading ? (
+      {loading && lat == null ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingHint, { color: colors.mutedForeground }]}>Getting your location…</Text>
         </View>
-      ) : err ? (
+      ) : err && lat == null ? (
         <View style={styles.center}>
-          <Text style={{ color: colors.mutedForeground, textAlign: "center", padding: 24 }}>{err}</Text>
-          <TouchableOpacity onPress={() => void refreshPosition()}>
+          <Ionicons name="location-outline" size={48} color={colors.mutedForeground} style={{ marginBottom: 12 }} />
+          <Text style={{ color: colors.mutedForeground, textAlign: "center", paddingHorizontal: 24, lineHeight: 22 }}>{err}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => void refreshPosition()}>
             <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>Try again</Text>
           </TouchableOpacity>
         </View>
@@ -208,18 +246,37 @@ export default function SendLocationScreen() {
         <>
           <View style={styles.mapWrap}>
             {mapUri ? (
-              <Image source={{ uri: mapUri }} style={styles.mapImg} contentFit="cover" />
+              <Image
+                source={{ uri: mapUri }}
+                style={styles.mapImg}
+                contentFit="cover"
+                onError={() => setMapFallback(true)}
+              />
+            ) : null}
+            <View style={styles.mapPin}>
+              <Ionicons name="location" size={36} color="#E53935" />
+            </View>
+            {refining ? (
+              <View style={styles.mapRefining}>
+                <ActivityIndicator size="small" color={colors.primary} />
+              </View>
             ) : null}
             <View style={styles.mapOverlayRow}>
               <TouchableOpacity style={styles.mapFab} onPress={() => {}}>
                 <Ionicons name="scan-outline" size={20} color="#555" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.mapFab} onPress={() => void refreshPosition()}>
+              <TouchableOpacity style={styles.mapFab} onPress={() => void refreshPosition({ silent: true })}>
                 <Ionicons name="locate" size={22} color="#555" />
               </TouchableOpacity>
             </View>
             <Text style={styles.osmCredit}>© OpenStreetMap</Text>
           </View>
+
+          {!!areaLabel && (
+            <Text style={[styles.areaBanner, { color: colors.mutedForeground, backgroundColor: colors.card }]} numberOfLines={2}>
+              {areaLabel}
+            </Text>
+          )}
 
           <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
             <TouchableOpacity
@@ -239,16 +296,24 @@ export default function SendLocationScreen() {
             <TouchableOpacity
               style={[styles.row, { borderBottomColor: colors.border }]}
               onPress={() => void sendStatic()}
-              disabled={sending}
+              disabled={sending || lat == null}
             >
               <View style={[styles.rowIconCircle, { backgroundColor: "#8696A0" }]}>
                 <Ionicons name="location" size={20} color="#fff" />
               </View>
-              <Text style={[styles.rowTitle, { color: colors.foreground }]}>Send your current location</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.rowTitle, { color: colors.foreground }]}>Send your current location</Text>
+                {refining ? (
+                  <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>Refining GPS…</Text>
+                ) : null}
+              </View>
               <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
             </TouchableOpacity>
 
             <Text style={[styles.sectionHdr, { color: colors.mutedForeground }]}>Nearby places</Text>
+            {nearbyRows.length === 0 ? (
+              <Text style={[styles.emptyPlaces, { color: colors.mutedForeground }]}>Loading nearby places…</Text>
+            ) : null}
             {nearbyRows.map((r, i) => (
               <TouchableOpacity
                 key={`${r.title}-${i}`}
@@ -267,7 +332,6 @@ export default function SendLocationScreen() {
         </>
       )}
 
-      {/* Live location — intro (WhatsApp-style copy) */}
       <Modal visible={liveIntroOpen} transparent animationType="fade" onRequestClose={() => setLiveIntroOpen(false)}>
         <Pressable style={styles.modalDim} onPress={() => setLiveIntroOpen(false)}>
           <Pressable style={[styles.introCard, { backgroundColor: colors.background }]} onPress={(e) => e.stopPropagation()}>
@@ -298,7 +362,6 @@ export default function SendLocationScreen() {
         </Pressable>
       </Modal>
 
-      {/* Live — duration + comment + send */}
       <Modal visible={livePanelOpen} transparent animationType="slide" onRequestClose={() => setLivePanelOpen(false)}>
         <View style={styles.liveModalRoot}>
           <Pressable style={styles.attachBackdrop} onPress={() => setLivePanelOpen(false)} />
@@ -361,8 +424,26 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, fontSize: 18, fontFamily: "Inter_600SemiBold", textAlign: "center", marginRight: 8 },
   headerRight: { flexDirection: "row", alignItems: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  loadingHint: { marginTop: 14, fontSize: 14, fontFamily: "Inter_400Regular" },
+  retryBtn: { marginTop: 16, padding: 12 },
   mapWrap: { height: MAP_H, backgroundColor: "#dfe6e4", position: "relative" },
   mapImg: { width: "100%", height: "100%" },
+  mapPin: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    marginLeft: -18,
+    marginTop: -36,
+    pointerEvents: "none",
+  },
+  mapRefining: {
+    position: "absolute",
+    bottom: 10,
+    right: 10,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderRadius: 16,
+    padding: 8,
+  },
   mapOverlayRow: {
     position: "absolute",
     top: 12,
@@ -392,6 +473,12 @@ const styles = StyleSheet.create({
     color: "rgba(0,0,0,0.45)",
     fontFamily: "Inter_400Regular",
   },
+  areaBanner: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+  },
   list: { flex: 1 },
   row: {
     flexDirection: "row",
@@ -402,8 +489,10 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   rowIconCircle: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-  rowTitle: { flex: 1, fontSize: 16, fontFamily: "Inter_500Medium" },
+  rowTitle: { fontSize: 16, fontFamily: "Inter_500Medium" },
+  rowSub: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
   sectionHdr: { fontSize: 13, fontFamily: "Inter_600SemiBold", paddingHorizontal: 16, paddingTop: 18, paddingBottom: 8 },
+  emptyPlaces: { paddingHorizontal: 16, paddingVertical: 8, fontSize: 13, fontFamily: "Inter_400Regular" },
   placeRow: {
     flexDirection: "row",
     alignItems: "center",

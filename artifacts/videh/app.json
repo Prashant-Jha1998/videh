@@ -23,6 +23,8 @@
         "NSContactsUsageDescription": "Videh uses your contacts to find friends who are already on Videh.",
         "NSBluetoothAlwaysUsageDescription": "Videh uses Bluetooth for audio routing during calls.",
         "NSPhotoLibraryAddUsageDescription": "Videh saves videos you download from chat to your photo library.",
+        "NSLocationWhenInUseUsageDescription": "Videh needs your location to send current location and live location in chats.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Videh uses your location for live location sharing in chats.",
         "UIBackgroundModes": [
           "audio",
           "voip",
@@ -103,6 +105,14 @@
           "icon": "./assets/images/videh_icon_foreground.png",
           "color": "#00A884",
           "defaultChannel": "messages"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Videh needs your location to send current location and live location in chats.",
+          "locationAlwaysAndWhenInUsePermission": "Videh uses your location for live location sharing in chats.",
+          "isAndroidBackgroundLocationEnabled": false
         }
       ],
       [
