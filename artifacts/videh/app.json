@@ -120,7 +120,6 @@
           "isAndroidBackgroundLocationEnabled": false
         }
       ],
-      "./plugins/withAndroidIncomingCall.js",
       [
         "expo-speech-recognition",
         {
