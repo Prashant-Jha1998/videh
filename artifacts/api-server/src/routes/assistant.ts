@@ -110,8 +110,8 @@ router.post("/enroll", async (req: Request, res: Response) => {
   const samples = (body.samples ?? [])
     .map((s) => normalizeFingerprint(s))
     .filter((s): s is VoiceFingerprint => Boolean(s));
-  if (samples.length < 2) {
-    res.status(400).json({ success: false, message: "At least 2 voice samples are required." });
+  if (samples.length < 1) {
+    res.status(400).json({ success: false, message: "At least 1 voice sample is required." });
     return;
   }
   try {
@@ -213,8 +213,8 @@ router.post("/command", async (req: Request, res: Response) => {
 
     if (plan.intent === "unknown") {
       const unknownSpeak = lang === "en"
-        ? `${name}, I can message anyone in your chats, make calls, read messages, broadcast, khata, search, and help with Videh. Just say what you need.`
-        : `${name} ji, main aapke kisi bhi contact ko message bhej sakta hoon, call kar sakta hoon, messages padh sakta hoon, broadcast, khata, search — jo chahiye bolein.`;
+        ? `${name}, ask anything in your own words: who messaged today, missed calls, messages in a group, how to change a setting, or message or call anyone in your chat list.`
+        : `${name} ji, apni bhasha mein kuch bhi poochiye — aaj kis ka message aaya, kis ka call miss hua, kis group mein kitne message, setting kaise badlein, ya chat list ke kisi naam ko call ya message.`;
       jsonLang(res, lang, {
         success: true,
         intent: "unknown",

@@ -14,6 +14,8 @@ export type AssistantIntent =
   | { type: "open_chat"; contactName: string }
   | { type: "search_messages"; searchQuery: string }
   | { type: "recent_calls" }
+  | { type: "missed_calls" }
+  | { type: "group_message_stats" }
   | { type: "list_broadcasts" }
   | { type: "send_broadcast"; broadcastListName: string; messageText: string }
   | { type: "khata_summary"; contactName: string }
@@ -29,9 +31,23 @@ function normalize(text: string): string {
 }
 
 function stripWakePrefix(raw: string): string {
-  return raw
-    .replace(/^(hey\s+videh|he\s+videh|videh|हे\s+विदेह|हे\s+वीडेह)[,\s]*/i, "")
-    .trim();
+  let t = raw.trim();
+  const prefixes = [
+    "hey videh",
+    "he videh",
+    "hay videh",
+    "hi videh",
+    "hello videh",
+    "हे विदेह",
+    "है विदेह",
+    "हे वीडेह",
+    "विदेह जी",
+  ].sort((a, b) => b.length - a.length);
+  for (const p of prefixes) {
+    const re = new RegExp(`^${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[,\\s]*`, "i");
+    t = t.replace(re, "").trim();
+  }
+  return t;
 }
 
 function extractContactName(fragment: string): string {
@@ -62,6 +78,9 @@ export function parseAssistantIntent(text: string): AssistantIntent {
     { re: /^send\s+(?:a\s+)?message\s+to\s+(.+?)\s+(?:saying|that|ki)\s+(.+)$/i, contactIdx: 1, msgIdx: 2 },
     { re: /^tell\s+(.+?)\s+(?:that|to)\s+(.+)$/i, contactIdx: 1, msgIdx: 2 },
     { re: /^(.+?)\s+ko\s+(.+)\s+bhej\s+do$/i, contactIdx: 1, msgIdx: 2 },
+    { re: /^(.+?)\s+ko\s+(?:ye|yeh)\s+(?:bhej|message)\s+(?:do|kar)(?:o|na)?\s*(?:ki|ke)?\s*(.+)$/i, contactIdx: 1, msgIdx: 2 },
+    { re: /^(.+?)\s+group\s+ko\s+(.+?)\s+(?:bhej|message)\s+(?:do|kar)/i, contactIdx: 1, msgIdx: 2 },
+    { re: /^(.+?)\s+ko\s+bol(?:o|na| do)?\s*(?:ki|ke|ye|yeh)?\s*(.+)$/i, contactIdx: 1, msgIdx: 2 },
   ];
   for (const { re, contactIdx, msgIdx } of sendPatterns) {
     const m = raw.match(re);
@@ -75,10 +94,14 @@ export function parseAssistantIntent(text: string): AssistantIntent {
   }
 
   const callPatterns = [
-    { re: /^(.+?)\s+ko\s+(?:video\s+)?call\s+(?:karo|lagao|karna|kar|laga)/i, video: false },
-    { re: /^(.+?)\s+(?:ko|se)\s+video\s+call\s+(?:karo|kar)/i, video: true },
+    { re: /^(.+?)\s+ko\s+video\s+call\s+(?:karo|lagao|karna|kar|laga|mar)/i, video: true },
+    { re: /^(.+?)\s+ko\s+(?:voice\s+)?call\s+(?:karo|lagao|karna|kar|laga|mar)/i, video: false },
+    { re: /^(.+?)\s+(?:ko|se|par)\s+video\s+call/i, video: true },
+    { re: /^video\s+call\s+(.+?)(?:\s+now)?$/i, video: true },
     { re: /^call\s+(.+?)(?:\s+now)?$/i, video: false },
-    { re: /^(.+?)\s+ko\s+phone\s+(?:karo|lagao)/i, video: false },
+    { re: /^(.+?)\s+ko\s+phone\s+(?:karo|lagao|laga)/i, video: false },
+    { re: /^(.+?)\s+se\s+(?:baat|call)\s+karo/i, video: false },
+    { re: /^(.+?)\s+ko\s+dial\s+karo/i, video: false },
   ];
   for (const { re, video } of callPatterns) {
     const m = raw.match(re);
@@ -141,8 +164,24 @@ export function parseAssistantIntent(text: string): AssistantIntent {
     if (q) return { type: "search_messages", searchQuery: q };
   }
 
-  if (/recent\s+calls?|call\s+history|aaj\s+.*call|kal\s+.*call/i.test(n)) {
+  if (
+    /missed\s+call|call\s+miss|miss\s+ho(?:i|gaye)|kaun\s+sa\s+call\s+miss|kis(?:ne|ka)\s+call\s+miss/i.test(n)
+    || /(?:video|voice)\s+call\s+miss/i.test(n)
+  ) {
+    return { type: "missed_calls" };
+  }
+
+  if (/recent\s+calls?|call\s+history|sab(?:hi)?\s+call/i.test(n) && !/miss/.test(n)) {
     return { type: "recent_calls" };
+  }
+
+  if (
+    /group.*(?:mein|me)\s+kitne\s+message/.test(n)
+    || /kis\s+group\s+mein\s+/.test(n)
+    || /sab(?:hi)?\s+group.*message/.test(n)
+    || /group\s+message\s+count/i.test(n)
+  ) {
+    return { type: "group_message_stats" };
   }
 
   if (/broadcast\s+list|mer[ei]\s+broadcast/i.test(n) && !/bhej|send/.test(n)) {
@@ -178,16 +217,23 @@ export function parseAssistantIntent(text: string): AssistantIntent {
     || /aaj\s+(?:kaha|kahan)(?:\s+(?:kaha|kahan|se))?\s*(?:se\s+)?message/.test(n)
     || /aaj\s+.*message\s+(?:aaya|aaye)/.test(n)
     || /aaj\s+(?:ke|ka)\s+message/.test(n)
+    || /kaun\s+kaun\s+ne\s+message/.test(n)
+    || /mujhe\s+aaj\s+.*message/.test(n)
     || /today.*message/.test(n)
+    || /who\s+messaged\s+(?:me\s+)?today/.test(n)
   ) {
     return { type: "messages_today" };
   }
 
-  if (/kitne\s+(?:unread|padhe|bache|baaki)\s+message/.test(n) || /unread\s+message\s+kitne/.test(n)) {
+  if (
+    /kitne\s+(?:unread|padhe|bache|baaki|pending)\s+message/.test(n)
+    || /unread\s+message\s+kitne/.test(n)
+    || /message\s+kitne\s+(?:bache|pending)/.test(n)
+  ) {
     return { type: "unread_count" };
   }
 
-  if (/important\s+message/.test(n) || /zaruri\s+message/.test(n) || /missed\s+message/.test(n)) {
+  if (/important\s+message/.test(n) || /zaruri\s+message/.test(n)) {
     return { type: "important_messages" };
   }
 

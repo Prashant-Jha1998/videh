@@ -12,7 +12,7 @@ import {
   toSpeechLocale,
   type AssistantLangCode,
 } from "./assistantLanguages";
-import { WAKE_PHRASES } from "./assistantPrefs";
+import { WAKE_CONTEXT_STRINGS } from "./assistantWake";
 
 type Listener = { remove: () => void };
 
@@ -102,11 +102,12 @@ export async function startListening(opts: ListenOpts): Promise<void> {
       : opts.locale,
   );
 
+  const wakeLang = toRecognitionLocale(code);
   ExpoSpeechRecognitionModule.start({
-    lang: opts.wakeMode ? "en-IN" : toRecognitionLocale(code),
+    lang: opts.wakeMode ? wakeLang : toRecognitionLocale(code),
     interimResults: true,
-    continuous: true,
-    contextualStrings: opts.wakeMode ? WAKE_PHRASES : undefined,
+    continuous: opts.wakeMode ? true : true,
+    contextualStrings: opts.wakeMode ? WAKE_CONTEXT_STRINGS : undefined,
     androidIntent: opts.wakeMode ? "android.speech.action.VOICE_SEARCH_HANDS_FREE" : undefined,
     androidIntentOptions: {
       EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 2500 : 12000,

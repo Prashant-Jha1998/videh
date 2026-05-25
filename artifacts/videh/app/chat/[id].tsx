@@ -85,6 +85,7 @@ import { loadEnterIsSend } from "@/lib/chatSettings";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { safeJsonParse } from "@/lib/safeJson";
 import { formatCallMessageLabel, parseCallMessageMeta } from "@/lib/callMessage";
+import { messageReplyPreviewText, replyQuoteSenderLabel } from "@/lib/messageReplyPreview";
 import { formatPresenceSubtitle, type PresenceView } from "@/lib/presence";
 import { setAssistantChatInputFocused } from "@/lib/assistantPause";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -184,6 +185,21 @@ const ATTACH_SHEET_ITEMS: {
 ];
 
 type ReplyData = { id: string; text: string; senderId: string; senderName?: string } | null;
+
+function toReplyData(msg: {
+  id: string;
+  text: string;
+  type: string;
+  senderId: string;
+  senderName?: string;
+}): NonNullable<ReplyData> {
+  return {
+    id: msg.id,
+    text: messageReplyPreviewText({ type: msg.type, text: msg.text, senderId: msg.senderId }),
+    senderId: msg.senderId,
+    senderName: msg.senderName,
+  };
+}
 
 // Extract URLs from text
 function extractUrls(text: string): string[] {
@@ -605,6 +621,44 @@ function ViewOnceOpenedBubble({ kind }: { kind: "image" | "video" }) {
   );
 }
 
+/** Quoted reply bar — tap scrolls to original message (WhatsApp-style). */
+function ReplyQuoteStrip({
+  senderLabel,
+  previewText,
+  isMe,
+  accentColor,
+  previewColor,
+  onPress,
+}: {
+  senderLabel: string;
+  previewText: string;
+  isMe: boolean;
+  accentColor: string;
+  previewColor: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.replyStrip,
+        {
+          borderLeftColor: accentColor,
+          backgroundColor: isMe ? "rgba(0,0,0,0.07)" : "rgba(0,0,0,0.05)",
+          opacity: pressed ? 0.88 : 1,
+        },
+      ]}
+    >
+      <Text style={[styles.replyWho, { color: accentColor }]} numberOfLines={1}>
+        {senderLabel}
+      </Text>
+      <Text style={[styles.replyText, { color: previewColor }]} numberOfLines={2}>
+        {previewText}
+      </Text>
+    </Pressable>
+  );
+}
+
 function CallMessageBubble({
   meta,
   isMe,
@@ -623,20 +677,23 @@ function CallMessageBubble({
     ? (missed && !isMe ? "videocam-off" : "videocam")
     : (missed && !isMe ? "call" : "call");
   const tint = missed && !isMe ? "#ef4444" : isMe ? "#008069" : colors.primary;
+  const label = formatCallMessageLabel(meta, isMe);
   return (
     <TouchableOpacity style={styles.callBubble} onPress={onPress} activeOpacity={0.85}>
       <Ionicons
         name={iconName as any}
-        size={18}
+        size={20}
         color={tint}
-        style={{ transform: [{ rotate: missed && isMe ? "135deg" : "0deg" }] }}
+        style={[styles.callBubbleIcon, { transform: [{ rotate: missed && isMe ? "135deg" : "0deg" }] }]}
       />
-      <Text style={[styles.callBubbleText, { color: colors.foreground }]}>
-        {formatCallMessageLabel(meta, isMe)}
-      </Text>
-      <Text style={[styles.callBubbleTime, { color: colors.mutedForeground }]}>
-        {formatChatBubbleTime(timestamp)}
-      </Text>
+      <View style={styles.callBubbleBody}>
+        <Text style={[styles.callBubbleText, { color: colors.foreground }]} numberOfLines={2}>
+          {label}
+        </Text>
+        <Text style={[styles.callBubbleTime, { color: colors.mutedForeground }]}>
+          {formatChatBubbleTime(timestamp)}
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -1001,6 +1058,29 @@ export default function ChatScreen() {
     : allMessages;
 
   const listRows = useMemo(() => messagesWithDateRows(messages), [messages]);
+  const chatContactName = name ?? chat?.name ?? "Chat";
+
+  const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
+  const flashAnim = useRef(new Animated.Value(0)).current;
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scrollToQuotedMessage = useCallback((quotedId: string) => {
+    const index = listRows.findIndex((r) => r.rowType === "msg" && r.message.id === quotedId);
+    if (index < 0) {
+      Alert.alert("Message not found", "This message is not loaded. Scroll up to load older messages.");
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    setFlashMessageId(quotedId);
+    flashAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(flashAnim, { toValue: 1, duration: 180, useNativeDriver: false }),
+      Animated.timing(flashAnim, { toValue: 0, duration: 700, useNativeDriver: false }),
+    ]).start();
+    flashTimerRef.current = setTimeout(() => setFlashMessageId(null), 950);
+  }, [listRows, flashAnim]);
 
   useEffect(() => {
     if (searching) return;
@@ -1314,11 +1394,23 @@ export default function ChatScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     clearTyping(chatId);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-    sendMessage(chatId, text.trim(), replyTo?.id);
+    sendMessage(
+      chatId,
+      text.trim(),
+      replyTo?.id,
+      replyTo
+        ? {
+            replyText: replyTo.text,
+            replySenderName:
+              replyTo.senderName ?? (replyTo.senderId === "me" ? user?.name : (name ?? chat?.name ?? "Chat")),
+            replyQuotedSenderId: replyTo.senderId === "me" ? String(user?.dbId ?? "") : replyTo.senderId,
+          }
+        : undefined,
+    );
     setText("");
     setReplyTo(null);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-  }, [text, chatId, sendMessage, replyTo, clearTyping, editTarget, editText, editMessage, composerEnabled, chat?.isGroup, groupSendPermission?.policy]);
+  }, [text, chatId, sendMessage, replyTo, clearTyping, editTarget, editText, editMessage, composerEnabled, chat?.isGroup, groupSendPermission?.policy, user?.dbId, user?.name, name, chat?.name]);
 
   const sendMediaMessage = async (
     type: "camera" | "videocamera" | "gallery" | "document" | "location" | "contact" | "viewonce" | "audiofile",
@@ -1566,7 +1658,7 @@ export default function ChatScreen() {
     const isMe = msg.senderId === "me";
 
     const opts: any[] = [
-      { text: "↩ Reply", onPress: () => { setReplyTo({ id: msg.id, text: msg.text, senderId: msg.senderId, senderName: msg.senderName }); inputRef.current?.focus(); } },
+      { text: "↩ Reply", onPress: () => { setReplyTo(toReplyData(msg)); inputRef.current?.focus(); } },
       { text: "📋 Copy", onPress: () => { Clipboard.setString(msg.text); } },
       { text: "😊 React", onPress: () => setReactionTarget(msg) },
       ...(msg.type === "image" && msg.mediaUrl && !msg.isViewOnce && Platform.OS !== "web"
@@ -1662,12 +1754,24 @@ export default function ChatScreen() {
     );
 
     const isSelected = selectedIds.includes(item.id);
+    const isFlashing = flashMessageId === item.id;
+    const flashTint = flashAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: ["rgba(255, 193, 7, 0)", "rgba(255, 193, 7, 0.38)"],
+    });
+    const quoteAccent = isMe ? "#06CF9C" : "#00A884";
     const selectionRowTint = colors.isDark ? "rgba(0, 168, 132, 0.2)" : "rgba(183, 223, 165, 0.55)";
     const deletedMeLabel = colors.isDark ? "rgba(255,255,255,0.72)" : "rgba(0,0,0,0.52)";
     const deletedMeIcon = colors.isDark ? "rgba(255,255,255,0.58)" : "rgba(0,0,0,0.42)";
     const deletedMeTime = colors.isDark ? "rgba(255,255,255,0.62)" : "rgba(0,0,0,0.42)";
     const msgRow = (
       <View style={[styles.msgRowOuter, isSelected && styles.msgRowOuterBleed]}>
+        {isFlashing ? (
+          <Animated.View
+            style={[StyleSheet.absoluteFillObject, { backgroundColor: flashTint, borderRadius: 8 }]}
+            pointerEvents="none"
+          />
+        ) : null}
         {isSelected ? (
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: selectionRowTint }]} pointerEvents="none" />
         ) : null}
@@ -1717,12 +1821,20 @@ export default function ChatScreen() {
           >
           {/* Reply strip */}
           {item.replyToId && item.replyText && !isDeleted && (
-            <View style={[styles.replyStrip, { borderLeftColor: colors.primary, backgroundColor: isMe ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.07)" }]}>
-              <Text style={[styles.replyWho, { color: colors.primary }]}>
-                {item.replySenderName ?? (item.replyToId === "me" ? "You" : "Them")}
-              </Text>
-              <Text style={[styles.replyText, { color: colors.mutedForeground }]} numberOfLines={1}>{item.replyText}</Text>
-            </View>
+            <ReplyQuoteStrip
+              senderLabel={replyQuoteSenderLabel({
+                replyQuotedSenderId: item.replyQuotedSenderId,
+                replySenderName: item.replySenderName,
+                viewerDbId: user?.dbId,
+                chatContactName,
+                isGroup: chat?.isGroup,
+              })}
+              previewText={item.replyText}
+              isMe={isMe}
+              accentColor={quoteAccent}
+              previewColor={colors.mutedForeground}
+              onPress={() => scrollToQuotedMessage(item.replyToId!)}
+            />
           )}
 
           {/* Content */}
@@ -1936,12 +2048,7 @@ export default function ChatScreen() {
           const ok = (!isMe && direction === "left") || (isMe && direction === "right");
           if (!ok) return;
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          setReplyTo({
-            id: item.id,
-            text: item.text,
-            senderId: item.senderId,
-            senderName: item.senderName,
-          });
+          setReplyTo(toReplyData(item));
           inputRef.current?.focus();
           swipeable.close();
         }}
@@ -2149,12 +2256,7 @@ export default function ChatScreen() {
                   onPress={() => {
                     const m = allMessages.find((x) => x.id === selectedIds[0]);
                     if (!m || m.type === "deleted") return;
-                    setReplyTo({
-                      id: m.id,
-                      text: m.text,
-                      senderId: m.senderId,
-                      senderName: m.senderName,
-                    });
+                    setReplyTo(toReplyData(m));
                     clearSelection();
                     inputRef.current?.focus();
                   }}
@@ -2298,7 +2400,7 @@ export default function ChatScreen() {
         <FlatList
           ref={listRef}
           data={listRows}
-          extraData={selectedIds.join(",")}
+          extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}`}
           keyExtractor={(row) => (row.rowType === "date" ? row.id : row.message.id)}
           renderItem={renderChatListRow}
           contentContainerStyle={{ paddingVertical: 12, paddingHorizontal: 10 }}
@@ -2306,6 +2408,19 @@ export default function ChatScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          onScrollToIndexFailed={(info) => {
+            listRef.current?.scrollToOffset({
+              offset: Math.max(0, info.averageItemLength * info.index),
+              animated: true,
+            });
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({
+                index: info.index,
+                animated: true,
+                viewPosition: 0.5,
+              });
+            }, 120);
+          }}
           ListEmptyComponent={
             initializing ? (
               <View style={styles.initWrap}>
@@ -2357,15 +2472,28 @@ export default function ChatScreen() {
 
         {/* Reply preview */}
         {!selectionActive && replyTo && !editTarget && (
-          <View style={[styles.replyPreview, { backgroundColor: colors.card, borderLeftColor: colors.primary }]}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.replyPreviewLabel, { color: colors.primary }]}>
-                {replyTo.senderId === "me" ? "You" : (replyTo.senderName ?? displayName)}
-              </Text>
-              <Text style={[styles.replyPreviewText, { color: colors.mutedForeground }]} numberOfLines={1}>{replyTo.text}</Text>
-            </View>
-            <TouchableOpacity onPress={() => setReplyTo(null)} style={{ padding: 4 }}>
-              <Ionicons name="close" size={20} color={colors.mutedForeground} />
+          <View style={[styles.replyPreviewBar, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+            <Pressable
+              style={[styles.replyPreview, { borderLeftColor: "#00A884" }]}
+              onPress={() => scrollToQuotedMessage(replyTo.id)}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.replyPreviewLabel, { color: "#00A884" }]}>
+                  {replyQuoteSenderLabel({
+                    replyQuotedSenderId: replyTo.senderId === "me" ? String(user?.dbId ?? "") : replyTo.senderId,
+                    replySenderName: replyTo.senderName,
+                    viewerDbId: user?.dbId,
+                    chatContactName,
+                    isGroup: chat?.isGroup,
+                  })}
+                </Text>
+                <Text style={[styles.replyPreviewText, { color: colors.mutedForeground }]} numberOfLines={2}>
+                  {replyTo.text}
+                </Text>
+              </View>
+            </Pressable>
+            <TouchableOpacity onPress={() => setReplyTo(null)} style={styles.replyPreviewClose} hitSlop={12}>
+              <Ionicons name="close-circle" size={22} color={colors.mutedForeground} />
             </TouchableOpacity>
           </View>
         )}
@@ -2933,9 +3061,18 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 12,
     borderBottomRightRadius: 12,
   },
-  replyStrip: { borderLeftWidth: 3, paddingLeft: 8, marginBottom: 5, paddingVertical: 2, borderRadius: 2, marginHorizontal: 0 },
-  replyWho: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
-  replyText: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  replyStrip: {
+    borderLeftWidth: 4,
+    paddingLeft: 8,
+    paddingRight: 6,
+    marginBottom: 6,
+    marginTop: 2,
+    paddingVertical: 5,
+    borderRadius: 6,
+    marginHorizontal: 0,
+  },
+  replyWho: { fontSize: 12.5, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
+  replyText: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 17 },
   msgText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
   msgImage: { width: W * 0.62, height: W * 0.62, borderRadius: 12 },
   imageFallbackBg: { backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 8 },
@@ -2996,9 +3133,19 @@ const styles = StyleSheet.create({
   },
   viewOnceOpenedText: { color: "#8696a0", fontSize: 14, fontFamily: "Inter_600SemiBold" },
   viewOnceOpenedSub: { color: "#667781", fontSize: 12, fontFamily: "Inter_400Regular" },
-  callBubble: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 10, minWidth: 180 },
-  callBubbleText: { flex: 1, fontSize: 14, fontFamily: "Inter_500Medium" },
-  callBubbleTime: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  callBubble: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    minWidth: 200,
+    maxWidth: W * 0.78,
+  },
+  callBubbleIcon: { marginTop: 2 },
+  callBubbleBody: { flex: 1, minWidth: 0, paddingBottom: 2 },
+  callBubbleText: { fontSize: 14.5, fontFamily: "Inter_500Medium", lineHeight: 19 },
+  callBubbleTime: { fontSize: 11, fontFamily: "Inter_400Regular", marginTop: 4, alignSelf: "flex-end" },
   translatedBox: { marginTop: 6, paddingTop: 6, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.15)" },
   translatedLabel: { fontSize: 10, color: "#00A884", fontFamily: "Inter_600SemiBold", marginBottom: 3 },
   docCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, minWidth: 220 },
@@ -3121,9 +3268,25 @@ const styles = StyleSheet.create({
   editBanner: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 8, borderLeftWidth: 3, marginHorizontal: 8, marginBottom: 4, borderRadius: 4, gap: 4 },
   editBannerLabel: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   editBannerText: { fontSize: 12, fontFamily: "Inter_400Regular" },
-  replyPreview: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 8, borderLeftWidth: 3, marginHorizontal: 8, marginBottom: 4, borderRadius: 4 },
-  replyPreviewLabel: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
-  replyPreviewText: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  replyPreviewBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingRight: 8,
+  },
+  replyPreview: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderLeftWidth: 4,
+    marginVertical: 6,
+    marginLeft: 8,
+    borderRadius: 8,
+    backgroundColor: "rgba(0,0,0,0.04)",
+  },
+  replyPreviewClose: { padding: 6 },
+  replyPreviewLabel: { fontSize: 13, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
+  replyPreviewText: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18 },
   voiceRecordPanel: {
     flexDirection: "row",
     alignItems: "center",

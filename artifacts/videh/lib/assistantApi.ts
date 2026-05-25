@@ -51,14 +51,17 @@ export async function deleteAssistantVoice(token: string | null | undefined): Pr
 export async function enrollAssistantVoice(
   token: string | null | undefined,
   samples: VoiceFingerprint[],
-): Promise<boolean> {
+): Promise<{ ok: boolean; message?: string }> {
   const res = await fetch(`${getApiUrl()}/api/assistant/enroll`, {
     method: "POST",
     headers: authHeaders(token),
     body: JSON.stringify({ samples }),
   });
-  const data = await res.json() as { success?: boolean };
-  return Boolean(data.success);
+  const data = await res.json() as { success?: boolean; message?: string };
+  if (!res.ok || !data.success) {
+    return { ok: false, message: data.message ?? `Save failed (${res.status})` };
+  }
+  return { ok: true };
 }
 
 export async function verifyAssistantVoice(

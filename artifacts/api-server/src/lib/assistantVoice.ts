@@ -12,7 +12,10 @@ export function normalizeFingerprint(raw: unknown): VoiceFingerprint | null {
   const rmsLevels = Array.isArray(o.rmsLevels)
     ? o.rmsLevels.map((v) => Number(v)).filter((n) => Number.isFinite(n))
     : [];
-  if (!Number.isFinite(durationMs) || durationMs < 300 || rmsLevels.length < 4) return null;
+  if (!Number.isFinite(durationMs) || durationMs < 200) return null;
+  while (rmsLevels.length < 6) {
+    rmsLevels.push(Number.isFinite(peakLevel) && peakLevel > 0 ? peakLevel : 0.2);
+  }
   return { durationMs, rmsLevels, peakLevel: Number.isFinite(peakLevel) ? peakLevel : 0 };
 }
 

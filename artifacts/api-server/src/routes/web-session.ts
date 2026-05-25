@@ -420,7 +420,11 @@ router.get("/:token/chats/:chatId/messages", async (req: Request, res: Response)
         m.reply_to_id, m.is_deleted, m.is_forwarded, m.forward_count,
         m.is_starred, m.is_view_once, m.edited_at, m.created_at,
         u.name AS sender_name, u.avatar_url AS sender_avatar,
-        rm.content AS reply_content, rm_u.name AS reply_sender_name,
+        rm.content AS reply_content,
+        rm.type AS reply_type,
+        rm.sender_id AS reply_sender_id,
+        rm.is_deleted AS reply_is_deleted,
+        rm_u.name AS reply_sender_name,
         (
           SELECT json_agg(json_build_object('emoji', r.emoji, 'user_id', r.user_id))
           FROM message_reactions r WHERE r.message_id = m.id

@@ -36,35 +36,20 @@ export function buildVoiceFingerprint(
   durationMs: number,
   meteringSamples: number[],
 ): VoiceFingerprint {
-  const rmsLevels = meteringSamples
+  let rmsLevels = meteringSamples
     .filter((n) => Number.isFinite(n))
     .map((n) => Math.max(0, Math.min(1, (n + 160) / 160)));
-  const peakLevel = rmsLevels.length ? Math.max(...rmsLevels) : 0;
+  const peakLevel = rmsLevels.length ? Math.max(...rmsLevels) : 0.25;
+  while (rmsLevels.length < 10) {
+    rmsLevels.push(peakLevel * (0.85 + (rmsLevels.length % 3) * 0.05));
+  }
   return { durationMs, rmsLevels, peakLevel };
 }
 
-export const WAKE_PHRASES = [
-  "hey videh",
-  "he videh",
-  "hey vede",
-  "hey video",
-  "hay videh",
-  "hi videh",
-  "hello videh",
-  "videh",
-  "हे विदेह",
-  "है विदेह",
-  "वीडेह",
-];
-
-export function containsWakePhrase(text: string): boolean {
-  const n = text.toLowerCase().trim();
-  return WAKE_PHRASES.some((p) => n.includes(p));
-}
-
-/** Remove wake phrase if user repeats it in the command. */
-export function stripWakeFromCommand(text: string): string {
-  return text
-    .replace(/^(hey\s+videh|he\s+videh|videh|हे\s+विदेह|हे\s+वीडेह)[,\s]*/i, "")
-    .trim();
-}
+export {
+  containsWakePhrase,
+  stripWakeFromCommand,
+  extractCommandAfterWake,
+  parseWakeUtterance,
+  WAKE_CONTEXT_STRINGS as WAKE_PHRASES,
+} from "./assistantWake";

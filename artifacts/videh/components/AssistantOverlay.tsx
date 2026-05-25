@@ -1,47 +1,80 @@
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
-import { ActivityIndicator, Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { ActivityIndicator, Animated, Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useAssistant } from "@/context/AssistantContext";
 import { useColors } from "@/hooks/useColors";
 
 export function AssistantOverlay() {
   const colors = useColors();
-  const { phase, transcript, lastResponse, dismiss } = useAssistant();
+  const { phase, transcript, lastResponse, lastError, dismiss } = useAssistant();
+  const pulse = useRef(new Animated.Value(0.4)).current;
   const visible = phase !== "idle";
+
+  useEffect(() => {
+    if (!visible || phase !== "listening") {
+      pulse.setValue(0.4);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.35, duration: 700, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [visible, phase, pulse]);
 
   if (!visible) return null;
 
   const title =
-    phase === "wake" ? "Verifying your voice..."
-    : phase === "listening" ? "Sun raha hoon..."
-    : phase === "processing" ? "Processing..."
-    : phase === "speaking" ? "Videh bol raha hai"
-    : "Say Hey Videh";
+    phase === "listening"
+      ? "Listening…"
+      : phase === "processing"
+        ? "Working on it…"
+        : phase === "speaking"
+          ? "Videh"
+          : "Hey Videh";
+
+  const subtitle =
+    phase === "listening"
+      ? "Koi bhi contact ya group — call, message, padho, khata, broadcast…"
+      : phase === "active"
+        ? "Getting ready"
+        : null;
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={dismiss}>
       <View style={styles.backdrop}>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
-          <View style={styles.iconRing}>
-            {phase === "processing" || phase === "wake" ? (
+          <Animated.View style={[styles.iconRing, phase === "listening" && { opacity: pulse }]}>
+            {phase === "processing" ? (
               <ActivityIndicator size="large" color="#00A884" />
             ) : (
               <Ionicons name="mic" size={34} color="#00A884" />
             )}
-          </View>
+          </Animated.View>
           <Text style={[styles.title, { color: colors.foreground }]}>{title}</Text>
+          {subtitle ? (
+            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>{subtitle}</Text>
+          ) : null}
           {transcript ? (
-            <Text style={[styles.transcript, { color: colors.mutedForeground }]} numberOfLines={3}>
+            <Text style={[styles.transcript, { color: colors.mutedForeground }]} numberOfLines={4}>
               {transcript}
             </Text>
           ) : null}
-          {lastResponse && phase === "speaking" ? (
-            <Text style={[styles.response, { color: colors.foreground }]} numberOfLines={4}>
+          {lastError ? (
+            <Text style={[styles.error, { color: "#c62828" }]} numberOfLines={3}>
+              {lastError}
+            </Text>
+          ) : null}
+          {lastResponse && (phase === "speaking" || phase === "processing") ? (
+            <Text style={[styles.response, { color: colors.foreground }]} numberOfLines={5}>
               {lastResponse}
             </Text>
           ) : null}
           <TouchableOpacity style={styles.closeBtn} onPress={dismiss}>
-            <Text style={styles.closeText}>Close</Text>
+            <Text style={styles.closeText}>Cancel</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -73,9 +106,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 16,
   },
-  title: { fontSize: 18, fontFamily: "Inter_700Bold", marginBottom: 8, textAlign: "center" },
+  title: { fontSize: 18, fontFamily: "Inter_700Bold", marginBottom: 6, textAlign: "center" },
+  subtitle: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", marginBottom: 10, lineHeight: 18 },
   transcript: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", marginBottom: 8 },
-  response: { fontSize: 15, fontFamily: "Inter_500Medium", textAlign: "center", marginTop: 4 },
+  error: { fontSize: 13, fontFamily: "Inter_500Medium", textAlign: "center", marginBottom: 8 },
+  response: { fontSize: 15, fontFamily: "Inter_500Medium", textAlign: "center", marginTop: 4, lineHeight: 21 },
   closeBtn: { marginTop: 18, paddingVertical: 10, paddingHorizontal: 20 },
   closeText: { color: "#00A884", fontSize: 15, fontFamily: "Inter_600SemiBold" },
 });

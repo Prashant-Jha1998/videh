@@ -7,7 +7,7 @@ export type VoiceEnrollmentSample = {
 };
 
 export async function recordVoiceSample(
-  durationMs = 2400,
+  durationMs = 3200,
   onMeter?: (level: number) => void,
 ): Promise<VoiceEnrollmentSample> {
   const perm = await Audio.requestPermissionsAsync();
@@ -29,7 +29,7 @@ export async function recordVoiceSample(
         onMeter?.(level);
       }
     },
-    100,
+    60,
   );
 
   await new Promise((r) => setTimeout(r, durationMs));

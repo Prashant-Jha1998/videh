@@ -6,7 +6,7 @@ import { firstName, INDIAN_LANGUAGE_LABELS } from "./assistantLanguages";
 import { VIDEH_PRODUCT_KNOWLEDGE } from "./assistantKnowledge";
 
 const ACTION_SCHEMA = `{
-  "intent": "send_message|messages_today|messages_from|last_message_from|unread_count|important_messages|chat_summary|list_contacts|mark_read|mark_all_read|call_contact|open_chat|search_messages|recent_calls|list_broadcasts|send_broadcast|khata_summary|khata_add|project_qa|reply|unknown",
+  "intent": "send_message|messages_today|messages_from|last_message_from|unread_count|important_messages|chat_summary|list_contacts|mark_read|mark_all_read|call_contact|open_chat|search_messages|recent_calls|missed_calls|group_message_stats|list_broadcasts|send_broadcast|khata_summary|khata_add|project_qa|reply|unknown",
   "contactName": "ANY contact/group name from user's chat list — not a fixed example name",
   "messageText": "string optional",
   "broadcastListName": "string optional",
@@ -21,7 +21,10 @@ function isLikelyProjectQuestion(text: string): boolean {
   const n = text.toLowerCase();
   return (
     /\b(videh|hey\s+videh|assistant|khata|broadcast|business\s+api|developer\s+portal)\b/i.test(n)
-    || /\b(app|messenger|feature|setting|call|group)\b/i.test(n) && /\b(kya|kaise|how|what|kahan|where)\b/i.test(n)
+    || /\b(app|messenger|feature|setting|settings|privacy|notification|theme|status|wallpaper)\b/i.test(n)
+      && /\b(kya|kaise|how|what|kahan|where|kaun|kab)\b/.test(n)
+    || /\b(kaise\s+(?:kare|karu|on|off|enable|change|set)|setting\s+kaise)\b/i.test(n)
+    || /\b(kis\s+setting|kahan\s+se|menu\s+mein)\b/i.test(n)
   );
 }
 
@@ -71,12 +74,16 @@ You can plan ANY of these real actions:
 - list_contacts: list all chats
 - mark_read / mark_all_read
 - search_messages: search text in chats
-- recent_calls, list_broadcasts, send_broadcast
+- recent_calls, missed_calls (who missed calls today / recently)
+- group_message_stats: how many messages in which group today
+- list_broadcasts, send_broadcast
 - khata_summary, khata_add (amount in rupees)
-- project_qa: Videh app help (not secrets)
-- reply: polite answer or refusal
+- project_qa: ANY question about Videh features, settings path, how-to (not secrets)
+- reply: open-ended answer using user's real chat/call data when question is informational
 
-IMPORTANT: contactName must match one of the user's actual chat names when possible. Never hardcode example names like Rahul — use who the user said.
+IMPORTANT: contactName must match one of the user's actual chat names when possible — every user has different names; never invent or assume example names.
+
+Users may ask unlimited natural questions (Hindi/English): who messaged today, missed calls, group activity, how to change a setting, etc. Pick the best intent.
 
 Never plan: sexual/illegal/terror content, or revealing API keys/source code/passwords.`,
           },

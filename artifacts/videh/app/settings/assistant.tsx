@@ -53,6 +53,17 @@ export default function AssistantSettingsScreen() {
     if (prefs) setListenLocked(prefs.listenWhenLocked);
   }, [prefs]);
 
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    void refreshPrefs();
+    void import("@/lib/assistantSpeech").then((m) => {
+      if (!m.isSpeechRecognitionAvailable()) return;
+      void import("expo-speech-recognition").then(({ ExpoSpeechRecognitionModule }) => {
+        void ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      }).catch(() => {});
+    });
+  }, [refreshPrefs]);
+
   const resetEnrollment = useCallback(async () => {
     for (const s of samples) {
       await deleteEnrollmentFile(s.uri);
@@ -106,7 +117,7 @@ export default function AssistantSettingsScreen() {
     if (samples.length < ENROLLMENT_SAMPLES) return;
     setSaving(true);
     try {
-      const ok = await enrollAssistantVoice(
+      const { ok, message } = await enrollAssistantVoice(
         user?.sessionToken,
         samples.map((s) => s.fingerprint),
       );
@@ -121,7 +132,7 @@ export default function AssistantSettingsScreen() {
           "Say \"Hey Videh\" when the app is open (or with Listen when locked on). Keep the phone unlocked first time to confirm it works.",
         );
       } else {
-        Alert.alert("Error", "Could not save voice profile. Please try again.");
+        Alert.alert("Error", message ?? "Could not save voice profile. Record again in a quiet place.");
       }
     } finally {
       setSaving(false);
@@ -179,7 +190,7 @@ export default function AssistantSettingsScreen() {
           </View>
           <Text style={[styles.heroTitle, { color: colors.foreground }]}>Videh AI voice assistant</Text>
           <Text style={[styles.heroSub, { color: colors.mutedForeground }]}>
-            Say &quot;Hey Videh&quot; to send messages, call contacts, read chats, and more. Works in Hindi, English, and other Indian languages.
+            Boliye &quot;Hey Videh&quot; — phir apni bhasha mein kuch bhi: kisi bhi contact ya group ko call/message, aaj kis ka message aaya, missed calls, group activity, ya app/settings ke baare mein sawal. Har user ki chat list alag hoti hai.
           </Text>
         </View>
 
@@ -321,13 +332,19 @@ export default function AssistantSettingsScreen() {
           )}
         </View>
 
-        <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>TRY COMMANDS</Text>
+        <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>EXAMPLE PHRASES (apne contacts / groups ke naam use karein)</Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           {[
-            "Send Amit a message that I will be late",
-            "Call Priya",
-            "Who messaged me today",
-            "Mark all messages as read",
+            "[Naam] ko call karo / video call lagao",
+            "[Naam] ko message bhejo …",
+            "Aaj kis kis ka message aaya",
+            "Kis ka call miss hua",
+            "Kis group mein kitne message hain",
+            "Kitne unread messages hain",
+            "Mere chats kaun kaun hain",
+            "Sab messages read kar do",
+            "Privacy setting kahan hai",
+            "Theme kaise change karein",
           ].map((cmd) => (
             <Text key={cmd} style={[styles.cmd, { color: colors.mutedForeground }]}>• {cmd}</Text>
           ))}
@@ -335,8 +352,11 @@ export default function AssistantSettingsScreen() {
             style={[styles.secondaryBtn, { borderColor: colors.border }]}
             onPress={() => void activateManually()}
           >
-            <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>Test now (button)</Text>
+            <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>Test now — speak a command</Text>
           </TouchableOpacity>
+          <Text style={[styles.hint, { color: colors.mutedForeground, marginTop: 10 }]}>
+            [Naam] = jo contact ya group aapki chat list mein dikhta hai. Fixed examples nahi — aap jo chahein bol sakte hain. Ek line: &quot;Hey Videh [naam] ko call karo&quot;.
+          </Text>
         </View>
       </ScrollView>
     </View>

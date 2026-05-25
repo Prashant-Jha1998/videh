@@ -9,12 +9,12 @@ import { encodeLocationPayload, mapsUrl as buildMapsUrl } from "@/lib/locationMe
 import { safeJsonParse } from "@/lib/safeJson";
 import { loadChatMediaSettings } from "@/lib/chatMediaSettings";
 import { shouldAutoDownload } from "@/lib/chatMediaNetwork";
-import { saveVideoUriToLibrary } from "@/lib/saveVideoToLibrary";
-import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
+import { cacheChatImageUrl, cacheChatVideoUrl } from "@/lib/cacheChatMedia";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 import { ensureUploadableFileUri } from "@/lib/prepareFileUpload";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { encodeVoiceMessageText, stripWaveformMeta } from "@/lib/voiceWaveform";
+import { messageReplyPreviewText } from "@/lib/messageReplyPreview";
 
 const BASE_URL = getApiUrl();
 const STATUS_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -77,6 +77,8 @@ export interface Message {
   replyToId?: string;
   replyText?: string;
   replySenderName?: string;
+  replyType?: string;
+  replyQuotedSenderId?: string;
   /** Bytes; shown on document bubbles (Videh-style). */
   fileSizeBytes?: number;
   /** 0–99 while uploading; undefined when sent. */
@@ -174,7 +176,12 @@ interface AppContextType {
   callLogs: CallLog[];
   setUser: (user: UserProfile) => Promise<void>;
   logout: () => Promise<void>;
-  sendMessage: (chatId: string, text: string, replyToId?: string) => void;
+  sendMessage: (
+    chatId: string,
+    text: string,
+    replyToId?: string,
+    replyQuote?: { replyText: string; replySenderName?: string; replyQuotedSenderId?: string; replyType?: string },
+  ) => void;
   createGroup: (name: string, memberIds: number[], groupAvatarUrl?: string) => void;
   markAsRead: (chatId: string) => void;
   markAllAsRead: () => Promise<void>;
@@ -660,7 +667,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           editedAt: m.edited_at ? new Date(m.edited_at).getTime() : undefined,
           reactions: m.reactions ?? [],
           replyToId: m.reply_to_id ? String(m.reply_to_id) : undefined,
-          replyText: m.reply_content ?? undefined,
+          replyType: m.reply_type ?? undefined,
+          replyQuotedSenderId: m.reply_sender_id != null ? String(m.reply_sender_id) : undefined,
+          replyText: m.reply_content
+            ? messageReplyPreviewText({
+                type: m.reply_is_deleted ? "deleted" : (m.reply_type ?? "text"),
+                text: m.reply_content,
+                senderId: String(m.reply_sender_id) === String(u?.dbId) ? "me" : String(m.reply_sender_id),
+                isDeleted: !!m.reply_is_deleted,
+              })
+            : undefined,
           replySenderName: m.reply_sender_name ?? undefined,
         };
       });
@@ -705,10 +721,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         for (const m of msgs) {
           if (!m.mediaUrl || m.senderId === "me" || m.isViewOnce) continue;
           if (m.type === "video" && (await shouldAutoDownload("video", settings))) {
-            void saveVideoUriToLibrary(m.mediaUrl, authSessionToken).catch(() => {});
+            void cacheChatVideoUrl(m.mediaUrl, authSessionToken).catch(() => {});
           }
           if (m.type === "image" && (await shouldAutoDownload("image", settings))) {
-            void saveImageUriToLibrary(m.mediaUrl, authSessionToken).catch(() => {});
+            void cacheChatImageUrl(m.mediaUrl, authSessionToken).catch(() => {});
           }
           if (m.type === "document" && (await shouldAutoDownload("document", settings))) {
             const { cacheChatDocument } = await import("@/lib/openChatDocument");
@@ -791,7 +807,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, [isAuthenticated, loadChats, loadMessages]);
 
-  const sendMessage = useCallback((chatId: string, text: string, replyToId?: string) => {
+  const sendMessage = useCallback((
+    chatId: string,
+    text: string,
+    replyToId?: string,
+    replyQuote?: { replyText: string; replySenderName?: string; replyQuotedSenderId?: string; replyType?: string },
+  ) => {
     if (!text.trim()) return;
     const u = userRef.current;
     const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
@@ -803,6 +824,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       type: "text",
       status: "sent",
       replyToId,
+      replyText: replyQuote?.replyText,
+      replySenderName: replyQuote?.replySenderName,
+      replyQuotedSenderId: replyQuote?.replyQuotedSenderId,
+      replyType: replyQuote?.replyType,
     };
     setChats((prev) =>
       prev.map((c) =>

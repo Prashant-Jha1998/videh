@@ -110,7 +110,7 @@ export default function StorageScreen() {
           <ToggleRow
             icon="image-outline" iconBg="#FF5722"
             label="Photos"
-            value="Mobile data & WiFi"
+            value="In-app cache only (not Gallery)"
             enabled={autoDownloadImages}
             onToggle={() => {
               const next = !autoDownloadImages;

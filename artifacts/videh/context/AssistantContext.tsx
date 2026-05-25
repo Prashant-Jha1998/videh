@@ -23,8 +23,8 @@ import {
   type AssistantLangCode,
 } from "@/lib/assistantLanguages";
 import {
-  containsWakePhrase,
   getLocalAssistantPrefs,
+  parseWakeUtterance,
   setLocalAssistantPrefs,
   stripWakeFromCommand,
   type AssistantPrefs,
@@ -45,6 +45,7 @@ type AssistantContextType = {
   phase: AssistantPhase;
   transcript: string;
   lastResponse: string;
+  lastError: string | null;
   activeLang: AssistantLangCode;
   refreshPrefs: () => Promise<void>;
   setEnabled: (enabled: boolean) => Promise<void>;
@@ -61,13 +62,16 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const [phase, setPhase] = useState<AssistantPhase>("idle");
   const [transcript, setTranscript] = useState("");
   const [lastResponse, setLastResponse] = useState("");
+  const [lastError, setLastError] = useState<string | null>(null);
   const [activeLang, setActiveLang] = useState<AssistantLangCode>("hi");
   const listeningRef = useRef(false);
   const phaseRef = useRef<AssistantPhase>("idle");
   const commandBufferRef = useRef("");
+  const pendingWakeCommandRef = useRef("");
   const listenLocaleRef = useRef<AssistantLangCode>("hi");
   const prefsRef = useRef<AssistantPrefs | null>(null);
   const wakeRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activatingRef = useRef(false);
 
   useEffect(() => {
@@ -87,19 +91,34 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
   const refreshPrefs = useCallback(async () => {
     if (!user?.sessionToken) return;
-    const p = await fetchAssistantPrefs(user.sessionToken);
-    if (p) {
-      const local = await getLocalAssistantPrefs();
-      const finalPrefs: AssistantPrefs = {
-        ...p,
-        lastLangCode: p.lastLangCode ?? local.lastLangCode ?? "hi",
+    const local = await getLocalAssistantPrefs();
+    let p = await fetchAssistantPrefs(user.sessionToken);
+    if (!p) {
+      p = {
+        enabled: local.enabled ?? true,
+        voiceEnrolled: false,
+        listenWhenLocked: local.listenWhenLocked ?? true,
+        userName: user.name ?? "User",
+        lastLangCode: local.lastLangCode ?? "hi",
       };
-      setPrefs(finalPrefs);
-      listenLocaleRef.current = finalPrefs.lastLangCode ?? "hi";
-      setActiveLang(finalPrefs.lastLangCode ?? "hi");
-      await setLocalAssistantPrefs(finalPrefs);
+    } else {
+      const shouldEnable = local.enabled !== false && (p.voiceEnrolled || local.enabled === true);
+      if (!p.enabled && shouldEnable) {
+        await patchAssistantPrefs(user.sessionToken, { enabled: true });
+        p = { ...p, enabled: true };
+      }
     }
-  }, [user?.sessionToken]);
+    const finalPrefs: AssistantPrefs = {
+      ...p,
+      enabled: p.enabled ?? local.enabled ?? true,
+      listenWhenLocked: p.listenWhenLocked ?? local.listenWhenLocked ?? true,
+      lastLangCode: p.lastLangCode ?? local.lastLangCode ?? "hi",
+    };
+    setPrefs(finalPrefs);
+    listenLocaleRef.current = finalPrefs.lastLangCode ?? "hi";
+    setActiveLang(finalPrefs.lastLangCode ?? "hi");
+    await setLocalAssistantPrefs(finalPrefs);
+  }, [user?.sessionToken, user?.name]);
 
   useEffect(() => {
     if (isAuthenticated && user?.sessionToken) void refreshPrefs();
@@ -107,7 +126,10 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
   const dismiss = useCallback(() => {
     commandBufferRef.current = "";
+    pendingWakeCommandRef.current = "";
     setTranscript("");
+    setLastError(null);
+    if (commandTimerRef.current) clearTimeout(commandTimerRef.current);
     void stopListening();
     void stopSpeaking();
     setPhaseSafe("idle");
@@ -116,8 +138,19 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
   const handleCommand = useCallback(async (text: string) => {
     const cleaned = stripWakeFromCommand(text.trim());
-    if (!user?.sessionToken || !cleaned) return;
+    if (!user?.sessionToken || !cleaned) {
+      const hint = listenLocaleRef.current === "en"
+        ? "I did not catch that. Say anything: call or message someone from your chats, who messaged today, missed calls, group messages, or how to use a setting."
+        : "Command samajh nahi aaya. Apni chat list ke kisi naam se call/message bolein, ya poochhiye: aaj kis ka message aaya, missed call, group messages, setting kaise badlein.";
+      setLastError(hint);
+      setLastResponse(hint);
+      setPhaseSafe("speaking");
+      await speakAssistant(hint, listenLocaleRef.current);
+      dismiss();
+      return;
+    }
 
+    setLastError(null);
     const guessed = detectLocaleFromTranscript(cleaned);
     const langHint = listenLocaleRef.current !== "hi" ? listenLocaleRef.current : guessed;
 
@@ -167,26 +200,44 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user?.sessionToken, setPhaseSafe, dismiss, router, persistLang]);
 
-  const activateAssistant = useCallback(async () => {
-    if (!user?.sessionToken || !user.dbId) return;
+  const activateAssistant = useCallback(async (inlineCommand?: string) => {
+    if (!user?.sessionToken) {
+      setLastError("Please sign in again to use Hey Videh.");
+      return;
+    }
+    const userDbId = user.dbId ?? Number(user.id);
     const lang = prefs?.lastLangCode ?? "hi";
     listenLocaleRef.current = lang;
     setActiveLang(lang);
+    setLastError(null);
+
+    const preCommand = stripWakeFromCommand(
+      (inlineCommand ?? pendingWakeCommandRef.current ?? "").trim(),
+    );
+    pendingWakeCommandRef.current = "";
 
     setPhaseSafe("active");
     const displayName = prefs?.userName || user.name || "User";
     let greeting = localActivationGreeting(displayName, lang);
     let speechLocale: string | undefined;
-    try {
-      const g = await fetchAssistantGreeting(user.sessionToken, user.dbId, lang);
-      greeting = g.speak;
-      if (g.langCode) await persistLang(normalizeLangCode(g.langCode));
-      speechLocale = g.speechLocale;
-    } catch { /* local fallback */ }
+    if (userDbId && Number.isFinite(userDbId)) {
+      try {
+        const g = await fetchAssistantGreeting(user.sessionToken, userDbId, lang);
+        greeting = g.speak;
+        if (g.langCode) await persistLang(normalizeLangCode(g.langCode));
+        speechLocale = g.speechLocale;
+      } catch { /* local fallback */ }
+    }
 
     setLastResponse(greeting);
     setPhaseSafe("speaking");
     await speakAssistant(greeting, speechLocale ?? lang);
+
+    if (preCommand) {
+      await handleCommand(preCommand);
+      return;
+    }
+
     setPhaseSafe("listening");
     setTranscript("");
     commandBufferRef.current = "";
@@ -195,6 +246,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       locale: listenLocaleRef.current,
       onPartial: (t: string) => {
         setTranscript(t);
+        commandBufferRef.current = t;
         const detected = detectLocaleFromTranscript(t);
         if (detected !== listenLocaleRef.current) {
           listenLocaleRef.current = detected;
@@ -204,24 +256,35 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         commandBufferRef.current = t;
         listenLocaleRef.current = detectLocaleFromTranscript(t);
       },
-      onError: () => {},
+      onError: (msg) => {
+        setLastError(msg);
+      },
     });
-    setTimeout(() => {
+
+    if (commandTimerRef.current) clearTimeout(commandTimerRef.current);
+    commandTimerRef.current = setTimeout(() => {
       void stopListening();
-      const cmd = commandBufferRef.current.trim() || transcript.trim();
+      const cmd = stripWakeFromCommand(commandBufferRef.current.trim());
       if (cmd) void handleCommand(cmd);
-      else dismiss();
-    }, 14000);
+      else {
+        const prompt = lang === "en"
+          ? "Yes? What should I do?"
+          : "Haan, bataiye — kya karna hai?";
+        setLastResponse(prompt);
+        setPhaseSafe("speaking");
+        void speakAssistant(prompt, lang).then(() => dismiss());
+      }
+    }, 18000);
   }, [
     user?.sessionToken,
     user?.dbId,
+    user?.id,
     user?.name,
     prefs?.userName,
     prefs?.lastLangCode,
     setPhaseSafe,
     handleCommand,
     dismiss,
-    transcript,
     persistLang,
   ]);
 
@@ -236,17 +299,32 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     }, delayMs);
   }, []);
 
-  const tryWakeActivation = useCallback(async () => {
+  const tryWakeActivationRef = useRef<(inlineCommand?: string) => Promise<void>>(async () => {});
+
+  const tryWakeActivation = useCallback(async (inlineCommand?: string) => {
     if (!user?.sessionToken || phaseRef.current !== "idle" || activatingRef.current) return;
+    if (!isSpeechRecognitionAvailable()) {
+      setLastError("Speech recognition is not available on this device.");
+      return;
+    }
     activatingRef.current = true;
     listeningRef.current = false;
     await stopListening();
     try {
-      await activateAssistant();
+      await activateAssistant(inlineCommand);
     } finally {
       activatingRef.current = false;
     }
   }, [user?.sessionToken, activateAssistant]);
+
+  tryWakeActivationRef.current = tryWakeActivation;
+
+  const onWakeTranscript = useCallback((text: string) => {
+    const { hasWake, command } = parseWakeUtterance(text);
+    if (!hasWake) return;
+    pendingWakeCommandRef.current = command;
+    void tryWakeActivationRef.current(command);
+  }, []);
 
   const startWakeListeningRef = useRef<() => Promise<void>>(async () => {});
 
@@ -268,15 +346,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       wakeMode: true,
       onPartial: (text: string) => {
         if (phaseRef.current !== "idle") return;
-        if (containsWakePhrase(text)) {
-          void tryWakeActivation();
-        }
+        onWakeTranscript(text);
       },
       onFinal: (text: string) => {
         if (phaseRef.current !== "idle") return;
-        if (containsWakePhrase(text)) {
-          void tryWakeActivation();
-        }
+        onWakeTranscript(text);
       },
       onError: () => {
         listeningRef.current = false;
@@ -287,7 +361,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         scheduleWakeRestart(400);
       },
     });
-  }, [tryWakeActivation, scheduleWakeRestart]);
+  }, [onWakeTranscript, scheduleWakeRestart]);
 
   startWakeListeningRef.current = startWakeListening;
 
@@ -353,7 +427,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const setEnabled = useCallback(async (enabled: boolean) => {
     if (!user?.sessionToken) return;
     await patchAssistantPrefs(user.sessionToken, { enabled });
+    await setLocalAssistantPrefs({ enabled });
     await refreshPrefs();
+    if (enabled && Platform.OS !== "web") {
+      setTimeout(() => void startWakeListeningRef.current(), 400);
+    }
   }, [user?.sessionToken, refreshPrefs]);
 
   const activateManually = useCallback(async () => {
@@ -366,6 +444,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       phase,
       transcript,
       lastResponse,
+      lastError,
       activeLang,
       refreshPrefs,
       setEnabled,

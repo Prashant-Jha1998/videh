@@ -342,6 +342,81 @@ export async function executeAssistantAction(
       };
     }
 
+    case "missed_calls": {
+      const r = await query(
+        `SELECT CASE WHEN c.caller_id = $1 THEN u2.name ELSE u1.name END AS other_name,
+                c.type, c.status, c.created_at
+         FROM calls c
+         JOIN users u1 ON u1.id = c.caller_id
+         JOIN users u2 ON u2.id = c.callee_id
+         WHERE (c.caller_id = $1 OR c.callee_id = $1)
+           AND c.status = 'missed'
+           AND c.created_at >= NOW() - INTERVAL '7 days'
+         ORDER BY c.created_at DESC
+         LIMIT 15`,
+        [userId],
+      );
+      if (!r.rows.length) {
+        return {
+          intent: "missed_calls",
+          success: true,
+          speak: isEn(lang)
+            ? `${name}, no missed calls in the last week. ${suffix}`
+            : `${name} ji, pichle hafte koi missed call nahi. ${suffix}`,
+          actions: [{ type: "open_calls_tab" }],
+        };
+      }
+      const lines = r.rows.map((row: { other_name: string; type: string }) =>
+        `${row.other_name} (${row.type})`);
+      return {
+        intent: "missed_calls",
+        success: true,
+        speak: isEn(lang)
+          ? `${name}, missed calls: ${lines.join(", ")}. ${suffix}`
+          : `${name} ji, missed calls: ${lines.join(", ")}. ${suffix}`,
+        actions: [{ type: "open_calls_tab" }],
+        data: { calls: r.rows },
+      };
+    }
+
+    case "group_message_stats": {
+      const r = await query(
+        `SELECT c.group_name, COUNT(m.id)::int AS msg_count
+         FROM messages m
+         JOIN chats c ON c.id = m.chat_id
+         JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $1
+         WHERE c.is_group = TRUE
+           AND m.is_deleted = FALSE
+           AND m.created_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Kolkata')
+         GROUP BY c.id, c.group_name
+         HAVING COUNT(m.id) > 0
+         ORDER BY msg_count DESC
+         LIMIT 15`,
+        [userId],
+      );
+      if (!r.rows.length) {
+        return {
+          intent: "group_message_stats",
+          success: true,
+          speak: isEn(lang)
+            ? `${name}, no group messages today. ${suffix}`
+            : `${name} ji, aaj kisi group mein message nahi. ${suffix}`,
+          actions: [],
+        };
+      }
+      const parts = r.rows.map((row: { group_name: string; msg_count: number }) =>
+        `${row.group_name}: ${row.msg_count}`);
+      return {
+        intent: "group_message_stats",
+        success: true,
+        speak: isEn(lang)
+          ? `${name}, group messages today: ${parts.join(", ")}. ${suffix}`
+          : `${name} ji, aaj groups: ${parts.join(", ")}. ${suffix}`,
+        data: { groups: r.rows },
+        actions: [],
+      };
+    }
+
     case "recent_calls": {
       const r = await query(
         `SELECT CASE WHEN c.caller_id = $1 THEN u2.name ELSE u1.name END AS other_name,
@@ -506,9 +581,12 @@ export async function executeAssistantAction(
 
     case "messages_today": {
       const r = await query(
-        `SELECT u.name, COUNT(m.id)::int AS msg_count,
-                MAX(m.content) FILTER (WHERE m.type = 'text') AS last_text,
-                MAX(m.type) AS last_type
+        `SELECT
+           CASE WHEN c.is_group THEN c.group_name ELSE u.name END AS label,
+           c.is_group,
+           COUNT(m.id)::int AS msg_count,
+           MAX(m.content) FILTER (WHERE m.type = 'text') AS last_text,
+           MAX(m.type) AS last_type
          FROM messages m
          JOIN chats c ON c.id = m.chat_id
          JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $1
@@ -516,9 +594,9 @@ export async function executeAssistantAction(
          WHERE m.sender_id != $1
            AND m.created_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Kolkata')
            AND m.is_deleted = FALSE
-         GROUP BY u.name
+         GROUP BY c.id, c.is_group, c.group_name, u.name
          ORDER BY msg_count DESC
-         LIMIT 20`,
+         LIMIT 25`,
         [userId],
       );
       if (!r.rows.length) {
@@ -529,9 +607,16 @@ export async function executeAssistantAction(
           actions: [],
         };
       }
-      const parts = r.rows.map((row: { name: string; msg_count: number; last_text?: string; last_type?: string }) => {
+      const parts = r.rows.map((row: {
+        label: string;
+        is_group: boolean;
+        msg_count: number;
+        last_text?: string;
+        last_type?: string;
+      }) => {
         const preview = messagePreview(row.last_type ?? "text", row.last_text ?? "");
-        return `${row.name}: ${row.msg_count} msg, ${preview}`;
+        const prefix = row.is_group ? `${row.label} group` : row.label;
+        return `${prefix}: ${row.msg_count} message, ${preview}`;
       });
       return {
         intent: "messages_today",
