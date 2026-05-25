@@ -2,8 +2,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Platform,
@@ -19,11 +20,14 @@ import { authFetchHeaders, authPlaybackSource } from "@/lib/authenticatedMedia";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 import {
   applyImageQuality,
+  cropImageToAspect,
+  ensureEditableImageUri,
   imageExtFromUri,
   imageMimeFromUri,
   isGifUri,
   rotateImage,
   squareCropImage,
+  type ImageDimensionHints,
   type MediaQuality,
 } from "@/lib/imageEdit";
 
@@ -36,12 +40,19 @@ export default function ChatMediaComposeScreen() {
     uri?: string;
     kind?: string;
     viewOnce?: string;
+    imgW?: string;
+    imgH?: string;
   }>();
 
   const chatId = String(params.chatId ?? "");
   const initialUri = params.uri ? decodeURIComponent(String(params.uri)) : "";
   const kind = params.kind === "video" ? "video" : "image";
   const isViewOnce = params.viewOnce === "1";
+  const dimHints: ImageDimensionHints = useMemo(() => {
+    const w = params.imgW ? Number(params.imgW) : undefined;
+    const h = params.imgH ? Number(params.imgH) : undefined;
+    return w && h && w > 0 && h > 0 ? { width: w, height: h } : {};
+  }, [params.imgW, params.imgH]);
 
   const [uri, setUri] = useState(initialUri);
   const [caption, setCaption] = useState("");
@@ -50,6 +61,20 @@ export default function ChatMediaComposeScreen() {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (kind !== "image" || isGifUri(initialUri)) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const local = await ensureEditableImageUri(initialUri);
+        if (!cancelled && local !== uri) setUri(local);
+      } catch {
+        /* keep original; crop may prompt again */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [initialUri, kind]);
 
   const mime = useMemo(() => {
     if (kind === "video") return uri.includes(".mov") ? "video/quicktime" : "video/mp4";
@@ -89,28 +114,61 @@ export default function ChatMediaComposeScreen() {
     }
   }
 
-  async function onRotate() {
+  async function applyCrop(aspectW: number, aspectH: number) {
     if (kind !== "image" || isGif || editing) return;
     setEditing(true);
     try {
-      setUri(await rotateImage(uri, quality));
-    } catch {
-      Alert.alert("Edit failed", "Could not rotate this photo.");
+      const next =
+        aspectW === 1 && aspectH === 1
+          ? await squareCropImage(uri, quality, dimHints)
+          : await cropImageToAspect(uri, quality, aspectW, aspectH, dimHints);
+      setUri(next);
+    } catch (e) {
+      Alert.alert("Edit failed", e instanceof Error ? e.message : "Could not crop this photo.");
     } finally {
       setEditing(false);
     }
   }
 
-  async function onSquareCrop() {
+  async function onRotate() {
     if (kind !== "image" || isGif || editing) return;
     setEditing(true);
     try {
-      setUri(await squareCropImage(uri, quality));
-    } catch {
-      Alert.alert("Edit failed", "Could not crop this photo.");
+      setUri(await rotateImage(uri, quality, dimHints));
+    } catch (e) {
+      Alert.alert("Edit failed", e instanceof Error ? e.message : "Could not rotate this photo.");
     } finally {
       setEditing(false);
     }
+  }
+
+  function onCropPress() {
+    if (kind !== "image" || isGif || editing) return;
+
+    const pick = (index: number) => {
+      if (index === 0) void applyCrop(1, 1);
+      else if (index === 1) void applyCrop(4, 5);
+      else if (index === 2) void applyCrop(16, 9);
+    };
+
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ["Square (1:1)", "Portrait (4:5)", "Landscape (16:9)", "Cancel"],
+          cancelButtonIndex: 3,
+          title: "Crop photo",
+        },
+        (i) => { if (i < 3) pick(i); },
+      );
+      return;
+    }
+
+    Alert.alert("Crop photo", "Choose crop shape", [
+      { text: "Square (1:1)", onPress: () => pick(0) },
+      { text: "Portrait (4:5)", onPress: () => pick(1) },
+      { text: "Landscape (16:9)", onPress: () => pick(2) },
+      { text: "Cancel", style: "cancel" },
+    ]);
   }
 
   function onCancelUpload() {
@@ -184,7 +242,7 @@ export default function ChatMediaComposeScreen() {
 
       {kind === "image" && !isGif ? (
         <View style={styles.editRow}>
-          <TouchableOpacity style={styles.editBtn} onPress={() => void onSquareCrop()} disabled={busy || editing}>
+          <TouchableOpacity style={styles.editBtn} onPress={onCropPress} disabled={busy || editing}>
             <Ionicons name="crop" size={20} color="#fff" />
             <Text style={styles.editBtnText}>Crop</Text>
           </TouchableOpacity>

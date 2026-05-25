@@ -39,8 +39,6 @@ import { getApiUrl } from "@/lib/api";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
 import { downloadPlayableAudioSource, usePlayableAudioUri } from "@/lib/usePlayableAudioUri";
 import {
-  CHAT_CAMERA_PHOTO_OPTIONS,
-  CHAT_CAMERA_VIDEO_OPTIONS,
   CHAT_VIDEO_PICKER_OPTIONS,
   CHAT_VIEW_ONCE_PICKER_OPTIONS,
   validatePickedMedia,
@@ -53,7 +51,7 @@ import { uploadRemoteGifOrSticker } from "@/lib/sendChatGifSticker";
 import { DocumentMessageBubble } from "@/components/DocumentMessageBubble";
 import { ContactMessageBubble } from "@/components/ContactMessageBubble";
 import { openChatDocument } from "@/lib/openChatDocument";
-import { parseContactMessage } from "@/lib/contactMessage";
+import { dedupeEmails, dedupePhones, parseContactMessage } from "@/lib/contactMessage";
 import type { ContactShareRow } from "@/lib/loadDeviceContactsForShare";
 import { ContactSharePickerModal } from "@/components/ContactSharePickerModal";
 import { claimVoicePlayback, releaseVoicePlayback } from "@/lib/voicePlaybackHub";
@@ -66,6 +64,7 @@ import {
 import { guessMimeFromFilename } from "@/lib/prepareFileUpload";
 import { stashBatchMedia } from "@/lib/chatMediaBatch";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
+import { launchChatPhotoCamera, launchChatVideoCamera } from "@/lib/openChatCamera";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { isGifUri } from "@/lib/imageEdit";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
@@ -184,7 +183,9 @@ const ATTACH_SHEET_ITEMS: {
   { key: "con", icon: "person", label: "Contact", color: "#1296D4", type: "contact" },
 ];
 
-type ReplyData = { id: string; text: string; senderId: string; senderName?: string } | null;
+type ReplyData = { id: string; text: string; senderId: string; senderName?: string; type?: string } | null;
+
+const REPLY_PREVIEW_TEXT_COLOR = "#667781";
 
 function toReplyData(msg: {
   id: string;
@@ -192,12 +193,20 @@ function toReplyData(msg: {
   type: string;
   senderId: string;
   senderName?: string;
+  isDeleted?: boolean;
 }): NonNullable<ReplyData> {
+  const preview = messageReplyPreviewText({
+    type: msg.type,
+    text: msg.text,
+    senderId: msg.senderId,
+    isDeleted: msg.isDeleted || msg.type === "deleted",
+  });
   return {
     id: msg.id,
-    text: messageReplyPreviewText({ type: msg.type, text: msg.text, senderId: msg.senderId }),
+    text: preview.trim() || "Message",
     senderId: msg.senderId,
     senderName: msg.senderName,
+    type: msg.type,
   };
 }
 
@@ -649,12 +658,14 @@ function ReplyQuoteStrip({
         },
       ]}
     >
-      <Text style={[styles.replyWho, { color: accentColor }]} numberOfLines={1}>
-        {senderLabel}
-      </Text>
-      <Text style={[styles.replyText, { color: previewColor }]} numberOfLines={2}>
-        {previewText}
-      </Text>
+      <View style={styles.replyStripTextCol}>
+        <Text style={[styles.replyWho, { color: accentColor }]} numberOfLines={1}>
+          {senderLabel || "Contact"}
+        </Text>
+        <Text style={[styles.replyText, { color: previewColor }]} numberOfLines={2}>
+          {previewText?.trim() || "Message"}
+        </Text>
+      </View>
     </Pressable>
   );
 }
@@ -992,6 +1003,8 @@ export default function ChatScreen() {
     useCallback(() => {
       void loadEnterIsSend().then(setEnterIsSend);
       if (!chatId) return;
+      pendingScrollToEndRef.current = true;
+      userScrolledUpRef.current = false;
       setActiveChatId(chatId);
       const pollMessages = () => {
         if (messagePollInFlightRef.current) return;
@@ -1081,17 +1094,6 @@ export default function ChatScreen() {
     ]).start();
     flashTimerRef.current = setTimeout(() => setFlashMessageId(null), 950);
   }, [listRows, flashAnim]);
-
-  useEffect(() => {
-    if (searching) return;
-    const count = messages.length;
-    if (count > prevMessageCountRef.current) {
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToEnd({ animated: count - prevMessageCountRef.current <= 3 });
-      });
-    }
-    prevMessageCountRef.current = count;
-  }, [messages.length, searching]);
 
   const peerNameForVideo = name ?? chat?.name ?? "Chat";
 
@@ -1213,6 +1215,8 @@ export default function ChatScreen() {
         uri: encodeURIComponent(picked.uri),
         kind: picked.kind,
         viewOnce: viewOnce ? "1" : "0",
+        ...(picked.kind === "image" && picked.width ? { imgW: String(picked.width) } : {}),
+        ...(picked.kind === "image" && picked.height ? { imgH: String(picked.height) } : {}),
       },
     } as unknown as Parameters<typeof router.push>[0]);
   }, [chatId, router]);
@@ -1264,8 +1268,32 @@ export default function ChatScreen() {
   }, [selectedIds.length]);
   const inputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList>(null);
+  const pendingScrollToEndRef = useRef(true);
+  const userScrolledUpRef = useRef(false);
+  const scrollToLatest = useCallback((animated = false) => {
+    if (searching) return;
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated });
+    });
+  }, [searching]);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevMessageCountRef = useRef(0);
+
+  useEffect(() => {
+    if (searching || messages.length === 0) return;
+    if (pendingScrollToEndRef.current) {
+      pendingScrollToEndRef.current = false;
+      scrollToLatest(false);
+      const t1 = setTimeout(() => scrollToLatest(false), 80);
+      const t2 = setTimeout(() => scrollToLatest(false), 280);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
+    }
+    const count = messages.length;
+    if (count > prevMessageCountRef.current && !userScrolledUpRef.current) {
+      scrollToLatest(count - prevMessageCountRef.current <= 3);
+    }
+    prevMessageCountRef.current = count;
+  }, [messages.length, searching, scrollToLatest]);
 
   // @mentions state
   const [groupMembers, setGroupMembers] = useState<{ id: number; name: string }[]>([]);
@@ -1404,6 +1432,7 @@ export default function ChatScreen() {
             replySenderName:
               replyTo.senderName ?? (replyTo.senderId === "me" ? user?.name : (name ?? chat?.name ?? "Chat")),
             replyQuotedSenderId: replyTo.senderId === "me" ? String(user?.dbId ?? "") : replyTo.senderId,
+            replyType: replyTo.type,
           }
         : undefined,
     );
@@ -1428,19 +1457,15 @@ export default function ChatScreen() {
     const isViewOnce = type === "viewonce";
 
     if (type === "camera") {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== "granted") { Alert.alert("Permission required", "Camera access is required."); return; }
-      const result = await ImagePicker.launchCameraAsync(CHAT_CAMERA_PHOTO_OPTIONS);
-      if (!result.canceled && result.assets[0]) {
+      const result = await launchChatPhotoCamera();
+      if (result && !result.canceled && result.assets[0]) {
         const picked = await validatePickedMedia(result.assets[0]);
         if (picked) goToMediaCompose(picked, false);
       }
 
     } else if (type === "videocamera") {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== "granted") { Alert.alert("Permission required", "Camera access is required."); return; }
-      const result = await ImagePicker.launchCameraAsync(CHAT_CAMERA_VIDEO_OPTIONS);
-      if (!result.canceled && result.assets[0]) {
+      const result = await launchChatVideoCamera();
+      if (result && !result.canceled && result.assets[0]) {
         const picked = await validatePickedMedia(result.assets[0]);
         if (picked) goToMediaCompose(picked, false);
       }
@@ -1532,12 +1557,13 @@ export default function ChatScreen() {
       void sendMediaMessage("camera");
       return;
     }
-    Alert.alert("Camera", "Choose photo or video", [
-      { text: "Take photo", onPress: () => void sendMediaMessage("camera") },
-      { text: "Record video", onPress: () => void sendMediaMessage("videocamera") },
-      { text: "Cancel", style: "cancel" },
-    ]);
+    setCameraSheetOpen(true);
   }, [composerEnabled, editTarget, chatId, sendMediaMessage]);
+
+  const runCameraChoice = useCallback((kind: "camera" | "videocamera") => {
+    setCameraSheetOpen(false);
+    void sendMediaMessage(kind);
+  }, [sendMediaMessage]);
 
   const sendSpecialMessage = useCallback((cid: string, text: string, msgType: string, mediaUrl?: string) => {
     const u = user;
@@ -1568,7 +1594,11 @@ export default function ChatScreen() {
   const openContactPickerRow = useCallback((row: ContactShareRow) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setContactPickerOpen(false);
-    setContactToConfirm(row);
+    setContactToConfirm({
+      ...row,
+      phones: dedupePhones(row.phones),
+      emails: dedupeEmails(row.emails),
+    });
   }, []);
 
   const confirmShareContact = useCallback(() => {
@@ -1576,8 +1606,8 @@ export default function ChatScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     sendContactMessage(chatId, {
       name: contactToConfirm.name,
-      phones: contactToConfirm.phones,
-      emails: contactToConfirm.emails,
+      phones: dedupePhones(contactToConfirm.phones),
+      emails: dedupeEmails(contactToConfirm.emails),
     });
     setContactToConfirm(null);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 150);
@@ -1646,6 +1676,7 @@ export default function ChatScreen() {
   }, [user?.sessionToken]);
 
   const [attachVisible, setAttachVisible] = useState(false);
+  const [cameraSheetOpen, setCameraSheetOpen] = useState(false);
   const [mediaPreview, setMediaPreview] = useState<{ uri: string; caption?: string; type: "image" | "video" } | null>(null);
   const showAttachMenu = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1829,10 +1860,10 @@ export default function ChatScreen() {
                 chatContactName,
                 isGroup: chat?.isGroup,
               })}
-              previewText={item.replyText}
+              previewText={item.replyText?.trim() || "Message"}
               isMe={isMe}
               accentColor={quoteAccent}
-              previewColor={colors.mutedForeground}
+              previewColor={REPLY_PREVIEW_TEXT_COLOR}
               onPress={() => scrollToQuotedMessage(item.replyToId!)}
             />
           )}
@@ -2407,7 +2438,17 @@ export default function ChatScreen() {
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          onScroll={(e) => {
+            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+            const distFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+            userScrolledUpRef.current = distFromBottom > 140;
+          }}
+          scrollEventThrottle={64}
+          onContentSizeChange={() => {
+            if (!searching && (pendingScrollToEndRef.current || !userScrolledUpRef.current)) {
+              scrollToLatest(false);
+            }
+          }}
           onScrollToIndexFailed={(info) => {
             listRef.current?.scrollToOffset({
               offset: Math.max(0, info.averageItemLength * info.index),
@@ -2477,8 +2518,8 @@ export default function ChatScreen() {
               style={[styles.replyPreview, { borderLeftColor: "#00A884" }]}
               onPress={() => scrollToQuotedMessage(replyTo.id)}
             >
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.replyPreviewLabel, { color: "#00A884" }]}>
+              <View style={styles.replyPreviewTextCol}>
+                <Text style={[styles.replyPreviewLabel, { color: "#00A884" }]} numberOfLines={1}>
                   {replyQuoteSenderLabel({
                     replyQuotedSenderId: replyTo.senderId === "me" ? String(user?.dbId ?? "") : replyTo.senderId,
                     replySenderName: replyTo.senderName,
@@ -2487,8 +2528,11 @@ export default function ChatScreen() {
                     isGroup: chat?.isGroup,
                   })}
                 </Text>
-                <Text style={[styles.replyPreviewText, { color: colors.mutedForeground }]} numberOfLines={2}>
-                  {replyTo.text}
+                <Text
+                  style={[styles.replyPreviewText, { color: REPLY_PREVIEW_TEXT_COLOR }]}
+                  numberOfLines={2}
+                >
+                  {replyTo.text?.trim() || "Message"}
                 </Text>
               </View>
             </Pressable>
@@ -2634,6 +2678,40 @@ export default function ChatScreen() {
       </KeyboardAvoidingView>
 
       {/* Attach menu — Videh-style bottom sheet (coloured circles + grid) */}
+      <Modal visible={cameraSheetOpen} transparent animationType="fade" onRequestClose={() => setCameraSheetOpen(false)}>
+        <View style={styles.attachModalRoot}>
+          <Pressable style={styles.attachBackdrop} onPress={() => setCameraSheetOpen(false)} />
+          <View
+            style={[
+              styles.cameraChoiceSheet,
+              { backgroundColor: colors.isDark ? "#1A2329" : "#fff", paddingBottom: insets.bottom + 16 },
+            ]}
+          >
+            <Text style={[styles.cameraChoiceTitle, { color: colors.foreground }]}>Camera</Text>
+            <Text style={[styles.cameraChoiceSub, { color: colors.mutedForeground }]}>Choose photo or video</Text>
+            <TouchableOpacity
+              style={[styles.cameraChoiceBtn, { borderColor: colors.border }]}
+              onPress={() => runCameraChoice("camera")}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="camera" size={22} color={colors.primary} />
+              <Text style={[styles.cameraChoiceBtnText, { color: colors.foreground }]}>Take photo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.cameraChoiceBtn, { borderColor: colors.border }]}
+              onPress={() => runCameraChoice("videocamera")}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="videocam" size={22} color={colors.primary} />
+              <Text style={[styles.cameraChoiceBtnText, { color: colors.foreground }]}>Record video</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cameraChoiceCancel} onPress={() => setCameraSheetOpen(false)}>
+              <Text style={[styles.cameraChoiceCancelText, { color: colors.mutedForeground }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={attachVisible} transparent animationType="fade" onRequestClose={() => setAttachVisible(false)}>
         <View style={styles.attachModalRoot}>
           <Pressable style={styles.attachBackdrop} onPress={() => setAttachVisible(false)} />
@@ -3070,7 +3148,10 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 6,
     marginHorizontal: 0,
+    alignSelf: "stretch",
+    minWidth: 0,
   },
+  replyStripTextCol: { flex: 1, minWidth: 0 },
   replyWho: { fontSize: 12.5, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
   replyText: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 17 },
   msgText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
@@ -3273,9 +3354,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingRight: 8,
+    minHeight: 56,
   },
   replyPreview: {
     flex: 1,
+    minWidth: 0,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderLeftWidth: 4,
@@ -3284,6 +3367,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: "rgba(0,0,0,0.04)",
   },
+  replyPreviewTextCol: { flex: 1, minWidth: 0, alignSelf: "stretch" },
   replyPreviewClose: { padding: 6 },
   replyPreviewLabel: { fontSize: 13, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
   replyPreviewText: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18 },
@@ -3356,6 +3440,27 @@ const styles = StyleSheet.create({
   },
   attachModalRoot: { flex: 1, justifyContent: "flex-end" },
   attachBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.42)" },
+  cameraChoiceSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 20,
+    paddingHorizontal: 20,
+  },
+  cameraChoiceTitle: { fontSize: 18, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  cameraChoiceSub: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", marginTop: 4, marginBottom: 16 },
+  cameraChoiceBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 10,
+  },
+  cameraChoiceBtnText: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
+  cameraChoiceCancel: { alignItems: "center", paddingVertical: 12, marginTop: 4 },
+  cameraChoiceCancelText: { fontSize: 15, fontFamily: "Inter_500Medium" },
   attachSheet: {
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,

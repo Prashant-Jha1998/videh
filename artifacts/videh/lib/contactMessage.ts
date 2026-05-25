@@ -6,6 +6,39 @@ export type SharedContactPayload = {
   emails?: string[];
 };
 
+/** Normalize for duplicate detection (same SIM entry often appears 2–3× on Android). */
+export function normalizePhoneKey(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits;
+}
+
+export function dedupePhones(phones: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of phones) {
+    const p = raw.trim();
+    if (!p) continue;
+    const key = normalizePhoneKey(p) || p.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+  }
+  return out;
+}
+
+export function dedupeEmails(emails: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of emails) {
+    const e = raw.trim().toLowerCase();
+    if (!e || seen.has(e)) continue;
+    seen.add(e);
+    out.push(raw.trim());
+  }
+  return out;
+}
+
 export function contactDisplayName(c: {
   name?: string | null;
   firstName?: string | null;
@@ -21,8 +54,8 @@ export function encodeContactMessage(payload: SharedContactPayload): string {
   return CONTACT_MSG_PREFIX + JSON.stringify({
     v: 1,
     name: payload.name.trim() || "Contact",
-    phones: payload.phones.filter(Boolean),
-    emails: payload.emails?.filter(Boolean) ?? [],
+    phones: dedupePhones(payload.phones),
+    emails: dedupeEmails(payload.emails ?? []),
   });
 }
 
@@ -37,8 +70,8 @@ export function parseContactMessage(text: string): SharedContactPayload | null {
       };
       return {
         name: (raw.name ?? "Contact").trim() || "Contact",
-        phones: Array.isArray(raw.phones) ? raw.phones.filter(Boolean) : [],
-        emails: Array.isArray(raw.emails) ? raw.emails.filter(Boolean) : [],
+        phones: dedupePhones(Array.isArray(raw.phones) ? raw.phones.filter(Boolean) : []),
+        emails: dedupeEmails(Array.isArray(raw.emails) ? raw.emails.filter(Boolean) : []),
       };
     } catch {
       return null;
@@ -47,7 +80,7 @@ export function parseContactMessage(text: string): SharedContactPayload | null {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return null;
   const name = lines[0]!.replace(/^👤\s*/, "").trim() || "Contact";
-  const phones = lines.slice(1).filter((l) => /[\d+]/.test(l));
+  const phones = dedupePhones(lines.slice(1).filter((l) => /[\d+]/.test(l)));
   return { name, phones, emails: [] };
 }
 

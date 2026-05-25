@@ -15,6 +15,8 @@ export type PickedChatMedia = {
   durationMs?: number;
   fileSize?: number;
   isGif?: boolean;
+  width?: number;
+  height?: number;
 };
 
 export const CHAT_VIDEO_PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
@@ -39,8 +41,8 @@ export const CHAT_VIEW_ONCE_PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
 };
 
 export const CHAT_CAMERA_VIDEO_OPTIONS: ImagePicker.ImagePickerOptions = {
-  mediaTypes: ["videos"],
-  allowsEditing: true,
+  mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+  allowsEditing: false,
   quality: 1,
   base64: false,
   videoMaxDuration: MAX_CHAT_VIDEO_DURATION_MS / 1000,
@@ -48,8 +50,8 @@ export const CHAT_CAMERA_VIDEO_OPTIONS: ImagePicker.ImagePickerOptions = {
 };
 
 export const CHAT_CAMERA_PHOTO_OPTIONS: ImagePicker.ImagePickerOptions = {
-  mediaTypes: ["images"],
-  allowsEditing: true,
+  mediaTypes: ImagePicker.MediaTypeOptions.Images,
+  allowsEditing: false,
   quality: 1,
   base64: false,
 };
@@ -81,7 +83,15 @@ export async function validatePickedMedia(asset: ImagePicker.ImagePickerAsset): 
     Alert.alert("Photo too large", "Maximum photo size is 16 MB.");
     return null;
   }
-  return { uri: asset.uri, kind, durationMs: asset.duration ?? undefined, fileSize: fileSize || undefined, isGif };
+  return {
+    uri: asset.uri,
+    kind,
+    durationMs: asset.duration ?? undefined,
+    fileSize: fileSize || undefined,
+    isGif,
+    width: asset.width ?? undefined,
+    height: asset.height ?? undefined,
+  };
 }
 
 export async function validatePickedAssets(assets: ImagePicker.ImagePickerAsset[]): Promise<PickedChatMedia[]> {

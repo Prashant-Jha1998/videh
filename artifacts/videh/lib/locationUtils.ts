@@ -1,5 +1,5 @@
 import * as Location from "expo-location";
-import { Platform } from "react-native";
+import { Linking, Platform } from "react-native";
 
 export type DeviceCoords = {
   latitude: number;
@@ -14,28 +14,39 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   ]);
 }
 
+/** Open app settings when permission is blocked. */
+export function openAppLocationSettings(): void {
+  void Linking.openSettings().catch(() => {});
+}
+
 export async function requestForegroundLocationPermission(): Promise<boolean> {
-  const result = await withTimeout(Location.requestForegroundPermissionsAsync(), 30_000);
-  return result?.status === "granted";
+  try {
+    const existing = await Location.getForegroundPermissionsAsync();
+    if (existing.status === "granted") return true;
+    if (existing.status === "denied" && !existing.canAskAgain) return false;
+
+    const requested = await withTimeout(Location.requestForegroundPermissionsAsync(), 20_000);
+    return requested?.status === "granted";
+  } catch {
+    return false;
+  }
 }
 
 export async function ensureLocationServicesEnabled(): Promise<boolean> {
   try {
-    const has = await withTimeout(Location.hasServicesEnabledAsync(), 4000);
-    if (has === true) return true;
-    if (has === false && Platform.OS === "android") {
-      await withTimeout(Location.enableNetworkProviderAsync(), 4000);
-      const again = await withTimeout(Location.hasServicesEnabledAsync(), 3000);
-      return again !== false;
-    }
-    return has !== false;
+    const enabled = await withTimeout(Location.hasServicesEnabledAsync(), 4000);
+    return enabled !== false;
   } catch {
     return true;
   }
 }
 
-async function readLastKnown(maxAgeMs: number, timeoutMs = 3500): Promise<Location.LocationObject | null> {
-  return withTimeout(Location.getLastKnownPositionAsync({ maxAge: maxAgeMs }), timeoutMs);
+async function readLastKnown(maxAgeMs: number): Promise<Location.LocationObject | null> {
+  try {
+    return await withTimeout(Location.getLastKnownPositionAsync({ maxAge: maxAgeMs }), 4000);
+  } catch {
+    return null;
+  }
 }
 
 async function readCurrentPosition(
@@ -51,7 +62,7 @@ async function readCurrentPosition(
   );
 }
 
-/** One-shot watch — helps when getCurrentPositionAsync never resolves on some Android builds. */
+/** Fallback when getCurrentPositionAsync never resolves (some Android builds). */
 async function watchOncePosition(timeoutMs: number): Promise<Location.LocationObject | null> {
   if (Platform.OS === "web") return null;
 
@@ -72,8 +83,8 @@ async function watchOncePosition(timeoutMs: number): Promise<Location.LocationOb
     void Location.watchPositionAsync(
       {
         accuracy: Location.Accuracy.Balanced,
-        distanceInterval: 1,
-        timeInterval: 1000,
+        distanceInterval: 0,
+        timeInterval: 500,
       },
       (loc) => finish(loc),
     )
@@ -93,33 +104,31 @@ function toCoords(loc: Location.LocationObject, fromCache: boolean): DeviceCoord
 }
 
 /**
- * Videh-style: cached fix first (fast UI), then GPS / network, then stale cache.
- * Every native call is time-boxed so the screen cannot spin forever.
+ * WhatsApp-style: recent cache first (instant map), then GPS, then stale cache.
  */
 export async function resolveDeviceLocation(opts?: {
   timeoutMs?: number;
   cachedMaxAgeMs?: number;
 }): Promise<DeviceCoords | null> {
-  const timeoutMs = opts?.timeoutMs ?? 10_000;
+  const timeoutMs = opts?.timeoutMs ?? 12_000;
   const cachedMaxAgeMs = opts?.cachedMaxAgeMs ?? 10 * 60 * 1000;
 
   const recent = await readLastKnown(cachedMaxAgeMs);
   if (recent) return toCoords(recent, true);
 
-  const lowAccuracy = Platform.OS === "android" ? Location.Accuracy.Low : Location.Accuracy.Balanced;
+  const balanced = await readCurrentPosition(Location.Accuracy.Balanced, timeoutMs);
+  if (balanced) return toCoords(balanced, false);
 
-  const attempts = await Promise.all([
-    readCurrentPosition(lowAccuracy, timeoutMs),
-    watchOncePosition(timeoutMs),
-  ]);
-  for (const loc of attempts) {
-    if (loc) return toCoords(loc, false);
-  }
+  const watched = await watchOncePosition(Math.min(timeoutMs, 10_000));
+  if (watched) return toCoords(watched, false);
 
-  const high = await readCurrentPosition(Location.Accuracy.Balanced, Math.min(timeoutMs, 8000));
-  if (high) return toCoords(high, false);
+  const low = await readCurrentPosition(
+    Platform.OS === "android" ? Location.Accuracy.Low : Location.Accuracy.Lowest,
+    Math.min(timeoutMs, 8000),
+  );
+  if (low) return toCoords(low, false);
 
-  const stale = await readLastKnown(7 * 24 * 60 * 60 * 1000, 3500);
+  const stale = await readLastKnown(7 * 24 * 60 * 60 * 1000);
   if (stale) return toCoords(stale, true);
 
   return null;

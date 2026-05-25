@@ -97,6 +97,14 @@
       "expo-web-browser",
       "expo-contacts",
       [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Videh needs camera access to take photos and record videos in chat.",
+          "microphonePermission": "Videh needs microphone access to record videos in chat.",
+          "photosPermission": "Allow Videh to access your photos to send images in chat."
+        }
+      ],
+      [
         "expo-media-library",
         {
           "photosPermission": "Allow Videh to access your photos to save videos from chat.",

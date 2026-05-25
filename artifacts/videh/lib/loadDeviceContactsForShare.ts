@@ -1,6 +1,6 @@
 import * as Contacts from "expo-contacts";
 import type { ExistingContact } from "expo-contacts";
-import { contactDisplayName } from "./contactMessage";
+import { contactDisplayName, dedupeEmails, dedupePhones } from "./contactMessage";
 
 export type ContactShareRow = {
   id: string;
@@ -29,14 +29,16 @@ let loadPromise: Promise<ContactShareRow[]> | null = null;
 function rowFromContact(c: ExistingContact, index: number): ContactShareRow | null {
   try {
     const name = contactDisplayName(c);
-    const phones = (c.phoneNumbers ?? [])
-      .map((p) => String(p.number ?? "").trim())
-      .filter((p) => p.length > 0)
-      .slice(0, 8);
-    const emails = (c.emails ?? [])
-      .map((e) => String(e.email ?? "").trim())
-      .filter((e) => e.length > 0)
-      .slice(0, 4);
+    const phones = dedupePhones(
+      (c.phoneNumbers ?? [])
+        .map((p) => String(p.number ?? "").trim())
+        .filter((p) => p.length > 0),
+    ).slice(0, 8);
+    const emails = dedupeEmails(
+      (c.emails ?? [])
+        .map((e) => String(e.email ?? "").trim())
+        .filter((e) => e.length > 0),
+    ).slice(0, 4);
     if (!name && phones.length === 0 && emails.length === 0) return null;
 
     const id = c.id != null ? String(c.id) : `c_${index}_${name.slice(0, 12)}`;

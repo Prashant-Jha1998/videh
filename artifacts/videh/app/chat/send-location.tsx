@@ -22,6 +22,7 @@ import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
   ensureLocationServicesEnabled,
+  openAppLocationSettings,
   refineDeviceLocation,
   requestForegroundLocationPermission,
   resolveDeviceLocation,
@@ -65,7 +66,7 @@ export default function SendLocationScreen() {
   const [sending, setSending] = useState(false);
 
   const geocodeReqRef = useRef(0);
-  const loadGenRef = useRef(0);
+  const activeLoadRef = useRef(0);
 
   const applyCoords = useCallback((latitude: number, longitude: number) => {
     setLat(latitude);
@@ -80,7 +81,8 @@ export default function SendLocationScreen() {
   }, []);
 
   const refreshPosition = useCallback(async (opts?: { silent?: boolean }) => {
-    const gen = ++loadGenRef.current;
+    const loadId = ++activeLoadRef.current;
+    const stillActive = () => activeLoadRef.current === loadId;
 
     if (!opts?.silent) {
       setLoading(true);
@@ -91,40 +93,41 @@ export default function SendLocationScreen() {
 
     try {
       const granted = await requestForegroundLocationPermission();
-      if (loadGenRef.current !== gen) return;
+      if (!stillActive()) return;
       if (!granted) {
-        setErr("Location permission is required. Open Settings → Videh → Location → Allow.");
+        setErr("Location permission is required. Tap \"Open settings\" and allow Location for Videh.");
         return;
       }
 
       const servicesOk = await ensureLocationServicesEnabled();
-      if (loadGenRef.current !== gen) return;
+      if (!stillActive()) return;
       if (!servicesOk) {
         setErr("Turn on Location / GPS on your phone, then tap refresh.");
         return;
       }
 
-      const initial = await resolveDeviceLocation({ timeoutMs: opts?.silent ? 12_000 : 8_000 });
-      if (loadGenRef.current !== gen) return;
+      const initial = await resolveDeviceLocation({ timeoutMs: opts?.silent ? 15_000 : 12_000 });
+      if (!stillActive()) return;
 
       if (initial) {
         applyCoords(initial.latitude, initial.longitude);
+        setLoading(false);
 
         if (initial.fromCache) {
           setRefining(true);
-          const refined = await refineDeviceLocation(10_000);
-          if (loadGenRef.current !== gen) return;
+          const refined = await refineDeviceLocation(12_000);
+          if (!stillActive()) return;
           if (refined) applyCoords(refined.latitude, refined.longitude);
         }
         return;
       }
 
-      setErr("Could not get your location. Turn on GPS and try refresh.");
+      setErr("Could not get your location. Turn on GPS and tap refresh.");
     } catch {
-      if (loadGenRef.current !== gen) return;
+      if (!stillActive()) return;
       setErr("Could not load location. Please try again.");
     } finally {
-      if (loadGenRef.current === gen) {
+      if (stillActive()) {
         setLoading(false);
         setRefining(false);
       }
@@ -134,13 +137,17 @@ export default function SendLocationScreen() {
   useEffect(() => {
     void refreshPosition();
     const watchdog = setTimeout(() => {
-      setLoading((loading) => {
-        if (!loading) return loading;
+      setLoading((wasLoading) => {
+        if (!wasLoading) return wasLoading;
         setErr((prev) => prev ?? "Location is taking too long. Turn on GPS and tap refresh.");
         return false;
       });
-    }, 14_000);
-    return () => clearTimeout(watchdog);
+      setRefining(false);
+    }, 16_000);
+    return () => {
+      activeLoadRef.current += 1;
+      clearTimeout(watchdog);
+    };
   }, [refreshPosition]);
 
   const mapUri =
@@ -249,6 +256,11 @@ export default function SendLocationScreen() {
           <TouchableOpacity style={styles.retryBtn} onPress={() => void refreshPosition()}>
             <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>Try again</Text>
           </TouchableOpacity>
+          {err?.includes("permission") ? (
+            <TouchableOpacity style={[styles.retryBtn, { marginTop: 4 }]} onPress={openAppLocationSettings}>
+              <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>Open settings</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : (
         <>
