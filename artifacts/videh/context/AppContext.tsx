@@ -335,7 +335,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const ext = mime.includes("video")
       ? mime.includes("quicktime") ? "mov" : "mp4"
       : mime.includes("audio")
-        ? mime.includes("mpeg") ? "mp3" : "m4a"
+        ? (() => {
+            const lower = uri.toLowerCase();
+            if (lower.includes(".mp3")) return "mp3";
+            if (lower.includes(".wav")) return "wav";
+            if (lower.includes(".aac")) return "aac";
+            if (lower.includes(".3gp")) return "3gp";
+            if (lower.includes(".caf")) return "caf";
+            if (lower.includes(".amr")) return "amr";
+            if (lower.includes(".ogg")) return "ogg";
+            return mime.includes("mpeg") ? "mp3" : "m4a";
+          })()
         : mime.includes("pdf") ? "pdf"
           : mime.includes("png") ? "png" : "jpg";
     const uploaded = await uploadChatMediaWithProgress({
@@ -495,7 +505,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (nextState === "active") {
         api(`/users/${activeUid}/online`, { method: "POST" }).catch(() => {});
         if (Platform.OS !== "web") {
-          registerPushTokenWithServer(uid).catch(() => {});
+          registerPushTokenWithServer(activeUid).catch(() => {});
         }
       } else if (nextState === "background" || nextState === "inactive") {
         api(`/users/${activeUid}/offline`, { method: "POST" }).catch(() => {});
@@ -1256,14 +1266,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         };
       }),
     );
-    if (u?.dbId) {
+    const dbId = u?.dbId;
+    if (dbId) {
       void (async () => {
         try {
           await api(`/chats/${chatId}/messages/${messageId}`, {
             method: "DELETE",
-            body: JSON.stringify({ userId: u.dbId, deleteForEveryone: true }),
+            body: JSON.stringify({ userId: dbId, deleteForEveryone: true }),
           });
-          await loadChats(u.dbId);
+          await loadChats(dbId);
           if (activeChatIdRef.current === chatId) await loadMessages(chatId);
         } catch {
           /* keep optimistic UI */
@@ -1444,14 +1455,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }),
     );
     const u = userRef.current;
-    if (u?.dbId) {
+    const dbId = u?.dbId;
+    if (dbId) {
       void (async () => {
         try {
           await api(`/chats/${chatId}/messages/${messageId}`, {
             method: "DELETE",
-            body: JSON.stringify({ userId: u.dbId }),
+            body: JSON.stringify({ userId: dbId }),
           });
-          await loadChats(u.dbId);
+          await loadChats(dbId);
           if (activeChatIdRef.current === chatId) await loadMessages(chatId);
         } catch {
           /* keep optimistic UI */

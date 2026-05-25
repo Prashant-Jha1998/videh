@@ -7,8 +7,15 @@ export type CallMessageMeta = {
   durationSeconds?: number;
 };
 
-export function callMessagePreview(meta: CallMessageMeta): string {
-  const label = meta.callType === "video" ? "Video call" : "Voice call";
+export function callMessagePreview(meta: CallMessageMeta, participantCount = 1): string {
+  const label =
+    participantCount > 1
+      ? meta.callType === "video"
+        ? "Group video call"
+        : "Group voice call"
+      : meta.callType === "video"
+        ? "Video call"
+        : "Voice call";
   if (meta.result === "answered") {
     const total = Math.max(0, meta.durationSeconds ?? 0);
     const mins = Math.floor(total / 60);
@@ -63,7 +70,7 @@ export async function insertCallChatMessage(args: {
       type: "message",
       chatId: args.chatId,
       userIds: [args.callerId, ...args.participantIds],
-      payload: { messageId, preview: callMessagePreview(meta) },
+      payload: { messageId, preview: callMessagePreview(meta, args.participantIds.length) },
     });
   } catch (err) {
     console.error("insertCallChatMessage error", err);

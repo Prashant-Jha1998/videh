@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 8,
+      "versionCode": 13,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/videh_icon_foreground.png",
         "backgroundColor": "#0B141A"
@@ -63,7 +63,10 @@
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_MEDIA_DOCUMENTS",
         "android.permission.WRITE_CONTACTS",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.USE_FULL_SCREEN_INTENT",
+        "android.permission.WAKE_LOCK",
+        "android.permission.VIBRATE"
       ]
     },
     "web": {
@@ -117,6 +120,7 @@
           "isAndroidBackgroundLocationEnabled": false
         }
       ],
+      "./plugins/withAndroidIncomingCall.js",
       [
         "expo-speech-recognition",
         {

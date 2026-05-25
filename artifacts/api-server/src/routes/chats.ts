@@ -64,6 +64,8 @@ function mimeFromFilename(filename: string, fallback: string): string {
   if (ext === ".mov") return "video/quicktime";
   if (ext === ".mp3") return "audio/mpeg";
   if (ext === ".m4a") return "audio/mp4";
+  if (ext === ".3gp") return "audio/3gpp";
+  if (ext === ".caf") return "audio/x-caf";
   if (ext === ".aac") return "audio/aac";
   if (ext === ".zip") return "application/zip";
   if (ext === ".rar") return "application/vnd.rar";
@@ -570,10 +572,12 @@ router.post("/:chatId/messages/:messageId/consume-view-once", async (req: Reques
       [userId, messageId],
     );
     if (filename) await deleteChatMediaFile(filename);
+    const memberRes = await query("SELECT user_id FROM chat_members WHERE chat_id = $1", [chatId]);
     publishChatEvent({
       type: "message",
       chatId: String(chatId),
-      messageId: String(messageId),
+      userIds: memberRes.rows.map((r: { user_id: number }) => r.user_id),
+      payload: { messageId: String(messageId), action: "view_once_opened" },
     });
     res.json({ success: true, mediaUrl: msg.media_url });
   } catch (err) {

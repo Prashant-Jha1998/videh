@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { useApp, type StoryEditorOverlay, type StoryEditorStroke } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+import { jsonAuthHeaders } from "@/lib/authHeaders";
 
 const { width: W, height: H } = Dimensions.get("window");
 const MAX_STORY_PARTICIPANTS = 100;
@@ -129,7 +130,7 @@ function mediaExt(uri: string, type: "image" | "video"): string {
 export default function StatusCreateScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { addStatus } = useApp();
+  const { addStatus, user } = useApp();
   const params = useLocalSearchParams<{ mode?: string }>();
   const [mode, setMode] = useState<"text" | "media">(params.mode === "camera" ? "media" : "text");
   const [stage, setStage] = useState<"compose" | "audience">("compose");
@@ -324,7 +325,7 @@ export default function StatusCreateScreen() {
       }
       const res = await fetch(`${getApiUrl()}/api/users/check-phones`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonAuthHeaders(user?.sessionToken),
         body: JSON.stringify({ phones: Array.from(phones) }),
       });
       const data = await res.json() as { registered?: Record<string, any> };

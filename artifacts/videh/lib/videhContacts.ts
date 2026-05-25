@@ -23,7 +23,11 @@ export function normalizePhone(raw: string): string {
 }
 
 /** Phone book contacts who are registered on Videh (same logic as Contacts screen). */
-export async function loadVidehContacts(apiUrl: string, myPhone: string): Promise<VidehContact[]> {
+export async function loadVidehContacts(
+  apiUrl: string,
+  myPhone: string,
+  sessionToken?: string | null,
+): Promise<VidehContact[]> {
   if (Platform.OS === "web") return [];
 
   const { status: perm } = await Contacts.requestPermissionsAsync();
@@ -51,9 +55,13 @@ export async function loadVidehContacts(apiUrl: string, myPhone: string): Promis
 
   const res = await fetch(`${apiUrl}/api/users/check-phones`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+    },
     body: JSON.stringify({ phones }),
   });
+  if (res.status === 401 || res.status === 429) return [];
   const json = await res.json();
   const registered: Record<string, { id: number; name?: string; about?: string; avatarUrl?: string }> =
     json.registered ?? {};

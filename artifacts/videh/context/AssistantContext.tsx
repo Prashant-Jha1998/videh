@@ -193,14 +193,14 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
     await startListening({
       locale: listenLocaleRef.current,
-      onPartial: (t) => {
+      onPartial: (t: string) => {
         setTranscript(t);
         const detected = detectLocaleFromTranscript(t);
         if (detected !== listenLocaleRef.current) {
           listenLocaleRef.current = detected;
         }
       },
-      onFinal: (t) => {
+      onFinal: (t: string) => {
         commandBufferRef.current = t;
         listenLocaleRef.current = detectLocaleFromTranscript(t);
       },
@@ -266,13 +266,13 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     await startListening({
       locale: p.lastLangCode ?? "hi",
       wakeMode: true,
-      onPartial: (text) => {
+      onPartial: (text: string) => {
         if (phaseRef.current !== "idle") return;
         if (containsWakePhrase(text)) {
           void tryWakeActivation();
         }
       },
-      onFinal: (text) => {
+      onFinal: (text: string) => {
         if (phaseRef.current !== "idle") return;
         if (containsWakePhrase(text)) {
           void tryWakeActivation();

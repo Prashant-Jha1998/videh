@@ -58,9 +58,11 @@ export async function ensureVidehNotificationSetup(): Promise<void> {
   await Notifications.setNotificationChannelAsync(VIDEH_CALLS_CHANNEL_ID, {
     name: "Calls",
     importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 800, 400, 800, 400, 800],
+    vibrationPattern: [0, 1000, 500, 1000, 500, 1000],
     sound: "default",
     bypassDnd: true,
+    enableLights: true,
+    lightColor: "#00A884",
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });
 }

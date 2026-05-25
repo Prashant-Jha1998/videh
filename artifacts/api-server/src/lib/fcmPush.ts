@@ -83,13 +83,26 @@ export async function sendFcmChatPush(
       data: dataPayload,
       android: {
         priority: "high",
-        notification: { channelId, sound: "default", priority: "high" as const },
+        notification: {
+          channelId,
+          sound: "default",
+          priority: "high" as const,
+          ...(options?.isCall
+            ? {
+                visibility: "public" as const,
+                defaultSound: true,
+                defaultVibrateTimings: true,
+                tag: "videh_incoming_call",
+              }
+            : {}),
+        },
       },
       apns: {
         payload: {
           aps: {
             sound: "default",
             alert: { title, body },
+            ...(options?.isCall ? { "interruption-level": "time-sensitive" } : {}),
           },
         },
       },

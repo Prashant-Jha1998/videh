@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
@@ -135,7 +135,7 @@ export default function PrivacySettingsScreen() {
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Who can see my personal info</Text>
           <TouchableOpacity
             style={[styles.privacyRow, { borderBottomColor: colors.border }]}
-            onPress={() => router.push("/settings/last-seen-online")}
+            onPress={() => router.push("/settings/last-seen-online" as Href)}
             activeOpacity={0.7}
           >
             <Text style={[styles.privacyLabel, { color: colors.foreground }]}>Last seen and online</Text>

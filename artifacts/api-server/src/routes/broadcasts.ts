@@ -10,6 +10,11 @@ import { publishChatEvent } from "../lib/realtime";
 const router = Router();
 router.use(requireAuth);
 
+function routeParam(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0] ?? "";
+  return value ?? "";
+}
+
 async function assertListOwner(req: Request, res: Response, listId: string): Promise<number | null> {
   const authUserId = getAuthUserId(req);
   if (!authUserId) {
@@ -47,7 +52,8 @@ async function isDirectChatBlocked(chatId: number, senderId: number): Promise<bo
 }
 
 router.get("/user/:userId", async (req: Request, res: Response) => {
-  if (!assertSameUser(req, res, req.params.userId)) return;
+  const userId = Number(routeParam(req.params.userId));
+  if (!userId || !assertSameUser(req, res, userId)) return;
   try {
     const result = await query(
       `SELECT bl.*, COUNT(br.id)::int as recipient_count
@@ -55,7 +61,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
        LEFT JOIN broadcast_recipients br ON br.list_id = bl.id
        WHERE bl.creator_id = $1
        GROUP BY bl.id ORDER BY bl.created_at DESC`,
-      [req.params.userId],
+      [userId],
     );
     res.json({ success: true, lists: result.rows });
   } catch (err) {
@@ -88,14 +94,15 @@ router.post("/", async (req: Request, res: Response) => {
 });
 
 router.get("/:listId/recipients", async (req: Request, res: Response) => {
-  if (!(await assertListOwner(req, res, req.params.listId))) return;
+  const listId = routeParam(req.params.listId);
+  if (!(await assertListOwner(req, res, listId))) return;
   try {
     const result = await query(
       `SELECT br.*, u.name, u.phone, u.avatar_url, u.is_online
        FROM broadcast_recipients br
        JOIN users u ON u.id = br.user_id
        WHERE br.list_id = $1`,
-      [req.params.listId],
+      [listId],
     );
     res.json({ success: true, recipients: result.rows });
   } catch (err) {
@@ -105,7 +112,8 @@ router.get("/:listId/recipients", async (req: Request, res: Response) => {
 });
 
 router.post("/:listId/recipients", async (req: Request, res: Response) => {
-  if (!(await assertListOwner(req, res, req.params.listId))) return;
+  const listId = routeParam(req.params.listId);
+  if (!(await assertListOwner(req, res, listId))) return;
   const { userId } = req.body as { userId?: number };
   if (!userId) {
     res.status(400).json({ success: false, message: "userId required" });
@@ -114,7 +122,7 @@ router.post("/:listId/recipients", async (req: Request, res: Response) => {
   try {
     await query(
       "INSERT INTO broadcast_recipients (list_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
-      [req.params.listId, userId],
+      [listId, userId],
     );
     res.json({ success: true });
   } catch (err) {
@@ -124,9 +132,11 @@ router.post("/:listId/recipients", async (req: Request, res: Response) => {
 });
 
 router.delete("/:listId/recipients/:userId", async (req: Request, res: Response) => {
-  if (!(await assertListOwner(req, res, req.params.listId))) return;
+  const listId = routeParam(req.params.listId);
+  const recipientUserId = routeParam(req.params.userId);
+  if (!(await assertListOwner(req, res, listId))) return;
   try {
-    await query("DELETE FROM broadcast_recipients WHERE list_id=$1 AND user_id=$2", [req.params.listId, req.params.userId]);
+    await query("DELETE FROM broadcast_recipients WHERE list_id=$1 AND user_id=$2", [listId, recipientUserId]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
@@ -134,6 +144,7 @@ router.delete("/:listId/recipients/:userId", async (req: Request, res: Response)
 });
 
 router.post("/:listId/send", async (req: Request, res: Response) => {
+  const listId = routeParam(req.params.listId);
   const authUserId = getAuthUserId(req);
   if (!authUserId) {
     res.status(401).json({ success: false, message: "Authentication required" });
@@ -168,7 +179,7 @@ router.post("/:listId/send", async (req: Request, res: Response) => {
 
     const listResult = await query(
       "SELECT * FROM broadcast_lists WHERE id=$1 AND creator_id=$2",
-      [req.params.listId, authUserId],
+      [listId, authUserId],
     );
     if (listResult.rows.length === 0) {
       res.status(403).json({ success: false, message: "Not authorized" });
@@ -180,7 +191,7 @@ router.post("/:listId/send", async (req: Request, res: Response) => {
        FROM broadcast_recipients br
        JOIN users u ON u.id = br.user_id
        WHERE br.list_id = $1`,
-      [req.params.listId],
+      [listId],
     );
     const sender = await query("SELECT name FROM users WHERE id=$1", [authUserId]);
     const senderName = sender.rows[0]?.name ?? "Videh";
@@ -266,9 +277,10 @@ router.post("/:listId/send", async (req: Request, res: Response) => {
 });
 
 router.delete("/:listId", async (req: Request, res: Response) => {
-  if (!(await assertListOwner(req, res, req.params.listId))) return;
+  const listId = routeParam(req.params.listId);
+  if (!(await assertListOwner(req, res, listId))) return;
   try {
-    await query("DELETE FROM broadcast_lists WHERE id=$1", [req.params.listId]);
+    await query("DELETE FROM broadcast_lists WHERE id=$1", [listId]);
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "delete broadcast error");

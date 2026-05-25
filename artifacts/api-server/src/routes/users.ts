@@ -2,7 +2,8 @@ import { Router, type Request, type Response } from "express";
 import { query } from "../lib/db";
 import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
-import { assertSameUser, getAuthUserId, issueSessionToken } from "../lib/auth";
+import { assertSameUser, getAuthUserId, issueSessionToken, requireAuth } from "../lib/auth";
+import { clientIp, isRateLimited } from "../lib/rateLimit";
 import {
   ensurePrivacyColumns,
   getPresenceForViewer,
@@ -288,11 +289,26 @@ router.post("/:id/report", async (req: Request, res: Response) => {
   } catch { res.status(500).json({ success: false }); }
 });
 
-// Bulk check which phone numbers are registered on Videh
-router.post("/check-phones", async (req: Request, res: Response) => {
+// Bulk check which phone numbers are registered on Videh (authenticated + rate limited)
+router.post("/check-phones", requireAuth, async (req: Request, res: Response) => {
+  const authUserId = getAuthUserId(req);
+  if (!authUserId) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return;
+  }
+  const rateKey = `check-phones:${authUserId}:${clientIp(req)}`;
+  if (isRateLimited(rateKey, 30, 60_000)) {
+    res.status(429).json({ success: false, message: "Too many requests. Try again shortly." });
+    return;
+  }
+
   const { phones } = req.body as { phones?: string[] };
   if (!phones || !Array.isArray(phones) || phones.length === 0) {
     res.status(400).json({ success: false, message: "phones array required" });
+    return;
+  }
+  if (phones.length > 500) {
+    res.status(400).json({ success: false, message: "Maximum 500 phone numbers per request." });
     return;
   }
   try {

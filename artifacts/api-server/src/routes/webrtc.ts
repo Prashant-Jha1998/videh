@@ -107,7 +107,7 @@ function isCallEnded(call: CallInvite): boolean {
 async function listActiveCalls(): Promise<CallInvite[]> {
   const keys = await stateKeys("webrtc:call:");
   const calls = await Promise.all(keys.map((key) => stateGetJson<CallInvite>(key)));
-  return calls.filter((c): c is CallInvite => Boolean(c) && !isCallEnded(c));
+  return calls.filter((c): c is CallInvite => c != null && !isCallEnded(c));
 }
 
 /** User is already on a connected call (busy). */
@@ -123,28 +123,39 @@ function isCallParticipant(call: CallInvite, userId: number): boolean {
   return call.callerId === userId || call.participantIds.includes(userId);
 }
 
+function participantCallStatus(call: CallInvite, participantId: number): string {
+  const s = call.statuses[participantId];
+  if (s === "busy") return "busy";
+  if (s === "declined") return "declined";
+  if (s === "accepted" && call.connectedAt) return "answered";
+  return "missed";
+}
+
+function aggregateCallResult(call: CallInvite): "answered" | "missed" | "declined" | "busy" {
+  const statuses = call.participantIds.map((id) => participantCallStatus(call, id));
+  if (statuses.some((s) => s === "answered")) return "answered";
+  if (statuses.length > 0 && statuses.every((s) => s === "busy")) return "busy";
+  if (statuses.some((s) => s === "declined")) return "declined";
+  return "missed";
+}
+
 async function persistCallHistory(call: CallInvite): Promise<void> {
   if (call.logged || call.participantIds.length === 0) return;
-  const calleeId = call.participantIds[0];
-  const calleeStatus = call.statuses[calleeId];
-  let status = "missed";
-  if (calleeStatus === "busy") status = "busy";
-  else if (calleeStatus === "declined") status = "declined";
-  else if (call.connectedAt) status = "answered";
   const durationSeconds = call.connectedAt
     ? Math.max(0, Math.round((Date.now() - call.connectedAt) / 1000))
     : 0;
-  const result =
-    status === "answered" ? "answered"
-    : status === "declined" ? "declined"
-    : status === "busy" ? "busy"
-    : "missed";
+  const result = aggregateCallResult(call);
+  const startedAt = call.connectedAt ?? call.createdAt;
+
   try {
-    await query(
-      `INSERT INTO calls (caller_id, callee_id, chat_id, type, status, duration_seconds, started_at, ended_at)
-       VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7 / 1000.0), NOW())`,
-      [call.callerId, calleeId, call.chatId, call.type, status, durationSeconds, call.connectedAt ?? call.createdAt],
-    );
+    for (const participantId of call.participantIds) {
+      const status = participantCallStatus(call, participantId);
+      await query(
+        `INSERT INTO calls (caller_id, callee_id, chat_id, type, status, duration_seconds, started_at, ended_at)
+         VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7 / 1000.0), NOW())`,
+        [call.callerId, participantId, call.chatId, call.type, status, durationSeconds, startedAt],
+      );
+    }
     call.logged = true;
     await insertCallChatMessage({
       chatId: call.chatId,
@@ -158,7 +169,14 @@ async function persistCallHistory(call: CallInvite): Promise<void> {
       chatId: call.chatId,
       userIds: [call.callerId, ...call.participantIds],
       action: result === "answered" ? "ended" : result === "declined" ? "declined" : result === "busy" ? "busy" : "missed",
-      payload: { callId: call.callId, chatId: call.chatId, type: call.type, result, durationSeconds },
+      payload: {
+        callId: call.callId,
+        chatId: call.chatId,
+        type: call.type,
+        result,
+        durationSeconds,
+        conference: call.participantIds.length > 1,
+      },
     });
   } catch (err) {
     console.error("persistCallHistory error", err);
@@ -446,6 +464,147 @@ router.get("/calls/:callId/status", async (req: Request, res: Response) => {
     acceptedUserIds,
     callerId: call.callerId,
   });
+});
+
+router.post("/calls/:callId/participants", async (req: Request, res: Response) => {
+  await cleanupSessions();
+  const call = await getCall(String(req.params.callId));
+  const requesterId = Number((req as any).authUserId);
+  const body = req.body as { userIds?: number[] };
+  const rawIds = Array.isArray(body.userIds) ? body.userIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0) : [];
+
+  if (!call) {
+    res.status(404).json({ success: false, message: "Call not found." });
+    return;
+  }
+  if (!requesterId || !isCallParticipant(call, requesterId) || call.statuses[requesterId] !== "accepted") {
+    res.status(403).json({ success: false, message: "Only active participants can add people to the call." });
+    return;
+  }
+
+  const uniqueIds = [...new Set(rawIds)].filter((id) => id !== requesterId && id !== call.callerId);
+  if (uniqueIds.length === 0) {
+    res.status(400).json({ success: false, message: "Select at least one person to add." });
+    return;
+  }
+
+  try {
+    const blockRes = await query(
+      `SELECT blocker_id, blocked_id FROM blocked_users
+       WHERE (blocker_id = $1 AND blocked_id = ANY($2::int[]))
+          OR (blocker_id = ANY($2::int[]) AND blocked_id = $1)`,
+      [requesterId, uniqueIds],
+    );
+    const blocked = new Set<number>();
+    for (const row of blockRes.rows as { blocker_id: number; blocked_id: number }[]) {
+      blocked.add(Number(row.blocker_id));
+      blocked.add(Number(row.blocked_id));
+    }
+    const allowedIds = uniqueIds.filter((id) => !blocked.has(id));
+    if (allowedIds.length === 0) {
+      res.status(403).json({ success: false, message: "Cannot add blocked contacts to this call." });
+      return;
+    }
+
+    const liveCalls = await listActiveCalls();
+    const addedRinging: number[] = [];
+    const busyIds: number[] = [];
+    const alreadyOnCall: number[] = [];
+
+    for (const id of allowedIds) {
+      const existingStatus = call.statuses[id];
+      if (call.participantIds.includes(id)) {
+        if (existingStatus === "accepted" || existingStatus === "ringing") {
+          alreadyOnCall.push(id);
+          continue;
+        }
+        if (existingStatus === "declined" || existingStatus === "missed" || existingStatus === "busy") {
+          if (userIsOnLiveCall(liveCalls, id, call.callId)) {
+            call.statuses[id] = "busy";
+            busyIds.push(id);
+          } else {
+            call.statuses[id] = "ringing";
+            addedRinging.push(id);
+          }
+          continue;
+        }
+      }
+
+      if (userIsOnLiveCall(liveCalls, id, call.callId)) {
+        call.participantIds.push(id);
+        call.statuses[id] = "busy";
+        busyIds.push(id);
+      } else {
+        call.participantIds.push(id);
+        call.statuses[id] = "ringing";
+        addedRinging.push(id);
+      }
+    }
+
+    call.updatedAt = Date.now();
+    await saveCall(call);
+
+    const notifyIds = [...new Set([call.callerId, ...call.participantIds, requesterId])];
+    publishCallSignal({
+      chatId: call.chatId,
+      userIds: notifyIds,
+      action: "ringing",
+      payload: {
+        ...serializeIncoming(call, requesterId),
+        addedUserIds: addedRinging,
+        addedBy: requesterId,
+      },
+    });
+
+    if (addedRinging.length > 0) {
+      const tokenRes = await query(
+        `SELECT id, push_token, name FROM users WHERE id = ANY($1::int[])`,
+        [addedRinging],
+      );
+      const requesterRow = await query(`SELECT name FROM users WHERE id = $1`, [requesterId]);
+      const adderName = (requesterRow.rows[0] as { name?: string } | undefined)?.name ?? "Someone";
+      const pushTokens = tokenRes.rows
+        .map((row: any) => row.push_token)
+        .filter((t: unknown): t is string => isValidPushToken(t));
+      if (pushTokens.length > 0) {
+        await sendChatPush(
+          pushTokens,
+          call.type === "video" ? "Video call" : "Voice call",
+          `${adderName} added you to a call`,
+          {
+            callId: call.callId,
+            chatId: String(call.chatId),
+            type: call.type,
+            channel: call.channel,
+            callerName: adderName,
+            kind: "call",
+            notificationKind: "incoming_call",
+          },
+          { categoryId: EXPO_INCOMING_CALL_CATEGORY_ID, threadId: `call-${call.callId}`, isCall: true },
+        );
+      }
+    }
+
+    if (busyIds.length > 0) {
+      publishCallSignal({
+        chatId: call.chatId,
+        userIds: notifyIds,
+        action: "busy",
+        payload: { callId: call.callId, busyParticipantIds: busyIds, addedBy: requesterId },
+      });
+    }
+
+    res.json({
+      success: true,
+      call: serializeIncoming(call, requesterId),
+      addedRinging,
+      busyIds,
+      alreadyOnCall,
+    });
+  } catch (err) {
+    req.log?.error?.({ err }, "add call participants");
+    res.status(500).json({ success: false, message: "Could not add participants." });
+  }
 });
 
 router.post("/calls/:callId/end", async (req: Request, res: Response) => {

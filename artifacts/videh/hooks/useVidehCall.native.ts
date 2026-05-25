@@ -69,16 +69,20 @@ export function useVidehCall(
     }
   }, [isVideo]);
 
+  const channelsKey = channels.join("|");
+
   useEffect(() => {
     if (!primaryChannel || !uid) return;
 
     let stopped = false;
+    let localStream: any = null;
 
     const postJson = async (path: string, body: unknown) => {
       await webrtcFetch(path, sessionToken, { method: "POST", body: JSON.stringify(body) });
     };
 
     const connectChannel = async (channel: string, sharedLocalStream: any, iceServers: RTCIceServer[]) => {
+      if (pcsRef.current.has(channel)) return;
       const {
         RTCPeerConnection,
         RTCSessionDescription,
@@ -160,31 +164,43 @@ export function useVidehCall(
       pollTimersRef.current.set(channel, pollTimer);
     };
 
-    const connectAll = async () => {
+    const ensureLocalStream = async () => {
+      if (localStreamRef.current) return localStreamRef.current;
+      if (Platform.OS === "android") {
+        const perms: string[] = [PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
+        if (isVideo) perms.push(PermissionsAndroid.PERMISSIONS.CAMERA);
+        const results = await PermissionsAndroid.requestMultiple(perms as any);
+        const denied = Object.values(results).some((v) => v !== PermissionsAndroid.RESULTS.GRANTED);
+        if (denied) throw new Error("Microphone/camera permission denied");
+      }
+      await startInCallSession(isVideo);
+      applySpeakerRoute(speakerOnRef.current, isVideo);
+      const { mediaDevices } = require("react-native-webrtc");
+      const stream = await mediaDevices.getUserMedia({ audio: true, video: isVideo });
+      localStreamRef.current = stream;
+      setLocalStreamUrl(typeof stream.toURL === "function" ? stream.toURL() : undefined);
+      return stream;
+    };
+
+    const syncChannels = async () => {
       try {
-        if (Platform.OS === "android") {
-          const perms: string[] = [PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
-          if (isVideo) perms.push(PermissionsAndroid.PERMISSIONS.CAMERA);
-          const results = await PermissionsAndroid.requestMultiple(perms as any);
-          const denied = Object.values(results).some((v) => v !== PermissionsAndroid.RESULTS.GRANTED);
-          if (denied) {
-            setError("Microphone/camera permission denied");
-            return;
-          }
-        }
-
-        await startInCallSession(isVideo);
-        applySpeakerRoute(speakerOnRef.current, isVideo);
-
+        localStream = await ensureLocalStream();
         const iceServers = await loadIceServers(sessionToken);
-        const { mediaDevices } = require("react-native-webrtc");
-        const localStream = await mediaDevices.getUserMedia({ audio: true, video: isVideo });
-        localStreamRef.current = localStream;
-        setLocalStreamUrl(typeof localStream.toURL === "function" ? localStream.toURL() : undefined);
-
         for (const channel of channels) {
+          if (stopped) return;
           await connectChannel(channel, localStream, iceServers);
         }
+        const active = new Set(channels);
+        for (const [channel, timer] of pollTimersRef.current.entries()) {
+          if (!active.has(channel)) {
+            clearInterval(timer);
+            pollTimersRef.current.delete(channel);
+            pcsRef.current.get(channel)?.close?.();
+            pcsRef.current.delete(channel);
+            webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken, { method: "DELETE" }).catch(() => {});
+          }
+        }
+        refreshAggregate();
       } catch (e: any) {
         const msg = e?.message ?? "";
         if (msg.includes("Cannot find module") || msg.includes("TurboModuleRegistry") || msg.includes("NativeModules")) {
@@ -195,22 +211,27 @@ export function useVidehCall(
       }
     };
 
-    void connectAll();
+    void syncChannels();
 
     return () => {
       stopped = true;
+    };
+  }, [primaryChannel, uid, isVideo, channelsKey, refreshAggregate, sessionToken]);
+
+  useEffect(() => {
+    return () => {
       setProximityScreenOff(false);
       void stopInCallSession();
       for (const timer of pollTimersRef.current.values()) clearInterval(timer);
       pollTimersRef.current.clear();
       localStreamRef.current?.getTracks?.().forEach((track: any) => track.stop());
+      localStreamRef.current = null;
       for (const pc of pcsRef.current.values()) pc?.close?.();
       pcsRef.current.clear();
-      for (const channel of channels) {
-        webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken, { method: "DELETE" }).catch(() => {});
-      }
+      rolesRef.current.clear();
+      candidateCursorsRef.current.clear();
     };
-  }, [primaryChannel, uid, isVideo, channels.join("|"), refreshAggregate, sessionToken]);
+  }, [primaryChannel, uid]);
 
   return {
     joined,

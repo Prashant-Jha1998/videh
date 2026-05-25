@@ -8,7 +8,7 @@ import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { KeyboardAvoidingView } from "react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -37,7 +37,7 @@ import { useColors } from "@/hooks/useColors";
 import { useApp, type Message } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
-import { usePlayableAudioUri } from "@/lib/usePlayableAudioUri";
+import { downloadPlayableAudioSource, usePlayableAudioUri } from "@/lib/usePlayableAudioUri";
 import {
   CHAT_CAMERA_PHOTO_OPTIONS,
   CHAT_CAMERA_VIDEO_OPTIONS,
@@ -56,7 +56,6 @@ import { openChatDocument } from "@/lib/openChatDocument";
 import { parseContactMessage } from "@/lib/contactMessage";
 import type { ContactShareRow } from "@/lib/loadDeviceContactsForShare";
 import { ContactSharePickerModal } from "@/components/ContactSharePickerModal";
-import { startVoiceNotePlaybackSession, stopVoiceNotePlaybackSession } from "@/lib/inCallAudio";
 import { claimVoicePlayback, releaseVoicePlayback } from "@/lib/voicePlaybackHub";
 import {
   fallbackVoiceWaveHeights,
@@ -65,6 +64,7 @@ import {
   VOICE_WAVE_BAR_COUNT,
 } from "@/lib/voiceWaveform";
 import { guessMimeFromFilename } from "@/lib/prepareFileUpload";
+import { stashBatchMedia } from "@/lib/chatMediaBatch";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { isGifUri } from "@/lib/imageEdit";
@@ -242,7 +242,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
   avatarUri?: string;
   sessionToken?: string | null;
 }) {
-  const { playableUri, failed, loading: uriLoading } = usePlayableAudioUri(uri, sessionToken);
+  const { playbackSource, failed, loading: uriLoading } = usePlayableAudioUri(uri, sessionToken);
   const soundRef = useRef<Audio.Sound | null>(null);
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(Math.max(0.1, durationHintSec || 0.1));
@@ -264,7 +264,6 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
       } catch { /* ignore */ }
     }
     setPlaying(false);
-    stopVoiceNotePlaybackSession();
     releaseVoicePlayback(messageId);
   }, [messageId]);
 
@@ -298,13 +297,15 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
       interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
       interruptionModeIOS: InterruptionModeIOS.DoNotMix,
     });
-    startVoiceNotePlaybackSession();
   }, []);
 
   const playFromStart = useCallback(async (s: Audio.Sound) => {
-    try {
-      await s.stopAsync();
-    } catch { /* ignore */ }
+    const st = await s.getStatusAsync();
+    if (st.isLoaded && st.isPlaying) {
+      try {
+        await s.stopAsync();
+      } catch { /* ignore */ }
+    }
     await s.setPositionAsync(0);
     try {
       await s.setVolumeAsync(1);
@@ -316,20 +317,9 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
     setPlaying(true);
   }, [applyRate, rate]);
 
-  const ensureSound = useCallback(async (): Promise<Audio.Sound | null> => {
-    if (!playableUri) return null;
-
-    const existing = soundRef.current;
-    if (existing) {
-      const st = await existing.getStatusAsync();
-      if (st.isLoaded) return existing;
-      await disposeSoundRef();
-    }
-
-    await configureVoicePlaybackAudio();
-
+  const loadSound = useCallback(async (source: NonNullable<typeof playbackSource>): Promise<Audio.Sound> => {
     const { sound: s } = await Audio.Sound.createAsync(
-      { uri: playableUri },
+      source,
       { shouldPlay: false, volume: 1, rate: 1, progressUpdateIntervalMillis: 200 },
       (status) => {
         if (status.isLoaded) {
@@ -340,21 +330,47 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
             setPlaying(false);
             setEnded(true);
             setPosition(0);
-            stopVoiceNotePlaybackSession();
             releaseVoicePlayback(messageId);
-            void disposeSoundRef();
           }
         }
       },
     );
     await applyRate(s, rate);
-    soundRef.current = s;
     return s;
-  }, [playableUri, rate, applyRate, messageId, configureVoicePlaybackAudio, disposeSoundRef]);
+  }, [rate, applyRate, messageId]);
+
+  const ensureSound = useCallback(async (): Promise<Audio.Sound | null> => {
+    if (!playbackSource) return null;
+
+    const existing = soundRef.current;
+    if (existing) {
+      const st = await existing.getStatusAsync();
+      if (st.isLoaded) return existing;
+      await disposeSoundRef();
+    }
+
+    await configureVoicePlaybackAudio();
+
+    let source = playbackSource;
+    try {
+      const s = await loadSound(source);
+      soundRef.current = s;
+      return s;
+    } catch {
+      try {
+        source = await downloadPlayableAudioSource(source, sessionToken);
+        const s = await loadSound(source);
+        soundRef.current = s;
+        return s;
+      } catch {
+        return null;
+      }
+    }
+  }, [playbackSource, sessionToken, configureVoicePlaybackAudio, disposeSoundRef, loadSound]);
 
   const toggle = async () => {
     if (uriLoading) return;
-    if (!playableUri) {
+    if (!playbackSource) {
       if (failed) Alert.alert("Voice message", "Could not load this voice note. Check your connection and try again.");
       return;
     }
@@ -375,7 +391,6 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
       if (playing) {
         await s.pauseAsync();
         setPlaying(false);
-        stopVoiceNotePlaybackSession();
         releaseVoicePlayback(messageId);
       } else {
         await claimVoicePlayback(messageId, async () => {
@@ -386,7 +401,6 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
             } catch { /* ignore */ }
           }
           setPlaying(false);
-          stopVoiceNotePlaybackSession();
         });
         await configureVoicePlaybackAudio();
 
@@ -440,7 +454,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
     setPlaying(false);
     setEnded(false);
     setPosition(0);
-  }, [playableUri, unloadSound]);
+  }, [playbackSource, unloadSound]);
 
   useEffect(() => {
     if (!soundRef.current) return;
@@ -1408,7 +1422,7 @@ export default function ChatScreen() {
 
     } else if (type === "location") {
       if (!chatId) return;
-      router.push({ pathname: "/chat/send-location" as never, params: { id: chatId } });
+      router.push({ pathname: "/chat/send-location", params: { id: chatId } } as unknown as Href);
 
     } else if (type === "contact") {
       if (Platform.OS === "web") { Alert.alert("Not supported on web", "Use the mobile app to share contacts."); return; }
@@ -1489,6 +1503,8 @@ export default function ChatScreen() {
       const [firstName, ...rest] = parsed.name.split(/\s+/).filter(Boolean);
       const lastName = rest.join(" ");
       await Contacts.addContactAsync({
+        contactType: Contacts.ContactTypes.Person,
+        name: parsed.name,
         firstName: firstName || parsed.name,
         lastName: lastName || undefined,
         phoneNumbers: parsed.phones.map((number) => ({ number, label: "mobile" })),
@@ -1804,6 +1820,7 @@ export default function ChatScreen() {
               timestamp={item.timestamp}
               colors={colors}
               onPress={() => {
+                if (!chatId) return;
                 router.push({
                   pathname: "/call/[id]",
                   params: { id: chatId, name: chat?.name ?? "Contact", type: callMeta.callType === "video" ? "video" : "audio" },

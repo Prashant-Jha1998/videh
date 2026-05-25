@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+import { jsonAuthHeaders } from "@/lib/authHeaders";
 
 interface DeviceContact {
   id: string;
@@ -86,7 +87,7 @@ export default function ContactsScreen() {
     try {
       const res = await fetch(`${getApiUrl()}/api/users/check-phones`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonAuthHeaders(user?.sessionToken),
         body: JSON.stringify({ phones }),
       });
       const json = await res.json();
