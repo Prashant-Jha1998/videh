@@ -136,56 +136,80 @@ export default function CallScreen() {
       : phaseLabel("outgoing_ringing", isVideo));
 
   if (ringing) {
-    return (
-      <View style={[styles.container, styles.incomingRoot, { paddingTop: topPad, paddingBottom: insets.bottom + 30 }]}>
-        <Text style={styles.incomingLabel}>
-          {isVideo ? "Incoming video call" : "Incoming voice call"}
-        </Text>
-        <Animated.View style={[styles.avatarRing, { transform: [{ scale: pulse }] }]}>
-          <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
-            <Text style={styles.avatarText}>{initials}</Text>
-          </View>
-        </Animated.View>
-        <Text style={styles.callerName}>{name}</Text>
-        <Text style={styles.callStatus}>{displayStatus}</Text>
+    const callTypeLabel = isVideo ? "Incoming video call" : "Incoming voice call";
+    const statusDiffers =
+      Boolean(displayStatus) && displayStatus !== callTypeLabel;
 
-        <View style={styles.quickRow}>
-          {CALL_DECLINE_QUICK_MESSAGES.slice(0, 2).map((msg) => (
-            <TouchableOpacity
-              key={msg}
-              style={styles.quickChip}
-              onPress={() => void declineIncoming(msg)}
-            >
-              <Text style={styles.quickTxt} numberOfLines={2}>{msg}</Text>
-            </TouchableOpacity>
-          ))}
+    return (
+      <View
+        style={[
+          styles.container,
+          styles.incomingRoot,
+          { paddingTop: topPad, paddingBottom: Math.max(insets.bottom, 12) + 28 },
+        ]}
+      >
+        <View style={styles.incomingHeader}>
+          <Animated.View style={[styles.avatarRing, { transform: [{ scale: pulse }] }]}>
+            <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
+              <Text style={styles.avatarText}>{initials}</Text>
+            </View>
+          </Animated.View>
+          <Text style={styles.callerName}>{name}</Text>
+          {statusDiffers ? (
+            <Text style={styles.callStatus}>{displayStatus}</Text>
+          ) : (
+            <Text style={styles.incomingSubtitle}>{callTypeLabel}</Text>
+          )}
         </View>
 
-        <View style={styles.incomingActions}>
-          <TouchableOpacity
-            style={styles.declineBtn}
-            onPress={() => void declineIncoming()}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="close" size={28} color="#fff" />
-            <Text style={styles.actionLbl}>Decline</Text>
-          </TouchableOpacity>
-          <View style={styles.acceptCol}>
-            <Text style={styles.swipeHint}>Swipe up to answer</Text>
-            <Animated.View style={{ transform: [{ translateY: swipeY }] }} {...panResponder.panHandlers}>
+        <View style={styles.incomingMiddle}>
+          <View style={styles.quickRow}>
+            {CALL_DECLINE_QUICK_MESSAGES.slice(0, 2).map((msg) => (
               <TouchableOpacity
-                style={styles.acceptBtn}
-                onPress={() => {
-                  if (acceptedRef.current) return;
-                  acceptedRef.current = true;
-                  void acceptIncoming();
-                }}
-                activeOpacity={0.9}
+                key={msg}
+                style={styles.quickChip}
+                onPress={() => void declineIncoming(msg)}
               >
-                <Ionicons name="call" size={28} color="#fff" />
+                <Text style={styles.quickTxt} numberOfLines={2}>
+                  {msg}
+                </Text>
               </TouchableOpacity>
-            </Animated.View>
-            <Text style={styles.actionLblGreen}>Accept</Text>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.incomingFooter}>
+          <Text style={styles.swipeHint}>Swipe up on Accept to answer</Text>
+          <View style={styles.incomingActions}>
+            <View style={styles.actionItem}>
+              <TouchableOpacity
+                style={styles.declineCircle}
+                onPress={() => void declineIncoming()}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="close" size={28} color="#fff" />
+              </TouchableOpacity>
+              <Text style={styles.actionLbl}>Decline</Text>
+            </View>
+            <View style={styles.actionItem}>
+              <Animated.View
+                style={{ transform: [{ translateY: swipeY }] }}
+                {...panResponder.panHandlers}
+              >
+                <TouchableOpacity
+                  style={styles.acceptBtn}
+                  onPress={() => {
+                    if (acceptedRef.current) return;
+                    acceptedRef.current = true;
+                    void acceptIncoming();
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <Ionicons name="call" size={28} color="#fff" />
+                </TouchableOpacity>
+              </Animated.View>
+              <Text style={styles.actionLblGreen}>Accept</Text>
+            </View>
           </View>
         </View>
       </View>
@@ -331,18 +355,42 @@ function ControlBtn({ icon, label, onPress, active }: { icon: string; label: str
 
 const styles = StyleSheet.create({
   container: { flex: 1, alignItems: "center" },
-  incomingRoot: { backgroundColor: "#0B141A", justifyContent: "center" },
-  incomingLabel: { color: "#8696A0", fontSize: 15, fontFamily: "Inter_500Medium", marginBottom: 28 },
+  incomingRoot: { backgroundColor: "#0B141A", justifyContent: "flex-start" },
+  incomingHeader: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    paddingHorizontal: 32,
+    minHeight: 0,
+  },
+  incomingSubtitle: {
+    color: "#8696A0",
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+    marginTop: 6,
+    textAlign: "center",
+  },
+  incomingMiddle: { width: "100%", paddingHorizontal: 28, marginBottom: 20 },
+  incomingFooter: { width: "100%", paddingHorizontal: 40, alignItems: "center" },
   incomingActions: {
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     width: "100%",
-    marginTop: 36,
-    paddingHorizontal: 36,
+    marginTop: 16,
+    maxWidth: 280,
+    alignSelf: "center",
   },
-  declineBtn: { alignItems: "center", gap: 8 },
-  acceptCol: { alignItems: "center", gap: 8 },
+  actionItem: { alignItems: "center", gap: 10, minWidth: 88 },
+  declineCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#F15C6D",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   acceptBtn: {
     width: 64,
     height: 64,
@@ -351,10 +399,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  swipeHint: { color: "#8696A0", fontSize: 11, fontFamily: "Inter_400Regular" },
+  swipeHint: {
+    color: "#8696A0",
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+  },
   actionLbl: { color: "#E9EDEF", fontSize: 13, fontFamily: "Inter_600SemiBold" },
   actionLblGreen: { color: "#00A884", fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  quickRow: { flexDirection: "row", gap: 10, marginTop: 28, paddingHorizontal: 28, width: "100%" },
+  quickRow: { flexDirection: "row", gap: 10, width: "100%" },
   quickChip: {
     flex: 1,
     backgroundColor: "rgba(255,255,255,0.08)",

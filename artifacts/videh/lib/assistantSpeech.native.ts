@@ -38,6 +38,8 @@ export function isSpeechRecognitionAvailable(): boolean {
   }
 }
 
+let permissionsGranted = false;
+
 export async function speakAssistant(
   text: string,
   langOrLocale: AssistantLangCode | string = "hi",
@@ -45,10 +47,11 @@ export async function speakAssistant(
   const locale = langOrLocale.includes("-")
     ? langOrLocale
     : toSpeechLocale(normalizeLangCode(langOrLocale));
+  const short = text.length > 160 ? `${text.slice(0, 157)}…` : text;
   await new Promise<void>((resolve) => {
-    Speech.speak(text, {
+    Speech.speak(short, {
       language: locale,
-      rate: Platform.OS === "ios" ? 0.95 : 1,
+      rate: Platform.OS === "ios" ? 1.05 : 1.08,
       onDone: () => resolve(),
       onStopped: () => resolve(),
       onError: () => resolve(),
@@ -76,11 +79,18 @@ export async function startListening(opts: ListenOpts): Promise<void> {
     return;
   }
 
-  const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-  if (!perm.granted) {
-    opts.onError?.("Microphone and speech permissions are required.");
-    return;
+  if (!permissionsGranted) {
+    const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+    if (!perm.granted) {
+      opts.onError?.("Microphone and speech permissions are required.");
+      return;
+    }
+    permissionsGranted = true;
   }
+
+  try {
+    Speech.stop();
+  } catch { /* ignore */ }
 
   clearSpeechListeners();
   resultListener = ExpoSpeechRecognitionModule.addListener("result", (event) => {
@@ -103,28 +113,34 @@ export async function startListening(opts: ListenOpts): Promise<void> {
   );
 
   const wakeLang = toRecognitionLocale(code);
-  ExpoSpeechRecognitionModule.start({
-    lang: opts.wakeMode ? wakeLang : toRecognitionLocale(code),
-    interimResults: true,
-    continuous: opts.wakeMode ? true : true,
-    contextualStrings: opts.wakeMode ? WAKE_CONTEXT_STRINGS : undefined,
-    androidIntent: opts.wakeMode ? "android.speech.action.VOICE_SEARCH_HANDS_FREE" : undefined,
-    androidIntentOptions: {
-      EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 2500 : 12000,
-      EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 1500 : 5000,
-    },
-    iosCategory: opts.wakeMode
-      ? {
-          category: AVAudioSessionCategory.playAndRecord,
-          categoryOptions: [
-            AVAudioSessionCategoryOptions.defaultToSpeaker,
-            AVAudioSessionCategoryOptions.allowBluetooth,
-            AVAudioSessionCategoryOptions.mixWithOthers,
-          ],
-          mode: AVAudioSessionMode.measurement,
-        }
-      : undefined,
-  });
+  try {
+    ExpoSpeechRecognitionModule.start({
+      lang: opts.wakeMode ? wakeLang : toRecognitionLocale(code),
+      interimResults: true,
+      continuous: true,
+      maxAlternatives: 1,
+      contextualStrings: opts.wakeMode ? WAKE_CONTEXT_STRINGS : undefined,
+      iosTaskHint: opts.wakeMode ? "dictation" : "unspecified",
+      androidRecognitionServicePackage: "com.google.android.googlequicksearchbox",
+      androidIntentOptions: {
+        EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 3500 : 1400,
+        EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 2000 : 900,
+      },
+      iosCategory: opts.wakeMode
+        ? {
+            category: AVAudioSessionCategory.playAndRecord,
+            categoryOptions: [
+              AVAudioSessionCategoryOptions.defaultToSpeaker,
+              AVAudioSessionCategoryOptions.allowBluetooth,
+              AVAudioSessionCategoryOptions.mixWithOthers,
+            ],
+            mode: AVAudioSessionMode.measurement,
+          }
+        : undefined,
+    });
+  } catch (e: unknown) {
+    opts.onError?.(e instanceof Error ? e.message : "Speech recognition failed to start.");
+  }
 }
 
 export async function stopListening(): Promise<void> {

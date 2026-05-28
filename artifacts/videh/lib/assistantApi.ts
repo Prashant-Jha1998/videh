@@ -82,11 +82,19 @@ export async function runAssistantCommand(
   text: string,
   localeHint?: AssistantLangCode,
 ): Promise<AssistantCommandResult> {
-  const res = await fetch(`${getApiUrl()}/api/assistant/command`, {
-    method: "POST",
-    headers: authHeaders(token),
-    body: JSON.stringify({ text, locale: localeHint }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12_000);
+  let res: Response;
+  try {
+    res = await fetch(`${getApiUrl()}/api/assistant/command`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify({ text, locale: localeHint }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   const data = await res.json() as {
     success?: boolean;
     speak?: string;

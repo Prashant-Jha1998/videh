@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CALL_DECLINE_QUICK_MESSAGES } from "@/lib/callDeclineQuickMessages";
 
 export type IncomingCallInfo = {
@@ -31,6 +32,7 @@ type Props = {
 const SWIPE_ACCEPT_DY = -72;
 
 export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMessage }: Props) {
+  const insets = useSafeAreaInsets();
   const pulse = useRef(new Animated.Value(1)).current;
   const swipeY = useRef(new Animated.Value(0)).current;
   const acceptedRef = useRef(false);
@@ -76,65 +78,74 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
     .toUpperCase() || "?";
   const hue = (call.callerName.charCodeAt(0) || 32) * 37 % 360;
 
+  const callTypeLabel =
+    call.type === "video" ? "Incoming video call" : "Incoming voice call";
+  const subtitle =
+    call.participantCount > 2
+      ? `${call.participantCount} participants · Videh call`
+      : callTypeLabel;
+
   return (
     <Modal visible transparent animationType="fade" statusBarTranslucent>
-      <View style={styles.root}>
-        <Text style={styles.label}>
-          {call.type === "video" ? "Incoming video call" : "Incoming voice call"}
-        </Text>
-        <Animated.View style={[styles.avatarRing, { transform: [{ scale: pulse }] }]}>
-          <View style={[styles.avatar, { backgroundColor: `hsl(${hue},48%,42%)` }]}>
-            <Text style={styles.avatarTxt}>{initials}</Text>
-          </View>
-        </Animated.View>
-        <Text style={styles.name}>{call.callerName}</Text>
-        <Text style={styles.sub}>
-          {call.participantCount > 2
-            ? `${call.participantCount} participants · Videh call`
-            : "Videh voice & video call"}
-        </Text>
-
-        <View style={styles.quickRow}>
-          {CALL_DECLINE_QUICK_MESSAGES.slice(0, 2).map((msg) => (
-            <TouchableOpacity
-              key={msg}
-              style={styles.quickChip}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                onDeclineWithMessage(msg);
-              }}
-            >
-              <Text style={styles.quickTxt} numberOfLines={2}>{msg}</Text>
-            </TouchableOpacity>
-          ))}
+      <View style={[styles.root, { paddingBottom: Math.max(insets.bottom, 12) + 28 }]}>
+        <View style={styles.header}>
+          <Animated.View style={[styles.avatarRing, { transform: [{ scale: pulse }] }]}>
+            <View style={[styles.avatar, { backgroundColor: `hsl(${hue},48%,42%)` }]}>
+              <Text style={styles.avatarTxt}>{initials}</Text>
+            </View>
+          </Animated.View>
+          <Text style={styles.name}>{call.callerName}</Text>
+          <Text style={styles.sub}>{subtitle}</Text>
         </View>
 
-        <View style={styles.actions}>
-          <TouchableOpacity style={styles.declineBtn} onPress={onDecline} activeOpacity={0.85}>
-            <Ionicons name="close" size={28} color="#fff" />
-            <Text style={styles.actionLbl}>Decline</Text>
-          </TouchableOpacity>
-
-          <View style={styles.acceptCol}>
-            <Text style={styles.swipeHint}>Swipe up to answer</Text>
-            <Animated.View
-              style={[styles.acceptSwipe, { transform: [{ translateY: swipeY }] }]}
-              {...panResponder.panHandlers}
-            >
+        <View style={styles.middle}>
+          <View style={styles.quickRow}>
+            {CALL_DECLINE_QUICK_MESSAGES.slice(0, 2).map((msg) => (
               <TouchableOpacity
-                style={styles.acceptBtn}
+                key={msg}
+                style={styles.quickChip}
                 onPress={() => {
-                  if (acceptedRef.current) return;
-                  acceptedRef.current = true;
-                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                  onAccept();
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  onDeclineWithMessage(msg);
                 }}
-                activeOpacity={0.9}
               >
-                <Ionicons name="call" size={28} color="#fff" />
+                <Text style={styles.quickTxt} numberOfLines={2}>
+                  {msg}
+                </Text>
               </TouchableOpacity>
-            </Animated.View>
-            <Text style={styles.actionLblGreen}>Accept</Text>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.footer}>
+          <Text style={styles.swipeHint}>Swipe up on Accept to answer</Text>
+          <View style={styles.actions}>
+            <View style={styles.actionItem}>
+              <TouchableOpacity style={styles.declineCircle} onPress={onDecline} activeOpacity={0.85}>
+                <Ionicons name="close" size={28} color="#fff" />
+              </TouchableOpacity>
+              <Text style={styles.actionLbl}>Decline</Text>
+            </View>
+            <View style={styles.actionItem}>
+              <Animated.View
+                style={{ transform: [{ translateY: swipeY }] }}
+                {...panResponder.panHandlers}
+              >
+                <TouchableOpacity
+                  style={styles.acceptBtn}
+                  onPress={() => {
+                    if (acceptedRef.current) return;
+                    acceptedRef.current = true;
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    onAccept();
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <Ionicons name="call" size={28} color="#fff" />
+                </TouchableOpacity>
+              </Animated.View>
+              <Text style={styles.actionLblGreen}>Accept</Text>
+            </View>
           </View>
         </View>
       </View>
@@ -147,11 +158,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#0B141A",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-start",
     paddingHorizontal: 28,
-    paddingBottom: 48,
+    paddingTop: 48,
   },
-  label: { color: "#8696A0", fontSize: 15, fontFamily: "Inter_500Medium", marginBottom: 28 },
+  header: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    minHeight: 0,
+  },
+  middle: { width: "100%", marginBottom: 20 },
+  footer: { width: "100%", paddingHorizontal: 12, alignItems: "center" },
   avatarRing: {
     width: 132,
     height: 132,
@@ -166,7 +185,7 @@ const styles = StyleSheet.create({
   avatarTxt: { color: "#fff", fontSize: 40, fontFamily: "Inter_700Bold" },
   name: { color: "#E9EDEF", fontSize: 28, fontFamily: "Inter_700Bold", textAlign: "center" },
   sub: { color: "#8696A0", fontSize: 14, fontFamily: "Inter_400Regular", marginTop: 8, textAlign: "center" },
-  quickRow: { flexDirection: "row", gap: 10, marginTop: 28, width: "100%" },
+  quickRow: { flexDirection: "row", gap: 10, width: "100%" },
   quickChip: {
     flex: 1,
     backgroundColor: "rgba(255,255,255,0.08)",
@@ -177,15 +196,21 @@ const styles = StyleSheet.create({
   quickTxt: { color: "#AEBAC1", fontSize: 12, fontFamily: "Inter_500Medium", textAlign: "center" },
   actions: {
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     width: "100%",
-    marginTop: 36,
-    paddingHorizontal: 12,
+    marginTop: 16,
+    maxWidth: 280,
   },
-  declineBtn: { alignItems: "center", gap: 8 },
-  acceptCol: { alignItems: "center", gap: 8 },
-  acceptSwipe: { alignItems: "center" },
+  actionItem: { alignItems: "center", gap: 10, minWidth: 88 },
+  declineCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#F15C6D",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   acceptBtn: {
     width: 64,
     height: 64,
@@ -194,7 +219,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  swipeHint: { color: "#8696A0", fontSize: 11, fontFamily: "Inter_400Regular", marginBottom: 4 },
+  swipeHint: {
+    color: "#8696A0",
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+  },
   actionLbl: { color: "#E9EDEF", fontSize: 13, fontFamily: "Inter_600SemiBold" },
   actionLblGreen: { color: "#00A884", fontSize: 13, fontFamily: "Inter_600SemiBold" },
 });

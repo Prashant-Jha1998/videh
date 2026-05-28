@@ -68,8 +68,8 @@ export function ContactMessageBubble({ text, colors, isMe, onPress, onCall }: Pr
 }
 
 const styles = StyleSheet.create({
-  wrap: { minWidth: 248, maxWidth: 300, paddingTop: 4, paddingBottom: 2 },
-  topRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, paddingVertical: 6 },
+  wrap: { minWidth: 220, maxWidth: 300, paddingTop: 2, paddingBottom: 0 },
+  topRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, paddingVertical: 8 },
   avatar: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   avatarTxt: { fontSize: 16, fontFamily: "Inter_700Bold" },
   info: { flex: 1, minWidth: 0 },
@@ -78,5 +78,5 @@ const styles = StyleSheet.create({
   more: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
   callBtn: { padding: 6 },
   divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 8 },
-  action: { fontSize: 14, fontFamily: "Inter_600SemiBold", textAlign: "center", paddingVertical: 10 },
+  action: { fontSize: 14, fontFamily: "Inter_600SemiBold", textAlign: "center", paddingVertical: 8 },
 });

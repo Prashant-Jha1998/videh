@@ -97,6 +97,12 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const [statusHint, setStatusHint] = useState<string | null>(null);
   const [duration, setDuration] = useState(0);
   const endedTonePlayed = useRef(false);
+  const endingCallRef = useRef(false);
+  const sessionCallIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    sessionCallIdRef.current = session?.callId ?? null;
+  }, [session?.callId]);
 
   const userId = user?.dbId ?? 0;
   const remotePeerIds = useMemo(() => {
@@ -125,9 +131,12 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     setDuration(0);
     setStatusHint(null);
     endedTonePlayed.current = false;
+    endingCallRef.current = false;
   }, []);
 
   const onCallEnded = useCallback(() => {
+    if (endingCallRef.current) return;
+    endingCallRef.current = true;
     void refreshCallLogs();
     clearSession();
     if (router.canGoBack()) router.back();
@@ -321,8 +330,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!session?.callId || !userId) return;
+    const polledCallId = session.callId;
     const timer = setInterval(() => {
-      webrtcFetch(`/calls/${session.callId}/status?userId=${userId}`, user?.sessionToken)
+      webrtcFetch(`/calls/${polledCallId}/status?userId=${userId}`, user?.sessionToken)
         .then((res) => res.json())
         .then((data: {
           success?: boolean;
@@ -339,6 +349,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           statuses?: Record<string, string>;
         }) => {
           if (!data.success) return;
+          if (sessionCallIdRef.current !== polledCallId || endingCallRef.current) return;
           setAcceptedCount(data.acceptedCount ?? 1);
           setRingingCount(data.ringingCount ?? 0);
           setParticipantCount(data.call?.participantCount ?? participantCount);
@@ -362,24 +373,28 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
             if (data.allInviteesBusy || ((data.busyCount ?? 0) > 0 && (data.ringingCount ?? 0) === 0 && !remoteAccepted)) {
               endedTonePlayed.current = true;
               void (async () => {
-                await stopCallAlert();
-                await playCallBusyTone();
-                if (session.callId) {
-                  await webrtcFetch(`/calls/${session.callId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
-                }
-                onCallEnded();
+                try {
+                  await stopCallAlert();
+                  await playCallBusyTone();
+                  if (sessionCallIdRef.current === polledCallId) {
+                    await webrtcFetch(`/calls/${polledCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+                  }
+                  onCallEnded();
+                } catch { /* ignore */ }
               })();
               return;
             }
             if ((data.declinedCount ?? 0) > 0 && (data.ringingCount ?? 0) === 0 && !remoteAccepted) {
               endedTonePlayed.current = true;
               void (async () => {
-                await stopCallAlert();
-                await playCallBusyTone();
-                if (session.callId) {
-                  await webrtcFetch(`/calls/${session.callId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
-                }
-                onCallEnded();
+                try {
+                  await stopCallAlert();
+                  await playCallBusyTone();
+                  if (sessionCallIdRef.current === polledCallId) {
+                    await webrtcFetch(`/calls/${polledCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+                  }
+                  onCallEnded();
+                } catch { /* ignore */ }
               })();
               return;
             }
@@ -390,9 +405,11 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
               endedTonePlayed.current = true;
               const unavailable = (data.missedCount ?? 0) > 0;
               void (async () => {
-                await stopCallAlert();
-                if (unavailable) await playCallUnavailableTone();
-                onCallEnded();
+                try {
+                  await stopCallAlert();
+                  if (unavailable) await playCallUnavailableTone();
+                  onCallEnded();
+                } catch { /* ignore */ }
               })();
               return;
             }
@@ -401,7 +418,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           }
         })
         .catch(() => {});
-    }, 800);
+    }, 2000);
     return () => clearInterval(timer);
   }, [session?.callId, userId, participantCount, call.joined, user?.sessionToken, onCallEnded]);
 

@@ -32,10 +32,17 @@ import {
 } from "@/lib/pushNotifications";
 import { dismissIncomingCallNotification, showIncomingCallNotification } from "@/lib/incomingCallNotification";
 import { startIncomingCallAlert, stopCallAlert } from "@/lib/callRingtone";
+import { installGlobalErrorHandlers } from "@/lib/globalErrorHandlers";
 
 SplashScreen.preventAutoHideAsync();
+installGlobalErrorHandlers();
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: 2, staleTime: 30_000, refetchOnWindowFocus: false },
+    mutations: { retry: 0 },
+  },
+});
 
 // Show notification when app is foregrounded
 if (Platform.OS !== "web") {
@@ -198,7 +205,7 @@ function RootLayoutNav() {
       } catch {}
     };
     void poll();
-    const timer = setInterval(poll, 800);
+    const timer = setInterval(poll, 2500);
     const unsubCall = onCallSignal((payload) => {
       const action = String(payload.action ?? "");
       const callId = payload.callId ? String(payload.callId) : "";
@@ -268,29 +275,33 @@ function RootLayoutNav() {
     if (!incomingCall || !user?.dbId) return;
     const call = incomingCall;
     setIncomingCall(null);
-    await stopCallAlert();
-    await webrtcFetch(`/calls/${call.callId}/respond`, user.sessionToken, {
-      method: "POST",
-      body: JSON.stringify({
-        userId: user.dbId,
-        action,
-        ...(action === "decline" && declineMessage ? { declineMessage } : {}),
-      }),
-    }).catch(() => {});
-    if (action === "accept") {
-      router.push({
-        pathname: "/call/[id]",
-        params: {
-          id: String(call.chatId),
-          name: call.callerName,
-          type: call.type,
-          channel: call.channel,
-          callId: call.callId,
-          incoming: "1",
-        },
-      });
-    } else {
-      void loadMessages(String(call.chatId));
+    try {
+      await stopCallAlert();
+      await webrtcFetch(`/calls/${call.callId}/respond`, user.sessionToken, {
+        method: "POST",
+        body: JSON.stringify({
+          userId: user.dbId,
+          action,
+          ...(action === "decline" && declineMessage ? { declineMessage } : {}),
+        }),
+      }).catch(() => {});
+      if (action === "accept") {
+        router.push({
+          pathname: "/call/[id]",
+          params: {
+            id: String(call.chatId),
+            name: call.callerName,
+            type: call.type,
+            channel: call.channel,
+            callId: call.callId,
+            incoming: "1",
+          },
+        });
+      } else {
+        void loadMessages(String(call.chatId));
+      }
+    } catch {
+      /* keep UI responsive if ringtone/network fails */
     }
   };
 
@@ -304,14 +315,9 @@ function RootLayoutNav() {
         <Stack.Screen name="auth/two-step-login" options={{ headerShown: false }} />
         <Stack.Screen name="auth/profile" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="chat/[id]" options={{ headerShown: false }} />
-        <Stack.Screen name="chat/send-location" options={{ headerShown: false, presentation: "card" }} />
-        <Stack.Screen name="chat/message-info" options={{ headerShown: false }} />
-        <Stack.Screen name="chat/media-compose" options={{ headerShown: false, presentation: "fullScreenModal" }} />
-        <Stack.Screen name="chat/media-compose-batch" options={{ headerShown: false, presentation: "fullScreenModal" }} />
-        <Stack.Screen name="chat/video-viewer" options={{ headerShown: false, presentation: "fullScreenModal" }} />
+        <Stack.Screen name="chat" options={{ headerShown: false }} />
         <Stack.Screen name="chat-info/[id]" options={{ headerShown: false }} />
-        <Stack.Screen name="call/[id]" options={{ headerShown: false, presentation: "fullScreenModal" }} />
+        <Stack.Screen name="call" options={{ headerShown: false, presentation: "fullScreenModal" }} />
         <Stack.Screen name="contacts" options={{ headerShown: false }} />
         <Stack.Screen name="status/view" options={{ headerShown: false, presentation: "fullScreenModal" }} />
         <Stack.Screen name="status/viewers" options={{ headerShown: false }} />
@@ -338,9 +344,9 @@ function RootLayoutNav() {
       {incomingCall && Platform.OS === "web" ? (
         <IncomingCallOverlay
           call={incomingCall}
-          onAccept={() => void respondToIncomingCall("accept")}
-          onDecline={() => void respondToIncomingCall("decline")}
-          onDeclineWithMessage={(text) => void respondToIncomingCall("decline", text)}
+          onAccept={() => { void respondToIncomingCall("accept"); }}
+          onDecline={() => { void respondToIncomingCall("decline"); }}
+          onDeclineWithMessage={(text) => { void respondToIncomingCall("decline", text); }}
         />
       ) : null}
       {activeCallSession?.minimized && activeCallSession.engineActive && !activeCallSession.ringing ? (

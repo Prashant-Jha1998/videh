@@ -2,9 +2,18 @@ import React from "react";
 import { StyleSheet, View } from "react-native";
 
 function VideoElement({ streamUrl, muted, style }: { streamUrl?: string; muted?: boolean; style?: any }) {
-  if (!streamUrl) return <View style={[styles.fill, style]} />;
+  const url = typeof streamUrl === "string" ? streamUrl.trim() : "";
+  if (!url) return <View style={[styles.fill, style]} />;
   const { RTCView } = require("react-native-webrtc");
-  return <RTCView streamURL={streamUrl} objectFit="cover" mirror={Boolean(muted)} style={[styles.fill, style]} />;
+  return (
+    <RTCView
+      key={url}
+      streamURL={url}
+      objectFit="cover"
+      mirror={Boolean(muted)}
+      style={[styles.fill, style]}
+    />
+  );
 }
 
 export function VidehRemoteView({ streamUrl, style }: { uid?: number; nativeId?: string; streamUrl?: string; style?: any }) {

@@ -673,13 +673,11 @@ function ReplyQuoteStrip({
 function CallMessageBubble({
   meta,
   isMe,
-  timestamp,
   colors,
   onPress,
 }: {
   meta: NonNullable<ReturnType<typeof parseCallMessageMeta>>;
   isMe: boolean;
-  timestamp: number;
   colors: ReturnType<typeof useColors>;
   onPress: () => void;
 }) {
@@ -697,14 +695,9 @@ function CallMessageBubble({
         color={tint}
         style={[styles.callBubbleIcon, { transform: [{ rotate: missed && isMe ? "135deg" : "0deg" }] }]}
       />
-      <View style={styles.callBubbleBody}>
-        <Text style={[styles.callBubbleText, { color: colors.foreground }]} numberOfLines={2}>
-          {label}
-        </Text>
-        <Text style={[styles.callBubbleTime, { color: colors.mutedForeground }]}>
-          {formatChatBubbleTime(timestamp)}
-        </Text>
-      </View>
+      <Text style={[styles.callBubbleText, { color: colors.foreground }]} numberOfLines={1}>
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -982,6 +975,7 @@ export default function ChatScreen() {
   const router = useRouter();
   const messagePollInFlightRef = useRef(false);
   const typingPollInFlightRef = useRef(false);
+  const chatMetaRef = useRef<{ peerId?: number; isGroup: boolean }>({ isGroup: false });
 
   useEffect(() => {
     if (!rawId?.startsWith("new_")) return;
@@ -997,6 +991,11 @@ export default function ChatScreen() {
     markAsRead(chatId);
     loadMessages(chatId);
   }, [chatId]);
+
+  useEffect(() => {
+    const c = chats.find((x) => x.id === chatId);
+    chatMetaRef.current = { peerId: c?.otherUserId, isGroup: !!c?.isGroup };
+  }, [chatId, chats]);
 
   // Poll messages every 4s + typing every 3s
   useFocusEffect(
@@ -1018,14 +1017,18 @@ export default function ChatScreen() {
         try {
           const res = await fetch(`${BASE_URL}/api/chats/${chatId}/typing?userId=${user.dbId}`);
           const data = await res.json();
-          setTypingNames(data.typing ?? []);
+          const nextTyping: string[] = data.typing ?? [];
+          setTypingNames((prev) =>
+            prev.length === nextTyping.length && prev.every((n, i) => n === nextTyping[i])
+              ? prev
+              : nextTyping,
+          );
         } catch {
         } finally {
           typingPollInFlightRef.current = false;
         }
       }, 3000);
-      const peerId = chats.find((c) => c.id === chatId)?.otherUserId;
-      const isGroupChat = chats.find((c) => c.id === chatId)?.isGroup;
+      const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
       const loadPresence = async () => {
         if (!peerId || isGroupChat) {
           setPeerPresence(null);
@@ -1052,7 +1055,7 @@ export default function ChatScreen() {
         clearInterval(typingTimer);
         if (presenceTimer) clearInterval(presenceTimer);
       };
-    }, [chatId, user?.dbId, chats, setActiveChatId, loadMessages])
+    }, [chatId, user?.dbId, setActiveChatId, loadMessages])
   );
 
   const webEnterSend = Platform.OS === "web" && enterIsSend;
@@ -1284,9 +1287,7 @@ export default function ChatScreen() {
     if (pendingScrollToEndRef.current) {
       pendingScrollToEndRef.current = false;
       scrollToLatest(false);
-      const t1 = setTimeout(() => scrollToLatest(false), 80);
-      const t2 = setTimeout(() => scrollToLatest(false), 280);
-      return () => { clearTimeout(t1); clearTimeout(t2); };
+      return;
     }
     const count = messages.length;
     if (count > prevMessageCountRef.current && !userScrolledUpRef.current) {
@@ -1897,10 +1898,10 @@ export default function ChatScreen() {
               kind={item.type === "video" ? "video" : "image"}
               onOpen={() => { void openViewOnceMedia(item); }}
             />
-          ) : isImage ? (
+          ) : isImage && item.mediaUrl ? (
             <>
               <ChatImageBubble
-                uri={item.mediaUrl!}
+                uri={item.mediaUrl}
                 sessionToken={user?.sessionToken}
                 onOpen={() => {
                   if (!item.mediaUrl) return;
@@ -1932,10 +1933,10 @@ export default function ChatScreen() {
                 <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4 }]}>{item.text}</Text>
               )}
             </>
-          ) : isVideo ? (
+          ) : isVideo && item.mediaUrl ? (
             <>
               <ChatVideoThumbnailBubble
-                uri={item.mediaUrl!}
+                uri={item.mediaUrl}
                 sessionToken={user?.sessionToken}
                 onOpen={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1960,7 +1961,6 @@ export default function ChatScreen() {
             <CallMessageBubble
               meta={callMeta}
               isMe={isMe}
-              timestamp={item.timestamp}
               colors={colors}
               onPress={() => {
                 if (!chatId) return;
@@ -1970,9 +1970,9 @@ export default function ChatScreen() {
                 });
               }}
             />
-          ) : isAudio ? (
+          ) : isAudio && item.mediaUrl ? (
             <VoiceNotePlayer
-              uri={item.mediaUrl!}
+              uri={item.mediaUrl}
               colors={colors}
               isMe={isMe}
               messageId={item.id}
@@ -2025,7 +2025,7 @@ export default function ChatScreen() {
 
           {/* Footer: time + edited + ticks (hidden for deleted — time sits on deleted row) */}
           {!isDeleted ? (
-            <View style={[styles.msgMeta, (isImage || isVideo || isLocation) && styles.msgMetaOnMedia]}>
+            <View style={[styles.msgMeta, (isImage || isVideo || isLocation) && styles.msgMetaOnMedia, isCall && styles.msgMetaCall]}>
               {item.isEdited && <Text style={[styles.editedLabel, { color: colors.mutedForeground }]}>edited </Text>}
               <Text style={[styles.msgTime, { color: metaTextColor }]}>
                 {formatChatBubbleTime(item.timestamp)}
@@ -2432,12 +2432,21 @@ export default function ChatScreen() {
           ref={listRef}
           data={listRows}
           extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}`}
-          keyExtractor={(row) => (row.rowType === "date" ? row.id : row.message.id)}
+          keyExtractor={(row) => {
+            if (row.rowType === "date") return row.id;
+            const m = row.message;
+            return m.id.startsWith("tmp_") ? `${m.id}-${m.timestamp}` : m.id;
+          }}
           renderItem={renderChatListRow}
           contentContainerStyle={{ paddingVertical: 12, paddingHorizontal: 10 }}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews={Platform.OS === "android"}
+          initialNumToRender={18}
+          maxToRenderPerBatch={12}
+          windowSize={9}
+          updateCellsBatchingPeriod={50}
           onScroll={(e) => {
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
             const distFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
@@ -2445,7 +2454,7 @@ export default function ChatScreen() {
           }}
           scrollEventThrottle={64}
           onContentSizeChange={() => {
-            if (!searching && (pendingScrollToEndRef.current || !userScrolledUpRef.current)) {
+            if (!searching && pendingScrollToEndRef.current) {
               scrollToLatest(false);
             }
           }}
@@ -2572,12 +2581,12 @@ export default function ChatScreen() {
               {
                 backgroundColor: colors.isDark ? colors.background : "#F0F2F5",
                 borderTopColor: colors.isDark ? colors.border : "rgba(0,0,0,0.06)",
-                paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 8),
+                paddingBottom: Math.max(insets.bottom, Platform.OS === "web" ? 34 : 10),
               },
             ]}
           >
             {voiceRecPhase !== "locked" && (
-              <>
+              <View style={styles.inputBarMain}>
                 {voiceRecPhase !== "holding" && (
                   <TouchableOpacity
                     style={styles.inputIcon}
@@ -2592,7 +2601,7 @@ export default function ChatScreen() {
                   </TouchableOpacity>
                 )}
                 {voiceRecPhase === "holding" ? (
-                  <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 8 }}>
+                  <View style={styles.inputHoldingHint}>
                     <Text style={{ textAlign: "center", color: colors.mutedForeground, fontFamily: "Inter_500Medium" }}>
                       Recording… slide left to cancel, up to lock
                     </Text>
@@ -2643,7 +2652,7 @@ export default function ChatScreen() {
                     <Ionicons name="camera-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
                   </TouchableOpacity>
                 )}
-              </>
+              </View>
             )}
             {inputVal.trim() && voiceRecPhase === "idle" ? (
               <TouchableOpacity
@@ -3087,7 +3096,7 @@ const styles = StyleSheet.create({
   headerAvatarText: { color: "#fff", fontSize: 14, fontFamily: "Inter_700Bold" },
   headerInfo: { flex: 1 },
   headerName: { color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold" },
-  headerStatus: { color: "rgba(255,255,255,0.75)", fontSize: 12, fontFamily: "Inter_400Regular" },
+  headerStatus: { color: "rgba(255,255,255,0.75)", fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2, lineHeight: 16 },
   headerActions: { flexDirection: "row" },
   headerBtn: { padding: 6 },
   searchBar: { flexDirection: "row", alignItems: "center", margin: 8, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, gap: 8 },
@@ -3141,17 +3150,17 @@ const styles = StyleSheet.create({
   },
   replyStrip: {
     borderLeftWidth: 4,
-    paddingLeft: 8,
-    paddingRight: 6,
+    paddingLeft: 10,
+    paddingRight: 8,
     marginBottom: 6,
     marginTop: 2,
-    paddingVertical: 5,
+    marginHorizontal: 2,
+    paddingVertical: 6,
     borderRadius: 6,
-    marginHorizontal: 0,
-    alignSelf: "stretch",
+    maxWidth: "100%",
     minWidth: 0,
   },
-  replyStripTextCol: { flex: 1, minWidth: 0 },
+  replyStripTextCol: { minWidth: 0, flexShrink: 1 },
   replyWho: { fontSize: 12.5, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
   replyText: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 17 },
   msgText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
@@ -3216,17 +3225,15 @@ const styles = StyleSheet.create({
   viewOnceOpenedSub: { color: "#667781", fontSize: 12, fontFamily: "Inter_400Regular" },
   callBubble: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    minWidth: 200,
-    maxWidth: W * 0.78,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+    minWidth: 210,
+    maxWidth: W * 0.72,
   },
-  callBubbleIcon: { marginTop: 2 },
-  callBubbleBody: { flex: 1, minWidth: 0, paddingBottom: 2 },
-  callBubbleText: { fontSize: 14.5, fontFamily: "Inter_500Medium", lineHeight: 19 },
-  callBubbleTime: { fontSize: 11, fontFamily: "Inter_400Regular", marginTop: 4, alignSelf: "flex-end" },
+  callBubbleIcon: { flexShrink: 0 },
+  callBubbleText: { flex: 1, fontSize: 14.5, fontFamily: "Inter_500Medium", lineHeight: 19 },
   translatedBox: { marginTop: 6, paddingTop: 6, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.15)" },
   translatedLabel: { fontSize: 10, color: "#00A884", fontFamily: "Inter_600SemiBold", marginBottom: 3 },
   docCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, minWidth: 220 },
@@ -3314,6 +3321,7 @@ const styles = StyleSheet.create({
   linkPreview: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, paddingTop: 4, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },
   linkText: { flex: 1, fontSize: 12, fontFamily: "Inter_400Regular" },
   msgMeta: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 3 },
+  msgMetaCall: { marginTop: 2, paddingRight: 2 },
   msgMetaOnMedia: {
     position: "absolute",
     right: 6,
@@ -3367,7 +3375,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: "rgba(0,0,0,0.04)",
   },
-  replyPreviewTextCol: { flex: 1, minWidth: 0, alignSelf: "stretch" },
+  replyPreviewTextCol: { minWidth: 0, flexShrink: 1 },
   replyPreviewClose: { padding: 6 },
   replyPreviewLabel: { fontSize: 13, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
   replyPreviewText: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18 },
@@ -3401,22 +3409,38 @@ const styles = StyleSheet.create({
   groupLockBannerText: { flex: 1, fontSize: 13, fontFamily: "Inter_500Medium", lineHeight: 18 },
   inputBar: {
     flexDirection: "row",
-    alignItems: "flex-end",
-    paddingHorizontal: 10,
-    paddingTop: 10,
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingTop: 8,
     gap: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  inputIcon: { padding: 6 },
+  inputBarMain: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    minHeight: 44,
+  },
+  inputHoldingHint: { flex: 1, justifyContent: "center", paddingHorizontal: 8, minHeight: 44 },
+  inputIcon: {
+    width: 40,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   inputField: {
     flex: 1,
     borderRadius: 22,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingTop: Platform.OS === "ios" ? 11 : 10,
+    paddingBottom: Platform.OS === "ios" ? 11 : 10,
     fontSize: 15,
     fontFamily: "Inter_400Regular",
+    minHeight: 44,
     maxHeight: 120,
     borderWidth: StyleSheet.hairlineWidth,
+    ...(Platform.OS === "android" ? { textAlignVertical: "center" as const } : {}),
   },
   sendBtn: {
     width: 44,

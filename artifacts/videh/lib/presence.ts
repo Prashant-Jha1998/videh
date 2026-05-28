@@ -1,4 +1,4 @@
-import { formatTime } from "@/utils/time";
+import { formatFullTime } from "@/utils/time";
 
 export type PresenceView = {
   canSee: boolean;
@@ -15,13 +15,17 @@ export function formatPresenceSubtitle(p: PresenceView | null | undefined): stri
   if (Number.isNaN(d.getTime())) return "last seen recently";
   const now = Date.now();
   const diffMs = now - d.getTime();
-  const diffHrs = diffMs / 3600000;
-  if (diffHrs < 1) {
+  const today = new Date();
+  const isToday = d.toDateString() === today.toDateString();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const isYesterday = d.toDateString() === yesterday.toDateString();
+  if (diffMs < 3600000) {
     const mins = Math.max(1, Math.round(diffMs / 60000));
     return `last seen ${mins} min ago`;
   }
-  if (diffHrs < 24) return `last seen today at ${formatTime(d.getTime())}`;
-  if (diffHrs < 48) return `last seen yesterday at ${formatTime(d.getTime())}`;
+  if (isToday) return `last seen today at ${formatFullTime(d.getTime())}`;
+  if (isYesterday) return `last seen yesterday at ${formatFullTime(d.getTime())}`;
   return `last seen ${d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`;
 }
 

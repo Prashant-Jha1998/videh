@@ -1,6 +1,5 @@
 import * as Notifications from "expo-notifications";
-import * as Linking from "expo-linking";
-import { AppState, Platform } from "react-native";
+import { Platform } from "react-native";
 import type { IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import {
   NOTIFICATION_ACTION_ACCEPT_CALL,
@@ -12,19 +11,6 @@ import {
 export type IncomingCallNotificationPayload = IncomingCallInfo & {
   callerName: string;
 };
-
-function callDeepLink(call: IncomingCallNotificationPayload): string {
-  return Linking.createURL(`/call/${call.chatId}`, {
-    queryParams: {
-      name: call.callerName,
-      type: call.type,
-      channel: call.channel,
-      callId: call.callId,
-      incoming: "1",
-      ringing: "1",
-    },
-  });
-}
 
 /** High-priority incoming call notification (lock screen + heads-up). */
 export async function showIncomingCallNotification(call: IncomingCallNotificationPayload): Promise<void> {
@@ -60,13 +46,8 @@ export async function showIncomingCallNotification(call: IncomingCallNotificatio
       : {}),
   });
 
-  if (AppState.currentState !== "active" && Platform.OS === "android") {
-    try {
-      await Linking.openURL(callDeepLink(call));
-    } catch {
-      /* notification still shows on lock screen */
-    }
-  }
+  // Rely on notification tap / AppState listener — auto deep-link while backgrounded
+  // caused activity conflicts and random crashes on some Android devices.
 }
 
 export async function dismissIncomingCallNotification(callId: string): Promise<void> {

@@ -82,7 +82,11 @@ export function useVidehCall(
     };
 
     const connectChannel = async (channel: string, sharedLocalStream: any, iceServers: RTCIceServer[]) => {
-      if (pcsRef.current.has(channel)) return;
+      if (pcsRef.current.has(channel)) {
+        if (pollTimersRef.current.has(channel)) return;
+        pcsRef.current.get(channel)?.close?.();
+        pcsRef.current.delete(channel);
+      }
       const {
         RTCPeerConnection,
         RTCSessionDescription,
@@ -134,32 +138,45 @@ export function useVidehCall(
         await postJson(`/sessions/${encodeURIComponent(channel)}/offer`, { offer });
       }
 
-      const pollTimer = setInterval(async () => {
-        const pcNow = pcsRef.current.get(channel);
-        if (stopped || !pcNow) return;
-        const activeRole = rolesRef.current.get(channel) ?? "caller";
-        const session = await webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken).then((r) => r.json()) as {
-          session?: { offer?: RTCSessionDescriptionInit | null; answer?: RTCSessionDescriptionInit | null };
-        };
-        if (activeRole === "callee" && session.session?.offer && !pcNow.remoteDescription) {
-          await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.offer));
-          const answer = await pcNow.createAnswer();
-          await pcNow.setLocalDescription(answer);
-          await postJson(`/sessions/${encodeURIComponent(channel)}/answer`, { answer });
-        }
-        if (activeRole === "caller" && session.session?.answer && !pcNow.remoteDescription) {
-          await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.answer));
-        }
+      const pollTimer = setInterval(() => {
+        void (async () => {
+          try {
+            const pcNow = pcsRef.current.get(channel);
+            if (stopped || !pcNow) return;
+            const activeRole = rolesRef.current.get(channel) ?? "caller";
+            const session = await webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken).then((r) => r.json()) as {
+              session?: { offer?: RTCSessionDescriptionInit | null; answer?: RTCSessionDescriptionInit | null };
+            };
+            if (activeRole === "callee" && session.session?.offer && !pcNow.remoteDescription) {
+              await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.offer));
+              const answer = await pcNow.createAnswer();
+              await pcNow.setLocalDescription(answer);
+              await postJson(`/sessions/${encodeURIComponent(channel)}/answer`, { answer });
+            }
+            if (activeRole === "caller" && session.session?.answer && !pcNow.remoteDescription) {
+              await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.answer));
+            }
 
-        const since = candidateCursorsRef.current.get(channel) ?? 0;
-        const candidateRes = await webrtcFetch(
-          `/sessions/${encodeURIComponent(channel)}/candidates?role=${activeRole}&since=${since}`,
-          sessionToken,
-        ).then((r) => r.json()) as { candidates?: RTCIceCandidateInit[]; next?: number };
-        for (const candidate of candidateRes.candidates ?? []) {
-          await pcNow.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
-        }
-        candidateCursorsRef.current.set(channel, candidateRes.next ?? since);
+            const since = candidateCursorsRef.current.get(channel) ?? 0;
+            const candidateRes = await webrtcFetch(
+              `/sessions/${encodeURIComponent(channel)}/candidates?role=${activeRole}&since=${since}`,
+              sessionToken,
+            ).then((r) => r.json()) as { candidates?: RTCIceCandidateInit[]; next?: number };
+            for (const candidate of candidateRes.candidates ?? []) {
+              await pcNow.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+            }
+            candidateCursorsRef.current.set(channel, candidateRes.next ?? since);
+          } catch (e: any) {
+            if (stopped) return;
+            const msg = e?.message ?? "Call signaling error";
+            setError(msg);
+            const t = pollTimersRef.current.get(channel);
+            if (t) {
+              clearInterval(t);
+              pollTimersRef.current.delete(channel);
+            }
+          }
+        })();
       }, SIGNAL_POLL_MS);
       pollTimersRef.current.set(channel, pollTimer);
     };
@@ -215,6 +232,8 @@ export function useVidehCall(
 
     return () => {
       stopped = true;
+      for (const timer of pollTimersRef.current.values()) clearInterval(timer);
+      pollTimersRef.current.clear();
     };
   }, [primaryChannel, uid, isVideo, channelsKey, refreshAggregate, sessionToken]);
 

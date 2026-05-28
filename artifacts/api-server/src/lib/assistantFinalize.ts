@@ -13,6 +13,9 @@ export type FinalizeInput = {
 };
 
 export async function finalizeAssistantSpeak(input: FinalizeInput): Promise<string> {
+  if (process.env["ASSISTANT_AI_POLISH"] !== "1") {
+    return input.fallbackSpeak;
+  }
   const openAiKey = process.env["OPENAI_API_KEY"]?.trim();
   if (!openAiKey) return input.fallbackSpeak;
 
@@ -67,12 +70,15 @@ export async function answerVidehQuestion(
   question: string,
   userName: string,
   lang: AssistantLangCode,
+  dbAnswer?: string | null,
 ): Promise<string> {
+  if (dbAnswer?.trim()) return dbAnswer.trim();
+
   const openAiKey = process.env["OPENAI_API_KEY"]?.trim();
   const name = firstName(userName);
   const langLabel = INDIAN_LANGUAGE_LABELS[lang] ?? "Hindi";
 
-  if (!openAiKey) {
+  if (!openAiKey || process.env["ASSISTANT_USE_OPENAI"] !== "1") {
     return lang === "en"
       ? `${name}, I can help with messaging, calls, broadcasts, Khata, and Hey Videh commands. Ask in the app Settings for voice enrollment.`
       : `${name} ji, main messaging, calls, broadcast, Khata aur Hey Videh commands mein madad kar sakta hoon. Settings se voice enroll karein.`;

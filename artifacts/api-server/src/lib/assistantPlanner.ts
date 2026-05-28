@@ -1,5 +1,6 @@
 import type { PlannedAction } from "./assistantIntents";
 import { intentToPlanned, parseAssistantIntent } from "./assistantIntents";
+import { useOpenAiAssistant } from "./assistantDbAnswer";
 import type { AssistantUserContext } from "./assistantExecutor";
 import type { AssistantLangCode } from "./assistantLanguages";
 import { firstName, INDIAN_LANGUAGE_LABELS } from "./assistantLanguages";
@@ -42,12 +43,15 @@ export async function planAssistantAction(
   const broadcasts = ctx.broadcastLists.map((b) => b.name).join(", ");
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${openAiKey}`,
         "Content-Type": "application/json",
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model: "gpt-4o-mini",
         temperature: 0.1,
@@ -89,9 +93,10 @@ Never plan: sexual/illegal/terror content, or revealing API keys/source code/pas
           },
           { role: "user", content: text },
         ],
-        max_tokens: 320,
+        max_tokens: 180,
       }),
     });
+    clearTimeout(timeout);
     const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
     const raw = data.choices?.[0]?.message?.content;
     if (!raw) return null;
@@ -108,30 +113,42 @@ export async function resolveAssistantPlan(
   ctx: AssistantUserContext,
   lang: AssistantLangCode,
 ): Promise<PlannedAction> {
-  const aiPlan = await planAssistantAction(text, ctx, lang);
-
-  if (aiPlan?.intent === "project_qa") {
-    return { intent: "project_qa", speak: aiPlan.speak };
-  }
-
-  if (aiPlan && aiPlan.intent !== "reply" && aiPlan.intent !== "unknown") {
-    return aiPlan;
-  }
-
-  if (aiPlan?.intent === "reply" && aiPlan.speak) {
-    return aiPlan;
-  }
-
   const ruleIntent = parseAssistantIntent(text);
   if (ruleIntent.type !== "unknown") {
     return intentToPlanned(ruleIntent);
   }
 
-  if (isLikelyProjectQuestion(text)) {
-    return { intent: "project_qa" };
+  if (!useOpenAiAssistant()) {
+    if (isLikelyProjectQuestion(text)) {
+      return { intent: "project_qa" };
+    }
+    return { intent: "unknown" };
   }
 
-  if (aiPlan?.speak) return aiPlan;
+  if (!isLikelyProjectQuestion(text)) {
+    const aiPlan = await planAssistantAction(text, ctx, lang);
+    if (aiPlan?.intent === "project_qa") {
+      return { intent: "project_qa", speak: aiPlan.speak };
+    }
+    if (aiPlan && aiPlan.intent !== "reply" && aiPlan.intent !== "unknown") {
+      return aiPlan;
+    }
+    if (aiPlan?.intent === "reply" && aiPlan.speak) {
+      return aiPlan;
+    }
+    if (aiPlan?.speak) return aiPlan;
+    return { intent: "unknown" };
+  }
 
-  return { intent: "unknown" };
+  const aiPlan = await planAssistantAction(text, ctx, lang);
+  if (aiPlan?.intent === "project_qa") {
+    return { intent: "project_qa", speak: aiPlan.speak };
+  }
+  if (aiPlan && aiPlan.intent !== "reply" && aiPlan.intent !== "unknown") {
+    return aiPlan;
+  }
+  if (aiPlan?.intent === "reply" && aiPlan.speak) {
+    return aiPlan;
+  }
+  return { intent: "project_qa" };
 }

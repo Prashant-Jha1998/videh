@@ -11,6 +11,14 @@ const WAKE_PHRASES = [
   "hey vadeh",
   "hey video",
   "hey wede",
+  "hey vidhe",
+  "hey vidh",
+  "he video",
+  "hay video",
+  "hi video",
+  "play videh",
+  "ok videh",
+  "oye videh",
   "हे विदेह",
   "है विदेह",
   "हे वीडेह",
@@ -27,7 +35,12 @@ const WAKE_REGEX = new RegExp(
 export function containsWakePhrase(text: string): boolean {
   const n = text.toLowerCase().trim();
   if (!n) return false;
-  return WAKE_PHRASES.some((p) => n.includes(p));
+  if (WAKE_PHRASES.some((p) => n.includes(p))) return true;
+  // STT often splits "Hey Videh" — accept both words nearby
+  if (/\b(hey|he|hay|hi|hello|oye)\b/.test(n) && /\b(videh|vidhe|video|vede|vadeh|wede)\b/.test(n)) {
+    return true;
+  }
+  return false;
 }
 
 /** Text after the wake phrase in the same utterance (may be empty). */

@@ -555,8 +555,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const updateAvatar = useCallback(async (base64: string, mimeType = "image/jpeg") => {
     const u = userRef.current;
-    if (!u?.dbId) {
-      const updated = { ...u!, avatar: `data:${mimeType};base64,${base64}` };
+    if (!u) return;
+    if (!u.dbId) {
+      const updated = { ...u, avatar: `data:${mimeType};base64,${base64}` };
       setUserState(updated);
       await AsyncStorage.setItem("videh_user", JSON.stringify(updated));
       return;
@@ -699,16 +700,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ) {
             return c;
           }
-          const pendingUploads = prevMsgs.filter(
-            (m) =>
-              m.id.startsWith("tmp_")
-              && m.type === "document"
+          const isSupersededTemp = (tmp: Message, serverMsgs: Message[]) =>
+            serverMsgs.some(
+              (s) =>
+                s.senderId === "me"
+                && Math.abs(s.timestamp - tmp.timestamp) < 120_000
+                && (s.text === tmp.text || (tmp.type !== "text" && s.type === tmp.type)),
+            );
+          const pendingLocal = prevMsgs.filter((m) => {
+            if (!m.id.startsWith("tmp_")) return false;
+            if (
+              m.type === "document"
               && typeof m.uploadProgress === "number"
               && m.uploadProgress < 100
-              && !m.uploadFailed,
-          );
+              && !m.uploadFailed
+            ) {
+              return true;
+            }
+            return !isSupersededTemp(m, msgs);
+          });
           const merged = [...msgs];
-          for (const p of pendingUploads) {
+          for (const p of pendingLocal) {
             if (!merged.some((m) => m.id === p.id)) merged.push(p);
           }
           merged.sort((a, b) => a.timestamp - b.timestamp);
@@ -846,7 +858,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             senderId: u.dbId,
             content: text,
             type: "text",
-            replyToId: replyToId ? Number(replyToId) : undefined,
+            replyToId: replyToId && !replyToId.startsWith("tmp_") ? Number(replyToId) : undefined,
           }),
         });
         const data = (await res.json()) as {

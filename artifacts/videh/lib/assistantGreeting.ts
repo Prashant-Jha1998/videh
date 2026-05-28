@@ -23,7 +23,7 @@ export function localActivationGreeting(userName?: string | null, lang: Assistan
   const first = (userName ?? "").trim().split(/\s+/)[0] || "User";
   const tg = timeGreeting(lang);
   if (lang === "en") {
-    return `${tg}, ${first}. Videh is ready. Say what you need — I will reply in your language.`;
+    return `${tg}, ${first}. I'm listening — call, message, or ask anything.`;
   }
-  return `${tg}, ${first} ji. Videh aapki seva mein hazir hai. Jo aap bolenge, main wahi karunga — apni bhasha mein.`;
+  return `${tg}, ${first} ji. Boliye — call, message, ya kuch bhi poochhiye.`;
 }

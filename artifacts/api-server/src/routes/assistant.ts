@@ -1,9 +1,10 @@
 import { Router, type Request, type Response } from "express";
 import { assertSameUser, requireAuth } from "../lib/auth";
 import { executeAssistantAction, loadAssistantUserContext } from "../lib/assistantExecutor";
+import { answerFromDatabase, databaseAssistantFallback } from "../lib/assistantDbAnswer";
 import { answerVidehQuestion, finalizeAssistantSpeak } from "../lib/assistantFinalize";
 import { buildActivationGreeting } from "../lib/assistantGreeting";
-import { parseAssistantIntent } from "../lib/assistantIntents";
+import { intentToPlanned, parseAssistantIntent } from "../lib/assistantIntents";
 import {
   detectAssistantLanguage,
   firstName,
@@ -187,11 +188,27 @@ router.post("/command", async (req: Request, res: Response) => {
       return;
     }
 
+    if (ruleIntent.type !== "unknown") {
+      const plan = intentToPlanned(ruleIntent);
+      const result = await executeAssistantAction(ctx, plan, lang);
+      jsonLang(res, lang, {
+        success: true,
+        intent: result.intent,
+        speak: result.speak,
+        actions: result.actions,
+        data: result.data,
+      });
+      return;
+    }
+
     const plan = await resolveAssistantPlan(text, ctx, lang);
 
     if (plan.intent === "project_qa") {
-      const speak = plan.speak
-        ?? await answerVidehQuestion(text, ctx.userName, lang);
+      const dbSpeak = await answerFromDatabase(text, ctx, lang);
+      const speak = dbSpeak
+        ?? plan.speak
+        ?? await answerVidehQuestion(text, ctx.userName, lang, dbSpeak)
+        ?? databaseAssistantFallback(lang, ctx.userName);
       jsonLang(res, lang, {
         success: true,
         intent: "project_qa",
@@ -212,12 +229,11 @@ router.post("/command", async (req: Request, res: Response) => {
     }
 
     if (plan.intent === "unknown") {
-      const unknownSpeak = lang === "en"
-        ? `${name}, ask anything in your own words: who messaged today, missed calls, messages in a group, how to change a setting, or message or call anyone in your chat list.`
-        : `${name} ji, apni bhasha mein kuch bhi poochiye — aaj kis ka message aaya, kis ka call miss hua, kis group mein kitne message, setting kaise badlein, ya chat list ke kisi naam ko call ya message.`;
+      const dbSpeak = await answerFromDatabase(text, ctx, lang);
+      const unknownSpeak = dbSpeak ?? databaseAssistantFallback(lang, ctx.userName);
       jsonLang(res, lang, {
         success: true,
-        intent: "unknown",
+        intent: dbSpeak ? "db_answer" : "unknown",
         speak: unknownSpeak,
         actions: [],
       });
@@ -225,15 +241,17 @@ router.post("/command", async (req: Request, res: Response) => {
     }
 
     const result = await executeAssistantAction(ctx, plan, lang);
-    const speak = await finalizeAssistantSpeak({
-      userName: ctx.userName,
-      lang,
-      userCommand: text,
-      intent: result.intent,
-      success: result.success,
-      fallbackSpeak: result.speak,
-      actionDetails: (result.data as Record<string, unknown>) ?? {},
-    });
+    const speak = process.env["ASSISTANT_AI_POLISH"] === "1"
+      ? await finalizeAssistantSpeak({
+          userName: ctx.userName,
+          lang,
+          userCommand: text,
+          intent: result.intent,
+          success: result.success,
+          fallbackSpeak: result.speak,
+          actionDetails: (result.data as Record<string, unknown>) ?? {},
+        })
+      : result.speak;
 
     jsonLang(res, lang, {
       success: true,

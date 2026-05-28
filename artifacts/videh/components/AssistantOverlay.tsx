@@ -38,9 +38,9 @@ export function AssistantOverlay() {
 
   const subtitle =
     phase === "listening"
-      ? "Koi bhi contact ya group — call, message, padho, khata, broadcast…"
-      : phase === "active"
-        ? "Getting ready"
+      ? "Boliye — jaise: “Videh ko call karo” ya “aaj kis ka message aaya”"
+      : phase === "processing"
+        ? "Thodi der…"
         : null;
 
   return (

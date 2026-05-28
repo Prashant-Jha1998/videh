@@ -38,7 +38,7 @@ export default function AssistantSettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useApp();
-  const { prefs, refreshPrefs, setEnabled, activateManually } = useAssistant();
+  const { prefs, refreshPrefs, setEnabled, activateManually, lastError, phase } = useAssistant();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const [enrollPhase, setEnrollPhase] = useState<EnrollPhase>("idle");
@@ -203,6 +203,10 @@ export default function AssistantSettingsScreen() {
             colors={colors}
           />
           <Row label="Assistant" value={prefs?.enabled ? "On" : "Off"} colors={colors} />
+          <Row label="Listening" value={phase === "idle" && prefs?.enabled ? "Waiting for Hey Videh" : phase} colors={colors} />
+          {lastError ? (
+            <Text style={[styles.hint, { color: "#c62828", marginTop: 8 }]}>{lastError}</Text>
+          ) : null}
         </View>
 
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>CONTROLS</Text>
@@ -225,7 +229,7 @@ export default function AssistantSettingsScreen() {
             />
           </View>
           <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-            Keep Videh open in the background. With this on, listening continues when the screen is locked (Android). If nothing happens, unlock once and use &quot;Test now&quot; below.
+            App open hone par &quot;Hey Videh&quot; sunne ke liye mic chahiye. Lock screen par Android mic band kar sakta hai — pehle unlock karke &quot;Test now&quot; try karein. Google app / speech services installed honi chahiye.
           </Text>
         </View>
 
