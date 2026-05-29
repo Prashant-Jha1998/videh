@@ -3,7 +3,7 @@ import * as Notifications from "expo-notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -31,8 +31,56 @@ import {
   VIDEH_CALLS_CHANNEL_ID,
 } from "@/lib/pushNotifications";
 import { dismissIncomingCallNotification, showIncomingCallNotification } from "@/lib/incomingCallNotification";
+import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
+import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
+import { wakeScreenForIncomingCall } from "@/lib/inCallAudio";
 import { startIncomingCallAlert, stopCallAlert } from "@/lib/callRingtone";
 import { installGlobalErrorHandlers } from "@/lib/globalErrorHandlers";
+import { loadCachedSilenceUnknownCallers } from "@/lib/privacySettings";
+import type { Chat } from "@/context/AppContext";
+
+function isKnownCaller(chatId: number, chatList: Chat[]): boolean {
+  const chat = chatList.find((c) => c.id === String(chatId));
+  if (!chat) return false;
+  if (chat.isGroup) return true;
+  if (!chat.otherUserId) return false;
+  return Boolean(chat.lastMessage) || (chat.messages?.length ?? 0) > 0;
+}
+
+async function declineIncomingCallSilently(callId: string, userId: number, sessionToken?: string | null) {
+  await fetch(`${getApiUrl()}/api/webrtc/calls/${callId}/respond`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+    },
+    body: JSON.stringify({ userId, action: "decline" }),
+  }).catch(() => {});
+}
+
+function canPresentIncomingCallUi(): boolean {
+  if (Platform.OS === "web") return false;
+  const state = AppState.currentState;
+  return state === "active" || state === "background";
+}
+
+function toIncomingCallInfo(raw: {
+  callId: string;
+  channel?: string;
+  chatId: number;
+  type?: string;
+  callerName?: string;
+  participantCount?: number;
+}): IncomingCallInfo {
+  return {
+    callId: String(raw.callId),
+    channel: String(raw.channel ?? ""),
+    chatId: Number(raw.chatId),
+    type: raw.type === "video" ? "video" : "audio",
+    callerName: String(raw.callerName ?? "Videh user"),
+    participantCount: Number(raw.participantCount ?? 2),
+  };
+}
 
 SplashScreen.preventAutoHideAsync();
 installGlobalErrorHandlers();
@@ -58,7 +106,7 @@ if (Platform.OS !== "web") {
 }
 
 function RootLayoutNav() {
-  const { isAuthenticated, isInitialized, user, markAsRead, muteChat, sendMessage, loadMessages } = useApp();
+  const { isAuthenticated, isInitialized, user, chats, markAsRead, muteChat, sendMessage, loadMessages } = useApp();
   const colors = useColors();
   const router = useRouter();
   const {
@@ -70,7 +118,80 @@ function RootLayoutNav() {
   } = useCallSession();
   const pendingIncomingRef = useRef<IncomingCallInfo | null>(null);
   const activeCallIdRef = useRef<string | null>(null);
+  const incomingRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [incomingCall, setIncomingCall] = useState<IncomingCallInfo | null>(null);
+
+  const clearIncomingAutoEnd = useCallback(() => {
+    if (incomingRingTimerRef.current) {
+      clearTimeout(incomingRingTimerRef.current);
+      incomingRingTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleIncomingAutoEnd = useCallback((callId: string) => {
+    clearIncomingAutoEnd();
+    incomingRingTimerRef.current = setTimeout(() => {
+      incomingRingTimerRef.current = null;
+      if (!user?.dbId) return;
+      void declineIncomingCallSilently(callId, user.dbId, user.sessionToken);
+      void stopCallAlert();
+      void dismissIncomingCallNotification(callId);
+      pendingIncomingRef.current = null;
+      setIncomingCall(null);
+      if (activeCallIdRef.current === callId) {
+        void endCall();
+      }
+    }, INCOMING_RING_TIMEOUT_MS);
+  }, [clearIncomingAutoEnd, user?.dbId, user?.sessionToken, endCall]);
+
+  const offerIncomingCall = useCallback(async (raw: {
+    callId: string;
+    channel?: string;
+    chatId: number;
+    type?: string;
+    callerName?: string;
+    participantCount?: number;
+  }) => {
+    const next = toIncomingCallInfo(raw);
+    if (activeCallIdRef.current === next.callId) return;
+    if (activeCallSession?.engineActive && !activeCallSession.ringing) return;
+
+    const silenceUnknown = await loadCachedSilenceUnknownCallers();
+    if (silenceUnknown && user?.dbId && !isKnownCaller(Number(next.chatId), chats)) {
+      await declineIncomingCallSilently(next.callId, user.dbId, user.sessionToken);
+      void stopCallAlert();
+      return;
+    }
+
+    wakeScreenForIncomingCall();
+
+    if (Platform.OS !== "web") {
+      void startIncomingCallAlert();
+      const callPayload = { ...next, callerName: next.callerName };
+      const appState = AppState.currentState;
+      if (appState === "background" || appState === "inactive" || !appState) {
+        pendingIncomingRef.current = callPayload;
+        void showIncomingCallNotification(callPayload);
+      }
+    }
+
+    scheduleIncomingAutoEnd(next.callId);
+
+    if (canPresentIncomingCallUi() && shouldRouteIncomingToCallScreen()) {
+      presentIncomingCall(next);
+      setIncomingCall(null);
+    } else {
+      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
+    }
+  }, [
+    activeCallSession?.engineActive,
+    activeCallSession?.ringing,
+    chats,
+    presentIncomingCall,
+    scheduleIncomingAutoEnd,
+    user?.dbId,
+    user?.sessionToken,
+  ]);
 
   useEffect(() => {
     activeCallIdRef.current = activeCallSession?.callId ?? null;
@@ -86,15 +207,21 @@ function RootLayoutNav() {
       const chatId = data?.chatId ? String(data.chatId) : "";
       if (actionId === NOTIFICATION_ACTION_MARK_READ && chatId && isAuthenticated) {
         markAsRead(chatId);
+        void dismissChatMessageNotifications(chatId);
         return;
       }
       if (actionId === NOTIFICATION_ACTION_MUTE && chatId && isAuthenticated) {
         muteChat(chatId);
+        void dismissChatMessageNotifications(chatId);
         return;
       }
       if (actionId === NOTIFICATION_ACTION_REPLY && chatId && isAuthenticated) {
-        const replyText = String((response as any).userText ?? "").trim();
-        if (replyText) sendMessage(chatId, replyText);
+        const replyText = String(response.userText ?? "").trim();
+        if (replyText) {
+          sendMessage(chatId, replyText);
+          markAsRead(chatId);
+        }
+        void dismissChatMessageNotifications(chatId);
         return;
       }
       if (
@@ -102,6 +229,7 @@ function RootLayoutNav() {
         && data?.callId
         && user?.dbId
       ) {
+        clearIncomingAutoEnd();
         void stopCallAlert();
         const action = actionId === NOTIFICATION_ACTION_ACCEPT_CALL ? "accept" : "decline";
         void fetch(`${getApiUrl()}/api/webrtc/calls/${data.callId}/respond`, {
@@ -171,6 +299,7 @@ function RootLayoutNav() {
         const next = data.calls?.[0] ?? null;
         if (!next) {
           pendingIncomingRef.current = null;
+          clearIncomingAutoEnd();
           setIncomingCall((prev) => {
             if (prev) {
               void stopCallAlert();
@@ -180,28 +309,14 @@ function RootLayoutNav() {
           });
           return;
         }
-        if (activeCallIdRef.current === next.callId) return;
-        if (activeCallSession?.engineActive && !activeCallSession.ringing) return;
-
-        const appActive = AppState.currentState === "active";
-        if (Platform.OS !== "web") {
-          void startIncomingCallAlert();
-          const callPayload = {
-            ...next,
-            callerName: next.callerName ?? "Videh user",
-          };
-          if (!appActive) {
-            pendingIncomingRef.current = callPayload;
-            void showIncomingCallNotification(callPayload);
-          }
-        }
-
-        if (shouldRouteIncomingToCallScreen() && appActive) {
-          presentIncomingCall(next);
-          setIncomingCall(null);
-        } else {
-          setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
-        }
+        await offerIncomingCall({
+          callId: next.callId,
+          channel: next.channel,
+          chatId: next.chatId,
+          type: next.type,
+          callerName: next.callerName ?? "Videh user",
+          participantCount: next.participantCount,
+        });
       } catch {}
     };
     void poll();
@@ -218,27 +333,13 @@ function RootLayoutNav() {
           callerName: String(payload.callerName ?? "Videh user"),
           participantCount: Number(payload.participantCount ?? 2),
         };
-        if (activeCallIdRef.current === callId) return;
-        if (activeCallSession?.engineActive && !activeCallSession.ringing) return;
-        if (Platform.OS !== "web") {
-          void startIncomingCallAlert();
-          if (!AppState.currentState || AppState.currentState !== "active") {
-            pendingIncomingRef.current = callInfo;
-          }
-          void showIncomingCallNotification(callInfo);
-        }
-        const appActive = AppState.currentState === "active";
-        if (shouldRouteIncomingToCallScreen() && appActive) {
-          presentIncomingCall(callInfo);
-          setIncomingCall(null);
-        } else {
-          setIncomingCall((prev) => (prev?.callId === callId ? prev : callInfo));
-        }
+        void offerIncomingCall(callInfo);
       }
       if (action === "accepted") {
         void stopCallAlert();
       }
       if (action === "declined" || action === "ended" || action === "missed" || action === "busy") {
+        clearIncomingAutoEnd();
         if (callId) void dismissIncomingCallNotification(callId);
         setIncomingCall((prev) => {
           if (!prev) return prev;
@@ -253,17 +354,19 @@ function RootLayoutNav() {
       cancelled = true;
       clearInterval(timer);
       unsubCall();
+      clearIncomingAutoEnd();
       void stopCallAlert();
     };
-  }, [isAuthenticated, user?.dbId, user?.sessionToken, loadMessages, activeCallSession?.callId, presentIncomingCall]);
+  }, [isAuthenticated, user?.dbId, user?.sessionToken, chats, loadMessages, activeCallSession?.callId, offerIncomingCall, clearIncomingAutoEnd]);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
     const sub = AppState.addEventListener("change", (state) => {
-      if (state !== "active") return;
+      if (state !== "active" && state !== "background") return;
       const pending = pendingIncomingRef.current;
-      if (pending && shouldRouteIncomingToCallScreen()) {
+      if (pending && shouldRouteIncomingToCallScreen() && canPresentIncomingCallUi()) {
         pendingIncomingRef.current = null;
+        wakeScreenForIncomingCall();
         presentIncomingCall(pending);
         setIncomingCall(null);
       }
@@ -271,9 +374,37 @@ function RootLayoutNav() {
     return () => sub.remove();
   }, [presentIncomingCall]);
 
+  useEffect(() => {
+    if (Platform.OS === "web" || !isAuthenticated) return;
+    const sub = Notifications.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data as Record<string, unknown> | undefined;
+      if (!data) return;
+      const isCall = data.kind === "call" || data.notificationKind === "incoming_call";
+      if (!isCall || !data.callId) return;
+      const info = toIncomingCallInfo({
+        callId: String(data.callId),
+        channel: String(data.channel ?? ""),
+        chatId: Number(data.chatId),
+        type: String(data.type ?? "audio"),
+        callerName: String(data.callerName ?? "Videh user"),
+        participantCount: 2,
+      });
+      wakeScreenForIncomingCall();
+      setTimeout(() => {
+        if (!canPresentIncomingCallUi() || !shouldRouteIncomingToCallScreen()) return;
+        if (activeCallIdRef.current === info.callId) return;
+        presentIncomingCall(info);
+        setIncomingCall(null);
+        scheduleIncomingAutoEnd(info.callId);
+      }, 400);
+    });
+    return () => sub.remove();
+  }, [isAuthenticated, presentIncomingCall, scheduleIncomingAutoEnd]);
+
   const respondToIncomingCall = async (action: "accept" | "decline", declineMessage?: string) => {
     if (!incomingCall || !user?.dbId) return;
     const call = incomingCall;
+    clearIncomingAutoEnd();
     setIncomingCall(null);
     try {
       await stopCallAlert();

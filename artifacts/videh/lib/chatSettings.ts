@@ -61,3 +61,35 @@ export async function loadOptionalBool(key: string, fallback: boolean): Promise<
 export async function saveOptionalBool(key: string, value: boolean): Promise<void> {
   await AsyncStorage.setItem(key, value ? "true" : "false");
 }
+
+/** When true, user may save received media to the device gallery (manual save only). */
+export async function loadMediaVisibilityEnabled(): Promise<boolean> {
+  return loadOptionalBool(CHAT_STORAGE.mediaVisibility, true);
+}
+
+/** Maps a font-size label to a scale multiplier for chat message text. */
+export const FONT_SIZE_LABELS = ["Small", "Medium", "Large", "Extra Large"] as const;
+export type FontSizeLabel = (typeof FONT_SIZE_LABELS)[number];
+
+export function fontSizeLabelToScale(label: string): number {
+  switch (label) {
+    case "Small": return 0.88;
+    case "Large": return 1.15;
+    case "Extra Large": return 1.3;
+    case "Medium":
+    default: return 1;
+  }
+}
+
+/** Maps a global wallpaper label to a solid background color, or null for theme default. */
+export function wallpaperLabelToColor(label: string): string | null {
+  switch (label) {
+    case "Dark": return "#0B141A";
+    case "Classic Dark": return "#111B21";
+    case "Light Blue": return "#CFE9F1";
+    case "Solid Black": return "#000000";
+    case "Solid White": return "#FFFFFF";
+    case "Default":
+    default: return null;
+  }
+}

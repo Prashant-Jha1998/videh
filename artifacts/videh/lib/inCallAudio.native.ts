@@ -20,6 +20,17 @@ export function isInCallManagerAvailable(): boolean {
   return Platform.OS !== "web" && InCallManager != null;
 }
 
+/** Wake display for incoming call (lock screen / screen off). */
+export function wakeScreenForIncomingCall(): void {
+  if (!InCallManager || Platform.OS === "web") return;
+  try {
+    InCallManager.turnScreenOn();
+    InCallManager.setKeepScreenOn(true);
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function startInCallSession(isVideo: boolean): Promise<void> {
   if (!InCallManager) return;
   InCallManager.start({ media: isVideo ? "video" : "audio" });

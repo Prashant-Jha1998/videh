@@ -20,11 +20,14 @@ import {
   enrollAssistantVoice,
   patchAssistantPrefs,
 } from "@/lib/assistantApi";
-import { isSpeechRecognitionAvailable } from "@/lib/assistantSpeech";
+import { getAndroidSpeechEngineLabel } from "@/lib/androidSpeechService";
+import { setAssistantVoiceEnrollmentActive } from "@/lib/assistantPause";
+import { destroySpeech, isSpeechRecognitionAvailable, stopListening } from "@/lib/assistantSpeech";
 import {
   deleteEnrollmentFile,
   playEnrollmentSample,
   recordVoiceSample,
+  releaseVoiceEnrollmentRecording,
   type VoiceEnrollmentSample,
 } from "@/lib/voiceEnrollment";
 import { useColors } from "@/hooks/useColors";
@@ -48,10 +51,24 @@ export default function AssistantSettingsScreen() {
   const [listenLocked, setListenLocked] = useState(true);
   const [playingIdx, setPlayingIdx] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [capturingSample, setCapturingSample] = useState(false);
 
   useEffect(() => {
     if (prefs) setListenLocked(prefs.listenWhenLocked);
   }, [prefs]);
+
+  useEffect(() => {
+    const enrolling = enrollPhase !== "idle";
+    setAssistantVoiceEnrollmentActive(enrolling);
+    if (enrolling) {
+      void stopListening();
+      void destroySpeech();
+    }
+    return () => {
+      setAssistantVoiceEnrollmentActive(false);
+      void releaseVoiceEnrollmentRecording();
+    };
+  }, [enrollPhase]);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -85,7 +102,12 @@ export default function AssistantSettingsScreen() {
   }, [resetEnrollment]);
 
   const recordNextSample = useCallback(async () => {
+    if (capturingSample) return;
+    setCapturingSample(true);
     try {
+      await stopListening();
+      await destroySpeech();
+      await releaseVoiceEnrollmentRecording();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       const sample = await recordVoiceSample(2600, setMeter);
       const next = [...samples, sample];
@@ -97,8 +119,14 @@ export default function AssistantSettingsScreen() {
         setSampleIndex(next.length);
       }
     } catch (e: unknown) {
-      Alert.alert("Microphone error", e instanceof Error ? e.message : "Recording failed.");
+      const raw = e instanceof Error ? e.message : "Recording failed.";
+      const message = /only one recording object/i.test(raw)
+        ? "Microphone is in use (Hey Videh or another chat recording). Wait a moment and tap Record again."
+        : raw;
+      Alert.alert("Microphone error", message);
       setEnrollPhase("idle");
+    } finally {
+      setCapturingSample(false);
     }
   }, [samples]);
 
@@ -202,6 +230,13 @@ export default function AssistantSettingsScreen() {
             value={isSpeechRecognitionAvailable() ? "Ready" : "Needs mobile app"}
             colors={colors}
           />
+          {Platform.OS === "android" && isSpeechRecognitionAvailable() ? (
+            <Row
+              label="Speech engine"
+              value={getAndroidSpeechEngineLabel() ?? "System default"}
+              colors={colors}
+            />
+          ) : null}
           <Row label="Assistant" value={prefs?.enabled ? "On" : "Off"} colors={colors} />
           <Row label="Listening" value={phase === "idle" && prefs?.enabled ? "Waiting for Hey Videh" : phase} colors={colors} />
           {lastError ? (
@@ -229,7 +264,7 @@ export default function AssistantSettingsScreen() {
             />
           </View>
           <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-            App open hone par &quot;Hey Videh&quot; sunne ke liye mic chahiye. Lock screen par Android mic band kar sakta hai — pehle unlock karke &quot;Test now&quot; try karein. Google app / speech services installed honi chahiye.
+            App open hone par &quot;Hey Videh&quot; sunne ke liye mic chahiye. Lock screen par Android mic band kar sakta hai — pehle unlock karke try karein. Phone ke Settings → Languages → Voice input mein speech-to-text engine select hona chahiye (alag se Google app install karne ki zaroorat nahi).
           </Text>
         </View>
 
@@ -274,9 +309,13 @@ export default function AssistantSettingsScreen() {
                   />
                 ))}
               </View>
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => void recordNextSample()}>
+              <TouchableOpacity
+                style={[styles.primaryBtn, capturingSample && { opacity: 0.6 }]}
+                onPress={() => void recordNextSample()}
+                disabled={capturingSample}
+              >
                 <Ionicons name="mic" size={20} color="#fff" />
-                <Text style={styles.primaryBtnText}>Record</Text>
+                <Text style={styles.primaryBtnText}>{capturingSample ? "Recording…" : "Record"}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => {

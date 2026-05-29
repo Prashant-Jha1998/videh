@@ -7,6 +7,7 @@ import multer from "multer";
 import { query } from "../lib/db";
 import { enforceModerationForActivity } from "../lib/moderation";
 import { assertSameUser, requireAuth } from "../lib/auth";
+import { canSeeUserField } from "../lib/userPrivacySettings";
 import { publicMediaUrl } from "../lib/mediaStorage";
 
 const router = Router();
@@ -380,7 +381,26 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
       ) DESC, s.created_at DESC
     `, [userId]);
 
-    res.json({ success: true, statuses: result.rows });
+    const viewerId = Number(userId);
+    const visible: typeof result.rows = [];
+    for (const row of result.rows) {
+      const ownerId = Number(row.user_id);
+      if (ownerId === viewerId) {
+        visible.push(row);
+        continue;
+      }
+      const [seeStatus, seePhoto] = await Promise.all([
+        canSeeUserField(viewerId, ownerId, "status_privacy"),
+        canSeeUserField(viewerId, ownerId, "profile_photo_privacy"),
+      ]);
+      if (!seeStatus) continue;
+      visible.push({
+        ...row,
+        user_avatar: seePhoto ? row.user_avatar : null,
+      });
+    }
+
+    res.json({ success: true, statuses: visible });
   } catch (err) {
     req.log.error({ err }, "get statuses error");
     res.status(500).json({ success: false });

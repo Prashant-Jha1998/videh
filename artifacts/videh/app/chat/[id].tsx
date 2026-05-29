@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
@@ -9,7 +9,7 @@ import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { KeyboardAvoidingView } from "react-native";
+import { KeyboardStickyView } from "react-native-keyboard-controller";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -34,6 +34,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Swipeable } from "react-native-gesture-handler";
 import { useColors } from "@/hooks/useColors";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { useApp, type Message } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
@@ -68,6 +69,8 @@ import { launchChatPhotoCamera, launchChatVideoCamera } from "@/lib/openChatCame
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { isGifUri } from "@/lib/imageEdit";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
+import { formatTypingLabel } from "@/lib/typingIndicator";
+import { TypingIndicator } from "@/components/TypingIndicator";
 import { formatChatBubbleTime } from "@/utils/time";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { DropdownMenu } from "@/components/DropdownMenu";
@@ -80,7 +83,7 @@ import {
   parseLocationPayload,
   staticMapImageUrl,
 } from "@/lib/locationMessage";
-import { loadEnterIsSend } from "@/lib/chatSettings";
+import { loadEnterIsSend, loadMediaVisibilityEnabled } from "@/lib/chatSettings";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { safeJsonParse } from "@/lib/safeJson";
 import { formatCallMessageLabel, parseCallMessageMeta } from "@/lib/callMessage";
@@ -92,7 +95,7 @@ import Svg, { Path } from "react-native-svg";
 
 const BASE_URL = getApiUrl();
 const { width: W } = Dimensions.get("window");
-const REACTION_EMOJIS = ["❤️", "👍", "😂", "😮", "😢", "🙏"];
+const REACTION_EMOJIS = ["â¤ï¸", "ðŸ‘", "ðŸ˜‚", "ðŸ˜®", "ðŸ˜¢", "ðŸ™"];
 const REPLY_SWIPE_ACTION_W = 56;
 
 type ChatListRow =
@@ -364,19 +367,29 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
     return s;
   }, [rate, applyRate, messageId]);
 
-  const ensureSound = useCallback(async (): Promise<Audio.Sound | null> => {
+  const ensureSound = useCallback(async (forceDownload = false): Promise<Audio.Sound | null> => {
     if (!playbackSource) return null;
 
-    const existing = soundRef.current;
-    if (existing) {
-      const st = await existing.getStatusAsync();
-      if (st.isLoaded) return existing;
+    if (!forceDownload) {
+      const existing = soundRef.current;
+      if (existing) {
+        const st = await existing.getStatusAsync();
+        if (st.isLoaded) return existing;
+        await disposeSoundRef();
+      }
+    } else {
       await disposeSoundRef();
     }
 
     await configureVoicePlaybackAudio();
 
     let source = playbackSource;
+    if (forceDownload) {
+      try {
+        source = await downloadPlayableAudioSource(source, sessionToken);
+      } catch { /* keep original source */ }
+    }
+
     try {
       const s = await loadSound(source);
       soundRef.current = s;
@@ -393,6 +406,49 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
     }
   }, [playbackSource, sessionToken, configureVoicePlaybackAudio, disposeSoundRef, loadSound]);
 
+  const startPlayback = useCallback(async (forceDownload: boolean): Promise<boolean> => {
+    let s = await ensureSound(forceDownload);
+    if (!s) return false;
+
+    let status = await s.getStatusAsync();
+    if (!status.isLoaded) {
+      await disposeSoundRef();
+      s = await ensureSound(true);
+      if (!s) return false;
+      status = await s.getStatusAsync();
+      if (!status.isLoaded) return false;
+    }
+
+    await claimVoicePlayback(messageId, async () => {
+      const active = soundRef.current;
+      if (active) {
+        try {
+          await active.pauseAsync();
+        } catch { /* ignore */ }
+      }
+      setPlaying(false);
+    });
+    await configureVoicePlaybackAudio();
+
+    const atEnd =
+      ended
+      || ((status.durationMillis ?? 0) > 0
+        && (status.positionMillis ?? 0) >= (status.durationMillis ?? 0) - 250);
+
+    if (atEnd) {
+      await playFromStart(s);
+    } else {
+      try {
+        await s.setVolumeAsync(1);
+      } catch { /* ignore */ }
+      await applyRate(s, rate);
+      await s.playAsync();
+      setPlaying(true);
+      setEnded(false);
+    }
+    return true;
+  }, [ensureSound, disposeSoundRef, messageId, configureVoicePlaybackAudio, ended, playFromStart, applyRate, rate]);
+
   const toggle = async () => {
     if (uriLoading) return;
     if (!playbackSource) {
@@ -401,55 +457,35 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
     }
     try {
       setPreparing(true);
-      let s = await ensureSound();
-      if (!s) return;
-
-      let status = await s.getStatusAsync();
-      if (!status.isLoaded) {
-        await disposeSoundRef();
-        s = await ensureSound();
-        if (!s) return;
-        status = await s.getStatusAsync();
-        if (!status.isLoaded) return;
-      }
 
       if (playing) {
-        await s.pauseAsync();
+        const s = soundRef.current;
+        if (s) await s.pauseAsync();
         setPlaying(false);
         releaseVoicePlayback(messageId);
-      } else {
-        await claimVoicePlayback(messageId, async () => {
-          const active = soundRef.current;
-          if (active) {
-            try {
-              await active.pauseAsync();
-            } catch { /* ignore */ }
-          }
-          setPlaying(false);
-        });
-        await configureVoicePlaybackAudio();
+        return;
+      }
 
-        const atEnd =
-          ended
-          || ((status.durationMillis ?? 0) > 0
-            && (status.positionMillis ?? 0) >= (status.durationMillis ?? 0) - 250);
+      const ok = await startPlayback(false);
+      if (ok) return;
 
-        if (atEnd) {
-          await playFromStart(s);
-        } else {
-          try {
-            await s.setVolumeAsync(1);
-          } catch { /* ignore */ }
-          await applyRate(s, rate);
-          await s.playAsync();
-          setPlaying(true);
-          setEnded(false);
-        }
+      // Silent one-time retry with a fresh local download before surfacing an error.
+      await unloadSound();
+      const retried = await startPlayback(true);
+      if (!retried) {
+        await unloadSound();
+        setPlaying(false);
+        Alert.alert("Voice message", "Could not play this voice note. Check your connection and try again.");
       }
     } catch {
+      try {
+        await unloadSound();
+        const retried = await startPlayback(true);
+        if (retried) return;
+      } catch { /* ignore */ }
       await unloadSound();
       setPlaying(false);
-      Alert.alert("Voice message", "Playback failed. Tap again to retry.");
+      Alert.alert("Voice message", "Could not play this voice note. Check your connection and try again.");
     } finally {
       setPreparing(false);
     }
@@ -630,7 +666,7 @@ function ViewOnceOpenedBubble({ kind }: { kind: "image" | "video" }) {
   );
 }
 
-/** Quoted reply bar — tap scrolls to original message (WhatsApp-style). */
+/** Quoted reply bar â€” tap scrolls to original message (WhatsApp-style). */
 function ReplyQuoteStrip({
   senderLabel,
   previewText,
@@ -836,7 +872,7 @@ function LocationMessageBubble({
   const subtitle =
     parsed?.stopped
       ? "Sharing ended"
-      : parsed?.label || (legacy ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : item.text.replace(/^📍[^\n]*\n?/, "").slice(0, 80));
+      : parsed?.label || (legacy ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : item.text.replace(/^ðŸ“[^\n]*\n?/, "").slice(0, 80));
 
   useEffect(() => {
     setMapFailed(false);
@@ -889,7 +925,7 @@ function LocationMessageBubble({
           <View style={{ flex: 1, marginLeft: 8 }}>
             <Text style={[styles.locationLiveSmall, { color: colors.mutedForeground }]}>Live until</Text>
             <Text style={[styles.locationLiveTime, { color: colors.foreground }]}>
-              {untilMs ? formatLiveUntil(untilMs) : "—"}
+              {untilMs ? formatLiveUntil(untilMs) : "â€”"}
             </Text>
           </View>
         </View>
@@ -925,12 +961,12 @@ export default function ChatScreen() {
     editMessage, reactToMessage, starMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
     loadMessages, forwardMessage, updateLocationOnServer, stopLiveLocationSession, setActiveChatId,
+    typingByChatId, reportRemoteTyping,
   } = useApp();
 
   const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
   const [initializing, setInitializing] = useState(rawId?.startsWith("new_") ?? false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [typingNames, setTypingNames] = useState<string[]>([]);
   const [peerPresence, setPeerPresence] = useState<PresenceView | null>(null);
 
   // Search
@@ -951,7 +987,7 @@ export default function ChatScreen() {
   const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
   const [forwardSearch, setForwardSearch] = useState("");
 
-  // Share contact — full-screen picker (Alert.alert only fits ~3 buttons on Android)
+  // Share contact â€” full-screen picker (Alert.alert only fits ~3 buttons on Android)
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [contactToConfirm, setContactToConfirm] = useState<ContactShareRow | null>(null);
   const [viewContactMsg, setViewContactMsg] = useState<Message | null>(null);
@@ -971,6 +1007,7 @@ export default function ChatScreen() {
   }, [chatId, sendAudioMessage]);
 
   const colors = useColors();
+  const { chatFontScale, chatWallpaperColor } = useUiPreferences();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const messagePollInFlightRef = useRef(false);
@@ -997,7 +1034,9 @@ export default function ChatScreen() {
     chatMetaRef.current = { peerId: c?.otherUserId, isGroup: !!c?.isGroup };
   }, [chatId, chats]);
 
-  // Poll messages every 4s + typing every 3s
+  const remoteTypingNames = chatId ? (typingByChatId[chatId] ?? []) : [];
+
+  // Poll messages every 4s + typing every 1.5s (auth + SSE backup)
   useFocusEffect(
     useCallback(() => {
       void loadEnterIsSend().then(setEnterIsSend);
@@ -1005,29 +1044,32 @@ export default function ChatScreen() {
       pendingScrollToEndRef.current = true;
       userScrolledUpRef.current = false;
       setActiveChatId(chatId);
+      const typingAuthHeaders: Record<string, string> = {};
+      if (user?.sessionToken) typingAuthHeaders.Authorization = `Bearer ${user.sessionToken}`;
+      const pollTyping = async () => {
+        if (!user?.dbId || typingPollInFlightRef.current) return;
+        typingPollInFlightRef.current = true;
+        try {
+          const res = await fetch(
+            `${BASE_URL}/api/chats/${chatId}/typing?userId=${user.dbId}`,
+            { headers: typingAuthHeaders },
+          );
+          const data = await res.json() as { typing?: string[] };
+          reportRemoteTyping(chatId, data.typing ?? []);
+        } catch {
+          /* ignore */
+        } finally {
+          typingPollInFlightRef.current = false;
+        }
+      };
       const pollMessages = () => {
         if (messagePollInFlightRef.current) return;
         messagePollInFlightRef.current = true;
         loadMessages(chatId).finally(() => { messagePollInFlightRef.current = false; });
       };
       const msgTimer = setInterval(pollMessages, 4000);
-      const typingTimer = setInterval(async () => {
-        if (!user?.dbId || typingPollInFlightRef.current) return;
-        typingPollInFlightRef.current = true;
-        try {
-          const res = await fetch(`${BASE_URL}/api/chats/${chatId}/typing?userId=${user.dbId}`);
-          const data = await res.json();
-          const nextTyping: string[] = data.typing ?? [];
-          setTypingNames((prev) =>
-            prev.length === nextTyping.length && prev.every((n, i) => n === nextTyping[i])
-              ? prev
-              : nextTyping,
-          );
-        } catch {
-        } finally {
-          typingPollInFlightRef.current = false;
-        }
-      }, 3000);
+      void pollTyping();
+      const typingTimer = setInterval(pollTyping, 1500);
       const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
       const loadPresence = async () => {
         if (!peerId || isGroupChat) {
@@ -1051,14 +1093,16 @@ export default function ChatScreen() {
 
       return () => {
         setActiveChatId(null);
+        clearTyping(chatId);
+        reportRemoteTyping(chatId, []);
         clearInterval(msgTimer);
         clearInterval(typingTimer);
         if (presenceTimer) clearInterval(presenceTimer);
       };
-    }, [chatId, user?.dbId, setActiveChatId, loadMessages])
+    }, [chatId, user?.dbId, user?.sessionToken, setActiveChatId, loadMessages, clearTyping, reportRemoteTyping])
   );
 
-  const webEnterSend = Platform.OS === "web" && enterIsSend;
+  const enterSendActive = enterIsSend;
 
   const chat = chats.find((c) => c.id === chatId);
   const allMessages = chat?.messages ?? [];
@@ -1110,14 +1154,16 @@ export default function ChatScreen() {
   }, [chats, chatId, forwardSearch]);
 
   const headerStatusText = useMemo(() => {
-    if (typingNames.length > 0) return "typing...";
+    if (remoteTypingNames.length > 0) {
+      return formatTypingLabel(remoteTypingNames, chat?.isGroup);
+    }
     if (chat?.isGroup) return `${chat.members?.length ?? ""} members`;
     if (initializing) return "connecting...";
     const fromPresence = formatPresenceSubtitle(peerPresence ?? undefined);
     if (fromPresence) return fromPresence;
     if (chat?.isOnline) return "online";
     return "";
-  }, [typingNames, chat?.isGroup, chat?.members?.length, chat?.isOnline, initializing, peerPresence]);
+  }, [remoteTypingNames, chat?.isGroup, chat?.members?.length, chat?.isOnline, initializing, peerPresence]);
 
   const [groupSendPermission, setGroupSendPermission] = useState<{ canSend: boolean; policy: string } | null>(null);
   const [blockState, setBlockState] = useState<{ iBlockedThem: boolean; theyBlockedMe: boolean }>({ iBlockedThem: false, theyBlockedMe: false });
@@ -1207,7 +1253,7 @@ export default function ChatScreen() {
   );
 
   const goToMediaCompose = useCallback((
-    picked: { uri: string; kind: "image" | "video" },
+    picked: { uri: string; kind: "image" | "video"; width?: number; height?: number },
     viewOnce: boolean,
   ) => {
     if (!chatId) return;
@@ -1251,7 +1297,7 @@ export default function ChatScreen() {
         setMediaPreview({
           uri: mediaUrl,
           type: "image",
-          caption: item.text && item.text !== "📷 Photo" && item.text !== "🔁 View once" ? item.text : undefined,
+          caption: item.text && item.text !== "ðŸ“· Photo" && item.text !== "ðŸ” View once" ? item.text : undefined,
         });
       }
     } catch (e) {
@@ -1668,6 +1714,14 @@ export default function ChatScreen() {
   }, [chatId, deleteMessage, sendDocumentMessage, user?.sessionToken]);
 
   const saveImageToGallery = useCallback(async (uri: string) => {
+    const allowGallery = await loadMediaVisibilityEnabled();
+    if (!allowGallery) {
+      Alert.alert(
+        "Media visibility is off",
+        "Turn on Media visibility in Settings → Chats to save photos to your phone gallery.",
+      );
+      return;
+    }
     const res = await saveImageUriToLibrary(uri, user?.sessionToken);
     if (res.ok) {
       Alert.alert("Saved", "Image saved to your gallery.");
@@ -1690,30 +1744,30 @@ export default function ChatScreen() {
     const isMe = msg.senderId === "me";
 
     const opts: any[] = [
-      { text: "↩ Reply", onPress: () => { setReplyTo(toReplyData(msg)); inputRef.current?.focus(); } },
-      { text: "📋 Copy", onPress: () => { Clipboard.setString(msg.text); } },
-      { text: "😊 React", onPress: () => setReactionTarget(msg) },
+      { text: "â†© Reply", onPress: () => { setReplyTo(toReplyData(msg)); inputRef.current?.focus(); } },
+      { text: "ðŸ“‹ Copy", onPress: () => { Clipboard.setString(msg.text); } },
+      { text: "ðŸ˜Š React", onPress: () => setReactionTarget(msg) },
       ...(msg.type === "image" && msg.mediaUrl && !msg.isViewOnce && Platform.OS !== "web"
-        ? [{ text: "💾 Save image", onPress: () => { void saveImageToGallery(msg.mediaUrl!); } }]
+        ? [{ text: "ðŸ’¾ Save image", onPress: () => { void saveImageToGallery(msg.mediaUrl!); } }]
         : []),
-      ...(!msg.isViewOnce ? [{ text: "↗ Forward to Videh chat", onPress: () => { setForwardSearch(""); setForwardMsg(msg); } }] : []),
-      { text: "⭐ Star", onPress: () => { if (chatId) starMessage(chatId, msg.id); } },
-      { text: "🌐 Translate", onPress: () => Alert.alert("Translate to:", "", [
-          { text: "हिंदी (Hindi)", onPress: () => translateMsg(msg, "hi") },
+      ...(!msg.isViewOnce ? [{ text: "â†— Forward to Videh chat", onPress: () => { setForwardSearch(""); setForwardMsg(msg); } }] : []),
+      { text: "â­ Star", onPress: () => { if (chatId) starMessage(chatId, msg.id); } },
+      { text: "ðŸŒ Translate", onPress: () => Alert.alert("Translate to:", "", [
+          { text: "à¤¹à¤¿à¤‚à¤¦à¥€ (Hindi)", onPress: () => translateMsg(msg, "hi") },
           { text: "English", onPress: () => translateMsg(msg, "en") },
-          { text: "বাংলা (Bengali)", onPress: () => translateMsg(msg, "bn") },
-          { text: "தமிழ் (Tamil)", onPress: () => translateMsg(msg, "ta") },
-          { text: "తెలుగు (Telugu)", onPress: () => translateMsg(msg, "te") },
-          { text: "मराठी (Marathi)", onPress: () => translateMsg(msg, "mr") },
+          { text: "à¦¬à¦¾à¦‚à¦²à¦¾ (Bengali)", onPress: () => translateMsg(msg, "bn") },
+          { text: "à®¤à®®à®¿à®´à¯ (Tamil)", onPress: () => translateMsg(msg, "ta") },
+          { text: "à°¤à±†à°²à±à°—à± (Telugu)", onPress: () => translateMsg(msg, "te") },
+          { text: "à¤®à¤°à¤¾à¤ à¥€ (Marathi)", onPress: () => translateMsg(msg, "mr") },
           { text: "Cancel", style: "cancel" },
         ]) },
     ];
     if (isMe) {
-      opts.push({ text: "ℹ️ Info", onPress: () => router.push({ pathname: "/chat/message-info", params: { chatId: chatId!, messageId: msg.id } }) });
-      opts.push({ text: "✏️ Edit", onPress: () => { setEditTarget(msg); setEditText(msg.text); inputRef.current?.focus(); } });
+      opts.push({ text: "â„¹ï¸ Info", onPress: () => router.push({ pathname: "/chat/message-info", params: { chatId: chatId!, messageId: msg.id } }) });
+      opts.push({ text: "âœï¸ Edit", onPress: () => { setEditTarget(msg); setEditText(msg.text); inputRef.current?.focus(); } });
     }
     opts.push({
-      text: "🗑 Delete",
+      text: "ðŸ—‘ Delete",
       style: "destructive" as const,
       onPress: () => setDeleteTarget(msg),
     });
@@ -1912,7 +1966,7 @@ export default function ChatScreen() {
                   setMediaPreview({
                     uri: item.mediaUrl,
                     type: "image",
-                    caption: item.text && item.text !== "📷 Photo" && item.text !== "🎥 Video" && item.text !== "🔁 View once"
+                    caption: item.text && item.text !== "ðŸ“· Photo" && item.text !== "ðŸŽ¥ Video" && item.text !== "ðŸ” View once"
                       ? item.text
                       : undefined,
                   });
@@ -1929,8 +1983,8 @@ export default function ChatScreen() {
                   <Text style={styles.viewOnceText}>GIF</Text>
                 </View>
               )}
-              {item.text && item.text !== "📷 Photo" && item.text !== "🎥 Video" && item.text !== "🔁 View once" && (
-                <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4 }]}>{item.text}</Text>
+              {item.text && item.text !== "ðŸ“· Photo" && item.text !== "ðŸŽ¥ Video" && item.text !== "ðŸ” View once" && (
+                <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{item.text}</Text>
               )}
             </>
           ) : isVideo && item.mediaUrl ? (
@@ -1953,8 +2007,8 @@ export default function ChatScreen() {
                   <Text style={styles.viewOnceText}>View once</Text>
                 </View>
               )}
-              {item.text && item.text !== "🎥 Video" && item.text !== "🔁 View once" && (
-                <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4 }]}>{item.text}</Text>
+              {item.text && item.text !== "ðŸŽ¥ Video" && item.text !== "ðŸ” View once" && (
+                <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{item.text}</Text>
               )}
             </>
           ) : isCall && callMeta ? (
@@ -2007,7 +2061,7 @@ export default function ChatScreen() {
             />
           ) : (
             <>
-              <MentionText text={item.text} style={[styles.msgText, { color: colors.foreground }]} />
+              <MentionText text={item.text} style={[styles.msgText, { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]} />
               {urls.length > 0 && (
                 <TouchableOpacity onPress={() => Linking.openURL(urls[0])} style={styles.linkPreview}>
                   <Ionicons name="link-outline" size={13} color={colors.primary} />
@@ -2016,14 +2070,14 @@ export default function ChatScreen() {
               )}
               {translatedMsgs[item.id] && (
                 <View style={styles.translatedBox}>
-                  <Text style={styles.translatedLabel}>🌐 Translated</Text>
-                  <Text style={[styles.msgText, { color: colors.foreground }]}>{translatedMsgs[item.id]}</Text>
+                  <Text style={styles.translatedLabel}>ðŸŒ Translated</Text>
+                  <Text style={[styles.msgText, { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{translatedMsgs[item.id]}</Text>
                 </View>
               )}
             </>
           )}
 
-          {/* Footer: time + edited + ticks (hidden for deleted — time sits on deleted row) */}
+          {/* Footer: time + edited + ticks (hidden for deleted â€” time sits on deleted row) */}
           {!isDeleted ? (
             <View style={[styles.msgMeta, (isImage || isVideo || isLocation) && styles.msgMetaOnMedia, isCall && styles.msgMetaCall]}>
               {item.isEdited && <Text style={[styles.editedLabel, { color: colors.mutedForeground }]}>edited </Text>}
@@ -2220,8 +2274,8 @@ export default function ChatScreen() {
         ...(wallpaper ? [{ text: "Remove wallpaper", style: "destructive" as const, onPress: removeWallpaper }] : []),
         { text: "Cancel", style: "cancel" as const },
       ]) },
-    { label: "Schedule Message ⏰", icon: "time-outline", onPress: () => chatId && router.push({ pathname: "/scheduled/[chatId]", params: { chatId, name: displayName } }) },
-    { label: "Khata 📒", icon: "cash-outline", onPress: () => chatId && router.push({ pathname: "/khata/[chatId]", params: { chatId, name: displayName } }) },
+    { label: "Schedule Message â°", icon: "time-outline", onPress: () => chatId && router.push({ pathname: "/scheduled/[chatId]", params: { chatId, name: displayName } }) },
+    { label: "Khata ðŸ“’", icon: "cash-outline", onPress: () => chatId && router.push({ pathname: "/khata/[chatId]", params: { chatId, name: displayName } }) },
     { label: "Mute notifications", icon: "notifications-off-outline", onPress: () => chatId && muteChat(chatId) },
     { label: "Search", icon: "search-outline", onPress: () => { clearSelection(); setSearching(true); setSearchQuery(""); } },
     ...(!chat?.isGroup && directContactId ? [
@@ -2257,8 +2311,212 @@ export default function ChatScreen() {
     router.push({ pathname: "/chat/message-info", params: { chatId, messageId: selectedMessage.id } });
   };
 
+  const inputBarBottomPad = Math.max(insets.bottom, Platform.OS === "web" ? 34 : 10);
+
+  const composerFooter = (
+    <>
+      {!selectionActive && mentionResults.length > 0 && mentionQuery !== null && (
+        <View style={[styles.mentionList, { backgroundColor: colors.card }]}>
+          {mentionResults.slice(0, 6).map((m) => {
+            const mInitials = m.name.slice(0, 2).toUpperCase();
+            const mHue = (m.name.charCodeAt(0) * 37) % 360;
+            return (
+              <TouchableOpacity
+                key={m.id}
+                style={[styles.mentionRow, { borderBottomColor: colors.border }]}
+                onPress={() => insertMention(m.name)}
+              >
+                <View style={[styles.mentionAvatar, { backgroundColor: `hsl(${mHue},50%,40%)` }]}>
+                  <Text style={styles.mentionAvatarText}>{mInitials}</Text>
+                </View>
+                <Text style={[styles.mentionName, { color: colors.foreground }]}>@{m.name}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      {!selectionActive && editTarget && (
+        <View style={[styles.editBanner, { backgroundColor: colors.card, borderLeftColor: colors.primary }]}>
+          <Ionicons name="pencil-outline" size={16} color={colors.primary} />
+          <View style={{ flex: 1, marginLeft: 8 }}>
+            <Text style={[styles.editBannerLabel, { color: colors.primary }]}>Editing message</Text>
+            <Text style={[styles.editBannerText, { color: colors.mutedForeground }]} numberOfLines={1}>{editTarget.text}</Text>
+          </View>
+          <TouchableOpacity onPress={() => { setEditTarget(null); setEditText(""); }}>
+            <Ionicons name="close" size={20} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {!selectionActive && replyTo && !editTarget && (
+        <View style={[styles.replyPreviewBar, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+          <Pressable
+            style={[styles.replyPreview, { borderLeftColor: "#00A884" }]}
+            onPress={() => scrollToQuotedMessage(replyTo.id)}
+          >
+            <View style={styles.replyPreviewTextCol}>
+              <Text style={[styles.replyPreviewLabel, { color: "#00A884" }]} numberOfLines={1}>
+                {replyQuoteSenderLabel({
+                  replyQuotedSenderId: replyTo.senderId === "me" ? String(user?.dbId ?? "") : replyTo.senderId,
+                  replySenderName: replyTo.senderName,
+                  viewerDbId: user?.dbId,
+                  chatContactName,
+                  isGroup: chat?.isGroup,
+                })}
+              </Text>
+              <Text style={[styles.replyPreviewText, { color: REPLY_PREVIEW_TEXT_COLOR }]} numberOfLines={2}>
+                {replyTo.text?.trim() || "Message"}
+              </Text>
+            </View>
+          </Pressable>
+          <TouchableOpacity onPress={() => setReplyTo(null)} style={styles.replyPreviewClose} hitSlop={12}>
+            <Ionicons name="close-circle" size={22} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe) && !editTarget && (
+        <View style={[styles.groupLockBanner, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+          <Ionicons name="ban-outline" size={18} color={colors.mutedForeground} />
+          <Text style={[styles.groupLockBannerText, { color: colors.foreground }]}>
+            {blockState.iBlockedThem
+              ? "You blocked this contact. Unblock to send messages or call."
+              : "You cannot message or call this contact."}
+          </Text>
+        </View>
+      )}
+
+      {chat?.isGroup && groupSendPermission && !groupSendPermission.canSend && !editTarget && (
+        <View style={[styles.groupLockBanner, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+          <Ionicons name="lock-closed-outline" size={18} color={colors.mutedForeground} />
+          <Text style={[styles.groupLockBannerText, { color: colors.foreground }]}>
+            {groupSendPermission.policy === "admins_only"
+              ? "Only admins can send messages here. Admins can change this in Group info."
+              : "You cannot send messages until a group admin allows you. Admins can change this in Group info."}
+          </Text>
+        </View>
+      )}
+
+      {!selectionActive && (
+        <View
+          style={[
+            styles.inputBar,
+            {
+              backgroundColor: colors.isDark ? colors.background : "#F0F2F5",
+              borderTopColor: colors.isDark ? colors.border : "rgba(0,0,0,0.06)",
+              paddingBottom: inputBarBottomPad,
+            },
+          ]}
+        >
+          {voiceRecPhase !== "locked" && (
+            <View style={styles.inputBarMain}>
+              {voiceRecPhase !== "holding" && (
+                <TouchableOpacity
+                  style={styles.inputIcon}
+                  onPress={toggleEmojiPanel}
+                  disabled={!composerEnabled || !!editTarget}
+                >
+                  <Ionicons
+                    name={emojiPanelOpen ? "happy" : "happy-outline"}
+                    size={24}
+                    color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"}
+                  />
+                </TouchableOpacity>
+              )}
+              {voiceRecPhase === "holding" ? (
+                <View style={styles.inputHoldingHint} />
+              ) : (
+                <TextInput
+                  ref={inputRef}
+                  style={[
+                    styles.inputField,
+                    {
+                      backgroundColor: colors.isDark ? colors.card : "#FFFFFF",
+                      color: colors.foreground,
+                      borderColor: colors.isDark ? colors.border : "rgba(0,0,0,0.06)",
+                    },
+                  ]}
+                  placeholder={editTarget ? "Edit message..." : "Message"}
+                  placeholderTextColor={colors.mutedForeground}
+                  value={inputVal}
+                  onChangeText={handleTextChange}
+                  onSelectionChange={(e) => setTextSelection(e.nativeEvent.selection)}
+                  multiline={!enterSendActive}
+                  blurOnSubmit={false}
+                  returnKeyType={enterSendActive ? "send" : "default"}
+                  onSubmitEditing={enterSendActive ? () => handleSend() : undefined}
+                  maxLength={2000}
+                  editable={composerEnabled}
+                  onFocus={() => {
+                    setEmojiPanelOpen(false);
+                    setAssistantChatInputFocused(true);
+                    if (chatId && inputVal.length > 0) setTyping(chatId);
+                  }}
+                  onBlur={() => {
+                    setAssistantChatInputFocused(false);
+                    if (chatId) {
+                      clearTyping(chatId);
+                      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+                    }
+                  }}
+                />
+              )}
+              {!inputVal.trim() && voiceRecPhase !== "holding" && (
+                <TouchableOpacity
+                  style={styles.inputIcon}
+                  onPress={showAttachMenu}
+                  disabled={!composerEnabled || !!editTarget}
+                >
+                  <Ionicons name="attach-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
+                </TouchableOpacity>
+              )}
+              {!inputVal.trim() && voiceRecPhase !== "holding" && (
+                <TouchableOpacity
+                  style={styles.inputIcon}
+                  onPress={showCameraOptions}
+                  disabled={!composerEnabled || !!editTarget}
+                >
+                  <Ionicons name="camera-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+          {inputVal.trim() && voiceRecPhase === "idle" ? (
+            <TouchableOpacity
+              style={[styles.sendBtn, { backgroundColor: colors.primary }, (!composerEnabled || initializing) && { opacity: 0.5 }]}
+              disabled={!composerEnabled || initializing}
+              onPress={handleSend}
+            >
+              <Ionicons name="send" size={18} color="#fff" />
+            </TouchableOpacity>
+          ) : (
+            <VidehVoiceMic
+              enabled={composerEnabled && !editTarget}
+              colors={colors}
+              onSend={handleVoiceNoteSend}
+              onPhaseChange={setVoiceRecPhase}
+              fullWidth={voiceRecPhase === "locked"}
+            />
+          )}
+        </View>
+      )}
+
+      <ChatEmojiPanel
+        visible={emojiPanelOpen && !selectionActive && voiceRecPhase === "idle"}
+        backgroundColor={colors.isDark ? colors.background : "#F0F2F5"}
+        borderColor={colors.isDark ? colors.border : "rgba(0,0,0,0.06)"}
+        mutedColor={colors.mutedForeground}
+        activeTabColor={colors.foreground}
+        onPickEmoji={insertEmoji}
+        onPickGif={handlePickGif}
+        onPickSticker={handlePickSticker}
+      />
+    </>
+  );
+
   return (
-    <View style={[styles.container, { backgroundColor: wallpaper ? "transparent" : colors.chatBackground }]}>
+    <View style={[styles.container, { backgroundColor: wallpaper ? "transparent" : (chatWallpaperColor ?? colors.chatBackground) }]}>
       {/* Wallpaper background */}
       {wallpaper && (
         <Image
@@ -2366,7 +2624,7 @@ export default function ChatScreen() {
             onPress={() => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } })}
           >
             <Text style={styles.headerName} numberOfLines={1}>{displayName}</Text>
-            <Text style={[styles.headerStatus, typingNames.length > 0 && { color: "#a7f3d0" }]}>
+            <Text style={[styles.headerStatus, remoteTypingNames.length > 0 && { color: "#a7f3d0" }]}>
               {headerStatusText}
             </Text>
           </TouchableOpacity>
@@ -2423,15 +2681,22 @@ export default function ChatScreen() {
         </View>
       )}
 
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={0}
-      >
+      <View style={styles.chatBody}>
         <FlatList
+          style={styles.messageList}
           ref={listRef}
           data={listRows}
-          extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}`}
+          extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}`}
+          ListFooterComponent={
+            !searching && remoteTypingNames.length > 0 ? (
+              <TypingIndicator
+                bubbleColor={colors.chatBubbleReceived}
+                dotColor={colors.mutedForeground}
+                textColor={colors.mutedForeground}
+                label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
+              />
+            ) : null
+          }
           keyExtractor={(row) => {
             if (row.rowType === "date") return row.id;
             const m = row.message;
@@ -2484,209 +2749,15 @@ export default function ChatScreen() {
           }
         />
 
-        {/* @Mention autocomplete */}
-        {!selectionActive && mentionResults.length > 0 && mentionQuery !== null && (
-          <View style={[styles.mentionList, { backgroundColor: colors.card }]}>
-            {mentionResults.slice(0, 6).map((m) => {
-              const mInitials = m.name.slice(0, 2).toUpperCase();
-              const mHue = (m.name.charCodeAt(0) * 37) % 360;
-              return (
-                <TouchableOpacity
-                  key={m.id}
-                  style={[styles.mentionRow, { borderBottomColor: colors.border }]}
-                  onPress={() => insertMention(m.name)}
-                >
-                  <View style={[styles.mentionAvatar, { backgroundColor: `hsl(${mHue},50%,40%)` }]}>
-                    <Text style={styles.mentionAvatarText}>{mInitials}</Text>
-                  </View>
-                  <Text style={[styles.mentionName, { color: colors.foreground }]}>@{m.name}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+        {Platform.OS === "ios" ? (
+          <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>{composerFooter}</KeyboardStickyView>
+        ) : (
+          composerFooter
         )}
+      </View>
 
-        {/* Edit mode banner */}
-        {!selectionActive && editTarget && (
-          <View style={[styles.editBanner, { backgroundColor: colors.card, borderLeftColor: colors.primary }]}>
-            <Ionicons name="pencil-outline" size={16} color={colors.primary} />
-            <View style={{ flex: 1, marginLeft: 8 }}>
-              <Text style={[styles.editBannerLabel, { color: colors.primary }]}>Editing message</Text>
-              <Text style={[styles.editBannerText, { color: colors.mutedForeground }]} numberOfLines={1}>{editTarget.text}</Text>
-            </View>
-            <TouchableOpacity onPress={() => { setEditTarget(null); setEditText(""); }}>
-              <Ionicons name="close" size={20} color={colors.mutedForeground} />
-            </TouchableOpacity>
-          </View>
-        )}
 
-        {/* Reply preview */}
-        {!selectionActive && replyTo && !editTarget && (
-          <View style={[styles.replyPreviewBar, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
-            <Pressable
-              style={[styles.replyPreview, { borderLeftColor: "#00A884" }]}
-              onPress={() => scrollToQuotedMessage(replyTo.id)}
-            >
-              <View style={styles.replyPreviewTextCol}>
-                <Text style={[styles.replyPreviewLabel, { color: "#00A884" }]} numberOfLines={1}>
-                  {replyQuoteSenderLabel({
-                    replyQuotedSenderId: replyTo.senderId === "me" ? String(user?.dbId ?? "") : replyTo.senderId,
-                    replySenderName: replyTo.senderName,
-                    viewerDbId: user?.dbId,
-                    chatContactName,
-                    isGroup: chat?.isGroup,
-                  })}
-                </Text>
-                <Text
-                  style={[styles.replyPreviewText, { color: REPLY_PREVIEW_TEXT_COLOR }]}
-                  numberOfLines={2}
-                >
-                  {replyTo.text?.trim() || "Message"}
-                </Text>
-              </View>
-            </Pressable>
-            <TouchableOpacity onPress={() => setReplyTo(null)} style={styles.replyPreviewClose} hitSlop={12}>
-              <Ionicons name="close-circle" size={22} color={colors.mutedForeground} />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe) && !editTarget && (
-          <View style={[styles.groupLockBanner, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
-            <Ionicons name="ban-outline" size={18} color={colors.mutedForeground} />
-            <Text style={[styles.groupLockBannerText, { color: colors.foreground }]}>
-              {blockState.iBlockedThem
-                ? "You blocked this contact. Unblock to send messages or call."
-                : "You cannot message or call this contact."}
-            </Text>
-          </View>
-        )}
-
-        {chat?.isGroup && groupSendPermission && !groupSendPermission.canSend && !editTarget && (
-          <View style={[styles.groupLockBanner, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
-            <Ionicons name="lock-closed-outline" size={18} color={colors.mutedForeground} />
-            <Text style={[styles.groupLockBannerText, { color: colors.foreground }]}>
-              {groupSendPermission.policy === "admins_only"
-                ? "Only admins can send messages here. Admins can change this in Group info."
-                : "You cannot send messages until a group admin allows you. Admins can change this in Group info."}
-            </Text>
-          </View>
-        )}
-
-        {/* Input bar */}
-        {!selectionActive && (
-          <View
-            style={[
-              styles.inputBar,
-              {
-                backgroundColor: colors.isDark ? colors.background : "#F0F2F5",
-                borderTopColor: colors.isDark ? colors.border : "rgba(0,0,0,0.06)",
-                paddingBottom: Math.max(insets.bottom, Platform.OS === "web" ? 34 : 10),
-              },
-            ]}
-          >
-            {voiceRecPhase !== "locked" && (
-              <View style={styles.inputBarMain}>
-                {voiceRecPhase !== "holding" && (
-                  <TouchableOpacity
-                    style={styles.inputIcon}
-                    onPress={toggleEmojiPanel}
-                    disabled={!composerEnabled || !!editTarget}
-                  >
-                    <Ionicons
-                      name={emojiPanelOpen ? "happy" : "happy-outline"}
-                      size={24}
-                      color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"}
-                    />
-                  </TouchableOpacity>
-                )}
-                {voiceRecPhase === "holding" ? (
-                  <View style={styles.inputHoldingHint}>
-                    <Text style={{ textAlign: "center", color: colors.mutedForeground, fontFamily: "Inter_500Medium" }}>
-                      Recording… slide left to cancel, up to lock
-                    </Text>
-                  </View>
-                ) : (
-                  <TextInput
-                    ref={inputRef}
-                    style={[
-                      styles.inputField,
-                      {
-                        backgroundColor: colors.isDark ? colors.card : "#FFFFFF",
-                        color: colors.foreground,
-                        borderColor: colors.isDark ? colors.border : "rgba(0,0,0,0.06)",
-                      },
-                    ]}
-                    placeholder={editTarget ? "Edit message..." : "Message"}
-                    placeholderTextColor={colors.mutedForeground}
-                    value={inputVal}
-                    onChangeText={handleTextChange}
-                    onSelectionChange={(e) => setTextSelection(e.nativeEvent.selection)}
-                    multiline={!webEnterSend}
-                    blurOnSubmit={webEnterSend}
-                    onSubmitEditing={webEnterSend ? () => handleSend() : undefined}
-                    maxLength={2000}
-                    editable={composerEnabled}
-                    onFocus={() => {
-                      setEmojiPanelOpen(false);
-                      setAssistantChatInputFocused(true);
-                    }}
-                    onBlur={() => setAssistantChatInputFocused(false)}
-                  />
-                )}
-                {!inputVal.trim() && voiceRecPhase !== "holding" && (
-                  <TouchableOpacity
-                    style={styles.inputIcon}
-                    onPress={showAttachMenu}
-                    disabled={!composerEnabled || !!editTarget}
-                  >
-                    <Ionicons name="attach-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
-                  </TouchableOpacity>
-                )}
-                {!inputVal.trim() && voiceRecPhase !== "holding" && (
-                  <TouchableOpacity
-                    style={styles.inputIcon}
-                    onPress={showCameraOptions}
-                    disabled={!composerEnabled || !!editTarget}
-                  >
-                    <Ionicons name="camera-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
-            {inputVal.trim() && voiceRecPhase === "idle" ? (
-              <TouchableOpacity
-                style={[styles.sendBtn, { backgroundColor: colors.primary }, (!composerEnabled || initializing) && { opacity: 0.5 }]}
-                disabled={!composerEnabled || initializing}
-                onPress={handleSend}
-              >
-                <Ionicons name="send" size={18} color="#fff" />
-              </TouchableOpacity>
-            ) : (
-              <VidehVoiceMic
-                enabled={composerEnabled && !editTarget}
-                colors={colors}
-                onSend={handleVoiceNoteSend}
-                onPhaseChange={setVoiceRecPhase}
-                fullWidth={voiceRecPhase === "locked"}
-              />
-            )}
-          </View>
-        )}
-
-        <ChatEmojiPanel
-          visible={emojiPanelOpen && !selectionActive && voiceRecPhase === "idle"}
-          backgroundColor={colors.isDark ? colors.background : "#F0F2F5"}
-          borderColor={colors.isDark ? colors.border : "rgba(0,0,0,0.06)"}
-          mutedColor={colors.mutedForeground}
-          activeTabColor={colors.foreground}
-          onPickEmoji={insertEmoji}
-          onPickGif={handlePickGif}
-          onPickSticker={handlePickSticker}
-        />
-      </KeyboardAvoidingView>
-
-      {/* Attach menu — Videh-style bottom sheet (coloured circles + grid) */}
+      {/* Attach menu â€” Videh-style bottom sheet (coloured circles + grid) */}
       <Modal visible={cameraSheetOpen} transparent animationType="fade" onRequestClose={() => setCameraSheetOpen(false)}>
         <View style={styles.attachModalRoot}>
           <Pressable style={styles.attachBackdrop} onPress={() => setCameraSheetOpen(false)} />
@@ -2902,7 +2973,7 @@ export default function ChatScreen() {
         </View>
       </DismissibleModal>
 
-      {/* Delete modal — centered card (Videh-style), not bottom sheet */}
+      {/* Delete modal â€” centered card (Videh-style), not bottom sheet */}
       <Modal visible={!!deleteTarget} transparent animationType="fade" onRequestClose={() => setDeleteTarget(null)}>
         <View style={styles.deleteModalRoot}>
           <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setDeleteTarget(null)} />
@@ -3081,6 +3152,8 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  chatBody: { flex: 1 },
+  messageList: { flex: 1 },
   // @mention autocomplete
   mentionList: { borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)", maxHeight: 220, elevation: 4, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4 },
   mentionRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, gap: 12, borderBottomWidth: 0.5 },

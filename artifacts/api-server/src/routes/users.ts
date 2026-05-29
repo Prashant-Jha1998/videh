@@ -12,6 +12,15 @@ import {
   type LastSeenPrivacy,
   type OnlinePrivacy,
 } from "../lib/presencePrivacy";
+import {
+  canSeeUserField,
+  disappearLabel,
+  ensureExtendedPrivacyColumns,
+  fieldPrivacyLabel,
+  getExtendedPrivacy,
+  labelToFieldPrivacy,
+  type FieldPrivacy,
+} from "../lib/userPrivacySettings";
 
 const router = Router();
 
@@ -72,8 +81,10 @@ router.get("/:id/privacy", async (req: Request, res: Response) => {
   if (!assertSameUser(req, res, req.params.id)) return;
   try {
     await ensurePrivacyColumns();
+    await ensureExtendedPrivacyColumns();
     const privacy = await getUserPrivacy(Number(req.params.id));
-    if (!privacy) { res.status(404).json({ success: false }); return; }
+    const extended = await getExtendedPrivacy(Number(req.params.id));
+    if (!privacy || !extended) { res.status(404).json({ success: false }); return; }
     const labels = privacyLabels(privacy.last_seen_privacy, privacy.online_privacy);
     res.json({
       success: true,
@@ -82,6 +93,18 @@ router.get("/:id/privacy", async (req: Request, res: Response) => {
       lastSeenExceptIds: privacy.last_seen_except_ids,
       lastSeenLabel: labels.lastSeenLabel,
       onlineLabel: labels.onlineLabel,
+      profilePhotoPrivacy: extended.profile_photo_privacy,
+      profilePhotoLabel: fieldPrivacyLabel(extended.profile_photo_privacy),
+      aboutPrivacy: extended.about_privacy,
+      aboutLabel: fieldPrivacyLabel(extended.about_privacy),
+      statusPrivacy: extended.status_privacy,
+      statusLabel: fieldPrivacyLabel(extended.status_privacy),
+      groupsPrivacy: extended.groups_privacy,
+      groupsLabel: fieldPrivacyLabel(extended.groups_privacy),
+      readReceiptsEnabled: extended.read_receipts_enabled,
+      defaultDisappearSeconds: extended.default_disappear_seconds,
+      disappearLabel: disappearLabel(extended.default_disappear_seconds),
+      silenceUnknownCallers: extended.silence_unknown_callers,
     });
   } catch (err) {
     req.log.error({ err }, "get privacy");
@@ -95,19 +118,68 @@ router.patch("/:id/privacy", async (req: Request, res: Response) => {
     lastSeenPrivacy?: LastSeenPrivacy;
     onlinePrivacy?: OnlinePrivacy;
     lastSeenExceptIds?: number[];
+    profilePhotoPrivacy?: FieldPrivacy;
+    aboutPrivacy?: FieldPrivacy;
+    statusPrivacy?: FieldPrivacy;
+    groupsPrivacy?: FieldPrivacy;
+    readReceiptsEnabled?: boolean;
+    defaultDisappearSeconds?: number | null;
+    silenceUnknownCallers?: boolean;
   };
   try {
     await ensurePrivacyColumns();
+    await ensureExtendedPrivacyColumns();
     const current = await getUserPrivacy(Number(req.params.id));
-    if (!current) { res.status(404).json({ success: false }); return; }
+    const extended = await getExtendedPrivacy(Number(req.params.id));
+    if (!current || !extended) { res.status(404).json({ success: false }); return; }
     const lastSeen = body.lastSeenPrivacy ?? current.last_seen_privacy;
     const online = body.onlinePrivacy ?? current.online_privacy;
     const exceptIds = Array.isArray(body.lastSeenExceptIds)
       ? body.lastSeenExceptIds.map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0)
       : current.last_seen_except_ids;
+    const profilePhoto = body.profilePhotoPrivacy ?? extended.profile_photo_privacy;
+    const about = body.aboutPrivacy ?? extended.about_privacy;
+    const status = body.statusPrivacy ?? extended.status_privacy;
+    const groups = body.groupsPrivacy ?? extended.groups_privacy;
+    const readReceipts =
+      typeof body.readReceiptsEnabled === "boolean"
+        ? body.readReceiptsEnabled
+        : extended.read_receipts_enabled;
+    const disappearSeconds =
+      body.defaultDisappearSeconds !== undefined
+        ? body.defaultDisappearSeconds
+        : extended.default_disappear_seconds;
+    const silenceUnknown =
+      typeof body.silenceUnknownCallers === "boolean"
+        ? body.silenceUnknownCallers
+        : extended.silence_unknown_callers;
     await query(
-      `UPDATE users SET last_seen_privacy = $1, online_privacy = $2, last_seen_except_ids = $3::jsonb, updated_at = NOW() WHERE id = $4`,
-      [lastSeen, online, JSON.stringify(exceptIds), req.params.id],
+      `UPDATE users SET
+        last_seen_privacy = $1,
+        online_privacy = $2,
+        last_seen_except_ids = $3::jsonb,
+        profile_photo_privacy = $4,
+        about_privacy = $5,
+        status_privacy = $6,
+        groups_privacy = $7,
+        read_receipts_enabled = $8,
+        default_disappear_seconds = $9,
+        silence_unknown_callers = $10,
+        updated_at = NOW()
+       WHERE id = $11`,
+      [
+        lastSeen,
+        online,
+        JSON.stringify(exceptIds),
+        profilePhoto,
+        about,
+        status,
+        groups,
+        readReceipts,
+        disappearSeconds,
+        silenceUnknown,
+        req.params.id,
+      ],
     );
     const labels = privacyLabels(lastSeen, online);
     res.json({
@@ -117,6 +189,18 @@ router.patch("/:id/privacy", async (req: Request, res: Response) => {
       lastSeenExceptIds: exceptIds,
       lastSeenLabel: labels.lastSeenLabel,
       onlineLabel: labels.onlineLabel,
+      profilePhotoPrivacy: profilePhoto,
+      profilePhotoLabel: fieldPrivacyLabel(profilePhoto),
+      aboutPrivacy: about,
+      aboutLabel: fieldPrivacyLabel(about),
+      statusPrivacy: status,
+      statusLabel: fieldPrivacyLabel(status),
+      groupsPrivacy: groups,
+      groupsLabel: fieldPrivacyLabel(groups),
+      readReceiptsEnabled: readReceipts,
+      defaultDisappearSeconds: disappearSeconds,
+      disappearLabel: disappearLabel(disappearSeconds),
+      silenceUnknownCallers: silenceUnknown,
     });
   } catch (err) {
     req.log.error({ err }, "patch privacy");
@@ -147,11 +231,18 @@ router.get("/:id", async (req: Request, res: Response) => {
     const viewerId = getAuthUserId(req);
     let user = result.rows[0];
     if (viewerId && viewerId !== Number(req.params.id)) {
-      const presence = await getPresenceForViewer(viewerId, Number(req.params.id));
+      const targetId = Number(req.params.id);
+      const [presence, seePhoto, seeAbout] = await Promise.all([
+        getPresenceForViewer(viewerId, targetId),
+        canSeeUserField(viewerId, targetId, "profile_photo_privacy"),
+        canSeeUserField(viewerId, targetId, "about_privacy"),
+      ]);
       user = {
         ...user,
         is_online: presence.canSee ? presence.isOnline : false,
         last_seen: presence.canSee ? presence.lastSeen : null,
+        avatar_url: seePhoto ? user.avatar_url : null,
+        about: seeAbout ? user.about : null,
       };
     }
     res.json({ success: true, user });

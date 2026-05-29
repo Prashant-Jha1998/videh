@@ -1,6 +1,7 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import type { IncomingCallInfo } from "@/components/IncomingCallOverlay";
+import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
 import {
   NOTIFICATION_ACTION_ACCEPT_CALL,
   NOTIFICATION_ACTION_DECLINE_CALL,
@@ -36,6 +37,8 @@ export async function showIncomingCallNotification(call: IncomingCallNotificatio
         channel: call.channel,
         callerName: call.callerName,
         kind: "call",
+        notificationKind: "incoming_call",
+        deepLink: `videh://call/${call.chatId}?callId=${encodeURIComponent(call.callId)}&incoming=1&ringing=1&type=${call.type}&name=${encodeURIComponent(call.callerName)}&channel=${encodeURIComponent(call.channel)}`,
       },
     },
     trigger: null,
@@ -46,9 +49,10 @@ export async function showIncomingCallNotification(call: IncomingCallNotificatio
       : {}),
   });
 
-  // Rely on notification tap / AppState listener — auto deep-link while backgrounded
-  // caused activity conflicts and random crashes on some Android devices.
+  // Full-screen call UI is opened from _layout when the app wakes (lock screen / background).
 }
+
+export { INCOMING_RING_TIMEOUT_MS };
 
 export async function dismissIncomingCallNotification(callId: string): Promise<void> {
   if (Platform.OS === "web") return;

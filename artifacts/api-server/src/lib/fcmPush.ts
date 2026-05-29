@@ -3,6 +3,7 @@ import admin from "firebase-admin";
 import {
   EXPO_ANDROID_CALLS_CHANNEL_ID,
   EXPO_ANDROID_CHANNEL_ID,
+  EXPO_CHAT_MESSAGE_CATEGORY_ID,
 } from "./expoPush";
 
 let initAttempted = false;
@@ -65,7 +66,12 @@ export async function sendFcmChatPush(
   title: string,
   body: string,
   data: Record<string, unknown>,
-  options?: { isCall?: boolean },
+  options?: {
+    isCall?: boolean;
+    categoryId?: string;
+    imageUrl?: string;
+    threadId?: string;
+  },
 ): Promise<void> {
   const messaging = getMessaging();
   if (!messaging) return;
@@ -74,7 +80,12 @@ export async function sendFcmChatPush(
   if (tokens.length === 0) return;
 
   const channelId = options?.isCall ? EXPO_ANDROID_CALLS_CHANNEL_ID : EXPO_ANDROID_CHANNEL_ID;
-  const dataPayload = stringifyData(data);
+  const categoryId = options?.categoryId ?? (options?.isCall ? undefined : EXPO_CHAT_MESSAGE_CATEGORY_ID);
+  const dataPayload = stringifyData({
+    ...data,
+    ...(categoryId ? { categoryId } : {}),
+  });
+  const chatTag = options?.threadId?.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
 
   try {
     const res = await messaging.sendEachForMulticast({
@@ -83,18 +94,24 @@ export async function sendFcmChatPush(
       data: dataPayload,
       android: {
         priority: "high",
+        ...(options?.isCall ? { ttl: 45_000 } : {}),
         notification: {
           channelId,
           sound: "default",
           priority: "high" as const,
+          ...(options?.imageUrl ? { imageUrl: options.imageUrl } : {}),
           ...(options?.isCall
             ? {
                 visibility: "public" as const,
                 defaultSound: true,
                 defaultVibrateTimings: true,
                 tag: "videh_incoming_call",
+                sticky: true,
               }
-            : {}),
+            : {
+                visibility: "public" as const,
+                ...(chatTag ? { tag: chatTag } : {}),
+              }),
         },
       },
       apns: {

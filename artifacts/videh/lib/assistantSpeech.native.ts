@@ -12,6 +12,10 @@ import {
   toSpeechLocale,
   type AssistantLangCode,
 } from "./assistantLanguages";
+import {
+  formatSpeechRecognitionError,
+  resolveAndroidRecognitionServicePackage,
+} from "./androidSpeechService";
 import { WAKE_CONTEXT_STRINGS } from "./assistantWake";
 
 type Listener = { remove: () => void };
@@ -100,7 +104,8 @@ export async function startListening(opts: ListenOpts): Promise<void> {
     else opts.onPartial?.(text);
   });
   errorListener = ExpoSpeechRecognitionModule.addListener("error", (event) => {
-    opts.onError?.(event.message ?? event.error ?? "Speech error");
+    const raw = event.message ?? event.error ?? "Speech error";
+    opts.onError?.(formatSpeechRecognitionError(raw));
   });
   endListener = ExpoSpeechRecognitionModule.addListener("end", () => {
     opts.onEnd?.();
@@ -113,6 +118,8 @@ export async function startListening(opts: ListenOpts): Promise<void> {
   );
 
   const wakeLang = toRecognitionLocale(code);
+  const androidService =
+    Platform.OS === "android" ? resolveAndroidRecognitionServicePackage() : undefined;
   try {
     ExpoSpeechRecognitionModule.start({
       lang: opts.wakeMode ? wakeLang : toRecognitionLocale(code),
@@ -121,7 +128,7 @@ export async function startListening(opts: ListenOpts): Promise<void> {
       maxAlternatives: 1,
       contextualStrings: opts.wakeMode ? WAKE_CONTEXT_STRINGS : undefined,
       iosTaskHint: opts.wakeMode ? "dictation" : "unspecified",
-      androidRecognitionServicePackage: "com.google.android.googlequicksearchbox",
+      ...(androidService ? { androidRecognitionServicePackage: androidService } : {}),
       androidIntentOptions: {
         EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 3500 : 1400,
         EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 2000 : 900,

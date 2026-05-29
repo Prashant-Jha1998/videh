@@ -20,6 +20,7 @@ import {
 } from "@/lib/callRingtone";
 import { addUsersToOngoingCall } from "@/lib/callParticipants";
 import { webrtcFetch } from "@/lib/webrtcApi";
+import { wakeScreenForIncomingCall } from "@/lib/inCallAudio";
 
 export type CallSession = {
   chatId: string;
@@ -171,6 +172,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [router]);
 
   const presentIncomingCall = useCallback((callInfo: IncomingCallInfo) => {
+    wakeScreenForIncomingCall();
     const next: CallSession = {
       chatId: String(callInfo.chatId),
       contactName: callInfo.callerName,
@@ -433,14 +435,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (session.ringing) {
       return session.isVideo ? "Incoming video call" : "Incoming voice call";
     }
-    if (call.error) {
-      return call.error === "NATIVE_WEBRTC_UNAVAILABLE" ? "Connecting..." : `Error: ${call.error}`;
-    }
     if (call.joined) {
       if (call.remoteCount > 0) return formatDuration(duration);
       if (call.connectionPhase === "reconnecting") return "Reconnecting…";
       if (acceptedCount > 1) return "Connecting participants...";
       return "Waiting for other party...";
+    }
+    if (call.error) {
+      return call.error === "NATIVE_WEBRTC_UNAVAILABLE" ? "Connecting..." : `Error: ${call.error}`;
     }
     if (statusHint) return statusHint;
     if (session.isIncoming) return session.isVideo ? "Incoming video call" : "Incoming voice call";

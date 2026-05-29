@@ -198,6 +198,7 @@ interface AppContextType {
   createDirectChat: (otherUserId: number, otherName: string, otherAvatar?: string) => Promise<string>;
   loadMessages: (chatId: string) => Promise<void>;
   refreshChats: () => Promise<void>;
+  clearAllChatHistory: () => Promise<void>;
   sendImageMessage: (chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean, mediaKind?: "image" | "video") => void;
   sendPreparedMediaMessage: (
     chatId: string,
@@ -228,6 +229,9 @@ interface AppContextType {
   stopLiveLocationSession: () => void;
   setActiveChatId: (chatId: string | null) => void;
   refreshCallLogs: () => Promise<void>;
+  /** Who is typing per chat (names), updated via API poll + realtime. */
+  typingByChatId: Record<string, string[]>;
+  reportRemoteTyping: (chatId: string, names: string[]) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -241,12 +245,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [statuses, setStatuses] = useState<Status[]>([]);
   const [contacts] = useState<Contact[]>([]);
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
+  const [typingByChatId, setTypingByChatId] = useState<Record<string, string[]>>({});
   const userRef = useRef<UserProfile | null>(null);
   userRef.current = user;
   const refreshInFlightRef = useRef({ chats: false, statuses: false, calls: false });
   const liveLocationTickingRef = useRef(false);
   const activeChatIdRef = useRef<string | null>(null);
-
+  const clearedHistoryAtRef = useRef<number>(0);
   const formatLastMessagePreview = (lastMsg: {
     is_deleted?: boolean;
     type?: string;
@@ -271,8 +276,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const { contactChatPreview } = require("@/lib/contactMessage") as typeof import("@/lib/contactMessage");
       return contactChatPreview(content);
     }
+    if (type === "location") {
+      const { parseLocationPayload } = require("@/lib/locationMessage") as typeof import("@/lib/locationMessage");
+      const loc = parseLocationPayload(content);
+      const isLive = loc?.mode === "live" && !loc?.stopped;
+      const label = loc?.label?.trim();
+      const base = isLive ? "📍 Live location" : "📍 Location";
+      return label ? `${base} · ${label}` : base;
+    }
     return content || undefined;
   };
+
+  /** Chat-list preview for a locally-held Message (handles location/media/etc). */
+  const messagePreviewText = (m: { type?: string; text?: string } | null | undefined): string | undefined =>
+    formatLastMessagePreview(
+      m ? { type: m.type, content: m.text, is_deleted: m.type === "deleted" } : null,
+    );
 
   const mapDbChats = (rows: any[]): Chat[] =>
     rows.map((c: any) => {
@@ -479,6 +498,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             loadChats(parsed.dbId);
             loadCallLogs(parsed.dbId);
             loadStatuses(parsed.dbId);
+            void import("@/lib/privacySettings").then(({ fetchPrivacySettings, cachePrivacyFlags }) =>
+              fetchPrivacySettings(parsed.dbId!, parsed.sessionToken).then((s) => {
+                if (s) void cachePrivacyFlags(s);
+              }),
+            );
             if (Platform.OS !== "web") {
               registerPushTokenWithServer(parsed.dbId).catch(() => {});
             }
@@ -532,6 +556,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       loadChats(u.dbId);
       loadCallLogs(u.dbId);
       loadStatuses(u.dbId);
+      void import("@/lib/privacySettings").then(({ fetchPrivacySettings, cachePrivacyFlags }) =>
+        fetchPrivacySettings(u.dbId!, u.sessionToken).then((s) => {
+          if (s) void cachePrivacyFlags(s);
+        }),
+      );
       api(`/users/${u.dbId}/online`, { method: "POST" }).catch(() => {});
       try {
         await api(`/users/${u.dbId}`, {
@@ -552,6 +581,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const u = userRef.current;
     if (u?.dbId) await loadChats(u.dbId);
   }, [loadChats]);
+
+  useEffect(() => {
+    void AsyncStorage.getItem("chatHistoryClearedAt").then((v) => {
+      const n = v ? Number(v) : 0;
+      if (Number.isFinite(n)) clearedHistoryAtRef.current = n;
+    });
+  }, []);
+
+  /** WhatsApp-style "clear all chats": hides existing message history on this device. */
+  const clearAllChatHistory = useCallback(async () => {
+    const now = Date.now();
+    clearedHistoryAtRef.current = now;
+    await AsyncStorage.setItem("chatHistoryClearedAt", String(now));
+    setChats((prev) =>
+      prev.map((c) => ({ ...c, messages: [], lastMessage: undefined, unreadCount: 0 })),
+    );
+  }, []);
 
   const updateAvatar = useCallback(async (base64: string, mimeType = "image/jpeg") => {
     const u = userRef.current;
@@ -641,7 +687,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const data = await api(`/chats/${chatId}/messages?limit=80&userId=${u?.dbId ?? 0}`) as { success: boolean; messages: any[] };
       if (!data.success || !data.messages) return;
 
-      const msgs: Message[] = data.messages.map((m: any) => {
+      const clearedAt = clearedHistoryAtRef.current;
+      const rawMessages = clearedAt > 0
+        ? data.messages.filter((m: any) => new Date(m.created_at).getTime() > clearedAt)
+        : data.messages;
+
+      const msgs: Message[] = rawMessages.map((m: any) => {
         const isMe = String(m.sender_id) === String(u?.dbId);
         // Determine tick status: sent by me → check delivery_status from DB
         let status: "sent" | "delivered" | "read" = "sent";
@@ -796,6 +847,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     eventSource?.addEventListener("message", onChatEvent as () => void);
+    eventSource?.addEventListener("typing", (ev?: { data?: string }) => {
+      try {
+        const raw = ev?.data;
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as {
+          chatId?: string | number;
+          payload?: { active?: boolean; name?: string; userId?: number };
+        };
+        const cid = parsed.chatId != null ? String(parsed.chatId) : null;
+        const name = parsed.payload?.name?.trim();
+        if (!cid || !name) return;
+        const myId = userRef.current?.dbId;
+        if (myId != null && Number(parsed.payload?.userId) === myId) return;
+        setTypingByChatId((prev) => {
+          const list = [...(prev[cid] ?? [])];
+          if (parsed.payload?.active === false) {
+            const next = list.filter((n) => n !== name);
+            if (next.length === 0) {
+              const { [cid]: _, ...rest } = prev;
+              return rest;
+            }
+            return { ...prev, [cid]: next };
+          }
+          if (list.includes(name)) return prev;
+          return { ...prev, [cid]: [...list, name] };
+        });
+      } catch {
+        /* ignore */
+      }
+    });
     eventSource?.addEventListener("call", (ev?: { data?: string }) => {
       runCalls();
       try {
@@ -1298,7 +1379,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return {
           ...c,
           messages,
-          lastMessage: last?.text,
+          lastMessage: messagePreviewText(last),
           lastMessageTime: last?.timestamp,
         };
       }),
@@ -1373,8 +1454,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setTyping = useCallback((chatId: string) => {
     const u = userRef.current;
     if (!u?.dbId) return;
-    api(`/chats/${chatId}/typing`, {
+    void fetch(`${BASE_URL}/api/chats/${chatId}/typing`, {
       method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ userId: u.dbId }),
     }).catch(() => {});
   }, []);
@@ -1382,10 +1464,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const clearTyping = useCallback((chatId: string) => {
     const u = userRef.current;
     if (!u?.dbId) return;
-    api(`/chats/${chatId}/typing`, {
+    void fetch(`${BASE_URL}/api/chats/${chatId}/typing`, {
       method: "DELETE",
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ userId: u.dbId }),
     }).catch(() => {});
+  }, []);
+
+  const reportRemoteTyping = useCallback((chatId: string, names: string[]) => {
+    const key = String(chatId);
+    setTypingByChatId((prev) => {
+      if (names.length === 0) {
+        if (!(key in prev)) return prev;
+        const { [key]: _, ...rest } = prev;
+        return rest;
+      }
+      const cur = prev[key] ?? [];
+      if (cur.length === names.length && cur.every((n, i) => n === names[i])) return prev;
+      return { ...prev, [key]: names };
+    });
   }, []);
 
   const createGroup = useCallback((name: string, memberIds: number[], groupAvatarUrl?: string) => {
@@ -1486,7 +1583,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return {
           ...c,
           messages: remaining,
-          lastMessage: last?.text,
+          lastMessage: messagePreviewText(last),
           lastMessageTime: last?.timestamp,
         };
       }),
@@ -1766,13 +1863,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setUser, logout, sendMessage, createGroup, markAsRead, markAllAsRead,
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, forwardMessage, starredMessages, updateAvatar,
-      createDirectChat, loadMessages, refreshChats,
+      createDirectChat, loadMessages, refreshChats, clearAllChatHistory,
       sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage, sendDocumentMessage,
       sendContactMessage, setTyping, clearTyping,
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, reportUser, setChatDisappear,
       updateLocationOnServer, startLiveLocationSession, stopLiveLocationSession,
-      setActiveChatId, refreshCallLogs,
+      setActiveChatId, refreshCallLogs, typingByChatId, reportRemoteTyping,
     }}>
       {children}
     </AppContext.Provider>

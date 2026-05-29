@@ -49,6 +49,14 @@ export function useVidehCall(
   const localVideoId = `videh-local-${primaryChannel}`;
   const remoteVideoId = `videh-remote-${primaryChannel}`;
 
+  const isBenignSignalingError = (message: string): boolean => {
+    const m = message.toLowerCase();
+    return (
+      m.includes("called in wrong state: stable")
+      || (m.includes("setremote") && m.includes("stable"))
+    );
+  };
+
   const refreshAggregate = useCallback(() => {
     const pcs = [...pcsRef.current.values()];
     const states = pcs.map((pc) => pc?.connectionState as string | undefined);
@@ -58,6 +66,7 @@ export function useVidehCall(
     setJoined(connected > 0);
     setRemoteCount(connected);
     if (connected > 0) {
+      setError(null);
       setConnectionPhase("connected");
       if (!isVideo) setProximityScreenOff(true);
     } else if (failed) {
@@ -147,13 +156,22 @@ export function useVidehCall(
             const session = await webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken).then((r) => r.json()) as {
               session?: { offer?: RTCSessionDescriptionInit | null; answer?: RTCSessionDescriptionInit | null };
             };
-            if (activeRole === "callee" && session.session?.offer && !pcNow.remoteDescription) {
+            if (
+              activeRole === "callee"
+              && session.session?.offer
+              && pcNow.signalingState === "stable"
+              && !pcNow.currentRemoteDescription
+            ) {
               await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.offer));
               const answer = await pcNow.createAnswer();
               await pcNow.setLocalDescription(answer);
               await postJson(`/sessions/${encodeURIComponent(channel)}/answer`, { answer });
             }
-            if (activeRole === "caller" && session.session?.answer && !pcNow.remoteDescription) {
+            if (
+              activeRole === "caller"
+              && session.session?.answer
+              && pcNow.signalingState === "have-local-offer"
+            ) {
               await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.answer));
             }
 
@@ -169,6 +187,9 @@ export function useVidehCall(
           } catch (e: any) {
             if (stopped) return;
             const msg = e?.message ?? "Call signaling error";
+            const pcNow = pcsRef.current.get(channel);
+            const connected = pcNow?.connectionState === "connected";
+            if (connected || isBenignSignalingError(msg)) return;
             setError(msg);
             const t = pollTimersRef.current.get(channel);
             if (t) {

@@ -280,10 +280,14 @@ export function VidehVoiceMic({ enabled, colors, onSend, onPhaseChange, fullWidt
             </View>
           ) : null}
           <View style={styles.holdingRow}>
-            <Text style={[styles.slideCancel, cancelHint && styles.slideCancelActive]}>
-              {cancelHint ? "Release to cancel" : "◀ Slide to cancel"}
-            </Text>
+            <View style={styles.recDot} />
             <Text style={styles.holdingTimer}>{formatVoiceClock(ms / 1000)}</Text>
+            <Text
+              style={[styles.slideCancel, cancelHint && styles.slideCancelActive]}
+              numberOfLines={1}
+            >
+              {cancelHint ? "Release to cancel" : "‹ Slide to cancel"}
+            </Text>
           </View>
         </View>
       )}
@@ -310,33 +314,39 @@ const styles = StyleSheet.create({
   },
   holdingOverlay: {
     position: "absolute",
-    right: 52,
-    bottom: 6,
-    left: -280,
-    alignItems: "flex-end",
+    right: 50,
+    left: -260,
+    top: 0,
+    bottom: 0,
     justifyContent: "center",
   },
   holdingRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingRight: 8,
+    gap: 8,
+    paddingRight: 6,
+  },
+  recDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: "#F0353B",
   },
   holdingTimer: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: "Inter_600SemiBold",
     color: "#667781",
-    minWidth: 44,
-    textAlign: "right",
+    minWidth: 40,
+    textAlign: "left",
   },
   slideCancel: {
     flex: 1,
     textAlign: "right",
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: "Inter_500Medium",
     color: "#8696A0",
   },
-  slideCancelActive: { color: "#c62828" },
+  slideCancelActive: { color: "#c62828", textAlign: "right" },
   lockHint: {
     position: "absolute",
     top: -72,

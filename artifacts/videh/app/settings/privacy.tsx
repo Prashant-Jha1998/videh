@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter, type Href } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import { useFocusEffect, useRouter, type Href } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
   Alert,
   Modal,
@@ -17,23 +17,46 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+import {
+  cachePrivacyFlags,
+  DISAPPEAR_OPTIONS,
+  fetchPrivacySettings,
+  patchPrivacySettings,
+  type PrivacySettings,
+  type VisibilityLabel,
+  VISIBILITY_OPTIONS,
+  visibilityLabelToApi,
+} from "@/lib/privacySettings";
 
-const VISIBILITY_OPTIONS = ["Everyone", "My contacts", "Nobody"];
-
-const LAST_SEEN_LABELS: Record<string, string> = {
-  everyone: "Everyone",
-  contacts: "My contacts",
-  contacts_except: "My contacts except...",
-  nobody: "Nobody",
-};
 const BASE_URL = getApiUrl();
 
-function VisibilityChooser({ label, value, onChange, colors }: { label: string; value: string; onChange: (v: string) => void; colors: any }) {
+function VisibilityChooser({
+  label,
+  value,
+  onChange,
+  colors,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: VisibilityLabel) => void;
+  colors: ReturnType<typeof useColors>;
+  disabled?: boolean;
+}) {
   return (
     <TouchableOpacity
       style={[styles.privacyRow, { borderBottomColor: colors.border }]}
-      onPress={() => Alert.alert(label, "Who can see your " + label.toLowerCase(), VISIBILITY_OPTIONS.map((o) => ({ text: o, onPress: () => onChange(o) })))}
+      onPress={() =>
+        Alert.alert(label, `Who can see your ${label.toLowerCase()}`, [
+          ...VISIBILITY_OPTIONS.map((o) => ({
+            text: o,
+            onPress: () => onChange(o),
+          })),
+          { text: "Cancel", style: "cancel" },
+        ])
+      }
       activeOpacity={0.7}
+      disabled={disabled}
     >
       <Text style={[styles.privacyLabel, { color: colors.foreground }]}>{label}</Text>
       <View style={styles.privacyRight}>
@@ -50,15 +73,9 @@ export default function PrivacySettingsScreen() {
   const router = useRouter();
   const { user, unblockUser } = useApp();
 
-  const [lastSeen, setLastSeen] = useState("My contacts");
-  const [onlinePrivacy, setOnlinePrivacy] = useState("Same as last seen");
-  const [profilePhoto, setProfilePhoto] = useState("My contacts");
-  const [about, setAbout] = useState("My contacts");
-  const [status, setStatus] = useState("My contacts");
-  const [groups, setGroups] = useState("Everyone");
-  const [readReceipts, setReadReceipts] = useState(true);
-  const [disappearing, setDisappearing] = useState(false);
-  const [callsPrivacy, setCallsPrivacy] = useState(false);
+  const [settings, setSettings] = useState<PrivacySettings | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [blockedOpen, setBlockedOpen] = useState(false);
   const [blocked, setBlocked] = useState<Array<{ id: number; name?: string | null; phone?: string; avatar_url?: string | null }>>([]);
 
@@ -68,36 +85,58 @@ export default function PrivacySettingsScreen() {
       const res = await fetch(`${BASE_URL}/api/users/${user.dbId}/blocked`);
       const data = await res.json();
       if (data.success) setBlocked(data.blocked ?? []);
-    } catch {}
-  }, [user?.dbId]);
-
-  useEffect(() => {
-    void loadBlocked();
-  }, [loadBlocked]);
-
-  const loadPrivacy = useCallback(async () => {
-    if (!user?.dbId) return;
-    try {
-      const stored = await import("@react-native-async-storage/async-storage").then((m) =>
-        m.default.getItem("videh_user"),
-      );
-      const token = stored ? JSON.parse(stored).sessionToken : undefined;
-      const res = await fetch(`${BASE_URL}/api/users/${user.dbId}/privacy`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      const data = await res.json();
-      if (data.success) {
-        setLastSeen(data.lastSeenLabel ?? LAST_SEEN_LABELS[data.lastSeenPrivacy] ?? "My contacts");
-        setOnlinePrivacy(data.onlineLabel ?? "Same as last seen");
-      }
     } catch {
-      // keep defaults
+      // ignore
     }
   }, [user?.dbId]);
 
-  useEffect(() => {
-    void loadPrivacy();
-  }, [loadPrivacy]);
+  const loadPrivacy = useCallback(async () => {
+    if (!user?.dbId) return;
+    const data = await fetchPrivacySettings(user.dbId, user.sessionToken);
+    if (data) {
+      setSettings(data);
+      await cachePrivacyFlags(data);
+    }
+    setHydrated(true);
+  }, [user?.dbId, user?.sessionToken]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadPrivacy();
+      void loadBlocked();
+    }, [loadPrivacy, loadBlocked]),
+  );
+
+  const savePatch = useCallback(
+    async (patch: Parameters<typeof patchPrivacySettings>[2]) => {
+      if (!user?.dbId || saving) return;
+      setSaving(true);
+      const next = await patchPrivacySettings(user.dbId, user.sessionToken, patch);
+      if (next) {
+        setSettings(next);
+        await cachePrivacyFlags(next);
+      } else {
+        Alert.alert("Privacy", "Could not save. Please try again.");
+        void loadPrivacy();
+      }
+      setSaving(false);
+    },
+    [user?.dbId, user?.sessionToken, saving, loadPrivacy],
+  );
+
+  const saveVisibility = (field: "profilePhotoPrivacy" | "aboutPrivacy" | "statusPrivacy" | "groupsPrivacy", label: VisibilityLabel) => {
+    const apiValue = visibilityLabelToApi(label);
+    void savePatch({ [field]: apiValue });
+    setSettings((prev) => {
+      if (!prev) return prev;
+      const key =
+        field === "profilePhotoPrivacy" ? "profilePhotoLabel"
+        : field === "aboutPrivacy" ? "aboutLabel"
+        : field === "statusPrivacy" ? "statusLabel"
+        : "groupsLabel";
+      return { ...prev, [key]: label };
+    });
+  };
 
   const openBlocked = async () => {
     await loadBlocked();
@@ -118,6 +157,8 @@ export default function PrivacySettingsScreen() {
   };
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+  const lastSeen = settings?.lastSeenLabel ?? "My contacts";
+  const onlinePrivacy = settings?.onlineLabel ?? "Same as last seen";
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -130,7 +171,6 @@ export default function PrivacySettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 60 }}>
-        {/* Who can see info */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Who can see my personal info</Text>
           <TouchableOpacity
@@ -146,59 +186,97 @@ export default function PrivacySettingsScreen() {
               <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
             </View>
           </TouchableOpacity>
-          <VisibilityChooser label="Profile photo" value={profilePhoto} onChange={setProfilePhoto} colors={colors} />
-          <VisibilityChooser label="About" value={about} onChange={setAbout} colors={colors} />
-          <VisibilityChooser label="Status" value={status} onChange={setStatus} colors={colors} />
-          <VisibilityChooser label="Groups" value={groups} onChange={setGroups} colors={colors} />
+          <VisibilityChooser
+            label="Profile photo"
+            value={settings?.profilePhotoLabel ?? "My contacts"}
+            onChange={(v) => saveVisibility("profilePhotoPrivacy", v)}
+            colors={colors}
+            disabled={!hydrated || saving}
+          />
+          <VisibilityChooser
+            label="About"
+            value={settings?.aboutLabel ?? "My contacts"}
+            onChange={(v) => saveVisibility("aboutPrivacy", v)}
+            colors={colors}
+            disabled={!hydrated || saving}
+          />
+          <VisibilityChooser
+            label="Status"
+            value={settings?.statusLabel ?? "My contacts"}
+            onChange={(v) => saveVisibility("statusPrivacy", v)}
+            colors={colors}
+            disabled={!hydrated || saving}
+          />
+          <VisibilityChooser
+            label="Groups"
+            value={settings?.groupsLabel ?? "Everyone"}
+            onChange={(v) => saveVisibility("groupsPrivacy", v)}
+            colors={colors}
+            disabled={!hydrated || saving}
+          />
         </View>
 
-        {/* Messaging */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Messaging</Text>
           <SwitchRow
             label="Read receipts"
             hint="When turned off, you won't send or receive Read receipts. Read receipts are always sent for group chats."
-            value={readReceipts}
-            onChange={setReadReceipts}
+            value={settings?.readReceiptsEnabled ?? true}
+            onChange={(v) => {
+              setSettings((prev) => (prev ? { ...prev, readReceiptsEnabled: v } : prev));
+              void savePatch({ readReceiptsEnabled: v });
+            }}
             colors={colors}
+            disabled={!hydrated || saving}
           />
         </View>
 
-        {/* Default message timer */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Default message timer</Text>
           <TouchableOpacity
             style={styles.privacyRow}
-            onPress={() => Alert.alert("Default Timer", "Set disappearing messages for new chats", [
-              { text: "Off", onPress: () => setDisappearing(false) },
-              { text: "24 hours", onPress: () => setDisappearing(true) },
-              { text: "7 days", onPress: () => setDisappearing(true) },
-              { text: "90 days", onPress: () => setDisappearing(true) },
-              { text: "Cancel", style: "cancel" },
-            ])}
+            onPress={() =>
+              Alert.alert("Default timer", "New chats will use this disappearing message timer", [
+                ...DISAPPEAR_OPTIONS.map((opt) => ({
+                  text: opt.label,
+                  onPress: () => {
+                    setSettings((prev) =>
+                      prev ? { ...prev, disappearLabel: opt.label, defaultDisappearSeconds: opt.seconds } : prev,
+                    );
+                    void savePatch({ defaultDisappearSeconds: opt.seconds });
+                  },
+                })),
+                { text: "Cancel", style: "cancel" },
+              ])
+            }
             activeOpacity={0.7}
+            disabled={!hydrated || saving}
           >
             <Text style={[styles.privacyLabel, { color: colors.foreground }]}>Disappearing messages</Text>
             <View style={styles.privacyRight}>
-              <Text style={[styles.privacyValue, { color: colors.mutedForeground }]}>{disappearing ? "On" : "Off"}</Text>
+              <Text style={[styles.privacyValue, { color: colors.mutedForeground }]}>
+                {settings?.disappearLabel ?? "Off"}
+              </Text>
               <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
             </View>
           </TouchableOpacity>
         </View>
 
-        {/* Calls */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Calls</Text>
           <SwitchRow
             label="Silence unknown callers"
             hint="Calls from unknown numbers will be silenced and shown in the call log."
-            value={callsPrivacy}
-            onChange={setCallsPrivacy}
+            value={settings?.silenceUnknownCallers ?? false}
+            onChange={(v) => {
+              setSettings((prev) => (prev ? { ...prev, silenceUnknownCallers: v } : prev));
+              void savePatch({ silenceUnknownCallers: v });
+            }}
             colors={colors}
+            disabled={!hydrated || saving}
           />
         </View>
 
-        {/* Blocked contacts */}
         <TouchableOpacity
           style={[styles.section, { backgroundColor: colors.card }]}
           onPress={openBlocked}
@@ -223,18 +301,30 @@ export default function PrivacySettingsScreen() {
             </Text>
             {blocked.length === 0 ? (
               <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No blocked contacts</Text>
-            ) : blocked.map((contact) => (
-              <TouchableOpacity key={contact.id} style={[styles.blockedContactRow, { borderTopColor: colors.border }]} onPress={() => confirmUnblock(contact)}>
-                <View style={[styles.blockedAvatar, { backgroundColor: colors.primary }]}>
-                  <Text style={styles.blockedAvatarText}>{(contact.name || contact.phone || "?").slice(0, 1).toUpperCase()}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.blockedContactName, { color: colors.foreground }]}>{contact.name || contact.phone || "Unknown contact"}</Text>
-                  {!!contact.phone && <Text style={[styles.blockedContactPhone, { color: colors.mutedForeground }]}>{contact.phone}</Text>}
-                </View>
-                <Text style={[styles.unblockText, { color: colors.primary }]}>Unblock</Text>
-              </TouchableOpacity>
-            ))}
+            ) : (
+              blocked.map((contact) => (
+                <TouchableOpacity
+                  key={contact.id}
+                  style={[styles.blockedContactRow, { borderTopColor: colors.border }]}
+                  onPress={() => confirmUnblock(contact)}
+                >
+                  <View style={[styles.blockedAvatar, { backgroundColor: colors.primary }]}>
+                    <Text style={styles.blockedAvatarText}>
+                      {(contact.name || contact.phone || "?").slice(0, 1).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.blockedContactName, { color: colors.foreground }]}>
+                      {contact.name || contact.phone || "Unknown contact"}
+                    </Text>
+                    {!!contact.phone && (
+                      <Text style={[styles.blockedContactPhone, { color: colors.mutedForeground }]}>{contact.phone}</Text>
+                    )}
+                  </View>
+                  <Text style={[styles.unblockText, { color: colors.primary }]}>Unblock</Text>
+                </TouchableOpacity>
+              ))
+            )}
             <TouchableOpacity style={styles.modalClose} onPress={() => setBlockedOpen(false)}>
               <Text style={[styles.modalCloseText, { color: colors.primary }]}>Done</Text>
             </TouchableOpacity>
@@ -245,14 +335,34 @@ export default function PrivacySettingsScreen() {
   );
 }
 
-function SwitchRow({ label, hint, value, onChange, colors }: any) {
+function SwitchRow({
+  label,
+  hint,
+  value,
+  onChange,
+  colors,
+  disabled,
+}: {
+  label: string;
+  hint?: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+  colors: ReturnType<typeof useColors>;
+  disabled?: boolean;
+}) {
   return (
     <View style={styles.switchRow}>
       <View style={{ flex: 1, marginRight: 12 }}>
         <Text style={[styles.switchLabel, { color: colors.foreground }]}>{label}</Text>
-        {hint && <Text style={[styles.switchHint, { color: colors.mutedForeground }]}>{hint}</Text>}
+        {hint ? <Text style={[styles.switchHint, { color: colors.mutedForeground }]}>{hint}</Text> : null}
       </View>
-      <Switch value={value} onValueChange={onChange} thumbColor={value ? colors.primary : "#f4f3f4"} trackColor={{ true: colors.primary + "80" }} />
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        disabled={disabled}
+        thumbColor={value ? colors.primary : "#f4f3f4"}
+        trackColor={{ true: colors.primary + "80" }}
+      />
     </View>
   );
 }

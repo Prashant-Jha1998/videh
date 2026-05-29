@@ -6,4 +6,5 @@ export {
   startVoiceNotePlaybackSession,
   stopInCallSession,
   stopVoiceNotePlaybackSession,
+  wakeScreenForIncomingCall,
 } from "./inCallAudio.native";

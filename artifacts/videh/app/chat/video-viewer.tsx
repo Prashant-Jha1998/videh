@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
+import { loadMediaVisibilityEnabled } from "@/lib/chatSettings";
 import { saveVideoUriToLibrary } from "@/lib/saveVideoToLibrary";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
 import { formatRelativeHeader } from "@/utils/time";
@@ -60,6 +61,14 @@ export default function ChatVideoViewerScreen() {
 
   const onDownload = useCallback(async () => {
     if (!rawUri || saving) return;
+    const allowGallery = await loadMediaVisibilityEnabled();
+    if (!allowGallery) {
+      Alert.alert(
+        "Media visibility is off",
+        "Turn on Media visibility in Settings → Chats to save videos to your phone gallery.",
+      );
+      return;
+    }
     setSaving(true);
     try {
       const res = await saveVideoUriToLibrary(rawUri, user?.sessionToken);

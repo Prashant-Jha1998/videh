@@ -13,6 +13,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
+import { useApp } from "@/context/AppContext";
+import { backupChatsToFile, exportChatsToFile } from "@/lib/chatExport";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import {
   CHAT_STORAGE,
@@ -33,16 +35,25 @@ export default function ChatsSettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { t, chatThemeChoice, setChatThemeChoice } = useUiPreferences();
+  const {
+    t,
+    chatThemeChoice,
+    setChatThemeChoice,
+    chatFontLabel,
+    setChatFontLabel,
+    chatWallpaperLabel,
+    setChatWallpaperLabel,
+  } = useUiPreferences();
+
+  const { chats, user, clearAllChatHistory } = useApp();
 
   const [enterSend, setEnterSend] = useState(false);
   const [mediaVisibility, setMediaVisibility] = useState(true);
-  const [fontSize, setFontSize] = useState("Medium");
   const [themeLabel, setThemeLabel] = useState<(typeof THEMES)[number]>("System default");
-  const [wallpaper, setWallpaper] = useState("Default");
   const [backup, setBackup] = useState("Weekly");
   const [emojiVariant, setEmojiVariant] = useState(true);
   const [hydrated, setHydrated] = useState(false);
+  const [busy, setBusy] = useState<null | "backup" | "export" | "clear">(null);
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
@@ -54,17 +65,13 @@ export default function ChatsSettingsScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const [w, f, b, enter, media, emoji] = await Promise.all([
-          loadOptionalString(CHAT_STORAGE.wallpaper, "Default"),
-          loadOptionalString(CHAT_STORAGE.fontSize, "Medium"),
+        const [b, enter, media, emoji] = await Promise.all([
           loadOptionalString(CHAT_STORAGE.backup, "Weekly"),
           loadOptionalBool(CHAT_STORAGE.enterIsSend, false),
           loadOptionalBool(CHAT_STORAGE.mediaVisibility, true),
           loadOptionalBool(CHAT_STORAGE.emojiVariant, true),
         ]);
         if (cancelled) return;
-        setWallpaper(w);
-        setFontSize(f);
         setBackup(b);
         setEnterSend(enter);
         setMediaVisibility(media);
@@ -99,6 +106,64 @@ export default function ChatsSettingsScreen() {
     setThemeLabel(choiceToThemeLabel(choice));
   };
 
+  const myName = user?.name || "Me";
+
+  const handleBackupNow = useCallback(async () => {
+    if (busy) return;
+    if (chats.length === 0) {
+      Alert.alert(t("chats.backupNow"), "No chats to back up yet.");
+      return;
+    }
+    setBusy("backup");
+    try {
+      const path = await backupChatsToFile(chats, myName);
+      Alert.alert(t("chats.backupNow"), `Backup saved.\n${path}`);
+    } catch (e) {
+      Alert.alert(t("chats.backupNow"), e instanceof Error ? e.message : "Backup failed.");
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, chats, myName, t]);
+
+  const handleExport = useCallback(async () => {
+    if (busy) return;
+    if (chats.length === 0) {
+      Alert.alert(t("chats.export"), "No chats to export yet.");
+      return;
+    }
+    setBusy("export");
+    try {
+      const path = await exportChatsToFile(chats, myName);
+      Alert.alert(t("chats.export"), `Exported.\n${path}`);
+    } catch (e) {
+      Alert.alert(t("chats.export"), e instanceof Error ? e.message : "Export failed.");
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, chats, myName, t]);
+
+  const handleClearAll = useCallback(() => {
+    if (busy) return;
+    Alert.alert(t("chats.clearAll"), "This will clear all message history on this device.", [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("chats.clearAll"),
+        style: "destructive",
+        onPress: async () => {
+          setBusy("clear");
+          try {
+            await clearAllChatHistory();
+            Alert.alert(t("common.ok"), "All chats cleared.");
+          } catch (e) {
+            Alert.alert(t("chats.clearAll"), e instanceof Error ? e.message : "Could not clear chats.");
+          } finally {
+            setBusy(null);
+          }
+        },
+      },
+    ]);
+  }, [busy, clearAllChatHistory, t]);
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
@@ -126,15 +191,12 @@ export default function ChatsSettingsScreen() {
           />
           <TappableRow
             label={t("chats.wallpaper")}
-            value={wallpaper}
+            value={chatWallpaperLabel}
             onPress={() =>
               Alert.alert(t("chats.wallpaper"), "", [
                 ...WALLPAPERS.map((w) => ({
                   text: w,
-                  onPress: () => {
-                    setWallpaper(w);
-                    void saveOptionalString(CHAT_STORAGE.wallpaper, w);
-                  },
+                  onPress: () => { void setChatWallpaperLabel(w); },
                 })),
                 { text: t("common.cancel"), style: "cancel" },
               ])
@@ -143,15 +205,12 @@ export default function ChatsSettingsScreen() {
           />
           <TappableRow
             label={t("chats.fontSize")}
-            value={fontSize}
+            value={chatFontLabel}
             onPress={() =>
               Alert.alert(t("chats.fontSize"), "", [
                 ...FONT_SIZES.map((f) => ({
                   text: f,
-                  onPress: () => {
-                    setFontSize(f);
-                    void saveOptionalString(CHAT_STORAGE.fontSize, f);
-                  },
+                  onPress: () => { void setChatFontLabel(f); },
                 })),
                 { text: t("common.cancel"), style: "cancel" },
               ])
@@ -212,11 +271,14 @@ export default function ChatsSettingsScreen() {
           />
           <TouchableOpacity
             style={styles.backupBtn}
-            onPress={() => Alert.alert(t("chats.backupNow"), t("common.ok"))}
+            onPress={handleBackupNow}
             activeOpacity={0.7}
+            disabled={busy !== null}
           >
             <Ionicons name="cloud-upload-outline" size={18} color={colors.primary} />
-            <Text style={[styles.backupBtnText, { color: colors.primary }]}>{t("chats.backupNow")}</Text>
+            <Text style={[styles.backupBtnText, { color: colors.primary }]}>
+              {busy === "backup" ? "Backing up…" : t("chats.backupNow")}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -225,29 +287,26 @@ export default function ChatsSettingsScreen() {
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>{t("chats.sectionHistory")}</Text>
           <TouchableOpacity
             style={styles.historyRow}
-            onPress={() => Alert.alert(t("chats.export"), "Chat export to email/file will be available soon.")}
+            onPress={handleExport}
             activeOpacity={0.7}
+            disabled={busy !== null}
           >
             <Ionicons name="share-outline" size={18} color={colors.foreground} />
-            <Text style={[styles.historyLabel, { color: colors.foreground }]}>{t("chats.export")}</Text>
+            <Text style={[styles.historyLabel, { color: colors.foreground }]}>
+              {busy === "export" ? "Exporting…" : t("chats.export")}
+            </Text>
             <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} style={{ marginLeft: "auto" }} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.historyRow, { borderTopWidth: 0.5, borderTopColor: colors.border }]}
-            onPress={() =>
-              Alert.alert(t("chats.clearAll"), "This will permanently delete all message history.", [
-                { text: t("common.cancel"), style: "cancel" },
-                {
-                  text: t("chats.clearAll"),
-                  style: "destructive",
-                  onPress: () => Alert.alert(t("common.ok"), "All chats cleared."),
-                },
-              ])
-            }
+            onPress={handleClearAll}
             activeOpacity={0.7}
+            disabled={busy !== null}
           >
             <Ionicons name="trash-outline" size={18} color={colors.destructive} />
-            <Text style={[styles.historyLabel, { color: colors.destructive }]}>{t("chats.clearAll")}</Text>
+            <Text style={[styles.historyLabel, { color: colors.destructive }]}>
+              {busy === "clear" ? "Clearing…" : t("chats.clearAll")}
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

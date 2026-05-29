@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -42,6 +43,18 @@ const EMOJI_SECTIONS: { title: string; emojis: string[] }[] = [
 
 type Tab = "emoji" | "gif" | "sticker";
 
+const SKIN_TONES = ["", "\u{1F3FB}", "\u{1F3FC}", "\u{1F3FD}", "\u{1F3FE}", "\u{1F3FF}"];
+const SKIN_TONE_EMOJIS = new Set(
+  ["👍", "👎", "👌", "✌️", "🤞", "🤟", "🤘", "🤙", "👋", "🤚", "🖐️", "✋", "🖖", "👏", "🙌", "🤝", "🙏", "💪", "🤲", "👊", "✊", "🤛", "🤜", "👆", "👇", "👈", "👉"],
+);
+
+function applySkinTone(emoji: string, tone: string): string {
+  if (!tone) return emoji;
+  // Insert tone after the base codepoint, before any variation selector (FE0F).
+  const base = emoji.replace("\uFE0F", "");
+  return base + tone;
+}
+
 type Props = {
   visible: boolean;
   backgroundColor: string;
@@ -73,8 +86,23 @@ export function ChatEmojiPanel({
   const [items, setItems] = useState<GifMediaItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [variantsEnabled, setVariantsEnabled] = useState(true);
+  const [variantTarget, setVariantTarget] = useState<string | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listRef = useRef<FlatList<GifMediaItem>>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    void AsyncStorage.getItem("emojiVariant").then((v) => setVariantsEnabled(v === null ? true : v === "true"));
+  }, [visible]);
+
+  const pickEmoji = useCallback(
+    (emoji: string) => {
+      setVariantTarget(null);
+      onPickEmoji(emoji);
+    },
+    [onPickEmoji],
+  );
 
   const loadMedia = useCallback(async (mode: Tab, query: string, categoryQuery?: string) => {
     setLoading(true);
@@ -182,20 +210,48 @@ export function ChatEmojiPanel({
       </View>
 
       {tab === "emoji" ? (
-        <ScrollView keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false} style={styles.flex}>
-          {EMOJI_SECTIONS.map((section) => (
-            <View key={section.title} style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: mutedColor }]}>{section.title}</Text>
-              <View style={styles.grid}>
-                {section.emojis.map((emoji) => (
-                  <TouchableOpacity key={emoji} style={styles.cell} onPress={() => onPickEmoji(emoji)} activeOpacity={0.55}>
-                    <Text style={styles.emoji}>{emoji}</Text>
+        <>
+          {variantTarget && (
+            <View style={[styles.variantBar, { backgroundColor, borderBottomColor: borderColor }]}>
+              {SKIN_TONES.map((tone) => {
+                const variant = applySkinTone(variantTarget, tone);
+                return (
+                  <TouchableOpacity key={tone || "base"} style={styles.variantCell} onPress={() => pickEmoji(variant)} activeOpacity={0.55}>
+                    <Text style={styles.emoji}>{variant}</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
+                );
+              })}
+              <TouchableOpacity style={styles.variantClose} onPress={() => setVariantTarget(null)}>
+                <Ionicons name="close" size={18} color={mutedColor} />
+              </TouchableOpacity>
             </View>
-          ))}
-        </ScrollView>
+          )}
+          <ScrollView keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false} style={styles.flex}>
+            {EMOJI_SECTIONS.map((section) => (
+              <View key={section.title} style={styles.section}>
+                <Text style={[styles.sectionTitle, { color: mutedColor }]}>{section.title}</Text>
+                <View style={styles.grid}>
+                  {section.emojis.map((emoji) => {
+                    const hasVariants = variantsEnabled && SKIN_TONE_EMOJIS.has(emoji);
+                    return (
+                      <TouchableOpacity
+                        key={emoji}
+                        style={styles.cell}
+                        onPress={() => pickEmoji(emoji)}
+                        onLongPress={hasVariants ? () => setVariantTarget(emoji) : undefined}
+                        delayLongPress={250}
+                        activeOpacity={0.55}
+                      >
+                        <Text style={styles.emoji}>{emoji}</Text>
+                        {hasVariants && <View style={[styles.variantDot, { backgroundColor: mutedColor }]} />}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        </>
       ) : (
         <>
           {tab === "gif" && !search.trim() && (
@@ -280,6 +336,16 @@ const styles = StyleSheet.create({
   grid: { flexDirection: "row", flexWrap: "wrap" },
   cell: { width: "12.5%", aspectRatio: 1, alignItems: "center", justifyContent: "center" },
   emoji: { fontSize: 26 },
+  variantDot: { position: "absolute", right: 6, bottom: 6, width: 4, height: 4, borderRadius: 2, opacity: 0.55 },
+  variantBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  variantCell: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 4 },
+  variantClose: { paddingHorizontal: 6, paddingVertical: 4 },
   categoryRow: { maxHeight: 44, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(0,0,0,0.06)" },
   categoryContent: { paddingHorizontal: 8, paddingVertical: 6, gap: 8, alignItems: "center" },
   categoryChip: {

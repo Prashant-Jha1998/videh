@@ -1,6 +1,6 @@
 import { sendFcmChatPush, isFcmConfigured } from "./fcmPush";
 import { sendWebPushChatPush, isWebPushConfigured } from "./webPush";
-import { sendExpoChatPush, sendExpoPush } from "./expoPush";
+import { sendExpoChatPush, sendExpoPush, EXPO_CHAT_MESSAGE_CATEGORY_ID } from "./expoPush";
 import { isValidPushToken, splitPushTokens } from "./pushTokens";
 
 export { isExpoPushToken, isFcmPushToken, isWebPushToken, isValidPushToken } from "./pushTokens";
@@ -11,6 +11,7 @@ type ChatPushOptions = {
   categoryId?: string;
   threadId?: string;
   isCall?: boolean;
+  imageUrl?: string;
 };
 
 /** FCM (Videh on Android) → Web Push (web) → Expo relay fallback. */
@@ -29,7 +30,12 @@ export async function sendChatPush(
 
   if (fcm.length > 0) {
     if (isFcmConfigured()) {
-      tasks.push(sendFcmChatPush(fcm, title, body, data, { isCall: options?.isCall }));
+      tasks.push(sendFcmChatPush(fcm, title, body, data, {
+        isCall: options?.isCall,
+        categoryId: options?.categoryId,
+        imageUrl: options?.imageUrl,
+        threadId: options?.threadId,
+      }));
     } else {
       console.warn("FCM tokens present but FIREBASE_SERVICE_ACCOUNT_JSON is not set on server");
     }
@@ -62,7 +68,10 @@ export async function sendPushBatch(
   const first = messages[0];
 
   if (fcm.length > 0 && isFcmConfigured()) {
-    await sendFcmChatPush(fcm, first.title, first.body, first.data, { isCall: first.isCall });
+    await sendFcmChatPush(fcm, first.title, first.body, first.data, {
+      isCall: first.isCall,
+      categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID,
+    });
   }
 
   if (webpush.length > 0 && isWebPushConfigured()) {

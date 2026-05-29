@@ -124,7 +124,9 @@ export default function CallScreen() {
   const avatarBg = `hsl(${hue},50%,45%)`;
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const displayStatus = error
+  const displayStatus = joined && remoteCount > 0
+    ? statusText
+    : error
     ? error === "NATIVE_WEBRTC_UNAVAILABLE"
       ? "Connecting..."
       : `Error: ${error}`

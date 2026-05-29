@@ -2,6 +2,8 @@ export function isInCallManagerAvailable(): boolean {
   return false;
 }
 
+export function wakeScreenForIncomingCall(): void {}
+
 export async function startInCallSession(_isVideo: boolean): Promise<void> {}
 
 export async function stopInCallSession(): Promise<void> {}

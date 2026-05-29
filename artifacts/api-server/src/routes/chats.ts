@@ -8,6 +8,7 @@ import { query } from "../lib/db";
 import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
 import { chatMessagePushPreview } from "../lib/chatMessagePreview";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
+import { pushNotificationImageUrl } from "../lib/pushMediaUrl";
 import { enforceModerationForActivity } from "../lib/moderation";
 import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
 import { assertSameUser, getAuthUserId, requireAuth } from "../lib/auth";
@@ -15,6 +16,7 @@ import { publicMediaUrl } from "../lib/mediaStorage";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
 import { ensureMessageUserHidesTable, hideMessageForUser, messageVisibleToUserSql } from "../lib/messageUserHides";
 import { getPresenceForViewer } from "../lib/presencePrivacy";
+import { canAddUserToGroup, getExtendedPrivacy } from "../lib/userPrivacySettings";
 import {
   deleteChatMediaFile,
   ensureViewOnceColumns,
@@ -318,7 +320,12 @@ router.post("/direct", async (req: Request, res: Response) => {
       return;
     }
 
-    const chat = await query("INSERT INTO chats (is_group) VALUES (FALSE) RETURNING id", []);
+    const ownerPrivacy = await getExtendedPrivacy(userId);
+    const defaultDisappear = ownerPrivacy?.default_disappear_seconds ?? null;
+    const chat = await query(
+      "INSERT INTO chats (is_group, disappear_after_seconds) VALUES (FALSE, $1) RETURNING id",
+      [defaultDisappear],
+    );
     const chatId = chat.rows[0].id;
     await query("INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2), ($1, $3)", [chatId, userId, otherUserId]);
     res.json({ success: true, chatId });
@@ -373,6 +380,16 @@ router.post("/group", async (req: Request, res: Response) => {
     const chatId = chat.rows[0].id;
     const allMembers = Array.from(new Set([creatorId, ...memberIds]));
     for (const memberId of allMembers) {
+      if (memberId !== creatorId) {
+        const allowed = await canAddUserToGroup(creatorId, memberId);
+        if (!allowed) {
+          res.status(403).json({
+            success: false,
+            message: "One or more people cannot be added to groups based on their privacy settings.",
+          });
+          return;
+        }
+      }
       await query(
         "INSERT INTO chat_members (chat_id, user_id, is_admin, can_send_messages) VALUES ($1, $2, $3, TRUE)",
         [chatId, memberId, memberId === creatorId],
@@ -602,6 +619,14 @@ router.post("/:chatId/typing", async (req: Request, res: Response) => {
        ON CONFLICT (chat_id, user_id) DO UPDATE SET updated_at = NOW()`,
       [chatId, userId]
     );
+    const memberRes = await query("SELECT user_id FROM chat_members WHERE chat_id = $1", [chatId]);
+    const nameRes = await query("SELECT name FROM users WHERE id = $1", [userId]);
+    publishChatEvent({
+      type: "typing",
+      chatId: String(chatId),
+      userIds: memberRes.rows.map((r: { user_id: number }) => r.user_id),
+      payload: { userId, active: true, name: nameRes.rows[0]?.name ?? "Someone" },
+    });
     res.json({ success: true });
   } catch { res.json({ success: false }); }
 });
@@ -614,6 +639,14 @@ router.delete("/:chatId/typing", async (req: Request, res: Response) => {
   if (!assertSameUser(req, res, userId)) return;
   try {
     await query("DELETE FROM typing_sessions WHERE chat_id = $1 AND user_id = $2", [chatId, userId]);
+    const memberRes = await query("SELECT user_id FROM chat_members WHERE chat_id = $1", [chatId]);
+    const nameRes = await query("SELECT name FROM users WHERE id = $1", [userId]);
+    publishChatEvent({
+      type: "typing",
+      chatId: String(chatId),
+      userIds: memberRes.rows.map((r: { user_id: number }) => r.user_id),
+      payload: { userId, active: false, name: nameRes.rows[0]?.name ?? "Someone" },
+    });
     res.json({ success: true });
   } catch { res.json({ success: false }); }
 });
@@ -748,8 +781,9 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     }
 
     // Send push notifications (fire and forget)
-    const senderRow = await query("SELECT name FROM users WHERE id = $1", [senderId]);
+    const senderRow = await query("SELECT name, avatar_url FROM users WHERE id = $1", [senderId]);
     const senderName = senderRow.rows[0]?.name ?? "Videh";
+    const senderAvatarUrl = pushNotificationImageUrl(senderRow.rows[0]?.avatar_url);
     const notifyMembers = members.rows.filter((m: any) => !m.is_muted);
     const recipientUserIds = notifyMembers.map((m: any) => Number(m.user_id)).filter(Boolean);
     const tokens = notifyMembers
@@ -766,11 +800,16 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
           messageId: String(result.rows[0].id),
           senderId: String(senderId),
           senderName,
+          senderAvatarUrl: senderAvatarUrl ?? "",
           messageType: type ?? "text",
           type: "message",
           notificationKind: "chat_message",
         },
-        { categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID, threadId: `chat-${chatId}` },
+        {
+          categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID,
+          threadId: `chat-${chatId}`,
+          imageUrl: senderAvatarUrl,
+        },
       );
     }
     publishChatEvent({
@@ -889,8 +928,9 @@ router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Re
       );
     }
 
-    const senderRow = await query("SELECT name FROM users WHERE id = $1", [senderId]);
+    const senderRow = await query("SELECT name, avatar_url FROM users WHERE id = $1", [senderId]);
     const senderName = senderRow.rows[0]?.name ?? "Videh";
+    const senderAvatarUrl = pushNotificationImageUrl(senderRow.rows[0]?.avatar_url);
     const notifyMembers = members.rows.filter((m: { is_muted: boolean }) => !m.is_muted);
     const tokens = notifyMembers
       .map((m: { push_token: string | null }) => m.push_token)
@@ -906,11 +946,16 @@ router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Re
           messageId: String(result.rows[0].id),
           senderId: String(senderId),
           senderName,
+          senderAvatarUrl: senderAvatarUrl ?? "",
           messageType,
           type: "message",
           notificationKind: "chat_message",
         },
-        { categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID, threadId: `chat-${targetId}` },
+        {
+          categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID,
+          threadId: `chat-${targetId}`,
+          imageUrl: senderAvatarUrl,
+        },
       );
     }
 
@@ -1091,15 +1136,18 @@ router.post("/read-all", async (req: Request, res: Response) => {
       "UPDATE chat_members SET last_read_at = NOW() WHERE user_id = $1",
       [userId],
     );
-    await query(
-      `INSERT INTO message_status (message_id, user_id, status, updated_at)
-       SELECT m.id, $1, 'read', NOW()
-       FROM messages m
-       JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1
-       WHERE m.sender_id != $1
-       ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'read', updated_at = NOW()`,
-      [userId],
-    );
+    const privacy = await getExtendedPrivacy(Number(userId));
+    if (privacy?.read_receipts_enabled !== false) {
+      await query(
+        `INSERT INTO message_status (message_id, user_id, status, updated_at)
+         SELECT m.id, $1, 'read', NOW()
+         FROM messages m
+         JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1
+         WHERE m.sender_id != $1
+         ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'read', updated_at = NOW()`,
+        [userId],
+      );
+    }
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "mark all chats read error");
@@ -1117,14 +1165,16 @@ router.post("/:chatId/read", async (req: Request, res: Response) => {
       "UPDATE chat_members SET last_read_at = NOW() WHERE chat_id = $1 AND user_id = $2",
       [chatId, userId]
     );
-    // Mark all messages in this chat (not sent by user) as 'read'
-    await query(`
-      INSERT INTO message_status (message_id, user_id, status, updated_at)
-      SELECT m.id, $2, 'read', NOW()
-      FROM messages m
-      WHERE m.chat_id = $1 AND m.sender_id != $2
-      ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'read', updated_at = NOW()
-    `, [chatId, userId]);
+    const privacy = userId ? await getExtendedPrivacy(userId) : null;
+    if (privacy?.read_receipts_enabled !== false) {
+      await query(`
+        INSERT INTO message_status (message_id, user_id, status, updated_at)
+        SELECT m.id, $2, 'read', NOW()
+        FROM messages m
+        WHERE m.chat_id = $1 AND m.sender_id != $2
+        ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'read', updated_at = NOW()
+      `, [chatId, userId]);
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false });
@@ -1233,6 +1283,14 @@ router.post("/:chatId/members", async (req: Request, res: Response) => {
     // Check requester is admin
     const adminCheck = await query("SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2", [chatId, requesterId]);
     if (!adminCheck.rows[0]?.is_admin) { res.status(403).json({ success: false, message: "Not admin" }); return; }
+    const allowed = await canAddUserToGroup(Number(requesterId), userId);
+    if (!allowed) {
+      res.status(403).json({
+        success: false,
+        message: "This person cannot be added to groups based on their privacy settings.",
+      });
+      return;
+    }
     const pol = await query(
       `SELECT COALESCE(NULLIF(TRIM(group_messaging_policy), ''), 'everyone') AS policy FROM chats WHERE id = $1`,
       [chatId],

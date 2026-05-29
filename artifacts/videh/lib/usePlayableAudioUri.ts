@@ -25,8 +25,76 @@ function audioExtFromUri(uri: string): string {
   return "m4a";
 }
 
+/** Stable djb2 hash so the same remote URL always maps to the same cache file. */
+function stableKey(input: string): string {
+  let hash = 5381;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) + hash + input.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(36);
+}
+
+const voiceCacheDir = (): string => {
+  const base = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
+  return base ? `${base}videh_voice/` : "";
+};
+
+async function ensureCacheDir(): Promise<string> {
+  const dir = voiceCacheDir();
+  if (!dir) throw new Error("No writable cache directory");
+  try {
+    const info = await FileSystem.getInfoAsync(dir);
+    if (!info.exists) {
+      await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    }
+  } catch {
+    /* directory may already exist */
+  }
+  return dir;
+}
+
+const downloadLocks = new Map<string, Promise<string>>();
+
 /**
- * Resolves voice-note sources for expo-av: local files, data URIs, and auth-protected chat media.
+ * Downloads a remote voice note to a stable local cache file once, then reuses it.
+ * Playing from a local file is far more reliable on Android than streaming a
+ * protected URL with auth headers (which is what caused "Playback failed").
+ */
+async function getCachedAudioFile(absoluteUrl: string, sessionToken?: string | null): Promise<string> {
+  const inflight = downloadLocks.get(absoluteUrl);
+  if (inflight) return inflight;
+
+  const task = (async () => {
+    const dir = await ensureCacheDir();
+    const ext = audioExtFromUri(absoluteUrl);
+    const target = `${dir}v_${stableKey(absoluteUrl)}.${ext}`;
+
+    const existing = await FileSystem.getInfoAsync(target);
+    if (existing.exists && (existing.size ?? 0) > 0) return target;
+
+    const needsAuth = absoluteUrl.includes("/api/chats/media/") && Boolean(sessionToken);
+    const res = await FileSystem.downloadAsync(absoluteUrl, target, {
+      headers: needsAuth ? (authFetchHeaders(sessionToken) as Record<string, string>) : undefined,
+    });
+    if (res.status >= 400) {
+      await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
+      throw new Error(`Download failed (${res.status})`);
+    }
+    return res.uri;
+  })();
+
+  downloadLocks.set(absoluteUrl, task);
+  try {
+    return await task;
+  } finally {
+    downloadLocks.delete(absoluteUrl);
+  }
+}
+
+/**
+ * Resolves voice-note sources for expo-av: local files, data URIs, and remote
+ * chat media. Remote media is downloaded to a local cache file first so playback
+ * is reliable (WhatsApp-style), instead of streaming with auth headers.
  */
 export function usePlayableAudioUri(uri: string | undefined, sessionToken?: string | null): {
   playbackSource: AVPlaybackSource | null;
@@ -45,43 +113,59 @@ export function usePlayableAudioUri(uri: string | undefined, sessionToken?: stri
       return;
     }
 
+    setFailed(false);
+    setPlaybackSource(null);
+
     const absolute = (resolvePublicAssetUrl(uri) ?? uri).trim();
 
     if (absolute.startsWith("file:") || absolute.startsWith("content:")) {
       setPlaybackSource({ uri: absolute });
-      setFailed(false);
       return;
     }
 
-    if (!absolute.startsWith("data:")) {
-      setPlaybackSource(authPlaybackSource(absolute, sessionToken));
-      setFailed(false);
+    if (absolute.startsWith("data:")) {
+      const writeDataUri = async () => {
+        try {
+          const dir = await ensureCacheDir();
+          const ext = audioExtFromUri(absolute);
+          const target = `${dir}data_${stableKey(absolute).slice(0, 12)}.${ext}`;
+          const existing = await FileSystem.getInfoAsync(target);
+          if (!existing.exists) {
+            const base64 = absolute.replace(/^data:[^;]+;base64,/, "");
+            await FileSystem.writeAsStringAsync(target, base64, { encoding: FileSystem.EncodingType.Base64 });
+          }
+          if (!cancelled) setPlaybackSource({ uri: target });
+        } catch {
+          if (!cancelled) {
+            setFailed(true);
+            setPlaybackSource(null);
+          }
+        }
+      };
+      void writeDataUri();
       return () => {
         cancelled = true;
       };
     }
 
-    const writeDataUri = async () => {
-      try {
-        const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
-        if (!cacheDir) throw new Error("No writable cache directory");
-        const ext = audioExtFromUri(absolute);
-        const target = `${cacheDir}voice_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
-        const base64 = absolute.replace(/^data:[^;]+;base64,/, "");
-        await FileSystem.writeAsStringAsync(target, base64, { encoding: FileSystem.EncodingType.Base64 });
-        if (!cancelled) {
-          setPlaybackSource({ uri: target });
-          setFailed(false);
+    if (absolute.startsWith("http://") || absolute.startsWith("https://")) {
+      const prepareRemote = async () => {
+        try {
+          const localUri = await getCachedAudioFile(absolute, sessionToken);
+          if (!cancelled) setPlaybackSource({ uri: localUri });
+        } catch {
+          if (cancelled) return;
+          // Fall back to direct streaming so playback can still be attempted.
+          setPlaybackSource(authPlaybackSource(absolute, sessionToken));
         }
-      } catch {
-        if (!cancelled) {
-          setFailed(true);
-          setPlaybackSource(null);
-        }
-      }
-    };
-    void writeDataUri();
+      };
+      void prepareRemote();
+      return () => {
+        cancelled = true;
+      };
+    }
 
+    setPlaybackSource({ uri: absolute });
     return () => {
       cancelled = true;
     };
@@ -98,14 +182,13 @@ export async function downloadPlayableAudioSource(
 ): Promise<AVPlaybackSource> {
   const uri = typeof source === "number" ? null : "uri" in source ? source.uri : null;
   if (!uri) return source;
-  if (!uri.includes("/api/chats/media/") || !sessionToken) return source;
+  if (uri.startsWith("file:") || uri.startsWith("content:")) return source;
+  if (!uri.startsWith("http://") && !uri.startsWith("https://")) return source;
 
-  const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
-  if (!cacheDir) throw new Error("No cache");
-  const ext = audioExtFromUri(uri);
-  const target = `${cacheDir}auth_audio_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
-  const res = await FileSystem.downloadAsync(uri, target, {
-    headers: authFetchHeaders(sessionToken) as Record<string, string>,
-  });
-  return { uri: res.uri };
+  try {
+    const localUri = await getCachedAudioFile(uri, sessionToken);
+    return { uri: localUri };
+  } catch {
+    return source;
+  }
 }

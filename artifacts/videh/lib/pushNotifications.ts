@@ -22,7 +22,7 @@ export async function ensureVidehNotificationSetup(): Promise<void> {
     {
       identifier: NOTIFICATION_ACTION_REPLY,
       buttonTitle: "Reply",
-      textInput: { submitButtonTitle: "Send", placeholder: "Message" },
+      textInput: { submitButtonTitle: "Send", placeholder: "Reply" },
       options: { opensAppToForeground: false },
     } as any,
     {

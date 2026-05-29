@@ -39,7 +39,43 @@ type CallInvite = {
 const router = Router();
 router.use(requireAuth);
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
-const RING_TIMEOUT_MS = 60 * 1000;
+const RING_TIMEOUT_MS = 45 * 1000;
+const ringExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearRingExpiryTimer(callId: string): void {
+  const t = ringExpiryTimers.get(callId);
+  if (t) {
+    clearTimeout(t);
+    ringExpiryTimers.delete(callId);
+  }
+}
+
+async function expireRingingCall(callId: string): Promise<void> {
+  ringExpiryTimers.delete(callId);
+  const call = await getCall(callId);
+  if (!call) return;
+  let changed = false;
+  for (const uid of call.participantIds) {
+    if (call.statuses[uid] === "ringing") {
+      call.statuses[uid] = "missed";
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  call.updatedAt = Date.now();
+  if (isCallEnded(call)) await persistCallHistory(call);
+  await saveCall(call);
+}
+
+function scheduleRingExpiry(callId: string): void {
+  clearRingExpiryTimer(callId);
+  ringExpiryTimers.set(
+    callId,
+    setTimeout(() => {
+      void expireRingingCall(callId);
+    }, RING_TIMEOUT_MS),
+  );
+}
 const sessionKey = (channel: string) => `webrtc:session:${channel}`;
 const callKey = (callId: string) => `webrtc:call:${callId}`;
 
@@ -282,6 +318,7 @@ router.post("/calls", async (req: Request, res: Response) => {
       updatedAt: Date.now(),
     };
     await saveCall(invite);
+    scheduleRingExpiry(callId);
     publishCallSignal({
       chatId,
       userIds: [callerId, ...callableParticipantIds],
@@ -420,7 +457,10 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
     action: body.action === "accept" ? "accepted" : "declined",
     payload: serializeIncoming(call, userId),
   });
-  if (isCallEnded(call)) await persistCallHistory(call);
+  if (isCallEnded(call)) {
+    clearRingExpiryTimer(call.callId);
+    await persistCallHistory(call);
+  }
   await saveCall(call);
   res.json({ success: true, call: serializeIncoming(call, userId) });
 });
@@ -615,6 +655,7 @@ router.post("/calls/:callId/end", async (req: Request, res: Response) => {
     return;
   }
   if (call) {
+    clearRingExpiryTimer(call.callId);
     Object.keys(call.statuses).forEach((uid) => { call.statuses[Number(uid)] = "ended"; });
     call.updatedAt = Date.now();
     await persistCallHistory(call);

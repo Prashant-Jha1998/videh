@@ -25,6 +25,7 @@ import { safeJsonArray } from "@/lib/safeJson";
 import { getApiUrl } from "@/lib/api";
 import { getContactStatusRingSegments } from "@/lib/statusRingSegments";
 import { StoryRingAvatar } from "@/components/StoryRing";
+import { formatTypingLabel } from "@/lib/typingIndicator";
 
 interface BroadcastListRow {
   id: number;
@@ -43,7 +44,7 @@ export default function ChatsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { chats, pinChat, muteChat, archiveChat, refreshChats, blockUser, markAsRead, markAllAsRead, user } = useApp();
+  const { chats, statuses, pinChat, muteChat, archiveChat, refreshChats, blockUser, markAsRead, markAllAsRead, user } = useApp();
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"all" | "unread" | "favorites" | "groups">("all");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -325,6 +326,23 @@ export default function ChatsScreen() {
     router.push({ pathname: "/chat-info/[id]", params: { id: chat.id } });
   };
 
+  const previewStatusIds = useMemo(() => {
+    if (!previewChat || previewChat.isGroup || previewChat.otherUserId == null) return [];
+    const uid = String(previewChat.otherUserId);
+    return statuses
+      .filter((s) => s.userId === uid)
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map((s) => s.id);
+  }, [previewChat, statuses]);
+
+  const openPreviewStatus = () => {
+    if (previewStatusIds.length === 0) return;
+    const ids = previewStatusIds.join(",");
+    setPreviewChat(null);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push({ pathname: "/status/view", params: { ids } });
+  };
+
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const menuItems = [
@@ -573,16 +591,50 @@ export default function ChatsScreen() {
               <Text style={[styles.previewName, { color: colors.foreground }]} numberOfLines={1}>
                 {previewChat.name}
               </Text>
-              {previewChat.avatar ? (
-                <Image source={{ uri: previewChat.avatar }} style={styles.previewImage} contentFit="cover" />
-              ) : (
-                <View style={[styles.previewFallback, { backgroundColor: colors.primary }]}>
-                  <Text style={styles.previewFallbackText}>
-                    {previewChat.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)}
-                  </Text>
-                </View>
-              )}
+              <TouchableOpacity
+                style={previewStatusIds.length > 0 ? styles.previewRingTouch : undefined}
+                activeOpacity={previewStatusIds.length > 0 ? 0.8 : 1}
+                onPress={previewStatusIds.length > 0 ? openPreviewStatus : undefined}
+                disabled={previewStatusIds.length === 0}
+              >
+                {previewStatusIds.length > 0 ? (
+                  <StoryRingAvatar
+                    size={208}
+                    strokeWidth={3.5}
+                    segments={previewStatusIds.map(() => false)}
+                    activeColor={colors.primary}
+                  >
+                    {previewChat.avatar ? (
+                      <Image source={{ uri: previewChat.avatar }} style={styles.previewRingImage} contentFit="cover" />
+                    ) : (
+                      <View style={[styles.previewRingFallback, { backgroundColor: colors.primary }]}>
+                        <Text style={styles.previewFallbackText}>
+                          {previewChat.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)}
+                        </Text>
+                      </View>
+                    )}
+                  </StoryRingAvatar>
+                ) : previewChat.avatar ? (
+                  <Image source={{ uri: previewChat.avatar }} style={styles.previewImage} contentFit="cover" />
+                ) : (
+                  <View style={[styles.previewFallback, { backgroundColor: colors.primary }]}>
+                    <Text style={styles.previewFallbackText}>
+                      {previewChat.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              {previewStatusIds.length > 0 ? (
+                <Text style={[styles.previewStatusHint, { color: colors.mutedForeground }]}>
+                  Tap photo to view status
+                </Text>
+              ) : null}
               <View style={[styles.previewActions, { borderTopColor: colors.border }]}>
+                {previewStatusIds.length > 0 ? (
+                  <TouchableOpacity style={styles.previewActionBtn} onPress={openPreviewStatus}>
+                    <Ionicons name="aperture-outline" size={22} color={colors.primary} />
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity
                   style={styles.previewActionBtn}
                   onPress={() => {
@@ -635,7 +687,12 @@ function ChatRow({
   isShortcut: boolean;
   unreadCount: number;
 }) {
-  const { statuses } = useApp();
+  const { statuses, typingByChatId } = useApp();
+  const typingNames = typingByChatId[chat.id] ?? [];
+  const lastLine = typingNames.length > 0
+    ? formatTypingLabel(typingNames, chat.isGroup)
+    : (chat.lastMessage ?? "No messages yet");
+  const lastLineIsTyping = typingNames.length > 0;
   const initials = chat.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = chat.name.charCodeAt(0) * 37 % 360;
   const avatarBg = `hsl(${hue},50%,45%)`;
@@ -698,8 +755,15 @@ function ChatRow({
           </Text>
         </View>
         <View style={styles.rowBottom}>
-          <Text style={[styles.lastMsg, { color: colors.mutedForeground }]} numberOfLines={1}>
-            {chat.lastMessage ?? "No messages yet"}
+          <Text
+            style={[
+              styles.lastMsg,
+              { color: lastLineIsTyping ? colors.primary : colors.mutedForeground },
+              lastLineIsTyping && { fontFamily: "Inter_500Medium" },
+            ]}
+            numberOfLines={1}
+          >
+            {lastLine}
           </Text>
           {unreadCount > 0 && !chat.isMuted && (
             <View style={[styles.badge, { backgroundColor: colors.primary }]}>
@@ -799,6 +863,10 @@ const styles = StyleSheet.create({
   previewImage: { width: "100%", height: 300 },
   previewFallback: { width: "100%", height: 300, alignItems: "center", justifyContent: "center" },
   previewFallbackText: { color: "#fff", fontSize: 56, fontFamily: "Inter_700Bold" },
+  previewRingTouch: { alignItems: "center", justifyContent: "center", paddingVertical: 18 },
+  previewRingImage: { width: 184, height: 184, borderRadius: 92 },
+  previewRingFallback: { width: 184, height: 184, borderRadius: 92, alignItems: "center", justifyContent: "center" },
+  previewStatusHint: { fontSize: 12, fontFamily: "Inter_500Medium", textAlign: "center", paddingBottom: 12 },
   previewActions: { height: 42, flexDirection: "row", alignItems: "center", justifyContent: "space-evenly", borderTopWidth: 1 },
   previewActionBtn: { minWidth: 64, alignItems: "center", justifyContent: "center" },
 });
