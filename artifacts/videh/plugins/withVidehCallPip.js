@@ -69,7 +69,18 @@ object VidehPipHolder {
     }
 
     if (!contents.includes("object VidehPipHolder")) {
-      contents = `${pipHolder}\n${contents}`;
+      const packageLine = contents.match(/^package .+\n/m);
+      if (packageLine?.index != null) {
+        const insertAt = packageLine.index + packageLine[0].length;
+        contents =
+          contents.slice(0, insertAt) +
+          "\n" +
+          pipHolder.trim() +
+          "\n" +
+          contents.slice(insertAt);
+      } else {
+        contents = `${pipHolder}\n${contents}`;
+      }
     }
 
     if (contents.includes("class MainActivity")) {
