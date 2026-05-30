@@ -123,10 +123,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const sessionCallIdRef = useRef<string | null>(null);
   const outgoingCallInitRef = useRef<string | null>(null);
   const busyEndHandledRef = useRef<string | null>(null);
+  const dismissedCallIdsRef = useRef<Set<string>>(new Set());
+  const sessionRingingRef = useRef(false);
 
   useEffect(() => {
     sessionCallIdRef.current = session?.callId ?? null;
-  }, [session?.callId]);
+    sessionRingingRef.current = Boolean(session?.ringing);
+  }, [session?.callId, session?.ringing]);
 
   const userId = user?.dbId ?? 0;
   const remotePeerIds = useMemo(() => {
@@ -160,11 +163,34 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     busyEndHandledRef.current = null;
   }, []);
 
+  const leaveCallScreen = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace("/(tabs)/chats");
+  }, [router]);
+
+  const dismissIncomingRinging = useCallback(
+    async (callId?: string) => {
+      const id = callId ?? sessionCallIdRef.current ?? undefined;
+      if (!id) return;
+      if (sessionCallIdRef.current && sessionCallIdRef.current !== id) return;
+      if (sessionCallIdRef.current === id && !sessionRingingRef.current) return;
+      if (endingCallRef.current) return;
+      endingCallRef.current = true;
+      dismissedCallIdsRef.current.add(id);
+      requestDismissIncomingCallUi(id);
+      await stopCallAlert();
+      clearSession();
+      leaveCallScreen();
+    },
+    [clearSession, leaveCallScreen],
+  );
+
   const onCallEnded = useCallback(() => {
     if (endingCallRef.current) return;
     endingCallRef.current = true;
     const endedCallId = session?.callId;
     const shouldLeave = session?.engineActive;
+    if (endedCallId) dismissedCallIdsRef.current.add(endedCallId);
     requestDismissIncomingCallUi(endedCallId);
     void (async () => {
       await stopCallAlert();
@@ -172,9 +198,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       if (endedCallId) endCallKeep(endedCallId);
       void refreshCallLogs();
       clearSession();
-      if (router.canGoBack()) router.back();
+      leaveCallScreen();
     })();
-  }, [clearSession, refreshCallLogs, router, session?.callId, session?.engineActive, call]);
+  }, [clearSession, refreshCallLogs, leaveCallScreen, session?.callId, session?.engineActive, call]);
 
   const pushCallRoute = useCallback((s: CallSession, replace = false) => {
     const route = {
@@ -206,8 +232,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     void refreshCallLogs();
     clearSession();
     setHeldSession(null);
-    if (router.canGoBack()) router.back();
-  }, [session, call, user?.sessionToken, clearSession, refreshCallLogs, router]);
+    leaveCallScreen();
+  }, [session, call, user?.sessionToken, clearSession, refreshCallLogs, leaveCallScreen]);
 
   const holdActiveCall = useCallback(async () => {
     if (!session?.callId || !user?.dbId) return;
@@ -280,6 +306,11 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const initFromRoute = useCallback((params: RouteParams) => {
     const chatId = params.id ?? "";
     if (!chatId) return;
+    const routeCallId = params.callId ?? "";
+    if (routeCallId && dismissedCallIdsRef.current.has(routeCallId)) {
+      leaveCallScreen();
+      return;
+    }
     const isIncoming = params.incoming === "1";
     const ringing = params.ringing === "1";
     const isVideo = params.type === "video";
@@ -343,7 +374,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         })
         .catch(() => {});
     }
-  }, [user?.dbId, user?.sessionToken, onCallEnded]);
+  }, [user?.dbId, user?.sessionToken, onCallEnded, leaveCallScreen]);
 
   const acceptIncoming = useCallback(async (callInfo?: IncomingCallInfo) => {
     const callId = callInfo?.callId ?? session?.callId;
@@ -388,9 +419,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         ...(declineMessage ? { declineMessage } : {}),
       }),
     }).catch(() => {});
+    if (session?.callId) dismissedCallIdsRef.current.add(session.callId);
     clearSession();
-    if (router.canGoBack()) router.back();
-  }, [session?.callId, user?.dbId, user?.sessionToken, clearSession, router]);
+    leaveCallScreen();
+  }, [session?.callId, user?.dbId, user?.sessionToken, clearSession, leaveCallScreen]);
 
   const minimizeCall = useCallback(() => {
     setSession((prev) => (prev ? { ...prev, minimized: true } : prev));
@@ -554,13 +586,22 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     const unsub = onCallSignal((payload) => {
-      if (String(payload.action ?? "") !== "media_type") return;
+      const action = String(payload.action ?? "");
+      const callId = payload.callId ? String(payload.callId) : "";
+      if (
+        callId
+        && (action === "ended" || action === "declined" || action === "missed" || action === "busy" || action === "cancelled")
+      ) {
+        void dismissIncomingRinging(callId);
+        return;
+      }
+      if (action !== "media_type") return;
       const raw = payload as { type?: string; payload?: { type?: string } };
       const nextVideo = (raw.type ?? raw.payload?.type) === "video";
       setSession((prev) => (prev ? { ...prev, isVideo: nextVideo } : prev));
     });
     return unsub;
-  }, []);
+  }, [dismissIncomingRinging]);
 
   const switchCallMediaType = useCallback(
     async (video: boolean) => {

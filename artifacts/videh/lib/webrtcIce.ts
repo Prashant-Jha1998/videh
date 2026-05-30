@@ -19,6 +19,27 @@ export function peerChannel(baseChannel: string, localUserId: number, remoteUser
   return `${baseChannel}_peer_${a}_${b}`;
 }
 
+/** Signaling channels for WebRTC. 1:1 calls always use the server call channel; mesh peer suffixes only for 3+ party. */
+export function channelsForCall(
+  baseChannel: string,
+  localUserId: number,
+  remotePeerIds: number[],
+): string[] {
+  if (!baseChannel) return [];
+  if (remotePeerIds.length <= 1) return [baseChannel];
+  return remotePeerIds.map((peerId) => peerChannel(baseChannel, localUserId, peerId));
+}
+
+export function peerIdFromCallChannel(channel: string, localUid: number): number {
+  const m = channel.match(/_peer_(\d+)_(\d+)$/);
+  if (!m) return 0;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === localUid) return b;
+  if (b === localUid) return a;
+  return 0;
+}
+
 export async function loadIceServers(sessionToken?: string | null): Promise<RTCIceServer[]> {
   if (cachedIce && Date.now() - cacheAt < CACHE_MS) return cachedIce;
   try {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PermissionsAndroid, Platform } from "react-native";
 import { applySpeakerRoute, setProximityScreenOff, startInCallSession, stopInCallSession } from "@/lib/inCallAudio";
 import { buildCallMediaConstraints, getCallMediaSettings } from "@/lib/callMediaSettings";
-import { loadIceServers } from "@/lib/webrtcIce";
+import { channelsForCall, loadIceServers, peerIdFromCallChannel } from "@/lib/webrtcIce";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import type { CallUiPhase } from "@/lib/callState";
 import type { RemoteCallPeerStream, VidehCallState } from "./videhCallTypes";
@@ -12,15 +12,8 @@ export type { VidehCallState } from "./videhCallTypes";
 type Role = "caller" | "callee";
 const SIGNAL_POLL_MS = 250;
 
-function peerIdFromChannel(channel: string, localUid: number): number {
-  const m = channel.match(/_peer_(\d+)_(\d+)$/);
-  if (!m) return 0;
-  const a = Number(m[1]);
-  const b = Number(m[2]);
-  if (a === localUid) return b;
-  if (b === localUid) return a;
-  return 0;
-}
+/** 0 = single shared call channel (no _peer_ suffix on server invite channel). */
+const SINGLE_PEER_KEY = 0;
 
 function upsertRemotePeer(
   map: Map<number, { streamUrl?: string; hasVideo: boolean }>,
@@ -28,19 +21,11 @@ function upsertRemotePeer(
   streamUrl: string | undefined,
   hasVideo: boolean,
 ) {
-  if (!peerId) return;
   const prev = map.get(peerId);
   map.set(peerId, {
     streamUrl: streamUrl ?? prev?.streamUrl,
     hasVideo: hasVideo || prev?.hasVideo || false,
   });
-}
-
-function channelsForCall(baseChannel: string, uid: number, remotePeerIds: number[]): string[] {
-  if (!baseChannel) return [];
-  if (remotePeerIds.length === 0) return [baseChannel];
-  const { peerChannel } = require("@/lib/webrtcIce") as typeof import("@/lib/webrtcIce");
-  return remotePeerIds.map((peerId) => peerChannel(baseChannel, uid, peerId));
 }
 
 export function useVidehCall(
@@ -86,6 +71,20 @@ export function useVidehCall(
   };
 
   const refreshAggregate = useCallback(() => {
+    if (remotePeersRef.current.size === 0) {
+      const { MediaStream: NativeMediaStream } = require("react-native-webrtc");
+      for (const [channel, pc] of pcsRef.current.entries()) {
+        if (pc?.connectionState !== "connected") continue;
+        for (const receiver of pc.getReceivers?.() ?? []) {
+          const track = receiver?.track;
+          if (!track || track.kind !== "video" || track.readyState === "ended") continue;
+          const stream = new NativeMediaStream([track]);
+          const url = typeof stream.toURL === "function" ? stream.toURL() : undefined;
+          const parsedPeer = peerIdFromCallChannel(channel, uid) || remotePeerIds[0];
+          upsertRemotePeer(remotePeersRef.current, parsedPeer || SINGLE_PEER_KEY, url, true);
+        }
+      }
+    }
     const pcs = [...pcsRef.current.values()];
     const states = pcs.map((pc) => pc?.connectionState as string | undefined);
     const connected = states.filter((s) => s === "connected").length;
@@ -99,8 +98,10 @@ export function useVidehCall(
       hasVideo: p.hasVideo,
     }));
     setRemotePeers(peerList);
-    if (peerList.length > 0) {
-      setRemoteStreamUrl(peerList[0].streamUrl);
+    const withStream = peerList.filter((p) => p.streamUrl);
+    const pick = withStream.find((p) => p.hasVideo) ?? withStream[0] ?? peerList[0];
+    if (pick) {
+      setRemoteStreamUrl(pick.streamUrl);
       setHasRemoteVideo(peerList.some((p) => p.hasVideo));
     }
     if (connected > 0) {
@@ -114,7 +115,7 @@ export function useVidehCall(
     } else if (pcs.length > 0) {
       setConnectionPhase("connecting");
     }
-  }, [isVideo]);
+  }, [isVideo, uid, remotePeerIds]);
 
   const channelsKey = channels.join("|");
 
@@ -164,12 +165,18 @@ export function useVidehCall(
         if (!stream) return;
         const url = typeof stream.toURL === "function" ? stream.toURL() : undefined;
         const hasVid = (stream.getVideoTracks?.().length ?? 0) > 0;
-        const pid = peerIdFromChannel(channel, uid) || remotePeerIds[0] || 0;
-        upsertRemotePeer(remotePeersRef.current, pid, url, hasVid);
+        const parsedPeer = peerIdFromCallChannel(channel, uid) || remotePeerIds[0];
+        const storageKey = parsedPeer || SINGLE_PEER_KEY;
+        upsertRemotePeer(remotePeersRef.current, storageKey, url, hasVid);
         refreshAggregate();
       };
       pc.ontrack = (event: any) => {
-        noteRemoteStream(event.streams?.[0] ?? event.stream);
+        const { MediaStream: NativeMediaStream } = require("react-native-webrtc");
+        const stream =
+          event.streams?.[0]
+          ?? event.stream
+          ?? (event.track ? new NativeMediaStream([event.track]) : null);
+        noteRemoteStream(stream);
       };
       pc.onaddstream = (event: any) => {
         noteRemoteStream(event.stream);

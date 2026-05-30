@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -27,6 +27,7 @@ import { isScreenShareSupported } from "@/lib/screenShare";
 
 export default function CallScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const params = useLocalSearchParams<{
     id: string;
     name: string;
@@ -82,12 +83,32 @@ export default function CallScreen() {
 
   const isVideo = session?.isVideo ?? params.type === "video";
   const name = session?.contactName ?? params.name ?? "Contact";
-  const ringing = session?.ringing ?? params.ringing === "1";
+  const ringing = Boolean(session?.ringing);
   const incoming = session?.isIncoming ?? params.incoming === "1";
 
   const pulse = useRef(new Animated.Value(1)).current;
   const swipeY = useRef(new Animated.Value(0)).current;
   const acceptedRef = useRef(false);
+  const hadSessionRef = useRef(false);
+
+  useEffect(() => {
+    if (session) hadSessionRef.current = true;
+  }, [session]);
+
+  useEffect(() => {
+    if (!hadSessionRef.current || session) return;
+    if (params.incoming !== "1" && params.ringing !== "1") return;
+    acceptedRef.current = false;
+    swipeY.setValue(0);
+    if (router.canGoBack()) router.back();
+    else router.replace("/(tabs)/chats");
+  }, [session, params.incoming, params.ringing, router, swipeY]);
+
+  useEffect(() => {
+    if (ringing) return;
+    acceptedRef.current = false;
+    swipeY.setValue(0);
+  }, [ringing, swipeY]);
 
   useEffect(() => {
     if (!ringing) return;
@@ -106,7 +127,7 @@ export default function CallScreen() {
       onStartShouldSetPanResponder: () => ringing,
       onMoveShouldSetPanResponder: () => ringing,
       onPanResponderMove: (_, g) => {
-        swipeY.setValue(Math.min(0, g.dy));
+        swipeY.setValue(Math.max(-56, Math.min(0, g.dy)));
       },
       onPanResponderRelease: (_, g) => {
         if (g.dy <= -72 && !acceptedRef.current) {
@@ -238,7 +259,7 @@ export default function CallScreen() {
             </View>
             <View style={styles.actionItem}>
               <Animated.View
-                style={{ transform: [{ translateY: swipeY }] }}
+                style={[styles.acceptSwipeCol, { transform: [{ translateY: swipeY }] }]}
                 {...panResponder.panHandlers}
               >
                 <TouchableOpacity
@@ -252,8 +273,8 @@ export default function CallScreen() {
                 >
                   <Ionicons name="call" size={28} color="#fff" />
                 </TouchableOpacity>
+                <Text style={styles.actionLblGreen}>Accept</Text>
               </Animated.View>
-              <Text style={styles.actionLblGreen}>Accept</Text>
             </View>
           </View>
         </View>
@@ -292,8 +313,12 @@ export default function CallScreen() {
         <View style={styles.videoContainer}>
           {participantCount > 2 && gridPeers.length > 1 ? (
             <GroupCallGrid peers={gridPeers} placeholderColor={avatarBg} />
-          ) : hasRemoteVideo || remoteStreamUrl ? (
+          ) : remoteStreamUrl ? (
             <VidehRemoteView nativeId={remoteVideoId} streamUrl={remoteStreamUrl} style={styles.remoteVideo} />
+          ) : hasRemoteVideo && joined ? (
+            <View style={[styles.remoteVideo, styles.videoPlaceholder]}>
+              <Text style={styles.callStatus}>Connecting video…</Text>
+            </View>
           ) : (
             <View style={[styles.remoteVideo, styles.videoPlaceholder]}>
               <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: !joined ? pulse : 1 }] }]}>
@@ -486,7 +511,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   incomingMiddle: { width: "100%", paddingHorizontal: 28, marginBottom: 20 },
-  incomingFooter: { width: "100%", paddingHorizontal: 40, alignItems: "center" },
+  incomingFooter: { width: "100%", paddingHorizontal: 40, alignItems: "center", marginTop: "auto" },
   incomingActions: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -496,7 +521,8 @@ const styles = StyleSheet.create({
     maxWidth: 280,
     alignSelf: "center",
   },
-  actionItem: { alignItems: "center", gap: 10, minWidth: 88 },
+  actionItem: { alignItems: "center", minWidth: 88, minHeight: 96, justifyContent: "flex-end" },
+  acceptSwipeCol: { alignItems: "center", gap: 10 },
   declineCircle: {
     width: 64,
     height: 64,

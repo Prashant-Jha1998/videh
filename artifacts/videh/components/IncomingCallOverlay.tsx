@@ -58,7 +58,7 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderMove: (_, g) => {
-        swipeY.setValue(Math.min(0, g.dy));
+        swipeY.setValue(Math.max(-56, Math.min(0, g.dy)));
       },
       onPanResponderRelease: (_, g) => {
         const swipedUp = g.dy <= SWIPE_ACCEPT_DY || g.vy < -0.45;
@@ -134,7 +134,7 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
             </View>
             <View style={styles.actionItem}>
               <Animated.View
-                style={{ transform: [{ translateY: swipeY }] }}
+                style={[styles.acceptSwipeCol, { transform: [{ translateY: swipeY }] }]}
                 {...panResponder.panHandlers}
               >
                 <TouchableOpacity
@@ -149,8 +149,8 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
                 >
                   <Ionicons name="call" size={28} color="#fff" />
                 </TouchableOpacity>
+                <Text style={styles.actionLblGreen}>Accept</Text>
               </Animated.View>
-              <Text style={styles.actionLblGreen}>Accept</Text>
             </View>
           </View>
         </View>
@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   middle: { width: "100%", marginBottom: 20 },
-  footer: { width: "100%", paddingHorizontal: 12, alignItems: "center" },
+  footer: { width: "100%", paddingHorizontal: 12, alignItems: "center", marginTop: "auto" },
   avatarRing: {
     width: 132,
     height: 132,
@@ -208,7 +208,8 @@ const styles = StyleSheet.create({
     marginTop: 16,
     maxWidth: 280,
   },
-  actionItem: { alignItems: "center", gap: 10, minWidth: 88 },
+  actionItem: { alignItems: "center", minWidth: 88, minHeight: 96, justifyContent: "flex-end" },
+  acceptSwipeCol: { alignItems: "center", gap: 10 },
   declineCircle: {
     width: 64,
     height: 64,

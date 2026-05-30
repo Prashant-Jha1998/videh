@@ -11,6 +11,7 @@ function VideoElement({ streamUrl, muted, style }: { streamUrl?: string; muted?:
       streamURL={url}
       objectFit="cover"
       mirror={Boolean(muted)}
+      zOrder={muted ? 1 : 0}
       style={[styles.fill, style]}
     />
   );

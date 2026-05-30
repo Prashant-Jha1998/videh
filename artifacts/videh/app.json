@@ -36,8 +36,8 @@
     },
     "android": {
       "package": "com.videh.app",
-      "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 26,
+      "softwareKeyboardLayoutMode": "pan",
+      "versionCode": 27,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/videh_icon_foreground.png",
         "backgroundColor": "#0B141A"
@@ -147,6 +147,7 @@
           ]
         }
       ],
+      "react-native-keyboard-controller",
       "./plugins/withIncomingCallAndroid.js",
       "@config-plugins/react-native-callkeep",
       "./plugins/withVidehCallPip.js",

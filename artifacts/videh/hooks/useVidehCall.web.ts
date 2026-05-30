@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadIceServers } from "@/lib/webrtcIce";
+import { channelsForCall, loadIceServers } from "@/lib/webrtcIce";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import { startScreenShare, stopScreenShare as stopScreenShareTracks } from "@/lib/screenShare";
 import type { VidehCallState } from "./videhCallTypes";
@@ -8,13 +8,6 @@ export type { VidehCallState } from "./videhCallTypes";
 
 type Role = "caller" | "callee";
 const SIGNAL_POLL_MS = 250;
-
-function channelsForCall(baseChannel: string, uid: number, remotePeerIds: number[]): string[] {
-  if (!baseChannel) return [];
-  if (remotePeerIds.length === 0) return [baseChannel];
-  const { peerChannel } = require("@/lib/webrtcIce") as typeof import("@/lib/webrtcIce");
-  return remotePeerIds.map((peerId) => peerChannel(baseChannel, uid, peerId));
-}
 
 export function useVidehCall(
   baseChannel: string,
