@@ -37,7 +37,23 @@ export type ChatEntry = {
   unread_count: number;
   is_pinned?: boolean;
   is_muted?: boolean;
+  is_archived?: boolean;
   other_members?: ChatMember[];
+};
+
+export type CallLogEntry = {
+  id: number;
+  chat_id?: number | null;
+  type: string;
+  status: string;
+  direction: "incoming" | "outgoing";
+  other_user_id?: number;
+  other_user_name?: string;
+  other_user_avatar?: string;
+  started_at?: string;
+  ended_at?: string;
+  duration_seconds?: number;
+  created_at: string;
 };
 
 export type Reaction = {
@@ -177,6 +193,8 @@ export const webApi = {
     request<{ success: true }>(`/web-session/${token}/statuses/${statusId}/view`, { method: "POST" }),
   starredMessages: (token: string) =>
     request<{ success: true; messages: StarredMessage[] }>(`/web-session/${token}/starred`),
+  callLogs: (token: string) =>
+    request<{ success: true; calls: CallLogEntry[] }>(`/web-session/${token}/calls`),
   markAllRead: (token: string) =>
     request<{ success: true }>(`/web-session/${token}/chats/read-all`, { method: "POST" }),
   createDirectChat: (token: string, otherUserId: number) =>

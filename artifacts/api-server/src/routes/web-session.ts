@@ -345,7 +345,7 @@ router.get("/:token/chats", async (req: Request, res: Response) => {
     const chatsResult = await query(
       `SELECT
         c.id, c.is_group, c.group_name, c.group_avatar_url,
-        cm.is_muted, cm.is_pinned,
+        cm.is_muted, cm.is_pinned, cm.is_archived,
         (
           SELECT json_build_object(
             'id', m.id, 'content', m.content, 'type', m.type, 'media_url', m.media_url,
@@ -847,6 +847,33 @@ router.post("/:token/statuses/:statusId/view", async (req: Request, res: Respons
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "web status view");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:token/calls", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  try {
+    const result = await query(
+      `SELECT
+        c.id, c.chat_id, c.type, c.status, c.started_at, c.ended_at, c.duration_seconds, c.created_at,
+        CASE WHEN c.caller_id = $1::int THEN 'outgoing' ELSE 'incoming' END AS direction,
+        CASE WHEN c.caller_id = $1::int THEN u2.id ELSE u1.id END AS other_user_id,
+        CASE WHEN c.caller_id = $1::int THEN u2.name ELSE u1.name END AS other_user_name,
+        CASE WHEN c.caller_id = $1::int THEN u2.avatar_url ELSE u1.avatar_url END AS other_user_avatar,
+        CASE WHEN c.caller_id = $1::int THEN u2.phone ELSE u1.phone END AS other_user_phone
+      FROM calls c
+      JOIN users u1 ON u1.id = c.caller_id
+      JOIN users u2 ON u2.id = c.callee_id
+      WHERE c.caller_id = $1::int OR c.callee_id = $1::int
+      ORDER BY c.created_at DESC
+      LIMIT 50`,
+      [session.userId],
+    );
+    res.json({ success: true, calls: result.rows });
+  } catch (err) {
+    req.log.error({ err }, "web session calls");
     res.status(500).json({ success: false });
   }
 });

@@ -2,14 +2,24 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { webApi, type WebStatus, type WebUser } from "../lib/webApi";
 import { DropdownMenu, EmojiPicker, useClickOutside } from "../components/web/WebOverlays";
-import { WebNavRail, type NavTab } from "../components/web/WebNavRail";
+import { WebNavRail } from "../components/web/WebNavRail";
 import { WebContactPicker, type ContactPickerMode } from "../components/web/WebContactPicker";
 import { WebContactInfo } from "../components/web/WebContactInfo";
 import { WebChatImage, WebChatVideo } from "../components/web/WebChatMedia";
 import { WebStatusPanel } from "../components/web/WebStatusPanel";
 import { WebStarredPanel } from "../components/web/WebStarredPanel";
-import { Avatar, initials, hue, WA_BG } from "../components/web/webUiShared";
-import type { ChatMember } from "../lib/webApi";
+import { WebFilterChips } from "../components/web/WebFilterChips";
+import { WebEmptyPane } from "../components/web/WebEmptyPane";
+import { WebCallsListPane } from "../components/web/WebCallsListPane";
+import { WebSettingsPane } from "../components/web/WebSettingsPane";
+import { WebDocumentBubble } from "../components/web/WebDocumentBubble";
+import { Avatar, initials, hue } from "../components/web/webUiShared";
+import type { CallLogEntry, ChatMember } from "../lib/webApi";
+import type { WebSection } from "../lib/webDesktop";
+import { WEB_LIST_PANE_WIDTH } from "../lib/webDesktop";
+import { inferListPreview } from "../lib/messagePreview";
+
+const FAV_CHATS_KEY = "videh_web_favorite_chats";
 
 const API = "";
 
@@ -18,10 +28,11 @@ interface ChatEntry {
   is_group: boolean;
   group_name?: string;
   other_members?: { id: number; name: string; avatar_url?: string; is_online: boolean; about?: string; phone?: string }[];
-  last_message?: { content: string; created_at: string; is_deleted: boolean; sender_id: number };
+  last_message?: { content: string; type?: string; created_at: string; is_deleted: boolean; sender_id: number };
   unread_count: number;
   is_pinned?: boolean;
   is_muted?: boolean;
+  is_archived?: boolean;
 }
 
 interface Msg {
@@ -49,7 +60,10 @@ export default function VidehWeb() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [msgText, setMsgText] = useState("");
   const [search, setSearch] = useState("");
-  const [navTab, setNavTab] = useState<NavTab>("chats");
+  const [mainSection, setMainSection] = useState<WebSection>("chats");
+  const [chatFilter, setChatFilter] = useState<"all" | "unread" | "favorites">("all");
+  const [favoriteChatIds, setFavoriteChatIds] = useState<number[]>([]);
+  const [callLogs, setCallLogs] = useState<CallLogEntry[]>([]);
   const [sidebarView, setSidebarView] = useState<SidebarView>("chats");
   const [sidebarMenuOpen, setSidebarMenuOpen] = useState(false);
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
@@ -168,11 +182,20 @@ export default function VidehWeb() {
     if (tok) pollRef.current = setInterval(() => pollStatus(tok), 2000);
   }, [token, createSession, pollStatus]);
 
+  const loadCallLogs = useCallback(async (tok: string) => {
+    try {
+      const res = await webApi.callLogs(tok);
+      setCallLogs(res.calls ?? []);
+    } catch {
+      setCallLogs([]);
+    }
+  }, []);
+
   const openChatById = useCallback(async (chatId: number) => {
     if (token) await loadChats(token);
     setActiveChatId(chatId);
+    setMainSection("chats");
     setSidebarView("chats");
-    setNavTab("chats");
     setSearch("");
   }, [token, loadChats]);
 
@@ -203,7 +226,7 @@ export default function VidehWeb() {
 
   const openStarred = useCallback(async () => {
     if (!token) return;
-    setSidebarView("starred");
+    setMainSection("starred");
     try {
       const res = await webApi.starredMessages(token);
       setStarredMessages(res.messages);
@@ -211,6 +234,21 @@ export default function VidehWeb() {
       setStarredMessages([]);
     }
   }, [token]);
+
+  const handleSectionChange = useCallback(
+    (section: WebSection) => {
+      setMainSection(section);
+      setActiveChatId(null);
+      setSidebarMenuOpen(false);
+      if (section === "starred") void openStarred();
+      if (section === "calls" && token) void loadCallLogs(token);
+      if (section === "archived") setChatFilter("all");
+      if (section === "chats" || section === "archived" || section === "status" || section === "settings" || section === "calls") {
+        setSidebarView("chats");
+      }
+    },
+    [token, openStarred, loadCallLogs],
+  );
 
   const markAllRead = useCallback(async () => {
     if (!token) return;
@@ -281,6 +319,21 @@ export default function VidehWeb() {
     }
     if (items.length > 0) loadStatuses(token);
   }, [token, statusFeed, loadStatuses]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(FAV_CHATS_KEY);
+      if (raw) setFavoriteChatIds(JSON.parse(raw) as number[]);
+    } catch {}
+  }, []);
+
+  const toggleFavoriteChat = useCallback((chatId: number) => {
+    setFavoriteChatIds((prev) => {
+      const next = prev.includes(chatId) ? prev.filter((id) => id !== chatId) : [...prev, chatId];
+      localStorage.setItem(FAV_CHATS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     const startNewSession = () => {
@@ -356,7 +409,18 @@ export default function VidehWeb() {
 
   const getChatName = (c: ChatEntry) => c.is_group ? (c.group_name ?? "Group") : (c.other_members?.[0]?.name ?? "Unknown");
   const getChatAvatar = (c: ChatEntry) => c.is_group ? undefined : c.other_members?.[0]?.avatar_url;
-  const filteredChats = chats.filter((c) => getChatName(c).toLowerCase().includes(search.toLowerCase()));
+  const filteredChats = chats.filter((c) => {
+    if (!getChatName(c).toLowerCase().includes(search.toLowerCase())) return false;
+    const archived = Boolean(c.is_archived);
+    if (mainSection === "archived") return archived;
+    if (archived) return false;
+    if (chatFilter === "unread") return c.unread_count > 0;
+    if (chatFilter === "favorites") return favoriteChatIds.includes(c.id);
+    return true;
+  });
+
+  const unreadChatCount = chats.filter((c) => !c.is_archived && c.unread_count > 0).length;
+  const favCount = chats.filter((c) => !c.is_archived && favoriteChatIds.includes(c.id)).length;
 
   const pickerMode: ContactPickerMode | null =
     sidebarView === "contacts-direct" ? "direct"
@@ -506,15 +570,41 @@ export default function VidehWeb() {
   // ─── CHAT INTERFACE ────────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "Segoe UI, sans-serif", overflow: "hidden" }}>
-      <WebNavRail active={navTab} onSelect={(tab) => { setNavTab(tab); setSidebarView(tab === "status" ? "status" : "chats"); }} userAvatar={user?.avatarUrl} userName={user?.name ?? "Videh"} onProfileClick={() => { setContactInfoChatId(null); setShowContactInfo(true); }} />
+      <WebNavRail
+        active={mainSection}
+        onSectionChange={handleSectionChange}
+        userAvatar={user?.avatarUrl}
+        userName={user?.name ?? "Videh"}
+        onProfileClick={() => { setContactInfoChatId(null); setShowContactInfo(true); }}
+      />
       {pickerMode && token ? (
-        <WebContactPicker token={token} mode={pickerMode} selected={groupSelected} onSelectedChange={setGroupSelected} groupName={groupName} onGroupNameChange={setGroupName} onClose={() => { setSidebarView(navTab === "status" ? "status" : "chats"); setGroupSelected([]); }} onOpenChat={openDirectChat} onGroupNext={() => setSidebarView("group-name")} onCreateGroup={createGroupChat} busy={groupBusy} />
-      ) : sidebarView === "status" ? (
+        <WebContactPicker
+          token={token}
+          mode={pickerMode}
+          selected={groupSelected}
+          onSelectedChange={setGroupSelected}
+          groupName={groupName}
+          onGroupNameChange={setGroupName}
+          onClose={() => { setSidebarView("chats"); setGroupSelected([]); }}
+          onOpenChat={openDirectChat}
+          onGroupNext={() => setSidebarView("group-name")}
+          onCreateGroup={createGroupChat}
+          busy={groupBusy}
+        />
+      ) : mainSection === "status" ? (
         <WebStatusPanel statuses={statusFeed} selfId={user!.id} selfName={user!.name} selfAvatar={user?.avatarUrl} onSelectUser={openStatusViewer} />
-      ) : sidebarView === "starred" ? (
-        <WebStarredPanel messages={starredMessages} onClose={() => setSidebarView("chats")} onOpenChat={openChatById} />
+      ) : mainSection === "starred" ? (
+        <WebStarredPanel messages={starredMessages} onClose={() => setMainSection("chats")} onOpenChat={openChatById} />
+      ) : mainSection === "calls" ? (
+        <WebCallsListPane calls={callLogs} onOpenChat={(id) => void openChatById(id)} />
+      ) : mainSection === "settings" && user ? (
+        <WebSettingsPane
+          user={user}
+          onProfileClick={() => { setContactInfoChatId(null); setShowContactInfo(true); }}
+          onLogout={() => void handleLogout()}
+        />
       ) : (
-      <div style={{ width: 380, display: "flex", flexDirection: "column", borderRight: "1px solid #e9edef", backgroundColor: "white", flexShrink: 0 }}>
+      <div style={{ width: WEB_LIST_PANE_WIDTH, display: "flex", flexDirection: "column", borderRight: "1px solid #e9edef", backgroundColor: "white", flexShrink: 0 }}>
 
         {/* Sidebar header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", backgroundColor: "#f0f2f5", height: 60 }}>
@@ -532,7 +622,9 @@ export default function VidehWeb() {
                 <span style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{initials(user?.name ?? "V")}</span>
               </div>
             )}
-            <span style={{ fontWeight: 600, color: "#111b21", fontSize: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.name}</span>
+            <span style={{ fontWeight: 600, color: "#111b21", fontSize: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {mainSection === "archived" ? "Archived" : user?.name}
+            </span>
           </div>
           <div style={{ display: "flex", gap: 8, color: "#54656f", position: "relative" }}>
             <button
@@ -558,7 +650,7 @@ export default function VidehWeb() {
               anchorRef={sidebarMenuBtnRef}
               items={[
                 { label: "New group", onClick: () => { setGroupSelected([]); setSidebarView("contacts-group"); } },
-                { label: "Starred messages", onClick: openStarred },
+                { label: "Starred messages", onClick: () => void openStarred() },
                 { label: "Mark all as read", onClick: markAllRead },
                 { label: "Log out", onClick: handleLogout, danger: true },
               ]}
@@ -579,6 +671,18 @@ export default function VidehWeb() {
           </div>
         </div>
 
+        {mainSection === "chats" && (
+          <WebFilterChips
+            chips={[
+              { id: "all", label: "All" },
+              { id: "unread", label: "Unread", count: unreadChatCount },
+              { id: "favorites", label: "Favourites", count: favCount },
+            ]}
+            activeId={chatFilter}
+            onChange={(id) => setChatFilter(id as "all" | "unread" | "favorites")}
+          />
+        )}
+
         {/* Chat list */}
         <div style={{ flex: 1, overflowY: "auto" }}>
           {filteredChats.length === 0 && (
@@ -591,10 +695,9 @@ export default function VidehWeb() {
             const av = getChatAvatar(chat);
             const isActive = chat.id === activeChatId;
             const lastMsgText = chat.last_message
-              ? chat.last_message.is_deleted
-                ? "This message was deleted"
-                : chat.last_message.content
+              ? inferListPreview(chat.last_message.type, chat.last_message.content, chat.last_message.is_deleted)
               : "No messages yet";
+            const isFav = favoriteChatIds.includes(chat.id);
 
             return (
               <div
@@ -616,7 +719,10 @@ export default function VidehWeb() {
                 <Avatar name={chatName} url={av} size={49} ring={!chat.is_group && chat.other_members?.[0] ? statusRingForUser(chat.other_members[0].id) : null} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                    <span style={{ fontWeight: 600, color: "#111b21", fontSize: 16 }}>{chatName}</span>
+                    <span style={{ fontWeight: 600, color: "#111b21", fontSize: 16 }}>
+                      {chatName}
+                      {isFav ? <span style={{ marginLeft: 4, color: "#8696a0" }}>★</span> : null}
+                    </span>
                     <span style={{ fontSize: 12, color: chat.unread_count > 0 ? "#00a884" : "#667781", flexShrink: 0, marginLeft: 8 }}>
                       {chat.last_message ? formatChatTime(chat.last_message.created_at) : ""}
                     </span>
@@ -687,6 +793,10 @@ export default function VidehWeb() {
                 items={[
                   { label: chatSearchOpen ? "Close search" : "Search messages", onClick: () => setChatSearchOpen((o) => !o) },
                   { label: activeChat.is_muted ? "Unmute notifications" : "Mute notifications", onClick: toggleMute },
+                  {
+                    label: favoriteChatIds.includes(activeChatId!) ? "Remove from favourites" : "Add to favourites",
+                    onClick: () => toggleFavoriteChat(activeChatId!),
+                  },
                   { label: "Contact info", onClick: () => { setContactInfoChatId(activeChatId); setShowContactInfo(true); } },
                 ]}
               />
@@ -734,10 +844,15 @@ export default function VidehWeb() {
                     {!isDeleted && msg.type === "video" && msg.media_url ? (
                       <WebChatVideo url={msg.media_url} token={token} />
                     ) : null}
+                    {!isDeleted && msg.type === "document" && msg.media_url ? (
+                      <WebDocumentBubble url={msg.media_url} token={token} filename={msg.content || "Document"} />
+                    ) : null}
                     <p style={{ margin: 0, fontSize: 14.5, color: "#111b21", lineHeight: 1.4, fontStyle: isDeleted ? "italic" : "normal" }}>
                       {isDeleted
                         ? "🚫 This message was deleted"
-                        : ((msg.type === "image" || msg.type === "video") && msg.media_url ? (msg.content !== "Attachment" && msg.content !== "🎥 Video" && msg.content !== "📷 Photo" ? msg.content : "") : msg.content)}
+                        : ((msg.type === "image" || msg.type === "video" || msg.type === "document") && msg.media_url
+                          ? (msg.type === "document" ? "" : msg.content !== "Attachment" && msg.content !== "🎥 Video" && msg.content !== "📷 Photo" ? msg.content : "")
+                          : msg.content)}
                     </p>
                     <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 4, marginTop: 3 }}>
                       <span style={{ fontSize: 11, color: "#667781" }}>{formatTime(msg.created_at)}</span>
@@ -811,22 +926,7 @@ export default function VidehWeb() {
           </div>
         </div>
       ) : (
-        /* Empty state */
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#f0f2f5", gap: 20 }}>
-          <div style={{ width: 220, height: 220, backgroundColor: "#e9edef", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg viewBox="0 0 303 172" width="180" fill="#bfc6cb"><path d="M229.565 160.229c32.647-10.984 57.366-41.988 57.366-79.8C286.931 34.963 249.286 0 203.445 0c-34.47 0-64.395 20.467-79.441 50.353A101.733 101.733 0 0 0 100.606 44C45.086 44 0 86.91 0 139.752c0 16.037 4.166 31.13 11.42 44.228H229.565v-23.751z"/></svg>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <h2 style={{ margin: "0 0 8px", fontSize: 24, fontWeight: 300, color: "#41525d" }}>Videh Web</h2>
-            <p style={{ margin: 0, color: "#667781", fontSize: 14 }}>
-              Select a chat to start messaging
-            </p>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#667781", fontSize: 13 }}>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="#667781"><path d="M2.213 10.35a9.681 9.681 0 0 1 9.55-8.35 9.863 9.863 0 0 1 9.861 9.861 9.863 9.863 0 0 1-9.861 9.862 9.681 9.681 0 0 1-8.35-4.769L2.1 22.8l5.937-1.313A9.9 9.9 0 0 0 11.763 22.4a10.863 10.863 0 1 0 0-21.725A10.682 10.682 0 0 0 1.1 9.875L2.213 10.35z"/></svg>
-            End-to-end encrypted
-          </div>
-        </div>
+        <WebEmptyPane section={mainSection} />
       )}
 
       {showContactInfo && user && token && (
