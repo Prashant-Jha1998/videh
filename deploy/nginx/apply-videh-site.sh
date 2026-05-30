@@ -217,6 +217,11 @@ else
   echo "Configured HTTP for admin.videh.co.in"
 fi
 
+if [ -f "${ICON_SRC}" ]; then
+  sudo cp "${ICON_SRC}" "${WEB_ROOT}/videh-logo.png" 2>/dev/null || true
+  echo "Copied videh-logo.png to web.videh.co.in"
+fi
+
 if write_ssl_server "${WEB_CONF}" "web.videh.co.in" "${WEB_ROOT}" "true"; then
   echo "Configured HTTPS for web.videh.co.in"
 else

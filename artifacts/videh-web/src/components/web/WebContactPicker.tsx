@@ -38,7 +38,10 @@ export function WebContactPicker({
     const load = async () => {
       setLoading(true);
       try {
-        const res = await webApi.contacts(token, query.trim() || undefined);
+        const q = query.trim();
+        const res = q.length > 0
+          ? await webApi.searchUsers(token, q)
+          : await webApi.contacts(token);
         if (!cancelled) setUsers(res.users);
       } catch {
         if (!cancelled) setUsers([]);
@@ -193,7 +196,11 @@ export function WebContactPicker({
       <div style={{ flex: 1, overflowY: "auto" }}>
         {loading && <p style={{ padding: 16, color: WA_MUTED, fontSize: 14 }}>Loading contacts…</p>}
         {!loading && users.length === 0 && (
-          <p style={{ padding: 16, color: WA_MUTED, fontSize: 14 }}>No contacts found. Start a chat on mobile first.</p>
+          <p style={{ padding: 16, color: WA_MUTED, fontSize: 14, lineHeight: 1.5 }}>
+            {query.trim()
+              ? "No users found. Check the name or phone number."
+              : "No contacts yet. Search by name or phone, or start a chat from the Videh app on your phone."}
+          </p>
         )}
         {groups.map((g) => (
           <div key={g.letter}>

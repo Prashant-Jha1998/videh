@@ -27,7 +27,7 @@ export function DropdownMenu({
   open: boolean;
   onClose: () => void;
   anchorRef: React.RefObject<HTMLElement | null>;
-  items: { label: string; onClick: () => void; danger?: boolean }[];
+  items: Array<{ label: string; onClick?: () => void; danger?: boolean; divider?: boolean }>;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   useClickOutside(menuRef, onClose, open);
@@ -54,12 +54,15 @@ export function DropdownMenu({
         padding: "6px 0",
       }}
     >
-      {items.map((item) => (
+      {items.map((item, idx) =>
+        item.divider ? (
+          <div key={`div-${idx}`} style={{ height: 1, backgroundColor: "#e9edef", margin: "6px 0" }} />
+        ) : (
         <button
           key={item.label}
           type="button"
           onClick={() => {
-            item.onClick();
+            item.onClick?.();
             onClose();
           }}
           style={{
@@ -82,7 +85,8 @@ export function DropdownMenu({
         >
           {item.label}
         </button>
-      ))}
+        ),
+      )}
     </div>
   );
 }

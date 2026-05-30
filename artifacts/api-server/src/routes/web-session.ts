@@ -8,6 +8,7 @@ import { query } from "../lib/db";
 import { publicMediaUrl } from "../lib/mediaStorage";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
 import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
+import { userCanAccessChatMedia } from "../lib/chatMediaAccess";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -407,6 +408,41 @@ router.post("/:token/media", chatMediaUpload.single("file"), async (req: Request
   }
 });
 
+router.get("/:token/media/:filename", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const rawFilename = routeParam(req.params.filename);
+  const filename = path.basename(rawFilename);
+  try {
+    await ensureChatMediaTable();
+    const allowed = await userCanAccessChatMedia(session.userId, filename);
+    if (!allowed) {
+      res.status(403).json({ success: false, message: "Media access denied." });
+      return;
+    }
+    const result = await query(
+      "SELECT filename, mime_type, size_bytes, data FROM chat_media_files WHERE filename = $1",
+      [filename],
+    );
+    const row = result.rows[0] as { filename: string; mime_type: string; size_bytes: number; data: Buffer } | undefined;
+    if (!row) {
+      res.status(404).json({ success: false, message: "Media not found." });
+      return;
+    }
+    const data = row.data;
+    const size = Number(row.size_bytes) || data.length;
+    const mimeType = mimeFromFilename(row.filename, row.mime_type);
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Content-Length", String(size));
+    res.end(data);
+  } catch (err) {
+    req.log.error({ err }, "web session media read");
+    res.status(500).json({ success: false });
+  }
+});
+
 router.get("/:token/chats/:chatId/messages", async (req: Request, res: Response) => {
   const chatId = routeParam(req.params.chatId);
   try {
@@ -749,8 +785,12 @@ router.get("/:token/contacts", async (req: Request, res: Response) => {
            SELECT cm_other.user_id
            FROM chat_members cm_self
            JOIN chat_members cm_other ON cm_other.chat_id = cm_self.chat_id AND cm_other.user_id != cm_self.user_id
-           JOIN chats c ON c.id = cm_self.chat_id AND c.is_group = FALSE
            WHERE cm_self.user_id = $1
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM blocked_users b
+           WHERE (b.blocker_id = $1 AND b.blocked_id = u.id)
+              OR (b.blocker_id = u.id AND b.blocked_id = $1)
          )
        ORDER BY COALESCE(u.name, u.phone) ASC
        LIMIT 500`,

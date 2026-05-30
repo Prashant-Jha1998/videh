@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { resolveWebMediaFetchUrl } from "./webMediaUrl";
 
-/** Fetch protected chat media with auth and expose a blob URL for img/video tags. */
+/** Fetch protected chat media via web-session proxy and expose a blob URL. */
 export function useAuthenticatedMediaUrl(url: string | undefined, token: string | null): {
   blobUrl: string | null;
   loading: boolean;
@@ -17,10 +18,21 @@ export function useAuthenticatedMediaUrl(url: string | undefined, token: string 
       setFailed(false);
       return;
     }
-    if (!url.includes("/api/chats/media/") || !token) {
-      setBlobUrl(url);
+    const fetchUrl = token && url.includes("/api/chats/media/")
+      ? resolveWebMediaFetchUrl(url, token)
+      : url;
+
+    if (!fetchUrl.includes("/api/web-session/") && !fetchUrl.includes("/api/chats/media/")) {
+      setBlobUrl(fetchUrl);
       setLoading(false);
       setFailed(false);
+      return;
+    }
+
+    if (!token) {
+      setBlobUrl(null);
+      setLoading(false);
+      setFailed(true);
       return;
     }
 
@@ -29,7 +41,7 @@ export function useAuthenticatedMediaUrl(url: string | undefined, token: string 
     setLoading(true);
     setFailed(false);
 
-    void fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    void fetch(fetchUrl, { credentials: "same-origin" })
       .then((res) => {
         if (!res.ok) throw new Error("Media fetch failed");
         return res.blob();

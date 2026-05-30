@@ -13,6 +13,8 @@ import { WebEmptyPane } from "../components/web/WebEmptyPane";
 import { WebCallsListPane } from "../components/web/WebCallsListPane";
 import { WebSettingsPane } from "../components/web/WebSettingsPane";
 import { WebDocumentBubble } from "../components/web/WebDocumentBubble";
+import { WebCallMessageBubble } from "../components/web/WebCallMessageBubble";
+import { parseCallMessageMeta } from "../lib/callMessage";
 import { Avatar, initials, hue } from "../components/web/webUiShared";
 import type { CallLogEntry, ChatMember } from "../lib/webApi";
 import type { WebSection } from "../lib/webDesktop";
@@ -651,7 +653,9 @@ export default function VidehWeb() {
               items={[
                 { label: "New group", onClick: () => { setGroupSelected([]); setSidebarView("contacts-group"); } },
                 { label: "Starred messages", onClick: () => void openStarred() },
+                { label: "Select chats", onClick: () => alert("Select chats is coming soon on Videh Web.") },
                 { label: "Mark all as read", onClick: markAllRead },
+                { divider: true, label: "" },
                 { label: "Log out", onClick: handleLogout, danger: true },
               ]}
             />
@@ -825,6 +829,9 @@ export default function VidehWeb() {
             {displayMessages.map((msg) => {
               const isMe = msg.sender_id === user?.id;
               const isDeleted = msg.is_deleted;
+              const callMeta = !isDeleted && (msg.type === "call" || parseCallMessageMeta(msg.content))
+                ? parseCallMessageMeta(msg.content)
+                : null;
               return (
                 <div key={msg.id} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", marginBottom: 4 }}>
                   <div style={{
@@ -847,6 +854,9 @@ export default function VidehWeb() {
                     {!isDeleted && msg.type === "document" && msg.media_url ? (
                       <WebDocumentBubble url={msg.media_url} token={token} filename={msg.content || "Document"} />
                     ) : null}
+                    {callMeta ? (
+                      <WebCallMessageBubble content={msg.content} isMe={isMe} />
+                    ) : (
                     <p style={{ margin: 0, fontSize: 14.5, color: "#111b21", lineHeight: 1.4, fontStyle: isDeleted ? "italic" : "normal" }}>
                       {isDeleted
                         ? "🚫 This message was deleted"
@@ -854,6 +864,7 @@ export default function VidehWeb() {
                           ? (msg.type === "document" ? "" : msg.content !== "Attachment" && msg.content !== "🎥 Video" && msg.content !== "📷 Photo" ? msg.content : "")
                           : msg.content)}
                     </p>
+                    )}
                     <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 4, marginTop: 3 }}>
                       <span style={{ fontSize: 11, color: "#667781" }}>{formatTime(msg.created_at)}</span>
                       {isMe && (

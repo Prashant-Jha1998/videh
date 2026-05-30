@@ -17,17 +17,20 @@ export function WebDocumentBubble({
   token: string | null;
   filename: string;
 }) {
-  const { blobUrl, loading } = useAuthenticatedMediaUrl(url, token);
+  const { blobUrl, loading, failed } = useAuthenticatedMediaUrl(url, token);
   const badge = docBadge(filename);
 
   const openDoc = () => {
     if (!blobUrl) return;
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = filename || "document";
-    a.target = "_blank";
-    a.rel = "noopener";
-    a.click();
+    const w = window.open(blobUrl, "_blank", "noopener,noreferrer");
+    if (!w) {
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename || "document";
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.click();
+    }
   };
 
   const isPdf = filename.toLowerCase().endsWith(".pdf");
@@ -51,7 +54,7 @@ export function WebDocumentBubble({
       <button
         type="button"
         onClick={openDoc}
-        disabled={loading || !blobUrl}
+        disabled={loading || failed || !blobUrl}
         style={{
           display: "flex",
           alignItems: "center",
@@ -95,8 +98,8 @@ export function WebDocumentBubble({
           >
             {filename || "Document"}
           </div>
-          <div style={{ fontSize: 12, color: "#667781", marginTop: 2 }}>
-            {loading ? "Loading…" : "Tap to open"}
+          <div style={{ fontSize: 12, color: failed ? "#ea0038" : "#667781", marginTop: 2 }}>
+            {failed ? "Could not load file" : loading ? "Loading…" : "Click to open"}
           </div>
         </div>
       </button>

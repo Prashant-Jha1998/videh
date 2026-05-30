@@ -1,9 +1,14 @@
+import { callMessagePreviewText, parseCallMessageMeta } from "./callMessage";
+
 export function inferListPreview(
   type: string | undefined,
   content: string,
   isDeleted?: boolean,
 ): string {
   if (isDeleted) return "This message was deleted";
+  if ((type ?? "").toLowerCase() === "call" || parseCallMessageMeta(content)) {
+    return callMessagePreviewText(content);
+  }
   const t = (type ?? "text").toLowerCase();
   const text = (content ?? "").trim();
   if (t === "image") return text && text !== "Attachment" && text !== "📷 Photo" ? text : "Photo";

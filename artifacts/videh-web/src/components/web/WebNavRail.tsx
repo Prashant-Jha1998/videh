@@ -1,5 +1,6 @@
 import type { WebSection } from "../../lib/webDesktop";
 import { WEB_NAV_RAIL_WIDTH } from "../../lib/webDesktop";
+import { VidehRailLogo } from "./VidehLogo";
 import { WA_BG, WA_GREEN } from "./webUiShared";
 
 export type { WebSection };
@@ -88,6 +89,33 @@ export function WebNavRail({
         flexShrink: 0,
       }}
     >
+      <div
+        style={{
+          padding: "12px 0 16px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 4,
+          borderBottom: "1px solid #e9edef",
+          marginBottom: 8,
+          width: "100%",
+        }}
+      >
+        <button
+          type="button"
+          title="Videh"
+          onClick={() => onSectionChange("chats")}
+          style={{
+            border: "none",
+            background: "none",
+            cursor: "pointer",
+            padding: 4,
+            borderRadius: 12,
+          }}
+        >
+          <VidehRailLogo size={40} />
+        </button>
+      </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
         {ITEMS.map((item) => (
           <button
