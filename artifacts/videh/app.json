@@ -147,7 +147,6 @@
           ]
         }
       ],
-      "react-native-keyboard-controller",
       "./plugins/withIncomingCallAndroid.js",
       "@config-plugins/react-native-callkeep",
       "./plugins/withVidehCallPip.js",
