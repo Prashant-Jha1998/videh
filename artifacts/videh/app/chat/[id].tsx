@@ -18,6 +18,7 @@ import {
   Clipboard,
   Dimensions,
   FlatList,
+  InteractionManager,
   Linking,
   Modal,
   Image as NativeImage,
@@ -134,22 +135,20 @@ function formatDateChipLabel(ts: number, nowMs = Date.now()): string {
   });
 }
 
-/** Newest-first rows for inverted FlatList (WhatsApp-style bottom anchor). */
-function messagesWithDateRowsInverted(msgs: Message[]): ChatListRow[] {
-  if (msgs.length === 0) return [];
+function messagesWithDateRows(msgs: Message[]): ChatListRow[] {
   const out: ChatListRow[] = [];
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i];
+  let prevDay: number | null = null;
+  for (const m of msgs) {
     const day = startOfLocalDay(m.timestamp);
-    out.push({ rowType: "msg", message: m });
-    const olderDay = i > 0 ? startOfLocalDay(msgs[i - 1]!.timestamp) : null;
-    if (olderDay === null || olderDay !== day) {
+    if (prevDay === null || day !== prevDay) {
       out.push({
         rowType: "date",
         id: `date-${day}`,
         label: formatDateChipLabel(m.timestamp),
       });
+      prevDay = day;
     }
+    out.push({ rowType: "msg", message: m });
   }
   return out;
 }
@@ -1131,7 +1130,8 @@ export default function ChatScreen() {
     ? allMessages.filter((m) => m.text.toLowerCase().includes(searchQuery.toLowerCase()))
     : allMessages;
 
-  const listRows = useMemo(() => messagesWithDateRowsInverted(messages), [messages]);
+  const listRows = useMemo(() => messagesWithDateRows(messages), [messages]);
+  const [composerHeight, setComposerHeight] = useState(56);
   const chatContactName = name ?? chat?.name ?? "Chat";
 
   const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
@@ -1338,7 +1338,7 @@ export default function ChatScreen() {
   const NEAR_BOTTOM_THRESHOLD = 80;
   const scrollToLatest = useCallback((animated = false) => {
     if (searching || scrollLockRef.current) return;
-    listRef.current?.scrollToOffset({ offset: 0, animated });
+    listRef.current?.scrollToEnd({ animated });
   }, [searching]);
   const pinChatToBottom = useCallback(
     (animated = false) => {
@@ -1374,22 +1374,22 @@ export default function ChatScreen() {
     prevMessageCountRef.current = count;
   }, [messages.length, searching, scrollToLatest]);
 
+  const keyboardVisible = useKeyboardState((s) => s.isVisible);
+  const keyboardHeight = useKeyboardState((s) => s.height);
+
   useEffect(() => {
-    if (searching) return;
-    const event = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const showSub = Keyboard.addListener(event, () => {
-      if (userScrolledUpRef.current) return;
-      if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
-      keyboardScrollTimerRef.current = setTimeout(() => {
-        keyboardScrollTimerRef.current = null;
-        scrollToLatest(false);
-      }, Platform.OS === "ios" ? 50 : 90);
+    if (searching || !keyboardVisible || userScrolledUpRef.current) return;
+    const run = () => scrollToLatest(false);
+    run();
+    const task = InteractionManager.runAfterInteractions(() => {
+      run();
+      keyboardScrollTimerRef.current = setTimeout(run, 120);
     });
     return () => {
-      showSub.remove();
+      task.cancel();
       if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
     };
-  }, [searching, scrollToLatest]);
+  }, [keyboardHeight, keyboardVisible, searching, scrollToLatest]);
 
   useEffect(() => {
     if (searching) return;
@@ -2388,7 +2388,6 @@ export default function ChatScreen() {
     router.push({ pathname: "/chat/message-info", params: { chatId, messageId: selectedMessage.id } });
   };
 
-  const keyboardVisible = useKeyboardState((s) => s.isVisible);
   const inputBarBottomPad = keyboardVisible
     ? Platform.OS === "ios"
       ? Math.max(insets.bottom, 8)
@@ -2783,10 +2782,9 @@ export default function ChatScreen() {
         <FlatList
           style={styles.messageList}
           ref={listRef}
-          inverted
           data={listRows}
-          extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}`}
-          ListHeaderComponent={
+          extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}|${composerHeight}`}
+          ListFooterComponent={
             !searching && remoteTypingNames.length > 0 ? (
               <TypingIndicator
                 bubbleColor={colors.chatBubbleReceived}
@@ -2796,18 +2794,16 @@ export default function ChatScreen() {
               />
             ) : null
           }
-          maintainVisibleContentPosition={
-            Platform.OS === "android"
-              ? { minIndexForVisible: 1, autoscrollToTopThreshold: 96 }
-              : undefined
-          }
           keyExtractor={(row) => {
             if (row.rowType === "date") return row.id;
             const m = row.message;
             return m.id.startsWith("tmp_") ? `${m.id}-${m.timestamp}` : m.id;
           }}
           renderItem={renderChatListRow}
-          contentContainerStyle={styles.messageListContent}
+          contentContainerStyle={[
+            styles.messageListContent,
+            { paddingBottom: Math.max(16, composerHeight + 10), flexGrow: listRows.length > 0 ? 0 : 1 },
+          ]}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -2821,26 +2817,32 @@ export default function ChatScreen() {
           }}
           onScrollEndDrag={(e) => {
             scrollLockRef.current = false;
-            const y = e.nativeEvent.contentOffset.y;
-            userScrolledUpRef.current = y > NEAR_BOTTOM_THRESHOLD;
+            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+            const distFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+            userScrolledUpRef.current = distFromBottom > NEAR_BOTTOM_THRESHOLD;
           }}
           onMomentumScrollEnd={(e) => {
-            const y = e.nativeEvent.contentOffset.y;
-            userScrolledUpRef.current = y > NEAR_BOTTOM_THRESHOLD;
+            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+            const distFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+            userScrolledUpRef.current = distFromBottom > NEAR_BOTTOM_THRESHOLD;
           }}
           onScroll={(e) => {
-            const y = e.nativeEvent.contentOffset.y;
-            if (y <= NEAR_BOTTOM_THRESHOLD) {
+            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+            const distFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+            if (distFromBottom <= NEAR_BOTTOM_THRESHOLD) {
               userScrolledUpRef.current = false;
             }
           }}
           scrollEventThrottle={16}
-          onContentSizeChange={(_w, h) => {
-            if (searching || h <= 0) return;
-            if (pendingScrollToEndRef.current) {
+          onContentSizeChange={() => {
+            if (searching) return;
+            if (pendingScrollToEndRef.current || !userScrolledUpRef.current) {
               pendingScrollToEndRef.current = false;
               scrollToLatest(false);
             }
+          }}
+          onLayout={() => {
+            if (!userScrolledUpRef.current) scrollToLatest(false);
           }}
           onScrollToIndexFailed={(info) => {
             listRef.current?.scrollToOffset({
@@ -2868,8 +2870,17 @@ export default function ChatScreen() {
           }
         />
 
-        {Platform.OS === "ios" ? (
-          <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>{composerFooter}</KeyboardStickyView>
+        {Platform.OS !== "web" ? (
+          <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
+            <View
+              onLayout={(e) => {
+                const h = Math.ceil(e.nativeEvent.layout.height);
+                if (h > 0 && h !== composerHeight) setComposerHeight(h);
+              }}
+            >
+              {composerFooter}
+            </View>
+          </KeyboardStickyView>
         ) : (
           composerFooter
         )}

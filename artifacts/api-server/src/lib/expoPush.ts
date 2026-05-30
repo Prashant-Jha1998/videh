@@ -58,11 +58,19 @@ export function sendExpoChatPush(
     to: token,
     title,
     body,
-    data,
+    data: isCall
+      ? {
+          ...data,
+          notificationKind: "incoming_call",
+          sticky: true,
+          autoDismiss: false,
+        }
+      : data,
     sound,
-    priority: isCall ? "high" : "high",
+    priority: "high",
     channelId,
     categoryId: options?.categoryId,
     threadId: options?.threadId,
+    ...(isCall ? { _contentAvailable: true } : {}),
   })));
 }

@@ -1,10 +1,14 @@
+const fs = require("fs");
+const path = require("path");
 const {
   withAndroidManifest,
   withMainActivity,
+  withDangerousMod,
   AndroidConfig,
 } = require("expo/config-plugins");
 
 const LOCK_SCREEN_MARKER = "VidehIncomingCallLockScreen";
+const FULL_SCREEN_MARKER = "VidehIncomingCallFullScreenIntent";
 
 /**
  * Show incoming call UI over the lock screen (WhatsApp-style on Android).
@@ -58,6 +62,59 @@ function withIncomingCallAndroid(config) {
     cfg.modResults.contents = contents;
     return cfg;
   });
+
+  return withDangerousMod(config, [
+    "android",
+    async (cfg) => {
+      const builderPath = path.join(
+        cfg.modRequest.projectRoot,
+        "node_modules",
+        "expo-notifications",
+        "android",
+        "src",
+        "main",
+        "java",
+        "expo",
+        "modules",
+        "notifications",
+        "notifications",
+        "presentation",
+        "builders",
+        "ExpoNotificationBuilder.kt",
+      );
+      if (!fs.existsSync(builderPath)) {
+        return cfg;
+      }
+      let contents = fs.readFileSync(builderPath, "utf8");
+      if (contents.includes(FULL_SCREEN_MARKER)) {
+        return cfg;
+      }
+      const anchor = `    builder.setContentIntent(
+      createNotificationResponseIntent(
+        context,
+        notification,
+        defaultAction
+      )
+    )`;
+      const replacement = `${anchor}
+
+    // ${FULL_SCREEN_MARKER}
+    if (content.categoryId == "incoming_call") {
+      val incomingCallIntent = createNotificationResponseIntent(
+        context,
+        notification,
+        defaultAction
+      )
+      builder.setFullScreenIntent(incomingCallIntent, true)
+      builder.setCategory(NotificationCompat.CATEGORY_CALL)
+    }`;
+      if (contents.includes(anchor)) {
+        contents = contents.replace(anchor, replacement);
+        fs.writeFileSync(builderPath, contents);
+      }
+      return cfg;
+    },
+  ]);
 }
 
 module.exports = withIncomingCallAndroid;

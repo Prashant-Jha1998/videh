@@ -93,38 +93,51 @@ export async function sendFcmChatPush(
   const categoryId =
     options?.categoryId
     ?? (options?.isCall ? EXPO_INCOMING_CALL_CATEGORY_ID : EXPO_CHAT_MESSAGE_CATEGORY_ID);
-  const dataPayload = stringifyData({
-    ...data,
-    ...(categoryId ? { categoryId } : {}),
-  });
+  const callId = options?.isCall ? String(data.callId ?? "") : "";
+  const dataPayload = stringifyData(
+    options?.isCall
+      ? {
+          ...data,
+          title,
+          message: body,
+          channelId,
+          categoryId: categoryId ?? EXPO_INCOMING_CALL_CATEGORY_ID,
+          sticky: "true",
+          autoDismiss: "false",
+          priority: "high",
+          ...(callId ? { tag: `videh_call_${callId}` } : {}),
+        }
+      : {
+          ...data,
+          ...(categoryId ? { categoryId } : {}),
+        },
+  );
   const chatTag = options?.threadId?.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
 
   try {
     const res = await messaging.sendEachForMulticast({
       tokens,
-      notification: { title, body },
+      ...(options?.isCall
+        ? {}
+        : {
+            notification: { title, body },
+          }),
       data: dataPayload,
       android: {
         priority: "high",
         ...(options?.isCall ? { ttl: 45_000 } : {}),
-        notification: {
-          channelId,
-          sound: androidSound,
-          priority: "high" as const,
-          ...(options?.imageUrl ? { imageUrl: options.imageUrl } : {}),
-          ...(options?.isCall
-            ? {
-                visibility: "public" as const,
-                defaultSound: true,
-                defaultVibrateTimings: true,
-                tag: "videh_incoming_call",
-                sticky: true,
-              }
-            : {
+        ...(options?.isCall
+          ? {}
+          : {
+              notification: {
+                channelId,
+                sound: androidSound,
+                priority: "high" as const,
+                ...(options?.imageUrl ? { imageUrl: options.imageUrl } : {}),
                 visibility: "public" as const,
                 ...(chatTag ? { tag: chatTag } : {}),
-              }),
-        },
+              },
+            }),
       },
       apns: {
         payload: {

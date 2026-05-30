@@ -127,6 +127,7 @@ function RootLayoutNav() {
   const offeredCallIdRef = useRef<string | null>(null);
   const activeCallIdRef = useRef<string | null>(null);
   const respondToIncomingCallRef = useRef<(action: "accept" | "decline", msg?: string) => void>(() => {});
+  const handledLaunchCallNotificationRef = useRef(false);
   const incomingRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [incomingCall, setIncomingCall] = useState<IncomingCallInfo | null>(null);
   const [callWaiting, setCallWaiting] = useState<IncomingCallInfo | null>(null);
@@ -170,6 +171,7 @@ function RootLayoutNav() {
       offeredCallIdRef.current = next.callId;
       setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
       pendingIncomingRef.current = callPayload;
+      presentIncomingCallUi(callPayload);
       scheduleIncomingAutoEnd(next.callId);
       return;
     }
@@ -436,6 +438,26 @@ function RootLayoutNav() {
       },
     });
   }, []);
+
+  useEffect(() => {
+    if (Platform.OS === "web" || !isAuthenticated || handledLaunchCallNotificationRef.current) return;
+    void (async () => {
+      const last = await Notifications.getLastNotificationResponseAsync();
+      if (!last) return;
+      handledLaunchCallNotificationRef.current = true;
+      const data = last.notification.request.content.data as Record<string, unknown> | undefined;
+      if (!data?.callId) return;
+      const actionId = last.actionIdentifier;
+      if (actionId && actionId !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
+      void offerIncomingCall({
+        callId: String(data.callId),
+        channel: String(data.channel ?? ""),
+        chatId: Number(data.chatId),
+        type: String(data.type ?? "audio"),
+        callerName: String(data.callerName ?? "Videh user"),
+      });
+    })();
+  }, [isAuthenticated, offerIncomingCall]);
 
   useEffect(() => {
     if (Platform.OS === "web" || !isAuthenticated) return;
