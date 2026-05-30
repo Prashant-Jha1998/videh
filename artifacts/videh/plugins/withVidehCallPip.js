@@ -2,6 +2,24 @@ const { withMainActivity, withAndroidManifest } = require("expo/config-plugins")
 
 const MARKER = "VidehCallPip";
 
+function addKotlinImports(contents, imports) {
+  const missing = imports.filter((line) => !contents.includes(line));
+  if (missing.length === 0) return contents;
+  const importMatches = [...contents.matchAll(/^import .+$/gm)];
+  if (importMatches.length > 0) {
+    const last = importMatches[importMatches.length - 1];
+    const pos = last.index + last[0].length;
+    return `${contents.slice(0, pos)}\n${missing.join("\n")}${contents.slice(pos)}`;
+  }
+  return contents.replace(/^package .+\n/m, (pkg) => `${pkg}${missing.join("\n")}\n`);
+}
+
+function insertBeforeMainActivity(contents, snippet) {
+  if (contents.includes(snippet.trim().split("\n")[0])) return contents;
+  if (!contents.includes("class MainActivity")) return `${snippet}\n${contents}`;
+  return contents.replace(/(\n)(class MainActivity)/, `\n\n${snippet.trim()}\n$2`);
+}
+
 /**
  * Android Picture-in-Picture for video calls (system PiP on Home).
  */
@@ -55,33 +73,16 @@ function withVidehCallPip(config) {
     }
 `;
 
-    const pipHolder = `
-object VidehPipHolder {
+    const pipHolder = `object VidehPipHolder {
   @JvmField var enterOnLeave: Boolean = false
-}
-`;
+}`;
 
-    if (!contents.includes("import android.os.Build")) {
-      contents = contents.replace(
-        /^package .+\n/m,
-        (m) => `${m}import android.os.Build\nimport android.util.Rational\nimport android.app.PictureInPictureParams\n`,
-      );
-    }
-
-    if (!contents.includes("object VidehPipHolder")) {
-      const packageLine = contents.match(/^package .+\n/m);
-      if (packageLine?.index != null) {
-        const insertAt = packageLine.index + packageLine[0].length;
-        contents =
-          contents.slice(0, insertAt) +
-          "\n" +
-          pipHolder.trim() +
-          "\n" +
-          contents.slice(insertAt);
-      } else {
-        contents = `${pipHolder}\n${contents}`;
-      }
-    }
+    contents = addKotlinImports(contents, [
+      "import android.os.Build",
+      "import android.util.Rational",
+      "import android.app.PictureInPictureParams",
+    ]);
+    contents = insertBeforeMainActivity(contents, pipHolder);
 
     if (contents.includes("class MainActivity")) {
       contents = contents.replace(/class MainActivity[^{]+\{/, (m) => `${m}${pipHook}`);
