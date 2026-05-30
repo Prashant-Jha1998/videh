@@ -41,8 +41,7 @@ jobs:
           git reset --hard origin/main
 
           export PATH="/usr/local/bin:/usr/bin:/bin:$HOME/.local/share/pnpm:$PATH"
-          corepack enable 2>/dev/null || true
-          command -v pnpm >/dev/null || (echo "pnpm not found on EC2" && exit 1)
+          command -v pnpm >/dev/null || (echo "pnpm not found on EC2 — install pnpm on the server" && exit 1)
 
           pnpm install --frozen-lockfile
           pnpm --filter @workspace/api-server run build:api
