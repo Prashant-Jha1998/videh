@@ -48,6 +48,31 @@ function answerSettingsHelp(question: string, lang: AssistantLangCode, name: str
       ? `${name}, open the Status tab and tap to add photo, video, or text status.`
       : `${name} ji, Status tab khol kar photo, video ya text status laga sakte hain.`;
   }
+  if (/(schedule|scheduled)\s+message|message\s+schedule/.test(n)) {
+    return isEn(lang)
+      ? `${name}, open any chat → menu (⋮) → Schedule Message. Pick date and time, type your message, and Videh will send it automatically. You can view or cancel scheduled messages from the same screen.`
+      : `${name} ji, kisi bhi chat mein menu (⋮) → Schedule Message. Date aur time chuniye, message likhiye — Videh us samay khud bhej dega. Wahi screen se scheduled messages dekh ya cancel kar sakte hain.`;
+  }
+  if (/(premium\s+sound|ringtone|notification\s+sound)/.test(n)) {
+    return isEn(lang)
+      ? `${name}, go to Settings → Notifications → Premium sounds. Set message tone, call ringtone, and per-chat sounds.`
+      : `${name} ji, Settings → Notifications → Premium sounds se message tone, call ringtone aur per-chat sound set karein.`;
+  }
+  if (/(call\s+link|join\s+call)/.test(n)) {
+    return isEn(lang)
+      ? `${name}, during a call use the share link option, or create a call link from call settings. Others can join with the link.`
+      : `${name} ji, call ke dauran link share kar sakte hain — link se log join kar sakte hain.`;
+  }
+  if (/(two\s+step|2\s*step|two-step)/.test(n)) {
+    return isEn(lang)
+      ? `${name}, open Settings → Account → Two-step verification to add a PIN for extra security.`
+      : `${name} ji, Settings → Account → Two-step verification se extra PIN laga sakte hain.`;
+  }
+  if (/(sos|emergency)/.test(n)) {
+    return isEn(lang)
+      ? `${name}, open Settings → SOS to add emergency contacts and trigger SOS from the app.`
+      : `${name} ji, Settings → SOS se emergency contacts add karein aur SOS trigger karein.`;
+  }
   if (/(missed\s+call|call\s+miss)/.test(n) && /(kahan|where|kaise|how)/.test(n)) {
     return isEn(lang)
       ? `${name}, check the Calls tab, or ask me: "kis ka call miss hua".`

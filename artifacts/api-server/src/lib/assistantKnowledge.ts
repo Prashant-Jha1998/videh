@@ -32,6 +32,11 @@ Common how-to:
 - Khata: open a chat → menu or Khata from chat
 - Missed calls: Calls tab shows call log; ask Hey Videh "kis ka call miss hua"
 - View once photos/videos: send from attach menu in chat
+- Schedule message: open any chat → menu (⋮) → Schedule Message → pick date/time and message; view or cancel from same screen
+- Premium sounds: Settings → Notifications → Premium sounds (message tone, call ringtone, per-chat)
+- Call link / join call: share link during a call for others to join
+- Two-step verification: Settings → Account → Two-step verification
+- SOS: Settings → SOS for emergency contacts
 
 Supported languages: Hindi, English, Tamil, Telugu, Bengali, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Odia, Assamese, Urdu.
 

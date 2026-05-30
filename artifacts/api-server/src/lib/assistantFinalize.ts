@@ -1,5 +1,6 @@
 import type { AssistantLangCode } from "./assistantLanguages";
 import { firstName, INDIAN_LANGUAGE_LABELS } from "./assistantLanguages";
+import { databaseAssistantFallback } from "./assistantDbAnswer";
 import { VIDEH_PRODUCT_KNOWLEDGE } from "./assistantKnowledge";
 
 export type FinalizeInput = {
@@ -114,9 +115,10 @@ No sexual, violent, illegal, or terrorist content.`,
       }),
     });
     const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
-    return data.choices?.[0]?.message?.content?.trim()
-      || `${name} ji, kripya Settings → Hey Videh se assistant enable karein.`;
+    const text = data.choices?.[0]?.message?.content?.trim();
+    if (text) return text;
+    return databaseAssistantFallback(lang, userName);
   } catch {
-    return `${name} ji, abhi jawab tayyar nahi ho paya. Dubara poochiye.`;
+    return databaseAssistantFallback(lang, userName);
   }
 }

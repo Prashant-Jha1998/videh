@@ -15,6 +15,7 @@ import {
   runAssistantCommand,
   type AssistantCommandResult,
 } from "@/lib/assistantApi";
+import { isAffirmative, isNegative, isSessionExit } from "@/lib/assistantConfirm";
 import { tryLocalAssistantCommand } from "@/lib/assistantLocal";
 import { shouldPauseAssistantListening, setAssistantChatInputFocused, setAssistantKeyboardVisible } from "@/lib/assistantPause";
 import { wakeListenPrompt } from "@/lib/assistantGreeting";
@@ -76,6 +77,12 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const commandSubmitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commandSubmittedRef = useRef(false);
   const activatingRef = useRef(false);
+  const pendingCallRef = useRef<{
+    chatId: string;
+    callType: "audio" | "video";
+    contactName: string;
+  } | null>(null);
+  const submitBufferedCommandRef = useRef<() => void>(() => {});
   const chatsRef = useRef(chats);
   useEffect(() => {
     chatsRef.current = chats;
@@ -134,6 +141,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const dismiss = useCallback(() => {
     commandBufferRef.current = "";
     pendingWakeCommandRef.current = "";
+    pendingCallRef.current = null;
     setTranscript("");
     setLastError(null);
     if (commandTimerRef.current) clearTimeout(commandTimerRef.current);
@@ -173,17 +181,99 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     }
   }, [router]);
 
+  const beginCommandListening = useCallback(async () => {
+    setPhaseSafe("listening");
+    setTranscript("");
+    commandBufferRef.current = "";
+    commandSubmittedRef.current = false;
+
+    await startListening({
+      locale: listenLocaleRef.current,
+      onPartial: (t: string) => {
+        setTranscript(t);
+        commandBufferRef.current = t;
+        const detected = detectLocaleFromTranscript(t);
+        if (detected !== listenLocaleRef.current) {
+          listenLocaleRef.current = detected;
+        }
+      },
+      onFinal: (t: string) => {
+        commandBufferRef.current = t;
+        listenLocaleRef.current = detectLocaleFromTranscript(t);
+        if (commandSubmitTimerRef.current) clearTimeout(commandSubmitTimerRef.current);
+        commandSubmitTimerRef.current = setTimeout(() => submitBufferedCommandRef.current(), 650);
+      },
+      onError: (msg) => {
+        setLastError(msg);
+      },
+      onEnd: () => {
+        if (commandSubmitTimerRef.current) clearTimeout(commandSubmitTimerRef.current);
+        commandSubmitTimerRef.current = setTimeout(() => submitBufferedCommandRef.current(), 320);
+      },
+    });
+
+    if (commandTimerRef.current) clearTimeout(commandTimerRef.current);
+    commandTimerRef.current = setTimeout(() => submitBufferedCommandRef.current(), 14_000);
+  }, [setPhaseSafe]);
+
+  const continueConversation = useCallback(async (speakText: string, lang: AssistantLangCode) => {
+    setLastResponse(speakText);
+    setPhaseSafe("speaking");
+    await speakAssistant(speakText, lang);
+    await beginCommandListening();
+  }, [setPhaseSafe, beginCommandListening]);
+
   const handleCommand = useCallback(async (text: string) => {
     const cleaned = stripWakeFromCommand(text.trim());
-    if (!user?.sessionToken || !cleaned) {
-      const hint = listenLocaleRef.current === "en"
-        ? "I did not catch that. Say a contact name to call or message, or ask: who messaged today, missed calls."
-        : "Command samajh nahi aaya. Kisi contact ka naam bolein — call ya message, ya poochhiye: aaj kis ka message aaya, missed call.";
-      setLastError(hint);
-      setLastResponse(hint);
+    const lang = listenLocaleRef.current;
+
+    if (isSessionExit(cleaned)) {
+      const bye = lang === "en" ? "Okay. Say Hey Videh anytime." : "Theek hai. Jab chahein Hey Videh boliye.";
+      setLastResponse(bye);
       setPhaseSafe("speaking");
-      await speakAssistant(hint, listenLocaleRef.current);
+      await speakAssistant(bye, lang);
       dismiss();
+      return;
+    }
+
+    const pendingCall = pendingCallRef.current;
+    if (pendingCall) {
+      if (isAffirmative(cleaned)) {
+        pendingCallRef.current = null;
+        const done = lang === "en"
+          ? `Calling ${pendingCall.contactName} now.`
+          : `${pendingCall.contactName} ko ab call lag rahi hai.`;
+        runAssistantActions({
+          speak: done,
+          actions: [{
+            type: "start_call",
+            chatId: pendingCall.chatId,
+            callType: pendingCall.callType,
+            contactName: pendingCall.contactName,
+          }],
+        });
+        const follow = lang === "en" ? "Anything else?" : "Aur kuch?";
+        await continueConversation(`${done} ${follow}`, lang);
+        return;
+      }
+      if (isNegative(cleaned)) {
+        pendingCallRef.current = null;
+        const cancelled = lang === "en" ? "Call cancelled." : "Call cancel kar di.";
+        await continueConversation(`${cancelled} Aur kuch?`, lang);
+        return;
+      }
+      const clarify = lang === "en"
+        ? `Say yes to call ${pendingCall.contactName}, or no to cancel.`
+        : `${pendingCall.contactName} ko call karoon? Haan ya nahi bolein.`;
+      await continueConversation(clarify, lang);
+      return;
+    }
+
+    if (!user?.sessionToken || !cleaned) {
+      const hint = lang === "en"
+        ? "I did not catch that. Ask about messages, calls, schedule message, or say a contact name to call."
+        : "Samajh nahi aaya. Messages, calls, schedule message poochhiye, ya contact ka naam bolein call ke liye.";
+      await continueConversation(hint, lang);
       return;
     }
 
@@ -196,23 +286,44 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     try {
       const local = tryLocalAssistantCommand(cleaned, chatsRef.current);
       const result = local ?? await runAssistantCommand(user.sessionToken, cleaned, langHint);
-      const lang = normalizeLangCode(result.langCode ?? langHint);
-      await persistLang(lang);
+      const replyLang = normalizeLangCode(result.langCode ?? langHint);
+      await persistLang(replyLang);
 
-      setLastResponse(result.speak);
+      const startCall = result.actions?.find((a) => a.type === "start_call" && a.chatId);
+      if (startCall?.chatId) {
+        pendingCallRef.current = {
+          chatId: startCall.chatId,
+          callType: (startCall.callType === "video" ? "video" : "audio"),
+          contactName: startCall.contactName ?? "contact",
+        };
+        const confirm = replyLang === "en"
+          ? `Should I call ${pendingCallRef.current.contactName}? Say yes to confirm or no to cancel.`
+          : `Kya main ${pendingCallRef.current.contactName} ko call karoon? Haan bolein confirm ke liye, nahi to cancel.`;
+        await continueConversation(confirm, replyLang);
+        return;
+      }
+
+      const speakLine = `${result.speak} ${replyLang === "en" ? "Anything else?" : "Aur kuch?"}`;
+      setLastResponse(speakLine);
       setPhaseSafe("speaking");
       runAssistantActions(result);
-      await speakAssistant(result.speak, result.speechLocale ?? lang);
+      await speakAssistant(speakLine, result.speechLocale ?? replyLang);
+      await beginCommandListening();
     } catch {
       const err = listenLocaleRef.current === "en"
-        ? "Sorry, I could not process that command."
-        : "Abhi command process nahi ho payi. Thodi der baad dubara boliye.";
-      setLastResponse(err);
-      await speakAssistant(err, listenLocaleRef.current);
-    } finally {
-      dismiss();
+        ? "Sorry, I could not process that. Try again."
+        : "Abhi process nahi ho paya. Dubara boliye.";
+      await continueConversation(err, listenLocaleRef.current);
     }
-  }, [user?.sessionToken, setPhaseSafe, dismiss, persistLang, runAssistantActions]);
+  }, [
+    user?.sessionToken,
+    setPhaseSafe,
+    dismiss,
+    persistLang,
+    runAssistantActions,
+    continueConversation,
+    beginCommandListening,
+  ]);
 
   const submitBufferedCommand = useCallback(() => {
     if (commandSubmittedRef.current || phaseRef.current !== "listening") return;
@@ -225,11 +336,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     else {
       const lang = listenLocaleRef.current;
       const prompt = lang === "en" ? "Yes? What should I do?" : "Haan, bataiye — kya karna hai?";
-      setLastResponse(prompt);
-      setPhaseSafe("speaking");
-      void speakAssistant(prompt, lang).then(() => dismiss());
+      void continueConversation(prompt, lang);
     }
-  }, [handleCommand, dismiss, setPhaseSafe]);
+  }, [handleCommand, continueConversation]);
+
+  submitBufferedCommandRef.current = submitBufferedCommand;
 
   const activateAssistant = useCallback(async (inlineCommand?: string) => {
     if (!user?.sessionToken) {
@@ -257,38 +368,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     setPhaseSafe("speaking");
     await speakAssistant(ack, lang);
 
-    setPhaseSafe("listening");
-    setTranscript("");
-    commandBufferRef.current = "";
-    commandSubmittedRef.current = false;
-
-    await startListening({
-      locale: listenLocaleRef.current,
-      onPartial: (t: string) => {
-        setTranscript(t);
-        commandBufferRef.current = t;
-        const detected = detectLocaleFromTranscript(t);
-        if (detected !== listenLocaleRef.current) {
-          listenLocaleRef.current = detected;
-        }
-      },
-      onFinal: (t: string) => {
-        commandBufferRef.current = t;
-        listenLocaleRef.current = detectLocaleFromTranscript(t);
-        if (commandSubmitTimerRef.current) clearTimeout(commandSubmitTimerRef.current);
-        commandSubmitTimerRef.current = setTimeout(() => submitBufferedCommand(), 650);
-      },
-      onError: (msg) => {
-        setLastError(msg);
-      },
-      onEnd: () => {
-        if (commandSubmitTimerRef.current) clearTimeout(commandSubmitTimerRef.current);
-        commandSubmitTimerRef.current = setTimeout(() => submitBufferedCommand(), 320);
-      },
-    });
-
-    if (commandTimerRef.current) clearTimeout(commandTimerRef.current);
-    commandTimerRef.current = setTimeout(() => submitBufferedCommand(), 10_000);
+    await beginCommandListening();
   }, [
     user?.sessionToken,
     user?.name,
@@ -296,7 +376,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     prefs?.lastLangCode,
     setPhaseSafe,
     handleCommand,
-    submitBufferedCommand,
+    beginCommandListening,
   ]);
 
   const scheduleWakeRestart = useCallback((delayMs = 900) => {
@@ -339,12 +419,6 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const onWakeTranscript = useCallback((text: string) => {
     const chunk = text.trim();
     if (!chunk) return;
-    if (/^(hey|he|hay|hi|hello|oye)(?:\s+videh)?[,.!?\s]*$/i.test(chunk)) {
-      wakeBufferRef.current = "";
-      pendingWakeCommandRef.current = "";
-      void tryWakeActivationRef.current("");
-      return;
-    }
     wakeBufferRef.current = `${wakeBufferRef.current} ${chunk}`.trim().slice(-240);
     const { hasWake, command } = parseWakeUtterance(wakeBufferRef.current);
     if (!hasWake) return;

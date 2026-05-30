@@ -226,8 +226,8 @@ export async function executeAssistantAction(
         intent: "call_contact",
         success: true,
         speak: isEn(lang)
-          ? `${name}, starting ${callType} call with ${chat.displayName}. ${suffix}`
-          : `${name} ji, ${chat.displayName} ko ${callType === "video" ? "video" : "voice"} call lag rahi hai. ${suffix}`,
+          ? `${name}, should I call ${chat.displayName}? The app will ask you to confirm.`
+          : `${name} ji, ${chat.displayName} ko call karoon? App mein confirm karenge.`,
         actions: [{
           type: "start_call",
           chatId: String(chat.chatId),

@@ -1,4 +1,4 @@
-/** Wake phrase detection and command extraction (Hey Videh). */
+/** Wake phrase detection — only "Hey Videh" (and close STT variants), not lone hey/hello. */
 
 const WAKE_PHRASES = [
   "hey videh",
@@ -32,24 +32,24 @@ const WAKE_REGEX = new RegExp(
   "i",
 );
 
-/** Short wake-only utterances (user said just "hey" / "hey videh"). */
-const STANDALONE_WAKE_RE = /^(?:hey|he|hay|hi|hello|helo|oye|ok|okay)(?:\s+videh|\s+vidhe|\s+video)?[,.!?\s]*$/i;
+/** Must include Videh (or common STT mis-hear) — not just "hey" or "hello". */
+const VIDEH_WORD_RE = /\b(videh|vidhe|vede|vadeh|wede|विदेह|वीडेह)\b/i;
+
+/** Full wake phrase only (optional punctuation after). */
+const STANDALONE_WAKE_RE =
+  /^(?:hey|he|hay|hi|hello|helo|oye|ok|okay)\s+(?:videh|vidhe|video|vede|vadeh|wede|विदेह|वीडेह)[,.!?\s]*$/i;
 
 export function containsWakePhrase(text: string): boolean {
   const n = text.toLowerCase().trim();
   if (!n) return false;
   if (STANDALONE_WAKE_RE.test(n)) return true;
   if (WAKE_PHRASES.some((p) => n.includes(p))) return true;
-  // STT often splits "Hey Videh" — accept both words nearby
-  if (/\b(hey|he|hay|hi|hello|oye)\b/.test(n) && /\b(videh|vidhe|video|vede|vadeh|wede)\b/.test(n)) {
+  if (/\b(hey|he|hay|hi|hello|oye)\b/.test(n) && VIDEH_WORD_RE.test(n)) {
     return true;
   }
-  // Lone "hey" / "hi" (very short wake tap)
-  if (/^(hey|he|hay|hi|hello|oye)[,.!?\s]*$/i.test(n)) return true;
   return false;
 }
 
-/** Text after the wake phrase in the same utterance (may be empty). */
 export function extractCommandAfterWake(text: string): string {
   const raw = text.trim();
   if (!raw) return "";
@@ -60,10 +60,14 @@ export function extractCommandAfterWake(text: string): string {
       return raw.slice(idx + phrase.length).replace(/^[,.\\s]+/, "").trim();
     }
   }
+  if (/\b(hey|he|hay|hi|hello|oye)\b/i.test(raw) && VIDEH_WORD_RE.test(raw)) {
+    return raw
+      .replace(/^(?:hey|he|hay|hi|hello|helo|oye)\s+(?:videh|vidhe|video|vede|vadeh|wede)\s*/i, "")
+      .trim();
+  }
   return raw;
 }
 
-/** Remove wake phrase if user repeats it before the command. */
 export function stripWakeFromCommand(text: string): string {
   let t = text.trim();
   if (!t) return "";
@@ -85,4 +89,4 @@ export function parseWakeUtterance(text: string): { hasWake: boolean; command: s
   return { hasWake: true, command };
 }
 
-export const WAKE_CONTEXT_STRINGS = ["hey", "hi", "hello", "hey videh", "hi videh", ...WAKE_PHRASES];
+export const WAKE_CONTEXT_STRINGS = ["hey videh", "hi videh", "hello videh", ...WAKE_PHRASES];

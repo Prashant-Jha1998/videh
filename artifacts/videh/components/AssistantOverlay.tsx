@@ -38,7 +38,7 @@ export function AssistantOverlay() {
 
   const subtitle =
     phase === "listening"
-      ? "Boliye — jaise: “Videh ko call karo” ya “aaj kis ka message aaya”"
+      ? "Boliye — aur sawal, call, ya “bas” / Cancel se band karein"
       : phase === "processing"
         ? "Thodi der…"
         : null;

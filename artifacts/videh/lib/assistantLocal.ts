@@ -27,7 +27,7 @@ export function tryLocalAssistantCommand(text: string, chats: Chat[]): Assistant
     const chat = findChat(chats, callVideo[1]);
     if (chat) {
       return {
-        speak: `${chat.name} ko video call lag rahi hai.`,
+        speak: `${chat.name} ko video call karoon? Haan bolein confirm ke liye.`,
         intent: "call_contact",
         langCode: "hi",
         actions: [{ type: "start_call", chatId: chat.id, callType: "video", contactName: chat.name }],
@@ -42,7 +42,7 @@ export function tryLocalAssistantCommand(text: string, chats: Chat[]): Assistant
     const chat = findChat(chats, callAudio[1]);
     if (chat) {
       return {
-        speak: `${chat.name} ko call lag rahi hai.`,
+        speak: `${chat.name} ko call karoon? Haan bolein confirm ke liye.`,
         intent: "call_contact",
         langCode: "hi",
         actions: [{ type: "start_call", chatId: chat.id, callType: "audio", contactName: chat.name }],

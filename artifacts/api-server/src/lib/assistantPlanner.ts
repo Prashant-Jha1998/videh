@@ -22,8 +22,10 @@ function isLikelyProjectQuestion(text: string): boolean {
   const n = text.toLowerCase();
   return (
     /\b(videh|hey\s+videh|assistant|khata|broadcast|business\s+api|developer\s+portal)\b/i.test(n)
+    || /\b(schedule|scheduled)\s+message/i.test(n)
+    || /\b(features?|feature)\b/i.test(n) && /\b(bare|about|detail|kya|kaise|how|what)\b/i.test(n)
     || /\b(app|messenger|feature|setting|settings|privacy|notification|theme|status|wallpaper)\b/i.test(n)
-      && /\b(kya|kaise|how|what|kahan|where|kaun|kab)\b/.test(n)
+      && /\b(kya|kaise|how|what|kahan|where|kaun|kab|detail|bare)\b/.test(n)
     || /\b(kaise\s+(?:kare|karu|on|off|enable|change|set)|setting\s+kaise)\b/i.test(n)
     || /\b(kis\s+setting|kahan\s+se|menu\s+mein)\b/i.test(n)
   );
@@ -126,6 +128,17 @@ export async function resolveAssistantPlan(
     return { intent: "unknown" };
   }
 
+  if (isLikelyProjectQuestion(text)) {
+    const aiPlan = await planAssistantAction(text, ctx, lang);
+    if (aiPlan && aiPlan.intent !== "reply" && aiPlan.intent !== "unknown" && aiPlan.intent !== "project_qa") {
+      return aiPlan;
+    }
+    if (aiPlan?.intent === "reply" && aiPlan.speak) {
+      return aiPlan;
+    }
+    return { intent: "project_qa", speak: aiPlan?.speak };
+  }
+
   const aiPlan = await planAssistantAction(text, ctx, lang);
   if (aiPlan && aiPlan.intent !== "reply" && aiPlan.intent !== "unknown" && aiPlan.intent !== "project_qa") {
     return aiPlan;
@@ -133,8 +146,5 @@ export async function resolveAssistantPlan(
   if (aiPlan?.intent === "reply" && aiPlan.speak) {
     return aiPlan;
   }
-  if (aiPlan?.speak && (aiPlan.intent === "project_qa" || isLikelyProjectQuestion(text))) {
-    return { intent: "project_qa", speak: aiPlan.speak };
-  }
-  return { intent: "project_qa" };
+  return { intent: "unknown" };
 }
