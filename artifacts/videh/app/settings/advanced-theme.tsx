@@ -22,6 +22,12 @@ import {
   type AppThemeOption,
 } from "@/lib/appThemes";
 import {
+  CHAT_BUBBLE_PRESETS,
+  bubbleOverrideFromPreset,
+  isBubblePresetSelected,
+  selectedBubbleLabel,
+} from "@/lib/chatBubblePresets";
+import {
   ANIMATED_WALLPAPERS,
   APP_ICON_STYLES,
   THEME_PACK_META,
@@ -31,17 +37,6 @@ import {
   type ThemeAppearance,
   type ThemePackId,
 } from "@/lib/themeAppearance";
-
-const BUBBLE_PRESETS: { name: string; sent: string; received: string }[] = [
-  { name: "Classic", sent: "#D9FDD3", received: "#FFFFFF" },
-  { name: "Blue", sent: "#DBEAFE", received: "#FFFFFF" },
-  { name: "Purple", sent: "#EDE9FE", received: "#FFFFFF" },
-  { name: "Pink", sent: "#FCE7F3", received: "#FFFFFF" },
-  { name: "Orange", sent: "#FFEDD5", received: "#FFFFFF" },
-  { name: "Red", sent: "#FEE2E2", received: "#FFFFFF" },
-  { name: "Grey", sent: "#E5E7EB", received: "#FFFFFF" },
-  { name: "Dark sent", sent: "#005C4B", received: "#1F2C34" },
-];
 
 export default function AdvancedThemeScreen() {
   const colors = useColors();
@@ -64,6 +59,8 @@ export default function AdvancedThemeScreen() {
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
   const trialDaysLeft = daysLeftInThemeTrial(appThemeTrialStartedAt);
   const premiumPacks = useMemo(() => listPremiumPacks(), []);
+  const usingThemeDefaultBubbles = customBubbleOverride == null;
+  const activeBubbleLabel = selectedBubbleLabel(customBubbleOverride);
 
   const filteredThemes = useMemo(() => {
     if (packFilter === "all") return APP_THEME_OPTIONS;
@@ -129,30 +126,67 @@ export default function AdvancedThemeScreen() {
           <Text style={[styles.hint, { color: colors.mutedForeground }]}>
             Sent and received message bubbles (global). Per-chat overrides: open a chat → info → Chat theme.
           </Text>
+          <View style={[styles.selectedBubbleBanner, { backgroundColor: colors.card, borderColor: colors.primary }]}>
+            <Ionicons name="chatbubble-ellipses" size={18} color={colors.primary} />
+            <Text style={[styles.selectedBubbleText, { color: colors.foreground }]}>
+              Selected: <Text style={{ fontFamily: "Inter_700Bold", color: colors.primary }}>{activeBubbleLabel}</Text>
+            </Text>
+          </View>
           <View style={styles.bubbleRow}>
-            {BUBBLE_PRESETS.map((p) => (
-              <TouchableOpacity
-                key={p.name}
-                style={[styles.bubblePreset, { borderColor: colors.border }]}
-                onPress={() => {
-                  void setCustomBubbleOverride({
-                    sentLight: p.sent,
-                    receivedLight: p.received,
-                    sentDark: p.sent,
-                    receivedDark: p.received,
-                  });
-                }}
-              >
-                <View style={[styles.bubbleMini, { backgroundColor: p.sent }]} />
-                <View style={[styles.bubbleMini, { backgroundColor: p.received, marginLeft: 4 }]} />
-                <Text style={[styles.bubbleName, { color: colors.mutedForeground }]}>{p.name}</Text>
-              </TouchableOpacity>
-            ))}
+            {CHAT_BUBBLE_PRESETS.map((p) => {
+              const selected = isBubblePresetSelected(customBubbleOverride, p);
+              return (
+                <TouchableOpacity
+                  key={p.id}
+                  style={[
+                    styles.bubblePreset,
+                    {
+                      borderColor: selected ? colors.primary : colors.border,
+                      borderWidth: selected ? 2.5 : 1,
+                      backgroundColor: selected ? `${colors.primary}14` : colors.card,
+                    },
+                  ]}
+                  onPress={() => void setCustomBubbleOverride(bubbleOverrideFromPreset(p))}
+                  accessibilityState={{ selected }}
+                >
+                  {selected ? (
+                    <View style={[styles.bubbleCheck, { backgroundColor: colors.primary }]}>
+                      <Ionicons name="checkmark" size={11} color="#fff" />
+                    </View>
+                  ) : null}
+                  <View style={styles.bubblePreviewRow}>
+                    <View style={[styles.bubbleMini, { backgroundColor: p.sent }]} />
+                    <View style={[styles.bubbleMini, { backgroundColor: p.received, marginLeft: 4 }]} />
+                  </View>
+                  <Text
+                    style={[
+                      styles.bubbleName,
+                      { color: selected ? colors.primary : colors.mutedForeground },
+                      selected && { fontFamily: "Inter_700Bold" },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {p.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
           <TouchableOpacity
             onPress={() => void setCustomBubbleOverride(null)}
-            style={[styles.resetBtn, { borderColor: colors.border }]}
+            style={[
+              styles.resetBtn,
+              {
+                borderColor: usingThemeDefaultBubbles ? colors.primary : colors.border,
+                borderWidth: usingThemeDefaultBubbles ? 2.5 : 1,
+                backgroundColor: usingThemeDefaultBubbles ? `${colors.primary}14` : "transparent",
+              },
+            ]}
+            accessibilityState={{ selected: usingThemeDefaultBubbles }}
           >
+            {usingThemeDefaultBubbles ? (
+              <Ionicons name="checkmark-circle" size={20} color={colors.primary} style={{ marginBottom: 4 }} />
+            ) : null}
             <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>Use theme default bubbles</Text>
           </TouchableOpacity>
         </Section>
@@ -306,10 +340,39 @@ const styles = StyleSheet.create({
   swatch: { width: "100%", aspectRatio: 1, borderRadius: 10, justifyContent: "center", alignItems: "center" },
   check: { width: 24, height: 24, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center" },
   cardLabel: { fontSize: 11, marginTop: 6, fontFamily: "Inter_500Medium" },
+  selectedBubbleBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    marginBottom: 12,
+  },
+  selectedBubbleText: { flex: 1, fontSize: 13, fontFamily: "Inter_500Medium" },
   bubbleRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  bubblePreset: { alignItems: "center", padding: 8, borderRadius: 10, borderWidth: 1, width: "23%" },
+  bubblePreset: {
+    alignItems: "center",
+    padding: 8,
+    paddingTop: 10,
+    borderRadius: 10,
+    width: "23%",
+    minWidth: 72,
+    position: "relative",
+  },
+  bubbleCheck: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bubblePreviewRow: { flexDirection: "row", alignItems: "center" },
   bubbleMini: { width: 22, height: 14, borderRadius: 6 },
-  bubbleName: { fontSize: 9, marginTop: 4 },
+  bubbleName: { fontSize: 9, marginTop: 4, fontFamily: "Inter_500Medium" },
   resetBtn: { marginTop: 12, padding: 12, borderRadius: 10, borderWidth: 1, alignItems: "center" },
   packScroll: { marginBottom: 12 },
   packChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, marginRight: 8 },

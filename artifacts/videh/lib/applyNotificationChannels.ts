@@ -33,12 +33,11 @@ export async function applyVidehNotificationSounds(): Promise<void> {
     });
   }
 
-  const callSound = prefs.globalCallSound === "none" ? undefined : prefs.globalCallSound;
   await Notifications.setNotificationChannelAsync(VIDEH_CALLS_CHANNEL_ID, {
     name: "Calls",
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 1000, 500, 1000, 500, 1000],
-    sound: callSound,
+    sound: undefined,
     bypassDnd: true,
     enableLights: true,
     lightColor: "#00A884",

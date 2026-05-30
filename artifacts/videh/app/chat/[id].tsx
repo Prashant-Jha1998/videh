@@ -134,20 +134,22 @@ function formatDateChipLabel(ts: number, nowMs = Date.now()): string {
   });
 }
 
-function messagesWithDateRows(msgs: Message[]): ChatListRow[] {
+/** Newest-first rows for inverted FlatList (WhatsApp-style bottom anchor). */
+function messagesWithDateRowsInverted(msgs: Message[]): ChatListRow[] {
+  if (msgs.length === 0) return [];
   const out: ChatListRow[] = [];
-  let prevDay: number | null = null;
-  for (const m of msgs) {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
     const day = startOfLocalDay(m.timestamp);
-    if (prevDay === null || day !== prevDay) {
+    out.push({ rowType: "msg", message: m });
+    const olderDay = i > 0 ? startOfLocalDay(msgs[i - 1]!.timestamp) : null;
+    if (olderDay === null || olderDay !== day) {
       out.push({
         rowType: "date",
         id: `date-${day}`,
         label: formatDateChipLabel(m.timestamp),
       });
-      prevDay = day;
     }
-    out.push({ rowType: "msg", message: m });
   }
   return out;
 }
@@ -1129,7 +1131,7 @@ export default function ChatScreen() {
     ? allMessages.filter((m) => m.text.toLowerCase().includes(searchQuery.toLowerCase()))
     : allMessages;
 
-  const listRows = useMemo(() => messagesWithDateRows(messages), [messages]);
+  const listRows = useMemo(() => messagesWithDateRowsInverted(messages), [messages]);
   const chatContactName = name ?? chat?.name ?? "Chat";
 
   const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
@@ -1328,41 +1330,75 @@ export default function ChatScreen() {
     prevSelectedCountRef.current = selectedIds.length;
   }, [selectedIds.length]);
   const inputRef = useRef<TextInput>(null);
-  const listRef = useRef<FlatList>(null);
+  const listRef = useRef<FlatList<ChatListRow>>(null);
   const pendingScrollToEndRef = useRef(true);
   const userScrolledUpRef = useRef(false);
+  const scrollLockRef = useRef(false);
+  const hadRemoteTypingRef = useRef(false);
+  const NEAR_BOTTOM_THRESHOLD = 80;
   const scrollToLatest = useCallback((animated = false) => {
-    if (searching) return;
-    requestAnimationFrame(() => {
-      listRef.current?.scrollToEnd({ animated });
-    });
+    if (searching || scrollLockRef.current) return;
+    listRef.current?.scrollToOffset({ offset: 0, animated });
   }, [searching]);
+  const pinChatToBottom = useCallback(
+    (animated = false) => {
+      userScrolledUpRef.current = false;
+      pendingScrollToEndRef.current = true;
+      scrollToLatest(animated);
+    },
+    [scrollToLatest],
+  );
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevMessageCountRef = useRef(0);
+  const keyboardScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    pendingScrollToEndRef.current = true;
+    userScrolledUpRef.current = false;
+    prevMessageCountRef.current = 0;
+    hadRemoteTypingRef.current = false;
+  }, [chatId]);
 
   useEffect(() => {
     if (searching || messages.length === 0) return;
     if (pendingScrollToEndRef.current) {
       pendingScrollToEndRef.current = false;
       scrollToLatest(false);
+      prevMessageCountRef.current = messages.length;
       return;
     }
     const count = messages.length;
     if (count > prevMessageCountRef.current && !userScrolledUpRef.current) {
-      scrollToLatest(count - prevMessageCountRef.current <= 3);
+      scrollToLatest(count - prevMessageCountRef.current <= 2);
     }
     prevMessageCountRef.current = count;
   }, [messages.length, searching, scrollToLatest]);
 
   useEffect(() => {
-    const showSub = Keyboard.addListener(
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
-      () => {
-        if (!searching && !userScrolledUpRef.current) scrollToLatest(true);
-      },
-    );
-    return () => showSub.remove();
+    if (searching) return;
+    const event = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const showSub = Keyboard.addListener(event, () => {
+      if (userScrolledUpRef.current) return;
+      if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
+      keyboardScrollTimerRef.current = setTimeout(() => {
+        keyboardScrollTimerRef.current = null;
+        scrollToLatest(false);
+      }, Platform.OS === "ios" ? 50 : 90);
+    });
+    return () => {
+      showSub.remove();
+      if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
+    };
   }, [searching, scrollToLatest]);
+
+  useEffect(() => {
+    if (searching) return;
+    const hasTyping = remoteTypingNames.length > 0;
+    if (hasTyping && !hadRemoteTypingRef.current && !userScrolledUpRef.current) {
+      scrollToLatest(true);
+    }
+    hadRemoteTypingRef.current = hasTyping;
+  }, [remoteTypingNames.length, searching, scrollToLatest]);
 
   // @mentions state
   const [groupMembers, setGroupMembers] = useState<{ id: number; name: string }[]>([]);
@@ -1407,8 +1443,9 @@ export default function ChatScreen() {
     if (!composerEnabled || editTarget) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setEmojiPanelOpen((open) => {
-      if (!open) Keyboard.dismiss();
-      return !open;
+      const next = !open;
+      if (next) Keyboard.dismiss();
+      return next;
     });
   }, [composerEnabled, editTarget]);
 
@@ -1419,11 +1456,11 @@ export default function ChatScreen() {
     try {
       const mediaUrl = await uploadRemoteGifOrSticker(item, user?.sessionToken, kind);
       sendPreparedMediaMessage(chatId, { mediaUrl, kind: "image" });
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 120);
+      pinChatToBottom(true);
     } catch (e) {
       Alert.alert("Error", e instanceof Error ? e.message : kind === "gif" ? "Could not send GIF." : "Could not send sticker.");
     }
-  }, [chatId, composerEnabled, editTarget, user?.sessionToken, sendPreparedMediaMessage]);
+  }, [chatId, composerEnabled, editTarget, user?.sessionToken, sendPreparedMediaMessage, pinChatToBottom]);
 
   const handlePickGif = useCallback((item: GifMediaItem) => {
     void sendGifOrSticker(item, "gif");
@@ -1507,8 +1544,8 @@ export default function ChatScreen() {
     );
     setText("");
     setReplyTo(null);
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-  }, [text, chatId, sendMessage, replyTo, clearTyping, editTarget, editText, editMessage, composerEnabled, chat?.isGroup, groupSendPermission?.policy, user?.dbId, user?.name, name, chat?.name]);
+    pinChatToBottom(true);
+  }, [text, chatId, sendMessage, replyTo, clearTyping, editTarget, editText, editMessage, composerEnabled, chat?.isGroup, groupSendPermission?.policy, user?.dbId, user?.name, name, chat?.name, pinChatToBottom]);
 
   const sendMediaMessage = async (
     type: "camera" | "videocamera" | "gallery" | "document" | "location" | "contact" | "viewonce" | "audiofile",
@@ -1604,7 +1641,7 @@ export default function ChatScreen() {
       const filename = asset.name ?? `document_${Date.now()}`;
       const mimeType = asset.mimeType ?? guessMimeFromFilename(filename);
       sendDocumentMessage(chatId, asset.uri, filename, asset.size ?? 0, mimeType);
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 120);
+      pinChatToBottom(true);
 
     } else if (type === "location") {
       if (!chatId) return;
@@ -1679,8 +1716,8 @@ export default function ChatScreen() {
       emails: dedupeEmails(contactToConfirm.emails),
     });
     setContactToConfirm(null);
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 150);
-  }, [chatId, contactToConfirm, sendContactMessage]);
+    pinChatToBottom(true);
+  }, [chatId, contactToConfirm, sendContactMessage, pinChatToBottom]);
 
   const saveSharedContactToPhone = useCallback(async (text: string) => {
     const parsed = parseContactMessage(text);
@@ -2496,6 +2533,8 @@ export default function ChatScreen() {
                   onFocus={() => {
                     setEmojiPanelOpen(false);
                     setAssistantChatInputFocused(true);
+                    userScrolledUpRef.current = false;
+                    pendingScrollToEndRef.current = true;
                     if (chatId && inputVal.length > 0) setTyping(chatId);
                   }}
                   onBlur={() => {
@@ -2744,9 +2783,10 @@ export default function ChatScreen() {
         <FlatList
           style={styles.messageList}
           ref={listRef}
+          inverted
           data={listRows}
           extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}`}
-          ListFooterComponent={
+          ListHeaderComponent={
             !searching && remoteTypingNames.length > 0 ? (
               <TypingIndicator
                 bubbleColor={colors.chatBubbleReceived}
@@ -2756,13 +2796,18 @@ export default function ChatScreen() {
               />
             ) : null
           }
+          maintainVisibleContentPosition={
+            Platform.OS === "android"
+              ? { minIndexForVisible: 1, autoscrollToTopThreshold: 96 }
+              : undefined
+          }
           keyExtractor={(row) => {
             if (row.rowType === "date") return row.id;
             const m = row.message;
             return m.id.startsWith("tmp_") ? `${m.id}-${m.timestamp}` : m.id;
           }}
           renderItem={renderChatListRow}
-          contentContainerStyle={{ paddingVertical: 12, paddingHorizontal: 10 }}
+          contentContainerStyle={styles.messageListContent}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -2771,14 +2816,29 @@ export default function ChatScreen() {
           maxToRenderPerBatch={12}
           windowSize={9}
           updateCellsBatchingPeriod={50}
-          onScroll={(e) => {
-            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-            const distFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-            userScrolledUpRef.current = distFromBottom > 140;
+          onScrollBeginDrag={() => {
+            scrollLockRef.current = true;
           }}
-          scrollEventThrottle={64}
-          onContentSizeChange={() => {
-            if (!searching && pendingScrollToEndRef.current) {
+          onScrollEndDrag={(e) => {
+            scrollLockRef.current = false;
+            const y = e.nativeEvent.contentOffset.y;
+            userScrolledUpRef.current = y > NEAR_BOTTOM_THRESHOLD;
+          }}
+          onMomentumScrollEnd={(e) => {
+            const y = e.nativeEvent.contentOffset.y;
+            userScrolledUpRef.current = y > NEAR_BOTTOM_THRESHOLD;
+          }}
+          onScroll={(e) => {
+            const y = e.nativeEvent.contentOffset.y;
+            if (y <= NEAR_BOTTOM_THRESHOLD) {
+              userScrolledUpRef.current = false;
+            }
+          }}
+          scrollEventThrottle={16}
+          onContentSizeChange={(_w, h) => {
+            if (searching || h <= 0) return;
+            if (pendingScrollToEndRef.current) {
+              pendingScrollToEndRef.current = false;
               scrollToLatest(false);
             }
           }}
@@ -2808,7 +2868,7 @@ export default function ChatScreen() {
           }
         />
 
-        {Platform.OS !== "web" ? (
+        {Platform.OS === "ios" ? (
           <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>{composerFooter}</KeyboardStickyView>
         ) : (
           composerFooter
@@ -3216,6 +3276,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   chatBody: { flex: 1 },
   messageList: { flex: 1 },
+  messageListContent: { paddingHorizontal: 10, paddingTop: 8, paddingBottom: 12 },
   // @mention autocomplete
   mentionList: { borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)", maxHeight: 220, elevation: 4, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4 },
   mentionRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, gap: 12, borderBottomWidth: 0.5 },

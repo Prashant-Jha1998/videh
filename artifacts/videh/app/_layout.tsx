@@ -38,17 +38,17 @@ import {
   endCallKeep,
   setupCallKeep,
   setCallKeepHandlers,
-  showCallKeepIncoming,
 } from "@/lib/callKeep";
 import type { CallKeepHandlerPayload } from "@/lib/callKeepBridge";
-import {
-  dismissNativeIncomingCall,
-  displayNativeIncomingCall,
-} from "@/lib/videhNativeCallUi";
+import { displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
 import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
 import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
-import { wakeScreenForIncomingCall } from "@/lib/inCallAudio";
-import { startIncomingCallAlert, stopCallAlert } from "@/lib/callRingtone";
+import {
+  claimIncomingCallRing,
+  presentIncomingCallUi,
+  startIncomingCallExperience,
+  stopIncomingCallExperience,
+} from "@/lib/incomingCallExperience";
 import { installGlobalErrorHandlers } from "@/lib/globalErrorHandlers";
 import { loadCachedSilenceUnknownCallers } from "@/lib/privacySettings";
 import type { Chat } from "@/context/AppContext";
@@ -62,6 +62,7 @@ function isKnownCaller(chatId: number, chatList: Chat[]): boolean {
 }
 
 async function declineIncomingCallSilently(callId: string, userId: number, sessionToken?: string | null) {
+  await stopIncomingCallExperience(callId);
   await fetch(`${getApiUrl()}/api/webrtc/calls/${callId}/respond`, {
     method: "POST",
     headers: {
@@ -123,6 +124,7 @@ function RootLayoutNav() {
     heldSession,
   } = useCallSession();
   const pendingIncomingRef = useRef<IncomingCallInfo | null>(null);
+  const offeredCallIdRef = useRef<string | null>(null);
   const activeCallIdRef = useRef<string | null>(null);
   const respondToIncomingCallRef = useRef<(action: "accept" | "decline", msg?: string) => void>(() => {});
   const incomingRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,8 +144,7 @@ function RootLayoutNav() {
       incomingRingTimerRef.current = null;
       if (!user?.dbId) return;
       void declineIncomingCallSilently(callId, user.dbId, user.sessionToken);
-      void stopCallAlert();
-      void dismissIncomingCallNotification(callId);
+      offeredCallIdRef.current = null;
       pendingIncomingRef.current = null;
       setIncomingCall(null);
       if (activeCallIdRef.current === callId) {
@@ -163,14 +164,25 @@ function RootLayoutNav() {
     const next = toIncomingCallInfo(raw);
     if (activeCallIdRef.current === next.callId) return;
 
+    const callPayload = { ...next, callerName: next.callerName };
+    const isRepeatOffer = offeredCallIdRef.current === next.callId || !claimIncomingCallRing(next.callId);
+    if (isRepeatOffer) {
+      offeredCallIdRef.current = next.callId;
+      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
+      pendingIncomingRef.current = callPayload;
+      scheduleIncomingAutoEnd(next.callId);
+      return;
+    }
+    offeredCallIdRef.current = next.callId;
+
     if (
       activeCallSession?.engineActive
       && !activeCallSession.ringing
       && activeCallSession.callId !== next.callId
     ) {
       setCallWaiting(next);
-      showCallKeepIncoming(next.callId, next.callerName, next.chatId, next.type === "video");
-      void startIncomingCallAlert();
+      presentIncomingCallUi(next);
+      void startIncomingCallExperience(next);
       scheduleIncomingAutoEnd(next.callId);
       return;
     }
@@ -178,27 +190,22 @@ function RootLayoutNav() {
     const silenceUnknown = await loadCachedSilenceUnknownCallers();
     if (silenceUnknown && user?.dbId && !isKnownCaller(Number(next.chatId), chats)) {
       await declineIncomingCallSilently(next.callId, user.dbId, user.sessionToken);
-      void stopCallAlert();
       return;
     }
 
-    wakeScreenForIncomingCall();
     displayNativeIncomingCall({
       callId: next.callId,
       callerName: next.callerName,
       isVideo: next.type === "video",
     });
 
-    setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
+    presentIncomingCallUi(next);
+    setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
+    pendingIncomingRef.current = callPayload;
 
     if (Platform.OS !== "web") {
-      void startIncomingCallAlert();
-      const callPayload = { ...next, callerName: next.callerName };
-      const appState = AppState.currentState;
-      if (appState === "background" || appState === "inactive") {
-        pendingIncomingRef.current = callPayload;
-        void showIncomingCallNotification(callPayload);
-      }
+      void startIncomingCallExperience(callPayload);
+      void showIncomingCallNotification(callPayload);
     }
 
     scheduleIncomingAutoEnd(next.callId);
@@ -248,8 +255,10 @@ function RootLayoutNav() {
         && user?.dbId
       ) {
         clearIncomingAutoEnd();
-        void stopCallAlert();
         const action = actionId === NOTIFICATION_ACTION_ACCEPT_CALL ? "accept" : "decline";
+        if (action === "decline") {
+          void stopIncomingCallExperience(String(data.callId));
+        }
         void (async () => {
           try {
             await fetch(`${getApiUrl()}/api/webrtc/calls/${data.callId}/respond`, {
@@ -285,10 +294,13 @@ function RootLayoutNav() {
           .then((payload: { success?: boolean; call?: IncomingCallInfo }) => {
             const call = payload.call;
             if (!call) return;
-            wakeScreenForIncomingCall();
-            void startIncomingCallAlert();
-            setIncomingCall(call);
-            scheduleIncomingAutoEnd(call.callId);
+            void offerIncomingCall({
+              callId: String(data.callId),
+              channel: String(data.channel ?? ""),
+              chatId: Number(data.chatId),
+              type: String(data.type ?? "audio"),
+              callerName: String(data.callerName ?? "Videh user"),
+            });
           })
           .catch(() => {});
         return;
@@ -333,11 +345,9 @@ function RootLayoutNav() {
         if (!next) {
           pendingIncomingRef.current = null;
           clearIncomingAutoEnd();
+          offeredCallIdRef.current = null;
           setIncomingCall((prev) => {
-            if (prev) {
-              void stopCallAlert();
-              void dismissIncomingCallNotification(prev.callId);
-            }
+            if (prev) void stopIncomingCallExperience(prev.callId);
             return null;
           });
           return;
@@ -368,18 +378,18 @@ function RootLayoutNav() {
         };
         void offerIncomingCall(callInfo);
       }
-      if (action === "accepted") {
-        void stopCallAlert();
+      if (action === "accepted" && callId) {
+        offeredCallIdRef.current = null;
+        void stopIncomingCallExperience(callId);
       }
       if (action === "declined" || action === "ended" || action === "missed" || action === "busy") {
         clearIncomingAutoEnd();
-        dismissNativeIncomingCall();
-        if (callId) void dismissIncomingCallNotification(callId);
+        offeredCallIdRef.current = null;
+        if (callId) void stopIncomingCallExperience(callId);
         setCallWaiting((prev) => (prev?.callId === callId ? null : prev));
         setIncomingCall((prev) => {
           if (!prev) return prev;
           if (callId && prev.callId !== callId) return prev;
-          void stopCallAlert();
           void loadMessages(String(prev.chatId));
           return null;
         });
@@ -390,7 +400,8 @@ function RootLayoutNav() {
       clearInterval(timer);
       unsubCall();
       clearIncomingAutoEnd();
-      void stopCallAlert();
+      offeredCallIdRef.current = null;
+      void stopIncomingCallExperience();
     };
   }, [isAuthenticated, user?.dbId, user?.sessionToken, chats, loadMessages, activeCallSession?.callId, offerIncomingCall, clearIncomingAutoEnd]);
 
@@ -401,9 +412,8 @@ function RootLayoutNav() {
       const pending = pendingIncomingRef.current;
       if (pending && canPresentIncomingCallUi()) {
         pendingIncomingRef.current = null;
-        wakeScreenForIncomingCall();
-        void startIncomingCallAlert();
         setIncomingCall(pending);
+        void startIncomingCallExperience(pending);
         scheduleIncomingAutoEnd(pending.callId);
       }
     });
@@ -413,13 +423,17 @@ function RootLayoutNav() {
   useEffect(() => {
     if (Platform.OS === "web") return;
     Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldSetBadge: true,
-      }),
+      handleNotification: async (notification) => {
+        const data = notification.request.content.data as Record<string, unknown> | undefined;
+        const isCall = data?.notificationKind === "incoming_call" || data?.kind === "call";
+        return {
+          shouldShowAlert: true,
+          shouldPlaySound: !isCall,
+          shouldShowBanner: true,
+          shouldShowList: true,
+          shouldSetBadge: true,
+        };
+      },
     });
   }, []);
 
@@ -439,10 +453,7 @@ function RootLayoutNav() {
         participantCount: 2,
       });
       if (activeCallIdRef.current === info.callId) return;
-      wakeScreenForIncomingCall();
-      void startIncomingCallAlert();
-      setIncomingCall(info);
-      scheduleIncomingAutoEnd(info.callId);
+      void offerIncomingCall(info);
     });
     return () => sub.remove();
   }, [isAuthenticated, scheduleIncomingAutoEnd]);
@@ -451,11 +462,11 @@ function RootLayoutNav() {
     if (!incomingCall || !user?.dbId) return;
     const call = incomingCall;
     clearIncomingAutoEnd();
-    dismissNativeIncomingCall();
+    offeredCallIdRef.current = null;
     setIncomingCall(null);
     setCallWaiting(null);
     try {
-      await stopCallAlert();
+      await stopIncomingCallExperience(call.callId);
       await webrtcFetch(`/calls/${call.callId}/respond`, user.sessionToken, {
         method: "POST",
         body: JSON.stringify({
@@ -487,8 +498,7 @@ function RootLayoutNav() {
         if (!callId || !user?.dbId) return;
         void (async () => {
           clearIncomingAutoEnd();
-          dismissNativeIncomingCall();
-          await stopCallAlert();
+          await stopIncomingCallExperience(callId);
           const waiting = callWaiting;
           if (waiting?.callId === callId) {
             setCallWaiting(null);
@@ -517,8 +527,8 @@ function RootLayoutNav() {
         if (!callId) return;
         if (callWaiting?.callId === callId) {
           clearIncomingAutoEnd();
-          dismissNativeIncomingCall();
-          void stopCallAlert();
+          offeredCallIdRef.current = null;
+          void stopIncomingCallExperience(callId);
           setCallWaiting(null);
           if (user?.dbId) void declineIncomingCallSilently(callId, user.dbId, user.sessionToken);
           endCallKeep(callId, "declined");
@@ -549,19 +559,35 @@ function RootLayoutNav() {
 
   useEffect(() => {
     if (Platform.OS === "web" || !isAuthenticated) return;
-    const openJoinCall = (url: string | null) => {
+    const handleDeepLink = (url: string | null) => {
       if (!url) return;
       const parsed = Linking.parse(url);
       const host = parsed.hostname ?? parsed.path?.replace(/^\//, "");
-      if (host !== "join-call") return;
-      const token = parsed.queryParams?.token;
-      if (!token) return;
-      router.push({ pathname: "/join-call", params: { token: String(token) } } as unknown as Href);
+      if (host === "join-call") {
+        const token = parsed.queryParams?.token;
+        if (!token) return;
+        router.push({ pathname: "/join-call", params: { token: String(token) } } as unknown as Href);
+        return;
+      }
+      if (host !== "call") return;
+      const qp = parsed.queryParams ?? {};
+      const callId = qp.callId ? String(qp.callId) : "";
+      const incoming = qp.incoming === "1" || qp.incoming === 1;
+      const pathChatId = String(parsed.path ?? "").replace(/^\//, "").split("/")[0];
+      const chatId = Number(pathChatId) || Number(qp.chatId ?? 0);
+      if (!callId || !incoming) return;
+      void offerIncomingCall({
+        callId,
+        channel: String(qp.channel ?? ""),
+        chatId: Number.isFinite(chatId) ? chatId : Number(qp.chatId ?? 0),
+        type: String(qp.type ?? "audio"),
+        callerName: String(qp.name ?? "Videh user"),
+      });
     };
-    void Linking.getInitialURL().then(openJoinCall);
-    const sub = Linking.addEventListener("url", ({ url }) => openJoinCall(url));
+    void Linking.getInitialURL().then(handleDeepLink);
+    const sub = Linking.addEventListener("url", ({ url }) => handleDeepLink(url));
     return () => sub.remove();
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, router, offerIncomingCall]);
 
   return (
     <>
@@ -621,10 +647,10 @@ function RootLayoutNav() {
             const waiting = callWaiting;
             if (!waiting || !user?.dbId) return;
             setCallWaiting(null);
-            clearIncomingAutoEnd();
-            dismissNativeIncomingCall();
-            await stopCallAlert();
-            await holdActiveCall();
+          clearIncomingAutoEnd();
+          offeredCallIdRef.current = null;
+          await stopIncomingCallExperience(waiting.callId);
+          await holdActiveCall();
             await webrtcFetch(`/calls/${waiting.callId}/respond`, user.sessionToken, {
               method: "POST",
               body: JSON.stringify({ userId: user.dbId, action: "accept" }),
@@ -636,7 +662,8 @@ function RootLayoutNav() {
             const waiting = callWaiting;
             setCallWaiting(null);
             clearIncomingAutoEnd();
-            dismissNativeIncomingCall();
+            offeredCallIdRef.current = null;
+            await stopIncomingCallExperience(waiting?.callId);
             await endCall();
             if (waiting) {
               await offerIncomingCall({
@@ -652,9 +679,8 @@ function RootLayoutNav() {
           onDecline={async () => {
             if (!callWaiting || !user?.dbId) return;
             clearIncomingAutoEnd();
-            dismissNativeIncomingCall();
+            offeredCallIdRef.current = null;
             await declineIncomingCallSilently(callWaiting.callId, user.dbId, user.sessionToken);
-            void stopCallAlert();
             setCallWaiting(null);
           }}
         />

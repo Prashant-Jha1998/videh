@@ -13,8 +13,7 @@ let vibrateActive = false;
 
 function ringAsset(id: CallSoundId): number | null {
   if (id === "none") return null;
-  const key = id === "call_default" ? "incoming_call" : id;
-  return SOUND_ASSETS[key] ?? SOUND_ASSETS.incoming_call ?? null;
+  return SOUND_ASSETS[id] ?? SOUND_ASSETS.call_default ?? null;
 }
 
 async function configureCallAudioMode(earpiece = false): Promise<void> {

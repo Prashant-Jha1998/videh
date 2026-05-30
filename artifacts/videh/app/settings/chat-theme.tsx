@@ -16,19 +16,13 @@ import { ThemedHeader } from "@/components/ThemedHeader";
 import { useColors } from "@/hooks/useColors";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { APP_THEME_OPTIONS } from "@/lib/appThemes";
+import { CHAT_BUBBLE_PRESETS } from "@/lib/chatBubblePresets";
 import {
   ANIMATED_WALLPAPERS,
   getThemeAppearanceById,
   type AnimatedWallpaperId,
 } from "@/lib/themeAppearance";
 import { getPerChatTheme, setPerChatTheme } from "@/lib/perChatTheme";
-
-const BUBBLE_PRESETS = [
-  { name: "Pink", sent: "#FCE7F3", received: "#FFFFFF" },
-  { name: "Blue", sent: "#DBEAFE", received: "#FFFFFF" },
-  { name: "Purple", sent: "#EDE9FE", received: "#FFFFFF" },
-  { name: "Grey", sent: "#E5E7EB", received: "#FFFFFF" },
-];
 
 export default function ChatThemeScreen() {
   const { chatId, name } = useLocalSearchParams<{ chatId: string; name?: string }>();
@@ -113,19 +107,39 @@ export default function ChatThemeScreen() {
         </View>
 
         <Text style={[styles.label, { color: colors.primary }]}>Bubble colors</Text>
-        <View style={styles.row}>
-          {BUBBLE_PRESETS.map((p) => (
-            <TouchableOpacity
-              key={p.name}
-              style={[styles.preset, { borderColor: colors.border }]}
-              onPress={() => {
-                setBubbleSent(p.sent);
-                setBubbleReceived(p.received);
-              }}
-            >
-              <Text style={{ color: colors.foreground, fontSize: 12 }}>{p.name}</Text>
-            </TouchableOpacity>
-          ))}
+        <View style={styles.bubbleGrid}>
+          {CHAT_BUBBLE_PRESETS.map((p) => {
+            const active =
+              bubbleSent != null
+              && bubbleSent.toUpperCase() === p.sent.toUpperCase()
+              && (bubbleReceived ?? "#FFFFFF").toUpperCase() === p.received.toUpperCase();
+            return (
+              <TouchableOpacity
+                key={p.id}
+                style={[
+                  styles.preset,
+                  {
+                    borderColor: active ? colors.primary : colors.border,
+                    borderWidth: active ? 2.5 : 1,
+                    backgroundColor: active ? `${colors.primary}14` : colors.card,
+                  },
+                ]}
+                onPress={() => {
+                  setBubbleSent(p.sent);
+                  setBubbleReceived(p.received);
+                }}
+              >
+                <View style={{ flexDirection: "row", marginBottom: 4 }}>
+                  <View style={[styles.bubbleDot, { backgroundColor: p.sent }]} />
+                  <View style={[styles.bubbleDot, { backgroundColor: p.received, marginLeft: 4 }]} />
+                </View>
+                <Text style={{ color: active ? colors.primary : colors.foreground, fontSize: 11, fontFamily: active ? "Inter_700Bold" : "Inter_500Medium" }}>
+                  {p.name}
+                </Text>
+                {active ? <Ionicons name="checkmark-circle" size={14} color={colors.primary} style={{ position: "absolute", top: 4, right: 4 }} /> : null}
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         <Text style={[styles.label, { color: colors.primary }]}>Animated background</Text>
@@ -164,6 +178,8 @@ const styles = StyleSheet.create({
   swatch: { width: "100%", aspectRatio: 1, borderRadius: 8 },
   cardTxt: { fontSize: 10, marginTop: 4 },
   row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  preset: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1 },
+  bubbleGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  preset: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, borderWidth: 1, alignItems: "center", width: "23%", minWidth: 72, position: "relative" },
+  bubbleDot: { width: 20, height: 12, borderRadius: 5 },
   clearBtn: { marginTop: 24, padding: 14, borderRadius: 10, borderWidth: 1, alignItems: "center" },
 });
