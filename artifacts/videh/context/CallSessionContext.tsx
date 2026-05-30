@@ -20,7 +20,16 @@ import {
 } from "@/lib/callRingtone";
 import { addUsersToOngoingCall } from "@/lib/callParticipants";
 import { webrtcFetch } from "@/lib/webrtcApi";
-import { wakeScreenForIncomingCall } from "@/lib/inCallAudio";
+import { chooseInCallAudioRoute, wakeScreenForIncomingCall, type InCallAudioRoute } from "@/lib/inCallAudio";
+import { onCallSignal } from "@/lib/callEvents";
+import { startNativeOngoingCallSession } from "@/lib/videhNativeCallUi";
+import {
+  endCallKeep,
+  showCallKeepIncoming,
+  startCallKeepOutgoing,
+} from "@/lib/callKeep";
+import { setVideoCallPipEnabled } from "@/lib/callPip";
+import type { RemoteCallPeerStream } from "@/hooks/videhCallTypes";
 
 export type CallSession = {
   chatId: string;
@@ -32,6 +41,7 @@ export type CallSession = {
   ringing: boolean;
   minimized: boolean;
   engineActive: boolean;
+  onHold?: boolean;
 };
 
 type RouteParams = {
@@ -75,6 +85,15 @@ type CallSessionContextValue = {
   toggleSpeaker: () => void;
   addParticipants: (userIds: number[]) => Promise<{ added: number; busy: number }>;
   inviteeUserIds: number[];
+  remotePeers: RemoteCallPeerStream[];
+  switchCallMediaType: (video: boolean) => Promise<void>;
+  setInCallAudioRoute: (route: InCallAudioRoute) => Promise<void>;
+  heldSession: CallSession | null;
+  holdActiveCall: () => Promise<void>;
+  resumeHeldCall: () => Promise<void>;
+  endHeldCall: () => Promise<void>;
+  shareScreen: () => Promise<boolean>;
+  stopScreenShare: () => Promise<void>;
 };
 
 const CallSessionContext = createContext<CallSessionContextValue | null>(null);
@@ -89,6 +108,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const router = useRouter();
   const { user, refreshCallLogs } = useApp();
   const [session, setSession] = useState<CallSession | null>(null);
+  const [heldSession, setHeldSession] = useState<CallSession | null>(null);
   const [participantCount, setParticipantCount] = useState(2);
   const [acceptedCount, setAcceptedCount] = useState(1);
   const [ringingCount, setRingingCount] = useState(0);
@@ -143,17 +163,6 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (router.canGoBack()) router.back();
   }, [clearSession, refreshCallLogs, router]);
 
-  const endCall = useCallback(async () => {
-    await stopCallAlert();
-    if (session?.engineActive) await call.leave();
-    if (session?.callId) {
-      await webrtcFetch(`/calls/${session.callId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
-    }
-    void refreshCallLogs();
-    clearSession();
-    if (router.canGoBack()) router.back();
-  }, [session, call, user?.sessionToken, clearSession, refreshCallLogs, router]);
-
   const pushCallRoute = useCallback((s: CallSession, replace = false) => {
     const route = {
       pathname: "/call/[id]" as const,
@@ -171,8 +180,73 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     else router.push(route);
   }, [router]);
 
+  const endCall = useCallback(async () => {
+    await stopCallAlert();
+    setVideoCallPipEnabled(false);
+    if (session?.engineActive) await call.leave();
+    if (session?.callId) {
+      endCallKeep(session.callId);
+      await webrtcFetch(`/calls/${session.callId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+    }
+    void refreshCallLogs();
+    clearSession();
+    setHeldSession(null);
+    if (router.canGoBack()) router.back();
+  }, [session, call, user?.sessionToken, clearSession, refreshCallLogs, router]);
+
+  const holdActiveCall = useCallback(async () => {
+    if (!session?.callId || !user?.dbId) return;
+    await webrtcFetch(`/calls/${session.callId}/hold`, user.sessionToken, {
+      method: "POST",
+      body: JSON.stringify({ hold: true }),
+    }).catch(() => {});
+    if (session.engineActive) await call.leave();
+    const snap: CallSession = {
+      ...session,
+      onHold: true,
+      engineActive: false,
+      minimized: true,
+      ringing: false,
+    };
+    setHeldSession(snap);
+    setSession(null);
+    setVideoCallPipEnabled(false);
+    if (router.canGoBack()) router.back();
+  }, [session, call, user?.dbId, user?.sessionToken, router]);
+
+  const resumeHeldCall = useCallback(async () => {
+    if (!heldSession?.callId || !user?.dbId) return;
+    await webrtcFetch(`/calls/${heldSession.callId}/hold`, user.sessionToken, {
+      method: "POST",
+      body: JSON.stringify({ hold: false }),
+    }).catch(() => {});
+    const next: CallSession = {
+      ...heldSession,
+      onHold: false,
+      engineActive: true,
+      minimized: false,
+    };
+    setHeldSession(null);
+    setSession(next);
+    pushCallRoute(next, true);
+  }, [heldSession, user?.dbId, user?.sessionToken, pushCallRoute]);
+
+  const endHeldCall = useCallback(async () => {
+    if (!heldSession?.callId) return;
+    endCallKeep(heldSession.callId);
+    await webrtcFetch(`/calls/${heldSession.callId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+    setHeldSession(null);
+    void refreshCallLogs();
+  }, [heldSession, user?.sessionToken, refreshCallLogs]);
+
   const presentIncomingCall = useCallback((callInfo: IncomingCallInfo) => {
     wakeScreenForIncomingCall();
+    showCallKeepIncoming(
+      callInfo.callId,
+      callInfo.callerName,
+      callInfo.chatId,
+      callInfo.type === "video",
+    );
     const next: CallSession = {
       chatId: String(callInfo.chatId),
       contactName: callInfo.callerName,
@@ -430,6 +504,49 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     return () => clearInterval(t);
   }, [call.joined]);
 
+  useEffect(() => {
+    if (!session?.engineActive || session.ringing) {
+      setVideoCallPipEnabled(false);
+      return;
+    }
+    startNativeOngoingCallSession(session.isVideo);
+    setVideoCallPipEnabled(session.isVideo);
+    if (session.callId && !session.isIncoming) {
+      startCallKeepOutgoing(session.callId, session.contactName, session.isVideo);
+    }
+  }, [session?.engineActive, session?.ringing, session?.isVideo, session?.callId, session?.isIncoming, session?.contactName]);
+
+  useEffect(() => {
+    const unsub = onCallSignal((payload) => {
+      if (String(payload.action ?? "") !== "media_type") return;
+      const raw = payload as { type?: string; payload?: { type?: string } };
+      const nextVideo = (raw.type ?? raw.payload?.type) === "video";
+      setSession((prev) => (prev ? { ...prev, isVideo: nextVideo } : prev));
+    });
+    return unsub;
+  }, []);
+
+  const switchCallMediaType = useCallback(
+    async (video: boolean) => {
+      if (!session?.callId || !user?.dbId) return;
+      await webrtcFetch(`/calls/${session.callId}/media-type`, user.sessionToken, {
+        method: "POST",
+        body: JSON.stringify({ type: video ? "video" : "audio" }),
+      }).catch(() => {});
+      setSession((prev) => (prev ? { ...prev, isVideo: video } : prev));
+    },
+    [session?.callId, user?.sessionToken],
+  );
+
+  const setInCallAudioRoute = useCallback(
+    async (route: InCallAudioRoute) => {
+      await chooseInCallAudioRoute(route);
+      const speaker = route === "SPEAKER_PHONE" || route === "BLUETOOTH";
+      call.setSpeaker(speaker);
+    },
+    [call],
+  );
+
   const statusText = useMemo(() => {
     if (!session) return "";
     if (session.ringing) {
@@ -482,6 +599,15 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       toggleSpeaker: () => call.toggleSpeaker(),
       addParticipants,
       inviteeUserIds: onCallUserIds,
+      remotePeers: call.remotePeers,
+      switchCallMediaType,
+      setInCallAudioRoute,
+      heldSession,
+      holdActiveCall,
+      resumeHeldCall,
+      endHeldCall,
+      shareScreen: () => call.shareScreen(),
+      stopScreenShare: () => call.stopScreenShare(),
     }),
     [
       session,
@@ -501,6 +627,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       addParticipants,
       onCallUserIds,
       inviteeUserIds,
+      switchCallMediaType,
+      setInCallAudioRoute,
+      heldSession,
+      holdActiveCall,
+      resumeHeldCall,
+      endHeldCall,
+      call.shareScreen,
+      call.stopScreenShare,
     ],
   );
 

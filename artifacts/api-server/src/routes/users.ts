@@ -553,6 +553,31 @@ router.get("/:id/storage-stats", async (req: Request, res: Response) => {
 });
 
 // Save push token
+router.put("/:id/sound-prefs", async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
+  const body = req.body as {
+    globalMessageSound?: string;
+    globalGroupMessageSound?: string;
+    globalCallSound?: string;
+    chatMessageSounds?: Record<string, string>;
+    chatPresets?: Record<string, string>;
+  };
+  try {
+    const { upsertUserSoundPrefs } = await import("../lib/soundPrefsDb");
+    await upsertUserSoundPrefs(Number(req.params.id), {
+      global_message_sound: body.globalMessageSound,
+      global_group_message_sound: body.globalGroupMessageSound,
+      global_call_sound: body.globalCallSound,
+      chat_message_sounds: body.chatMessageSounds,
+      chat_presets: body.chatPresets,
+    });
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "save sound prefs");
+    res.status(500).json({ success: false });
+  }
+});
+
 router.put("/:id/push-token", async (req: Request, res: Response) => {
   const { token, provider } = req.body as { token?: string; provider?: string };
   if (!assertSameUser(req, res, req.params.id)) return;

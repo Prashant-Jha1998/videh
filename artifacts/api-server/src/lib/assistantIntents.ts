@@ -171,6 +171,13 @@ export function parseAssistantIntent(text: string): AssistantIntent {
     return { type: "missed_calls" };
   }
 
+  if (
+    /last\s+call|latest\s+call|pichhl[aei]\s+call|sabse\s+last\s+call|call\s+kis\s+ka\s+aay|kis\s+ka\s+call\s+aay|किस\s*का\s*कॉल|लास्ट\s*कॉल|आखिरी\s*कॉल/i.test(n)
+    && !/miss/.test(n)
+  ) {
+    return { type: "recent_calls" };
+  }
+
   if (/recent\s+calls?|call\s+history|sab(?:hi)?\s+call/i.test(n) && !/miss/.test(n)) {
     return { type: "recent_calls" };
   }

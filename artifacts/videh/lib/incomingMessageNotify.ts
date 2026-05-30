@@ -1,0 +1,130 @@
+import { AppState, Platform } from "react-native";
+import { agentDebugLog } from "./agentDebugLog";
+import { showChatMessageNotification } from "./chatMessageNotification";
+
+export type NotificationChatSnapshot = {
+  id: string;
+  name: string;
+  avatar?: string;
+  lastMessage?: string;
+  isGroup: boolean;
+  isMuted?: boolean;
+};
+
+let chatsSnapshot: NotificationChatSnapshot[] = [];
+let activeChatId: string | null = null;
+const recentNotifyAt = new Map<string, number>();
+
+const DEDUPE_MS = 4000;
+
+export function setNotificationRuntimeState(state: {
+  chats: NotificationChatSnapshot[];
+  activeChatId: string | null;
+}): void {
+  chatsSnapshot = state.chats;
+  activeChatId = state.activeChatId;
+}
+
+export function setNotificationActiveChatId(chatId: string | null): void {
+  activeChatId = chatId;
+}
+
+function notifyDedupeKey(chatId: string, messageId?: string): string {
+  return `${chatId}:${messageId ?? "latest"}`;
+}
+
+function shouldDeliverNotification(chatId: string, messageId?: string): boolean {
+  const key = notifyDedupeKey(chatId, messageId);
+  const now = Date.now();
+  const prev = recentNotifyAt.get(key);
+  if (prev != null && now - prev < DEDUPE_MS) return false;
+  recentNotifyAt.set(key, now);
+  return true;
+}
+
+function findChat(chatId: string): NotificationChatSnapshot | undefined {
+  return chatsSnapshot.find((c) => c.id === String(chatId));
+}
+
+export type DeliverIncomingMessageOpts = {
+  chatId: string;
+  messageId?: string;
+  senderName?: string;
+  body?: string;
+  avatarUrl?: string | null;
+  isGroup?: boolean;
+  /** Refresh chat list before reading snapshot (SSE path). */
+  reloadChats?: () => Promise<void>;
+};
+
+/** Show a local notification with premium per-chat sound (replaces default FCM tone). */
+export async function deliverPremiumChatMessageNotification(
+  opts: DeliverIncomingMessageOpts,
+): Promise<boolean> {
+  if (Platform.OS === "web") return false;
+
+  if (opts.reloadChats) {
+    try {
+      await opts.reloadChats();
+    } catch {
+      /* list refresh optional */
+    }
+  }
+
+  const chat = findChat(opts.chatId);
+  if (chat?.isMuted) {
+    agentDebugLog(
+      "incomingMessageNotify.ts:deliver",
+      "skipped muted chat",
+      { chatId: opts.chatId },
+      "H1",
+      "post-fix",
+    );
+    return false;
+  }
+
+  const appActive = AppState.currentState === "active";
+  if (appActive && activeChatId === opts.chatId) {
+    agentDebugLog(
+      "incomingMessageNotify.ts:deliver",
+      "skipped active chat",
+      { chatId: opts.chatId },
+      "H1",
+      "post-fix",
+    );
+    return false;
+  }
+
+  if (!shouldDeliverNotification(opts.chatId, opts.messageId)) {
+    agentDebugLog(
+      "incomingMessageNotify.ts:deliver",
+      "skipped dedupe",
+      { chatId: opts.chatId, messageId: opts.messageId },
+      "H1",
+      "post-fix",
+    );
+    return false;
+  }
+
+  const senderName = opts.senderName?.trim() || chat?.name || "Videh";
+  const body = opts.body?.trim() || chat?.lastMessage?.trim() || "New message";
+  const isGroup = opts.isGroup ?? chat?.isGroup ?? false;
+
+  await showChatMessageNotification({
+    chatId: opts.chatId,
+    messageId: opts.messageId,
+    senderName,
+    body,
+    avatarUrl: opts.avatarUrl ?? chat?.avatar ?? null,
+    isGroup,
+  });
+
+  agentDebugLog(
+    "incomingMessageNotify.ts:deliver",
+    "premium notification delivered",
+    { chatId: opts.chatId, messageId: opts.messageId, isGroup, appState: AppState.currentState },
+    "H1",
+    "post-fix",
+  );
+  return true;
+}

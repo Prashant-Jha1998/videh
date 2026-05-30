@@ -1,6 +1,6 @@
 import type { AssistantUserContext } from "./assistantExecutor";
 import type { AssistantLangCode } from "./assistantLanguages";
-import { firstName, INDIAN_LANGUAGE_LABELS } from "./assistantLanguages";
+import { firstName } from "./assistantLanguages";
 import { parseAssistantIntent, intentToPlanned } from "./assistantIntents";
 import { executeAssistantAction } from "./assistantExecutor";
 import { query } from "./db";
@@ -144,15 +144,29 @@ export async function answerFromDatabase(
   return null;
 }
 
+const FALLBACK_BY_LANG: Partial<Record<AssistantLangCode, (name: string) => string>> = {
+  en: (name) =>
+    `${name}, I did not quite get that. Ask about messages, calls, unread chats, or say a contact name to call.`,
+  hi: (name) =>
+    `${name} ji, mujhe poori tarah samajh nahi aaya. Messages, calls, unread, ya kisi contact ko call karne ke liye boliye.`,
+  pa: (name) =>
+    `${name}, ਮੈਨੂੰ ਪੂਰੀ ਤਰ੍ਹਾਂ ਸਮਝ ਨਹੀਂ ਆਈ। ਸੁਨੇਹੇ, ਕਾਲਾਂ, ਜਾਂ ਕਿਸੇ contact ਨੂੰ ਕਾਲ ਕਰਨ ਲਈ ਬੋਲੋ।`,
+  ta: (name) =>
+    `${name}, முழுசா புரியவில்லை. செய்திகள், அழைப்புகள், அல்லது ஒரு contact-ஐ call செய்ய சொல்லுங்கள்.`,
+  mr: (name) =>
+    `${name}, मला पूर्ण समजले नाही. Messages, calls, किंवा contact ला call करण्यासाठी सांगा.`,
+  bn: (name) =>
+    `${name}, পুরোপুরি বুঝতে পারিনি। বার্তা, কল, বা কাউকে কল করতে বলুন।`,
+  te: (name) =>
+    `${name}, పూర్తిగా అర్థం కాలేదు. సందేశాలు, కాల్స్, లేదా contact కు call చెప్పండి.`,
+};
+
 export function databaseAssistantFallback(lang: AssistantLangCode, userName: string): string {
   const name = firstName(userName);
-  const label = INDIAN_LANGUAGE_LABELS[lang] ?? "Hindi";
-  if (isEn(lang)) {
-    return `${name}, I read your Videh data directly (${label}). Try: who messaged today, missed calls, unread count, call someone by name, or Khata summary.`;
-  }
-  return `${name} ji, main aapka Videh data seedha database se padhta hoon (${label}). Bolein: aaj kis ka message aaya, missed call, unread kitne, kisi ko call karo, ya khata batao.`;
+  const fn = FALLBACK_BY_LANG[lang] ?? FALLBACK_BY_LANG.en!;
+  return fn(name);
 }
 
 export function useOpenAiAssistant(): boolean {
-  return process.env["ASSISTANT_USE_OPENAI"] === "1";
+  return Boolean(process.env["OPENAI_API_KEY"]?.trim());
 }

@@ -89,7 +89,8 @@ IMPORTANT: contactName must match one of the user's actual chat names when possi
 
 Users may ask unlimited natural questions (Hindi/English): who messaged today, missed calls, group activity, how to change a setting, etc. Pick the best intent.
 
-Never plan: sexual/illegal/terror content, or revealing API keys/source code/passwords.`,
+Never plan: sexual/illegal/terror content, or revealing API keys/source code/passwords.
+Never use the word "database" in speak text — say "your chats" or "your Videh account" instead.`,
           },
           { role: "user", content: text },
         ],
@@ -125,30 +126,15 @@ export async function resolveAssistantPlan(
     return { intent: "unknown" };
   }
 
-  if (!isLikelyProjectQuestion(text)) {
-    const aiPlan = await planAssistantAction(text, ctx, lang);
-    if (aiPlan?.intent === "project_qa") {
-      return { intent: "project_qa", speak: aiPlan.speak };
-    }
-    if (aiPlan && aiPlan.intent !== "reply" && aiPlan.intent !== "unknown") {
-      return aiPlan;
-    }
-    if (aiPlan?.intent === "reply" && aiPlan.speak) {
-      return aiPlan;
-    }
-    if (aiPlan?.speak) return aiPlan;
-    return { intent: "unknown" };
-  }
-
   const aiPlan = await planAssistantAction(text, ctx, lang);
-  if (aiPlan?.intent === "project_qa") {
-    return { intent: "project_qa", speak: aiPlan.speak };
-  }
-  if (aiPlan && aiPlan.intent !== "reply" && aiPlan.intent !== "unknown") {
+  if (aiPlan && aiPlan.intent !== "reply" && aiPlan.intent !== "unknown" && aiPlan.intent !== "project_qa") {
     return aiPlan;
   }
   if (aiPlan?.intent === "reply" && aiPlan.speak) {
     return aiPlan;
+  }
+  if (aiPlan?.speak && (aiPlan.intent === "project_qa" || isLikelyProjectQuestion(text))) {
+    return { intent: "project_qa", speak: aiPlan.speak };
   }
   return { intent: "project_qa" };
 }

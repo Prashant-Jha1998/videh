@@ -68,7 +68,10 @@ export default function CallsScreen() {
           const initials = item.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
           const hue = item.name.charCodeAt(0) * 37 % 360;
           const avatarBg = `hsl(${hue},50%,45%)`;
-          const isMissed = item.status === "missed";
+          const isMissed =
+            item.status !== "answered"
+            && item.status !== "declined"
+            && !(item.duration != null && item.duration > 0);
           const durationStr = item.duration ? ` · ${Math.floor(item.duration / 60)}:${String(item.duration % 60).padStart(2, "0")}` : "";
           return (
             <View style={[styles.row, { borderBottomColor: colors.border }]}>

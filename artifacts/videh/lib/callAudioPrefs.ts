@@ -1,52 +1,63 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { CallSoundId } from "./premiumSounds";
+import { getSoundPrefs, patchSoundPrefs, type SoundPrefs } from "./soundPrefs";
+
+export type { CallSoundId };
+export type CallAudioRouteId = "earpiece" | "speaker" | "bluetooth";
 
 export const CALL_RINGTONE_KEY = "videh_call_ringtone";
 export const CALL_VIBRATE_KEY = "videh_call_vibrate";
 
-export type CallRingtoneId = "default" | "classic" | "none";
-
 export type CallAudioPrefs = {
-  ringtone: CallRingtoneId;
+  ringtone: CallSoundId;
   vibrate: boolean;
 };
 
-const DEFAULT_PREFS: CallAudioPrefs = { ringtone: "default", vibrate: true };
+export const CALL_AUDIO_ROUTE_LABELS: Record<CallAudioRouteId, string> = {
+  earpiece: "Phone",
+  speaker: "Speaker",
+  bluetooth: "Bluetooth",
+};
 
-export function labelForCallRingtone(id: CallRingtoneId): string {
-  if (id === "classic") return "Classic";
-  if (id === "none") return "None";
-  return "Default";
+export function labelForCallRingtone(id: CallSoundId | string): string {
+  const { labelForSoundId } = require("./premiumSounds") as typeof import("./premiumSounds");
+  return labelForSoundId(String(id));
 }
 
-export function callRingtoneIdFromLabel(label: string): CallRingtoneId {
-  const lower = label.toLowerCase();
-  if (lower === "none") return "none";
-  if (lower === "classic") return "classic";
-  return "default";
+export async function getCallAudioPrefs(): Promise<{ ringtone: CallSoundId; vibrate: boolean }> {
+  return getCallAudioPrefsFull();
 }
 
-export async function getCallAudioPrefs(): Promise<CallAudioPrefs> {
+export async function getCallAudioPrefsFull(): Promise<{ ringtone: CallSoundId; vibrate: boolean }> {
   try {
-    const rows = await AsyncStorage.multiGet([CALL_RINGTONE_KEY, CALL_VIBRATE_KEY]);
-    const ringtoneRaw = rows.find(([k]) => k === CALL_RINGTONE_KEY)?.[1];
-    const vibrateRaw = rows.find(([k]) => k === CALL_VIBRATE_KEY)?.[1];
-    const ringtone =
-      ringtoneRaw === "classic" || ringtoneRaw === "none" || ringtoneRaw === "default"
-        ? ringtoneRaw
-        : DEFAULT_PREFS.ringtone;
+    const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
+    const vibrateRaw = await AsyncStorage.getItem(CALL_VIBRATE_KEY);
+    const prefs = await getSoundPrefs();
     return {
-      ringtone,
-      vibrate: vibrateRaw == null ? DEFAULT_PREFS.vibrate : vibrateRaw !== "false",
+      ringtone: prefs.globalCallSound,
+      vibrate: vibrateRaw == null ? true : vibrateRaw !== "false",
     };
   } catch {
-    return DEFAULT_PREFS;
+    const prefs = await getSoundPrefs();
+    return { ringtone: prefs.globalCallSound, vibrate: true };
   }
 }
 
-export async function setCallRingtonePref(ringtone: CallRingtoneId): Promise<void> {
+export async function setCallRingtonePref(ringtone: CallSoundId): Promise<void> {
+  await patchSoundPrefs({ globalCallSound: ringtone });
+  const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
   await AsyncStorage.setItem(CALL_RINGTONE_KEY, ringtone);
+  const { applyVidehNotificationSounds } = await import("./applyNotificationChannels");
+  await applyVidehNotificationSounds();
 }
 
 export async function setCallVibratePref(vibrate: boolean): Promise<void> {
+  const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
   await AsyncStorage.setItem(CALL_VIBRATE_KEY, vibrate ? "true" : "false");
+}
+
+export function callRingtoneIdFromLabel(label: string): CallSoundId {
+  const { CALL_RINGTONES, resolveLegacyCallRingtone } = require("./premiumSounds") as typeof import("./premiumSounds");
+  const found = CALL_RINGTONES.find((r) => r.label.toLowerCase() === label.toLowerCase());
+  if (found) return resolveLegacyCallRingtone(found.id);
+  return "call_default";
 }

@@ -7,7 +7,7 @@ import multer from "multer";
 import { query } from "../lib/db";
 import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
 import { chatMessagePushPreview } from "../lib/chatMessagePreview";
-import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
+import { isValidPushToken, sendChatPush, sendChatPushToMembers } from "../lib/pushNotify";
 import { pushNotificationImageUrl } from "../lib/pushMediaUrl";
 import { enforceModerationForActivity } from "../lib/moderation";
 import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
@@ -786,13 +786,13 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     const senderAvatarUrl = pushNotificationImageUrl(senderRow.rows[0]?.avatar_url);
     const notifyMembers = members.rows.filter((m: any) => !m.is_muted);
     const recipientUserIds = notifyMembers.map((m: any) => Number(m.user_id)).filter(Boolean);
-    const tokens = notifyMembers
-      .map((m: any) => m.push_token)
-      .filter((t: unknown): t is string => isValidPushToken(t));
-    if (recipientUserIds.length > 0 || tokens.length > 0) {
+    if (notifyMembers.length > 0) {
       const preview = chatMessagePushPreview(type ?? "text", content ?? "");
-      await sendChatPush(
-        tokens,
+      await sendChatPushToMembers(
+        notifyMembers.map((m: any) => ({
+          user_id: Number(m.user_id),
+          push_token: m.push_token,
+        })),
         senderName,
         preview,
         {
@@ -804,11 +804,14 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
           messageType: type ?? "text",
           type: "message",
           notificationKind: "chat_message",
+          isGroup: perm.isGroup ? "1" : "0",
         },
         {
+          isGroup: perm.isGroup,
           categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID,
           threadId: `chat-${chatId}`,
           imageUrl: senderAvatarUrl,
+          chatId: String(chatId),
         },
       );
     }
@@ -932,13 +935,15 @@ router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Re
     const senderName = senderRow.rows[0]?.name ?? "Videh";
     const senderAvatarUrl = pushNotificationImageUrl(senderRow.rows[0]?.avatar_url);
     const notifyMembers = members.rows.filter((m: { is_muted: boolean }) => !m.is_muted);
-    const tokens = notifyMembers
-      .map((m: { push_token: string | null }) => m.push_token)
-      .filter((t: unknown): t is string => isValidPushToken(t));
-    if (tokens.length > 0) {
+    if (notifyMembers.length > 0) {
+      const targetIsGroup = await query("SELECT is_group FROM chats WHERE id = $1", [targetId]);
+      const isGroup = Boolean(targetIsGroup.rows[0]?.is_group);
       const preview = chatMessagePushPreview(messageType, content) || "Forwarded message";
-      await sendChatPush(
-        tokens,
+      await sendChatPushToMembers(
+        notifyMembers.map((m: { user_id: number; push_token: string | null }) => ({
+          user_id: Number(m.user_id),
+          push_token: m.push_token,
+        })),
         senderName,
         preview,
         {
@@ -950,11 +955,14 @@ router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Re
           messageType,
           type: "message",
           notificationKind: "chat_message",
+          isGroup: isGroup ? "1" : "0",
         },
         {
+          isGroup,
           categoryId: EXPO_CHAT_MESSAGE_CATEGORY_ID,
           threadId: `chat-${targetId}`,
           imageUrl: senderAvatarUrl,
+          chatId: targetId,
         },
       );
     }

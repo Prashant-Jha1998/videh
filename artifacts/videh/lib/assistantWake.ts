@@ -32,14 +32,20 @@ const WAKE_REGEX = new RegExp(
   "i",
 );
 
+/** Short wake-only utterances (user said just "hey" / "hey videh"). */
+const STANDALONE_WAKE_RE = /^(?:hey|he|hay|hi|hello|helo|oye|ok|okay)(?:\s+videh|\s+vidhe|\s+video)?[,.!?\s]*$/i;
+
 export function containsWakePhrase(text: string): boolean {
   const n = text.toLowerCase().trim();
   if (!n) return false;
+  if (STANDALONE_WAKE_RE.test(n)) return true;
   if (WAKE_PHRASES.some((p) => n.includes(p))) return true;
   // STT often splits "Hey Videh" — accept both words nearby
   if (/\b(hey|he|hay|hi|hello|oye)\b/.test(n) && /\b(videh|vidhe|video|vede|vadeh|wede)\b/.test(n)) {
     return true;
   }
+  // Lone "hey" / "hi" (very short wake tap)
+  if (/^(hey|he|hay|hi|hello|oye)[,.!?\s]*$/i.test(n)) return true;
   return false;
 }
 
@@ -79,4 +85,4 @@ export function parseWakeUtterance(text: string): { hasWake: boolean; command: s
   return { hasWake: true, command };
 }
 
-export const WAKE_CONTEXT_STRINGS = WAKE_PHRASES;
+export const WAKE_CONTEXT_STRINGS = ["hey", "hi", "hello", "hey videh", "hi videh", ...WAKE_PHRASES];

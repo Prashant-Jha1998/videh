@@ -43,15 +43,15 @@ export function normalizeLangCode(raw?: string | null): AssistantLangCode {
   if (v.startsWith("or")) return "or";
   if (v.startsWith("as")) return "as";
   if (v.startsWith("ur")) return "ur";
-  return "hi";
+  return "en";
 }
 
 export function toSpeechLocale(code: AssistantLangCode): string {
-  return SPEECH_LOCALE[code] ?? "hi-IN";
+  return SPEECH_LOCALE[code] ?? "en-IN";
 }
 
 export function toRecognitionLocale(code: AssistantLangCode): string {
-  return SPEECH_LOCALE[code] ?? "hi-IN";
+  return SPEECH_LOCALE[code] ?? "en-IN";
 }
 
 function scriptHint(text: string): AssistantLangCode | null {
@@ -74,5 +74,5 @@ function scriptHint(text: string): AssistantLangCode | null {
 
 /** Quick client-side locale guess from partial transcript (for STT). */
 export function detectLocaleFromTranscript(text: string): AssistantLangCode {
-  return scriptHint(text) ?? "hi";
+  return scriptHint(text) ?? "en";
 }

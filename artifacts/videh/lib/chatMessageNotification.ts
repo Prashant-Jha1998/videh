@@ -1,11 +1,12 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
+import { agentDebugLog } from "@/lib/agentDebugLog";
+import { resolveMessageNotificationSound } from "@/lib/applyNotificationChannels";
 import {
   NOTIFICATION_ACTION_MARK_READ,
   NOTIFICATION_ACTION_MUTE,
   NOTIFICATION_ACTION_REPLY,
   VIDEH_CHAT_MESSAGE_CATEGORY_ID,
-  VIDEH_PUSH_CHANNEL_ID,
 } from "@/lib/pushNotifications";
 
 export type ChatMessageNotificationPayload = {
@@ -15,16 +16,27 @@ export type ChatMessageNotificationPayload = {
   senderName: string;
   body: string;
   avatarUrl?: string | null;
+  isGroup?: boolean;
 };
 
 /** WhatsApp-style local notification: avatar + inline Reply / Mark read / Mute. */
 export async function showChatMessageNotification(payload: ChatMessageNotificationPayload): Promise<void> {
   if (Platform.OS === "web") return;
+  agentDebugLog(
+    "chatMessageNotification.ts:showChatMessageNotification",
+    "local message notification fired",
+    { chatId: payload.chatId, isGroup: payload.isGroup ?? false },
+    "H1",
+  );
 
   const title = payload.senderName;
   const body = payload.body;
   const avatar = payload.avatarUrl?.trim();
   const imageOk = avatar?.startsWith("https://");
+  const { sound, channelId } = await resolveMessageNotificationSound(
+    payload.chatId,
+    payload.isGroup ?? false,
+  );
 
   await Notifications.scheduleNotificationAsync({
     identifier: `chat_${payload.chatId}_${payload.messageId ?? Date.now()}`,
@@ -32,7 +44,7 @@ export async function showChatMessageNotification(payload: ChatMessageNotificati
       title,
       subtitle: Platform.OS === "ios" ? "Videh" : undefined,
       body,
-      sound: "default",
+      sound,
       priority: Notifications.AndroidNotificationPriority.HIGH,
       categoryIdentifier: VIDEH_CHAT_MESSAGE_CATEGORY_ID,
       data: {
@@ -57,7 +69,7 @@ export async function showChatMessageNotification(payload: ChatMessageNotificati
         : {}),
     },
     trigger: null,
-    ...(Platform.OS === "android" ? { channelId: VIDEH_PUSH_CHANNEL_ID } : {}),
+    ...(Platform.OS === "android" && channelId ? { channelId } : {}),
   });
 }
 

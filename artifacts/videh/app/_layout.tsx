@@ -1,7 +1,8 @@
 import * as Font from "expo-font";
 import * as Notifications from "expo-notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack, useRouter } from "expo-router";
+import * as Linking from "expo-linking";
+import { type Href, Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform } from "react-native";
@@ -11,7 +12,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { AppProvider, useApp } from "@/context/AppContext";
 import { AssistantProvider } from "@/context/AssistantContext";
-import { CallSessionProvider, shouldRouteIncomingToCallScreen, useCallSession } from "@/context/CallSessionContext";
+import { CallSessionProvider, useCallSession } from "@/context/CallSessionContext";
 import { OngoingCallBanner } from "@/components/OngoingCallBanner";
 import { UiPreferencesProvider } from "@/context/UiPreferencesContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -31,6 +32,19 @@ import {
   VIDEH_CALLS_CHANNEL_ID,
 } from "@/lib/pushNotifications";
 import { dismissIncomingCallNotification, showIncomingCallNotification } from "@/lib/incomingCallNotification";
+import { CallWaitingOverlay } from "@/components/CallWaitingOverlay";
+import { HeldCallBanner } from "@/components/HeldCallBanner";
+import {
+  endCallKeep,
+  setupCallKeep,
+  setCallKeepHandlers,
+  showCallKeepIncoming,
+} from "@/lib/callKeep";
+import type { CallKeepHandlerPayload } from "@/lib/callKeepBridge";
+import {
+  dismissNativeIncomingCall,
+  displayNativeIncomingCall,
+} from "@/lib/videhNativeCallUi";
 import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
 import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
 import { wakeScreenForIncomingCall } from "@/lib/inCallAudio";
@@ -61,7 +75,7 @@ async function declineIncomingCallSilently(callId: string, userId: number, sessi
 function canPresentIncomingCallUi(): boolean {
   if (Platform.OS === "web") return false;
   const state = AppState.currentState;
-  return state === "active" || state === "background";
+  return state === "active" || state === "background" || state === "inactive";
 }
 
 function toIncomingCallInfo(raw: {
@@ -92,19 +106,6 @@ const queryClient = new QueryClient({
   },
 });
 
-// Show notification when app is foregrounded
-if (Platform.OS !== "web") {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
-  });
-}
-
 function RootLayoutNav() {
   const { isAuthenticated, isInitialized, user, chats, markAsRead, muteChat, sendMessage, loadMessages } = useApp();
   const colors = useColors();
@@ -113,13 +114,20 @@ function RootLayoutNav() {
     session: activeCallSession,
     duration: callDuration,
     presentIncomingCall,
+    acceptIncoming,
     returnToCallScreen,
     endCall,
+    holdActiveCall,
+    resumeHeldCall,
+    endHeldCall,
+    heldSession,
   } = useCallSession();
   const pendingIncomingRef = useRef<IncomingCallInfo | null>(null);
   const activeCallIdRef = useRef<string | null>(null);
+  const respondToIncomingCallRef = useRef<(action: "accept" | "decline", msg?: string) => void>(() => {});
   const incomingRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [incomingCall, setIncomingCall] = useState<IncomingCallInfo | null>(null);
+  const [callWaiting, setCallWaiting] = useState<IncomingCallInfo | null>(null);
 
   const clearIncomingAutoEnd = useCallback(() => {
     if (incomingRingTimerRef.current) {
@@ -154,7 +162,18 @@ function RootLayoutNav() {
   }) => {
     const next = toIncomingCallInfo(raw);
     if (activeCallIdRef.current === next.callId) return;
-    if (activeCallSession?.engineActive && !activeCallSession.ringing) return;
+
+    if (
+      activeCallSession?.engineActive
+      && !activeCallSession.ringing
+      && activeCallSession.callId !== next.callId
+    ) {
+      setCallWaiting(next);
+      showCallKeepIncoming(next.callId, next.callerName, next.chatId, next.type === "video");
+      void startIncomingCallAlert();
+      scheduleIncomingAutoEnd(next.callId);
+      return;
+    }
 
     const silenceUnknown = await loadCachedSilenceUnknownCallers();
     if (silenceUnknown && user?.dbId && !isKnownCaller(Number(next.chatId), chats)) {
@@ -164,30 +183,29 @@ function RootLayoutNav() {
     }
 
     wakeScreenForIncomingCall();
+    displayNativeIncomingCall({
+      callId: next.callId,
+      callerName: next.callerName,
+      isVideo: next.type === "video",
+    });
+
+    setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
 
     if (Platform.OS !== "web") {
       void startIncomingCallAlert();
       const callPayload = { ...next, callerName: next.callerName };
       const appState = AppState.currentState;
-      if (appState === "background" || appState === "inactive" || !appState) {
+      if (appState === "background" || appState === "inactive") {
         pendingIncomingRef.current = callPayload;
         void showIncomingCallNotification(callPayload);
       }
     }
 
     scheduleIncomingAutoEnd(next.callId);
-
-    if (canPresentIncomingCallUi() && shouldRouteIncomingToCallScreen()) {
-      presentIncomingCall(next);
-      setIncomingCall(null);
-    } else {
-      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
-    }
   }, [
     activeCallSession?.engineActive,
     activeCallSession?.ringing,
     chats,
-    presentIncomingCall,
     scheduleIncomingAutoEnd,
     user?.dbId,
     user?.sessionToken,
@@ -232,28 +250,33 @@ function RootLayoutNav() {
         clearIncomingAutoEnd();
         void stopCallAlert();
         const action = actionId === NOTIFICATION_ACTION_ACCEPT_CALL ? "accept" : "decline";
-        void fetch(`${getApiUrl()}/api/webrtc/calls/${data.callId}/respond`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
-          },
-          body: JSON.stringify({ userId: user.dbId, action }),
-        }).then(() => {
-          if (action === "accept") {
-            router.push({
-              pathname: "/call/[id]",
-              params: {
-                id: String(data.chatId),
-                name: String(data.callerName ?? "Videh user"),
-                type: data.type === "video" ? "video" : "audio",
-                channel: String(data.channel ?? ""),
-                callId: String(data.callId),
-                incoming: "1",
+        void (async () => {
+          try {
+            await fetch(`${getApiUrl()}/api/webrtc/calls/${data.callId}/respond`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
               },
+              body: JSON.stringify({ userId: user.dbId, action }),
             });
+            if (action === "accept") {
+              const call = toIncomingCallInfo({
+                callId: String(data.callId),
+                channel: String(data.channel ?? ""),
+                chatId: Number(data.chatId),
+                type: String(data.type ?? "audio"),
+                callerName: String(data.callerName ?? "Videh user"),
+                participantCount: 2,
+              });
+              setIncomingCall(null);
+              presentIncomingCall(call);
+              await acceptIncoming();
+            }
+          } catch {
+            /* ignore */
           }
-        }).catch(() => {});
+        })();
         return;
       }
       if (data?.callId && isAuthenticated) {
@@ -262,11 +285,10 @@ function RootLayoutNav() {
           .then((payload: { success?: boolean; call?: IncomingCallInfo }) => {
             const call = payload.call;
             if (!call) return;
-            if (shouldRouteIncomingToCallScreen()) {
-              presentIncomingCall(call);
-            } else {
-              setIncomingCall(call);
-            }
+            wakeScreenForIncomingCall();
+            void startIncomingCallAlert();
+            setIncomingCall(call);
+            scheduleIncomingAutoEnd(call.callId);
           })
           .catch(() => {});
         return;
@@ -276,7 +298,18 @@ function RootLayoutNav() {
       }
     });
     return () => sub.remove();
-  }, [isAuthenticated, markAsRead, muteChat, router, sendMessage, user?.dbId, user?.sessionToken, presentIncomingCall]);
+  }, [
+    isAuthenticated,
+    markAsRead,
+    muteChat,
+    router,
+    sendMessage,
+    user?.dbId,
+    user?.sessionToken,
+    scheduleIncomingAutoEnd,
+    presentIncomingCall,
+    acceptIncoming,
+  ]);
 
   // Wait for AsyncStorage to load before deciding where to route
   useEffect(() => {
@@ -340,7 +373,9 @@ function RootLayoutNav() {
       }
       if (action === "declined" || action === "ended" || action === "missed" || action === "busy") {
         clearIncomingAutoEnd();
+        dismissNativeIncomingCall();
         if (callId) void dismissIncomingCallNotification(callId);
+        setCallWaiting((prev) => (prev?.callId === callId ? null : prev));
         setIncomingCall((prev) => {
           if (!prev) return prev;
           if (callId && prev.callId !== callId) return prev;
@@ -364,15 +399,29 @@ function RootLayoutNav() {
     const sub = AppState.addEventListener("change", (state) => {
       if (state !== "active" && state !== "background") return;
       const pending = pendingIncomingRef.current;
-      if (pending && shouldRouteIncomingToCallScreen() && canPresentIncomingCallUi()) {
+      if (pending && canPresentIncomingCallUi()) {
         pendingIncomingRef.current = null;
         wakeScreenForIncomingCall();
-        presentIncomingCall(pending);
-        setIncomingCall(null);
+        void startIncomingCallAlert();
+        setIncomingCall(pending);
+        scheduleIncomingAutoEnd(pending.callId);
       }
     });
     return () => sub.remove();
-  }, [presentIncomingCall]);
+  }, [scheduleIncomingAutoEnd]);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldSetBadge: true,
+      }),
+    });
+  }, []);
 
   useEffect(() => {
     if (Platform.OS === "web" || !isAuthenticated) return;
@@ -389,23 +438,22 @@ function RootLayoutNav() {
         callerName: String(data.callerName ?? "Videh user"),
         participantCount: 2,
       });
+      if (activeCallIdRef.current === info.callId) return;
       wakeScreenForIncomingCall();
-      setTimeout(() => {
-        if (!canPresentIncomingCallUi() || !shouldRouteIncomingToCallScreen()) return;
-        if (activeCallIdRef.current === info.callId) return;
-        presentIncomingCall(info);
-        setIncomingCall(null);
-        scheduleIncomingAutoEnd(info.callId);
-      }, 400);
+      void startIncomingCallAlert();
+      setIncomingCall(info);
+      scheduleIncomingAutoEnd(info.callId);
     });
     return () => sub.remove();
-  }, [isAuthenticated, presentIncomingCall, scheduleIncomingAutoEnd]);
+  }, [isAuthenticated, scheduleIncomingAutoEnd]);
 
   const respondToIncomingCall = async (action: "accept" | "decline", declineMessage?: string) => {
     if (!incomingCall || !user?.dbId) return;
     const call = incomingCall;
     clearIncomingAutoEnd();
+    dismissNativeIncomingCall();
     setIncomingCall(null);
+    setCallWaiting(null);
     try {
       await stopCallAlert();
       await webrtcFetch(`/calls/${call.callId}/respond`, user.sessionToken, {
@@ -417,17 +465,8 @@ function RootLayoutNav() {
         }),
       }).catch(() => {});
       if (action === "accept") {
-        router.push({
-          pathname: "/call/[id]",
-          params: {
-            id: String(call.chatId),
-            name: call.callerName,
-            type: call.type,
-            channel: call.channel,
-            callId: call.callId,
-            incoming: "1",
-          },
-        });
+        presentIncomingCall(call);
+        await acceptIncoming();
       } else {
         void loadMessages(String(call.chatId));
       }
@@ -435,6 +474,94 @@ function RootLayoutNav() {
       /* keep UI responsive if ringtone/network fails */
     }
   };
+
+  respondToIncomingCallRef.current = (action, msg) => {
+    void respondToIncomingCall(action, msg);
+  };
+
+  useEffect(() => {
+    if (Platform.OS === "web" || !isAuthenticated) return;
+    void setupCallKeep();
+    setCallKeepHandlers({
+      onAnswer: ({ callId }: CallKeepHandlerPayload) => {
+        if (!callId || !user?.dbId) return;
+        void (async () => {
+          clearIncomingAutoEnd();
+          dismissNativeIncomingCall();
+          await stopCallAlert();
+          const waiting = callWaiting;
+          if (waiting?.callId === callId) {
+            setCallWaiting(null);
+            await holdActiveCall();
+            await webrtcFetch(`/calls/${callId}/respond`, user.sessionToken, {
+              method: "POST",
+              body: JSON.stringify({ userId: user.dbId, action: "accept" }),
+            }).catch(() => {});
+            presentIncomingCall(waiting);
+            await acceptIncoming();
+            return;
+          }
+          if (incomingCall?.callId === callId) {
+            respondToIncomingCallRef.current("accept");
+            return;
+          }
+          await offerIncomingCall({
+            callId,
+            channel: "",
+            chatId: 0,
+            callerName: "Videh user",
+          });
+        })();
+      },
+      onEnd: ({ callId }: CallKeepHandlerPayload) => {
+        if (!callId) return;
+        if (callWaiting?.callId === callId) {
+          clearIncomingAutoEnd();
+          dismissNativeIncomingCall();
+          void stopCallAlert();
+          setCallWaiting(null);
+          if (user?.dbId) void declineIncomingCallSilently(callId, user.dbId, user.sessionToken);
+          endCallKeep(callId, "declined");
+          return;
+        }
+        if (incomingCall?.callId === callId) {
+          respondToIncomingCallRef.current("decline");
+          return;
+        }
+        if (activeCallSession?.callId === callId) void endCall();
+      },
+    });
+    return () => setCallKeepHandlers({});
+  }, [
+    isAuthenticated,
+    user?.dbId,
+    user?.sessionToken,
+    callWaiting,
+    incomingCall,
+    activeCallSession?.callId,
+    clearIncomingAutoEnd,
+    holdActiveCall,
+    presentIncomingCall,
+    acceptIncoming,
+    offerIncomingCall,
+    endCall,
+  ]);
+
+  useEffect(() => {
+    if (Platform.OS === "web" || !isAuthenticated) return;
+    const openJoinCall = (url: string | null) => {
+      if (!url) return;
+      const parsed = Linking.parse(url);
+      const host = parsed.hostname ?? parsed.path?.replace(/^\//, "");
+      if (host !== "join-call") return;
+      const token = parsed.queryParams?.token;
+      if (!token) return;
+      router.push({ pathname: "/join-call", params: { token: String(token) } } as unknown as Href);
+    };
+    void Linking.getInitialURL().then(openJoinCall);
+    const sub = Linking.addEventListener("url", ({ url }) => openJoinCall(url));
+    return () => sub.remove();
+  }, [isAuthenticated, router]);
 
   return (
     <>
@@ -449,6 +576,7 @@ function RootLayoutNav() {
         <Stack.Screen name="chat" options={{ headerShown: false }} />
         <Stack.Screen name="chat-info/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="call" options={{ headerShown: false, presentation: "fullScreenModal" }} />
+        <Stack.Screen name="join-call" options={{ headerShown: false, presentation: "modal" }} />
         <Stack.Screen name="contacts" options={{ headerShown: false }} />
         <Stack.Screen name="status/view" options={{ headerShown: false, presentation: "fullScreenModal" }} />
         <Stack.Screen name="status/viewers" options={{ headerShown: false }} />
@@ -466,18 +594,69 @@ function RootLayoutNav() {
         <Stack.Screen name="settings/privacy" options={{ headerShown: false }} />
         <Stack.Screen name="settings/account" options={{ headerShown: false }} />
         <Stack.Screen name="settings/notifications" options={{ headerShown: false }} />
+        <Stack.Screen name="settings/premium-sounds" options={{ headerShown: false }} />
+        <Stack.Screen name="settings/chat-sound/[chatId]" options={{ headerShown: false }} />
         <Stack.Screen name="settings/chats" options={{ headerShown: false }} />
         <Stack.Screen name="settings/theme" options={{ headerShown: false }} />
+        <Stack.Screen name="settings/advanced-theme" options={{ headerShown: false }} />
+        <Stack.Screen name="settings/chat-theme" options={{ headerShown: false }} />
         <Stack.Screen name="settings/help" options={{ headerShown: false }} />
         <Stack.Screen name="settings/last-seen-online" options={{ headerShown: false }} />
         <Stack.Screen name="broadcasts/index" options={{ headerShown: false }} />
       </Stack>
-      {incomingCall && Platform.OS === "web" ? (
+      {incomingCall ? (
         <IncomingCallOverlay
           call={incomingCall}
           onAccept={() => { void respondToIncomingCall("accept"); }}
           onDecline={() => { void respondToIncomingCall("decline"); }}
           onDeclineWithMessage={(text) => { void respondToIncomingCall("decline", text); }}
+        />
+      ) : null}
+      {callWaiting && activeCallSession?.engineActive && !activeCallSession.ringing ? (
+        <CallWaitingOverlay
+          visible
+          currentContactName={activeCallSession.contactName}
+          incoming={callWaiting}
+          onHoldAndAnswer={async () => {
+            const waiting = callWaiting;
+            if (!waiting || !user?.dbId) return;
+            setCallWaiting(null);
+            clearIncomingAutoEnd();
+            dismissNativeIncomingCall();
+            await stopCallAlert();
+            await holdActiveCall();
+            await webrtcFetch(`/calls/${waiting.callId}/respond`, user.sessionToken, {
+              method: "POST",
+              body: JSON.stringify({ userId: user.dbId, action: "accept" }),
+            }).catch(() => {});
+            presentIncomingCall(waiting);
+            await acceptIncoming();
+          }}
+          onEndAndAnswer={async () => {
+            const waiting = callWaiting;
+            setCallWaiting(null);
+            clearIncomingAutoEnd();
+            dismissNativeIncomingCall();
+            await endCall();
+            if (waiting) {
+              await offerIncomingCall({
+                callId: waiting.callId,
+                channel: waiting.channel,
+                chatId: waiting.chatId,
+                type: waiting.type,
+                callerName: waiting.callerName,
+                participantCount: waiting.participantCount,
+              });
+            }
+          }}
+          onDecline={async () => {
+            if (!callWaiting || !user?.dbId) return;
+            clearIncomingAutoEnd();
+            dismissNativeIncomingCall();
+            await declineIncomingCallSilently(callWaiting.callId, user.dbId, user.sessionToken);
+            void stopCallAlert();
+            setCallWaiting(null);
+          }}
         />
       ) : null}
       {activeCallSession?.minimized && activeCallSession.engineActive && !activeCallSession.ringing ? (
@@ -491,6 +670,14 @@ function RootLayoutNav() {
           })()}
           onReturn={returnToCallScreen}
           onEnd={() => void endCall()}
+        />
+      ) : null}
+      {heldSession?.onHold ? (
+        <HeldCallBanner
+          contactName={heldSession.contactName}
+          isVideo={heldSession.isVideo}
+          onResume={() => void resumeHeldCall()}
+          onEnd={() => void endHeldCall()}
         />
       ) : null}
       <AssistantOverlay />

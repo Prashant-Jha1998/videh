@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
   Alert,
   Platform,
@@ -14,15 +14,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import {
-  callRingtoneIdFromLabel,
   getCallAudioPrefs,
   labelForCallRingtone,
-  setCallRingtonePref,
   setCallVibratePref,
-  type CallRingtoneId,
 } from "@/lib/callAudioPrefs";
+import { getCallMediaSettings, setCallLowDataMode } from "@/lib/callMediaSettings";
+import { labelForSoundId } from "@/lib/premiumSounds";
+import { getSoundPrefs } from "@/lib/soundPrefs";
 
-const TONES = ["Default", "Classic", "None"];
 const PREVIEW_OPTIONS = ["Always show preview", "Only show sender name", "No preview"];
 
 export default function NotificationsScreen() {
@@ -40,40 +39,34 @@ export default function NotificationsScreen() {
   const [callRingtone, setCallRingtone] = useState("Default");
   const [callVibrate, setCallVibrate] = useState(true);
   const [callNotifs, setCallNotifs] = useState(true);
+  const [callLowData, setCallLowData] = useState(false);
   const [statusNotifs, setStatusNotifs] = useState(true);
   const [reactionNotifs, setReactionNotifs] = useState(true);
 
-  const loadCallPrefs = useCallback(async () => {
-    const prefs = await getCallAudioPrefs();
-    setCallRingtone(labelForCallRingtone(prefs.ringtone));
-    setCallVibrate(prefs.vibrate);
+  const loadPrefs = useCallback(async () => {
+    const [callPrefs, soundPrefs, media] = await Promise.all([
+      getCallAudioPrefs(),
+      getSoundPrefs(),
+      getCallMediaSettings(),
+    ]);
+    setCallRingtone(labelForCallRingtone(callPrefs.ringtone));
+    setCallVibrate(callPrefs.vibrate);
+    setMsgTone(labelForSoundId(soundPrefs.globalMessageSound));
+    setGroupTone(labelForSoundId(soundPrefs.globalGroupMessageSound));
+    setCallLowData(media.lowDataMode);
   }, []);
 
-  useEffect(() => { void loadCallPrefs(); }, [loadCallPrefs]);
+  useFocusEffect(
+    useCallback(() => {
+      void loadPrefs();
+    }, [loadPrefs]),
+  );
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
-
-  const pickTone = (current: string, onPick: (v: string) => void) => {
-    Alert.alert("Notification tone", "", TONES.map((t) => ({ text: t, onPress: () => onPick(t) })));
-  };
-
-  const pickCallRingtone = () => {
-    Alert.alert("Call ringtone", "", TONES.map((t) => ({
-      text: t,
-      onPress: () => {
-        setCallRingtone(t);
-        void setCallRingtonePref(callRingtoneIdFromLabel(t) as CallRingtoneId);
-      },
-    })));
-  };
 
   const onCallVibrateChange = (value: boolean) => {
     setCallVibrate(value);
     void setCallVibratePref(value);
-  };
-
-  const pickPreview = (current: string, onPick: (v: string) => void) => {
-    Alert.alert("Notification preview", "", PREVIEW_OPTIONS.map((p) => ({ text: p, onPress: () => onPick(p) })));
   };
 
   return (
@@ -87,44 +80,92 @@ export default function NotificationsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 60 }}>
-        {/* Messages */}
+        <TouchableOpacity
+          style={[styles.premiumBanner, { backgroundColor: colors.primary + "18", borderColor: colors.primary + "40" }]}
+          onPress={() => router.push("/settings/premium-sounds")}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="musical-notes" size={26} color={colors.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.premiumTitle, { color: colors.foreground }]}>Premium sounds</Text>
+            <Text style={[styles.premiumSub, { color: colors.mutedForeground }]}>
+              Ringtones, VIP tones, sound packs & per-contact sounds
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
+        </TouchableOpacity>
+
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Messages</Text>
           <SwitchRow label="Conversation notifications" value={msgNotifs} onChange={setMsgNotifs} colors={colors} />
           {msgNotifs && (
             <>
-              <TappableRow label="Notification tone" value={msgTone} onPress={() => pickTone(msgTone, setMsgTone)} colors={colors} />
+              <TappableRow
+                label="Notification tone"
+                value={msgTone}
+                onPress={() => router.push("/settings/premium-sounds")}
+                colors={colors}
+              />
               <SwitchRow label="Vibrate" value={msgVibrate} onChange={setMsgVibrate} colors={colors} />
-              <TappableRow label="Popup notification" value={msgPreview} onPress={() => pickPreview(msgPreview, setMsgPreview)} colors={colors} last />
+              <TappableRow
+                label="Popup notification"
+                value={msgPreview}
+                onPress={() =>
+                  Alert.alert(
+                    "Notification preview",
+                    "",
+                    PREVIEW_OPTIONS.map((p) => ({ text: p, onPress: () => setMsgPreview(p) })),
+                  )
+                }
+                colors={colors}
+                last
+              />
             </>
           )}
         </View>
 
-        {/* Groups */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Groups</Text>
           <SwitchRow label="Group notifications" value={groupNotifs} onChange={setGroupNotifs} colors={colors} />
           {groupNotifs && (
             <>
-              <TappableRow label="Notification tone" value={groupTone} onPress={() => pickTone(groupTone, setGroupTone)} colors={colors} />
+              <TappableRow
+                label="Notification tone"
+                value={groupTone}
+                onPress={() => router.push("/settings/premium-sounds")}
+                colors={colors}
+              />
               <SwitchRow label="Vibrate" value={groupVibrate} onChange={setGroupVibrate} colors={colors} last />
             </>
           )}
         </View>
 
-        {/* Calls */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Calls</Text>
           <SwitchRow label="Call notifications" value={callNotifs} onChange={setCallNotifs} colors={colors} />
           {callNotifs && (
             <>
-              <TappableRow label="Ringtone" value={callRingtone} onPress={pickCallRingtone} colors={colors} />
-              <SwitchRow label="Vibrate" value={callVibrate} onChange={onCallVibrateChange} colors={colors} last />
+              <TappableRow
+                label="Ringtone"
+                value={callRingtone}
+                onPress={() => router.push("/settings/premium-sounds")}
+                colors={colors}
+              />
+              <SwitchRow label="Vibrate" value={callVibrate} onChange={onCallVibrateChange} colors={colors} />
+              <SwitchRow
+                label="Use less data for calls"
+                value={callLowData}
+                onChange={(v: boolean) => {
+                  setCallLowData(v);
+                  void setCallLowDataMode(v);
+                }}
+                colors={colors}
+                last
+              />
             </>
           )}
         </View>
 
-        {/* Others */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Other</Text>
           <SwitchRow label="Status notifications" value={statusNotifs} onChange={setStatusNotifs} colors={colors} />
@@ -165,6 +206,18 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 8, paddingBottom: 12 },
   backBtn: { padding: 8 },
   headerTitle: { flex: 1, color: "#fff", fontSize: 18, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  premiumBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 12,
+    marginBottom: 10,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  premiumTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  premiumSub: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
   section: { marginBottom: 10, paddingHorizontal: 16, paddingVertical: 12 },
   sectionLabel: { fontSize: 11, fontFamily: "Inter_600SemiBold", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 },
   switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12 },

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadIceServers } from "@/lib/webrtcIce";
 import { webrtcFetch } from "@/lib/webrtcApi";
+import { startScreenShare, stopScreenShare as stopScreenShareTracks } from "@/lib/screenShare";
 import type { VidehCallState } from "./videhCallTypes";
 
 export type { VidehCallState } from "./videhCallTypes";
@@ -27,6 +28,8 @@ export function useVidehCall(
 
   const pcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
+  const cameraVideoTrackRef = useRef<MediaStreamTrack | null>(null);
+  const screenSharingRef = useRef(false);
   const rolesRef = useRef<Map<string, Role>>(new Map());
   const candidateCursorsRef = useRef<Map<string, number>>(new Map());
   const pollTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
@@ -153,6 +156,7 @@ export function useVidehCall(
         const iceServers = await loadIceServers(sessionToken);
         const localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
         localStreamRef.current = localStream;
+        cameraVideoTrackRef.current = localStream.getVideoTracks()[0] ?? null;
         setTimeout(attachLocalVideo, 100);
         for (const channel of channels) {
           await connectChannel(channel, localStream, iceServers);
@@ -189,6 +193,7 @@ export function useVidehCall(
     remoteVideoId,
     hasRemoteVideo,
     remoteUid: null,
+    remotePeers: [],
     toggleMute: () => {
       localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = muted; });
       setMuted((m) => !m);
@@ -210,7 +215,61 @@ export function useVidehCall(
         return next;
       });
     },
+    setSpeaker: (enabled: boolean) => {
+      setSpeakerOn(enabled);
+      const tracks = localStreamRef.current?.getAudioTracks() ?? [];
+      for (const track of tracks) {
+        const sinkId = (track as any).setSinkId;
+        if (typeof sinkId === "function") {
+          void sinkId.call(track, enabled ? "default" : "communications").catch(() => {});
+        }
+      }
+    },
+    setHeld: () => {},
+    shareScreen: async () => {
+      const screenStream = await startScreenShare();
+      const screenTrack = screenStream?.getVideoTracks()[0];
+      if (!screenTrack) return false;
+      screenSharingRef.current = true;
+      for (const pc of pcsRef.current.values()) {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+        if (sender) await sender.replaceTrack(screenTrack);
+      }
+      const el = document.getElementById(localVideoId) as HTMLVideoElement | null;
+      if (el) {
+        el.srcObject = screenStream;
+        void el.play().catch(() => {});
+      }
+      screenTrack.onended = () => {
+        void stopScreenShareTracks();
+        screenSharingRef.current = false;
+        const cam = cameraVideoTrackRef.current;
+        if (cam) {
+          for (const pc of pcsRef.current.values()) {
+            const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+            if (sender) void sender.replaceTrack(cam);
+          }
+          if (el && localStreamRef.current) el.srcObject = localStreamRef.current;
+        }
+      };
+      return true;
+    },
+    stopScreenShare: async () => {
+      if (!screenSharingRef.current) return;
+      await stopScreenShareTracks();
+      screenSharingRef.current = false;
+      const cam = cameraVideoTrackRef.current;
+      if (!cam) return;
+      for (const pc of pcsRef.current.values()) {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+        if (sender) await sender.replaceTrack(cam);
+      }
+      const el = document.getElementById(localVideoId) as HTMLVideoElement | null;
+      if (el && localStreamRef.current) el.srcObject = localStreamRef.current;
+    },
     leave: async () => {
+      await stopScreenShareTracks();
+      screenSharingRef.current = false;
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       for (const pc of pcsRef.current.values()) pc.close();
     },

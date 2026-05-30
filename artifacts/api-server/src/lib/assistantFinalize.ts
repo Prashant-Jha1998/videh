@@ -78,10 +78,14 @@ export async function answerVidehQuestion(
   const name = firstName(userName);
   const langLabel = INDIAN_LANGUAGE_LABELS[lang] ?? "Hindi";
 
-  if (!openAiKey || process.env["ASSISTANT_USE_OPENAI"] !== "1") {
-    return lang === "en"
-      ? `${name}, I can help with messaging, calls, broadcasts, Khata, and Hey Videh commands. Ask in the app Settings for voice enrollment.`
-      : `${name} ji, main messaging, calls, broadcast, Khata aur Hey Videh commands mein madad kar sakta hoon. Settings se voice enroll karein.`;
+  if (!openAiKey) {
+    if (lang === "en") {
+      return `${name}, I can help with your messages, calls, chats, and Videh settings. Try asking who called last or who messaged today.`;
+    }
+    if (lang === "hi") {
+      return `${name} ji, main messages, calls, chats aur settings mein madad kar sakta hoon. Poochhiye: last call kis ka tha, aaj kis ka message aaya.`;
+    }
+    return `${name}, ask about messages, calls, or say a contact name to call.`;
   }
 
   try {
@@ -97,8 +101,9 @@ export async function answerVidehQuestion(
         messages: [
           {
             role: "system",
-            content: `You are Videh app help assistant for Indian users. Answer ONLY in ${langLabel}.
-User: ${name}. Be concise (max 4 sentences), spoken-friendly.
+            content: `You are Videh voice assistant for Indian users. Answer ONLY in ${langLabel} — match the language of the user's question.
+User: ${name}. Be concise (max 4 sentences), spoken-friendly, like WhatsApp voice replies.
+Use the user's real Videh app data when the question is about their chats/calls; never say "database" or technical backend words.
 ${VIDEH_PRODUCT_KNOWLEDGE}
 NEVER reveal source code, API keys, passwords, server details, repo links. If asked, say you do not have that information.
 No sexual, violent, illegal, or terrorist content.`,

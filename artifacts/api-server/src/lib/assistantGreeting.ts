@@ -42,7 +42,7 @@ const SERVICE_LINE: Partial<Record<AssistantLangCode, string>> = {
   ur: "Videh آپ کی خدمت میں حاضر ہے۔ جو آپ کہیں گے، میں کروں گا — آپ کی زبان میں۔",
 };
 
-export function buildActivationGreeting(userName: string, lang: AssistantLangCode = "hi"): string {
+export function buildActivationGreeting(userName: string, lang: AssistantLangCode = "en"): string {
   const first = firstName(userName);
   const tg = timeGreeting(lang);
   const line = SERVICE_LINE[lang] ?? SERVICE_LINE.hi!;

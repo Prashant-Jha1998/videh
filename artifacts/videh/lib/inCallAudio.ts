@@ -1,5 +1,7 @@
 export {
   applySpeakerRoute,
+  audioRouteFromSpeakerToggle,
+  chooseInCallAudioRoute,
   isInCallManagerAvailable,
   setProximityScreenOff,
   startInCallSession,
@@ -7,4 +9,5 @@ export {
   stopInCallSession,
   stopVoiceNotePlaybackSession,
   wakeScreenForIncomingCall,
+  type InCallAudioRoute,
 } from "./inCallAudio.native";

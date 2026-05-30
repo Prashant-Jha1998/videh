@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { MediaProgressRing } from "@/components/MediaProgressRing";
 import { documentMetaLine, getDocumentVisual } from "@/lib/documentMessage";
 import type { Message } from "@/context/AppContext";
 
@@ -20,9 +21,24 @@ type Props = {
 export function DocumentMessageBubble({ item, isMe, colors, onPress }: Props) {
   const visual = getDocumentVisual(item.text);
   const uploading = typeof item.uploadProgress === "number" && item.uploadProgress < 100;
+  const downloading = typeof item.downloadProgress === "number" && item.downloadProgress < 100;
+  const transferring = uploading || downloading;
+  const transferPercent = uploading
+    ? (item.uploadProgress ?? 0)
+    : downloading
+      ? (item.downloadProgress ?? 0)
+      : 0;
   const failed = item.uploadFailed === true;
+  const ready = !!item.localMediaUri && !transferring && !failed;
   const titleColor = isMe ? (colors.isDark ? colors.foreground : "#111B21") : colors.foreground;
   const metaColor = isMe ? (colors.isDark ? "rgba(255,255,255,0.72)" : "rgba(17,27,33,0.55)") : colors.mutedForeground;
+  const ringColor = isMe ? "#00A884" : "#00A884";
+
+  let metaLine = documentMetaLine(item.fileSizeBytes);
+  if (failed) metaLine = "Couldn't send · Tap to retry";
+  else if (uploading) metaLine = `Uploading… ${transferPercent}%`;
+  else if (downloading) metaLine = `Downloading… ${transferPercent}%`;
+  else if (!isMe && !ready && item.mediaUrl) metaLine = "Tap to download";
 
   return (
     <TouchableOpacity
@@ -50,20 +66,26 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress }: Props) {
           {item.text || "Document"}
         </Text>
         <Text style={[styles.meta, { color: failed ? "#c62828" : metaColor }]} numberOfLines={2}>
-          {failed
-            ? "Couldn't send · Tap to retry"
-            : uploading
-              ? `Uploading… ${item.uploadProgress ?? 0}%`
-              : documentMetaLine(item.fileSizeBytes)}
+          {metaLine}
         </Text>
       </View>
 
       <View style={styles.action}>
-        {uploading ? (
-          <ActivityIndicator size="small" color={isMe ? "#111B21" : "#00A884"} />
+        {transferring ? (
+          <MediaProgressRing
+            size={40}
+            strokeWidth={3}
+            progress={transferPercent}
+            progressColor={ringColor}
+            trackColor={isMe ? "rgba(0,0,0,0.1)" : "rgba(0,0,0,0.08)"}
+          >
+            <Text style={[styles.ringPct, { color: isMe ? "#111B21" : colors.foreground }]}>
+              {transferPercent}
+            </Text>
+          </MediaProgressRing>
         ) : (
           <Ionicons
-            name={failed ? "refresh-outline" : "arrow-down-circle-outline"}
+            name={failed ? "refresh-outline" : ready ? "document-outline" : "arrow-down-circle-outline"}
             size={22}
             color={isMe ? (colors.isDark ? "rgba(255,255,255,0.85)" : "rgba(17,27,33,0.45)") : colors.mutedForeground}
           />
@@ -101,5 +123,6 @@ const styles = StyleSheet.create({
   body: { flex: 1, minWidth: 0 },
   name: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 3 },
   meta: { fontSize: 12, fontFamily: "Inter_400Regular", lineHeight: 16 },
-  action: { width: 28, alignItems: "center", justifyContent: "center" },
+  action: { width: 40, alignItems: "center", justifyContent: "center" },
+  ringPct: { fontSize: 10, fontFamily: "Inter_700Bold" },
 });

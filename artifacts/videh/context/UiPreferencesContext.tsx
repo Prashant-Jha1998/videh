@@ -10,11 +10,16 @@ import {
   type ChatThemeChoice,
 } from "@/lib/chatSettings";
 import { translate } from "@/lib/i18n";
+import { loadAppIconStyle, saveAppIconStyle } from "@/lib/appIconPreference";
 import { DEFAULT_APP_THEME_ID, getAppThemeById, type AppThemeOption } from "@/lib/appThemes";
+import type { AnimatedWallpaperId, AppIconStyleId, BubbleOverride } from "@/lib/themeAppearance";
+import { getThemeAppearanceById, resolveBubbles } from "@/lib/themeAppearance";
 
 const APP_LANGUAGE_KEY = "appLanguage";
 const APP_THEME_ID_KEY = "appThemeId";
 const APP_THEME_TRIAL_STARTED_KEY = "appThemeTrialStartedAt";
+const CUSTOM_BUBBLES_KEY = "videh_custom_bubble_colors_v1";
+const GLOBAL_ANIMATED_WALLPAPER_KEY = "videh_global_animated_wallpaper_v1";
 
 type UiPreferencesContextType = {
   locale: string;
@@ -32,6 +37,16 @@ type UiPreferencesContextType = {
   chatWallpaperLabel: string;
   chatWallpaperColor: string | null;
   setChatWallpaperLabel: (label: string) => Promise<void>;
+  /** Global sent/received bubble override (Settings → Advanced theme). */
+  customBubbleOverride: BubbleOverride | null;
+  setCustomBubbleOverride: (o: BubbleOverride | null) => Promise<void>;
+  globalAnimatedWallpaper: AnimatedWallpaperId;
+  setGlobalAnimatedWallpaper: (id: AnimatedWallpaperId) => Promise<void>;
+  appIconStyle: AppIconStyleId;
+  setAppIconStyle: (id: AppIconStyleId) => Promise<void>;
+  themeAppearance: ReturnType<typeof getThemeAppearanceById>;
+  perChatRevision: number;
+  refreshPerChatThemes: () => void;
   prefsReady: boolean;
 };
 
@@ -44,19 +59,27 @@ export function UiPreferencesProvider({ children }: { children: React.ReactNode 
   const [appThemeTrialStartedAt, setAppThemeTrialStartedAt] = useState<string | null>(null);
   const [chatFontLabel, setChatFontLabelState] = useState("Medium");
   const [chatWallpaperLabel, setChatWallpaperLabelState] = useState("Default");
+  const [customBubbleOverride, setCustomBubbleOverrideState] = useState<BubbleOverride | null>(null);
+  const [globalAnimatedWallpaper, setGlobalAnimatedWallpaperState] = useState<AnimatedWallpaperId>("none");
+  const [appIconStyle, setAppIconStyleState] = useState<AppIconStyleId>("default");
+  const [perChatRevision, setPerChatRevision] = useState(0);
   const [prefsReady, setPrefsReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [lang, theme, storedThemeId, trialStartedAt, fontLabel, wallpaperLabel] = await Promise.all([
+        const [lang, theme, storedThemeId, trialStartedAt, fontLabel, wallpaperLabel, customBubblesRaw, animWall, iconStyle] =
+          await Promise.all([
           AsyncStorage.getItem(APP_LANGUAGE_KEY),
           loadChatThemeChoice(),
           AsyncStorage.getItem(APP_THEME_ID_KEY),
           AsyncStorage.getItem(APP_THEME_TRIAL_STARTED_KEY),
           AsyncStorage.getItem(CHAT_STORAGE.fontSize),
           AsyncStorage.getItem(CHAT_STORAGE.wallpaper),
+          AsyncStorage.getItem(CUSTOM_BUBBLES_KEY),
+          AsyncStorage.getItem(GLOBAL_ANIMATED_WALLPAPER_KEY),
+          loadAppIconStyle(),
         ]);
         if (cancelled) return;
         if (lang) setLocaleState(lang);
@@ -64,6 +87,25 @@ export function UiPreferencesProvider({ children }: { children: React.ReactNode 
         setAppThemeIdState(getAppThemeById(storedThemeId).id);
         if (fontLabel) setChatFontLabelState(fontLabel);
         if (wallpaperLabel) setChatWallpaperLabelState(wallpaperLabel);
+        if (customBubblesRaw) {
+          try {
+            const parsed = JSON.parse(customBubblesRaw) as BubbleOverride;
+            if (parsed && typeof parsed === "object") setCustomBubbleOverrideState(parsed);
+          } catch {
+            /* ignore */
+          }
+        }
+        if (
+          animWall === "aurora"
+          || animWall === "neon-pulse"
+          || animWall === "sunset-flow"
+          || animWall === "amoled-glow"
+          || animWall === "festival-lights"
+          || animWall === "none"
+        ) {
+          setGlobalAnimatedWallpaperState(animWall);
+        }
+        setAppIconStyleState(iconStyle);
         if (trialStartedAt) {
           setAppThemeTrialStartedAt(trialStartedAt);
         } else {
@@ -110,8 +152,32 @@ export function UiPreferencesProvider({ children }: { children: React.ReactNode 
     await AsyncStorage.setItem(CHAT_STORAGE.wallpaper, label);
   }, []);
 
+  const setCustomBubbleOverride = useCallback(async (o: BubbleOverride | null) => {
+    setCustomBubbleOverrideState(o);
+    if (!o) {
+      await AsyncStorage.removeItem(CUSTOM_BUBBLES_KEY);
+      return;
+    }
+    await AsyncStorage.setItem(CUSTOM_BUBBLES_KEY, JSON.stringify(o));
+  }, []);
+
+  const setGlobalAnimatedWallpaper = useCallback(async (id: AnimatedWallpaperId) => {
+    setGlobalAnimatedWallpaperState(id);
+    await AsyncStorage.setItem(GLOBAL_ANIMATED_WALLPAPER_KEY, id);
+  }, []);
+
+  const setAppIconStyle = useCallback(async (id: AppIconStyleId) => {
+    setAppIconStyleState(id);
+    await saveAppIconStyle(id);
+  }, []);
+
+  const refreshPerChatThemes = useCallback(() => {
+    setPerChatRevision((n) => n + 1);
+  }, []);
+
   const t = useCallback((key: string) => translate(locale, key), [locale]);
   const appTheme = useMemo(() => getAppThemeById(appThemeId), [appThemeId]);
+  const themeAppearance = useMemo(() => getThemeAppearanceById(appThemeId), [appThemeId]);
   const chatFontScale = useMemo(() => fontSizeLabelToScale(chatFontLabel), [chatFontLabel]);
   const chatWallpaperColor = useMemo(() => wallpaperLabelToColor(chatWallpaperLabel), [chatWallpaperLabel]);
 
@@ -132,9 +198,24 @@ export function UiPreferencesProvider({ children }: { children: React.ReactNode 
       chatWallpaperLabel,
       chatWallpaperColor,
       setChatWallpaperLabel,
+      customBubbleOverride,
+      setCustomBubbleOverride,
+      globalAnimatedWallpaper,
+      setGlobalAnimatedWallpaper,
+      appIconStyle,
+      setAppIconStyle,
+      themeAppearance,
+      perChatRevision,
+      refreshPerChatThemes,
       prefsReady,
     }),
-    [locale, setLocale, t, chatThemeChoice, setChatThemeChoice, appThemeId, appTheme, setAppThemeId, appThemeTrialStartedAt, chatFontLabel, chatFontScale, setChatFontLabel, chatWallpaperLabel, chatWallpaperColor, setChatWallpaperLabel, prefsReady],
+    [
+      locale, setLocale, t, chatThemeChoice, setChatThemeChoice, appThemeId, appTheme, setAppThemeId,
+      appThemeTrialStartedAt, chatFontLabel, chatFontScale, setChatFontLabel, chatWallpaperLabel,
+      chatWallpaperColor, setChatWallpaperLabel, customBubbleOverride, setCustomBubbleOverride,
+      globalAnimatedWallpaper, setGlobalAnimatedWallpaper, appIconStyle, setAppIconStyle,
+      themeAppearance, perChatRevision, refreshPerChatThemes, prefsReady,
+    ],
   );
 
   return <UiPreferencesContext.Provider value={value}>{children}</UiPreferencesContext.Provider>;

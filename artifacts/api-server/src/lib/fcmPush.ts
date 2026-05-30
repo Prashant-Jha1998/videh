@@ -4,7 +4,9 @@ import {
   EXPO_ANDROID_CALLS_CHANNEL_ID,
   EXPO_ANDROID_CHANNEL_ID,
   EXPO_CHAT_MESSAGE_CATEGORY_ID,
+  EXPO_INCOMING_CALL_CATEGORY_ID,
 } from "./expoPush";
+import { fcmMessageSoundAndroid, fcmMessageSoundIos } from "./soundPrefsDb";
 
 let initAttempted = false;
 
@@ -71,6 +73,8 @@ export async function sendFcmChatPush(
     categoryId?: string;
     imageUrl?: string;
     threadId?: string;
+    /** Premium message tone (e.g. msg_romantic). */
+    messageSoundId?: string;
   },
 ): Promise<void> {
   const messaging = getMessaging();
@@ -79,8 +83,16 @@ export async function sendFcmChatPush(
   const tokens = (Array.isArray(to) ? to : [to]).filter(Boolean);
   if (tokens.length === 0) return;
 
-  const channelId = options?.isCall ? EXPO_ANDROID_CALLS_CHANNEL_ID : EXPO_ANDROID_CHANNEL_ID;
-  const categoryId = options?.categoryId ?? (options?.isCall ? undefined : EXPO_CHAT_MESSAGE_CATEGORY_ID);
+  const msgSound = options?.messageSoundId ?? "msg_default";
+  const androidTone = options?.isCall
+    ? { channelId: EXPO_ANDROID_CALLS_CHANNEL_ID, sound: "default" as const }
+    : fcmMessageSoundAndroid(msgSound);
+  const channelId = androidTone.channelId;
+  const androidSound = androidTone.sound;
+  const iosSound = options?.isCall ? "default" : fcmMessageSoundIos(msgSound);
+  const categoryId =
+    options?.categoryId
+    ?? (options?.isCall ? EXPO_INCOMING_CALL_CATEGORY_ID : EXPO_CHAT_MESSAGE_CATEGORY_ID);
   const dataPayload = stringifyData({
     ...data,
     ...(categoryId ? { categoryId } : {}),
@@ -97,7 +109,7 @@ export async function sendFcmChatPush(
         ...(options?.isCall ? { ttl: 45_000 } : {}),
         notification: {
           channelId,
-          sound: "default",
+          sound: androidSound,
           priority: "high" as const,
           ...(options?.imageUrl ? { imageUrl: options.imageUrl } : {}),
           ...(options?.isCall
@@ -117,7 +129,7 @@ export async function sendFcmChatPush(
       apns: {
         payload: {
           aps: {
-            sound: "default",
+            sound: iosSound,
             alert: { title, body },
             ...(options?.isCall ? { "interruption-level": "time-sensitive" } : {}),
           },

@@ -43,18 +43,25 @@ export function sendExpoChatPush(
   title: string,
   body: string,
   data: Record<string, unknown>,
-  options?: { categoryId?: string; threadId?: string; isCall?: boolean },
+  options?: { categoryId?: string; threadId?: string; isCall?: boolean; messageSoundId?: string },
 ): void {
   const tokens = Array.isArray(to) ? to : [to];
   const isCall = options?.isCall === true;
+  const soundId = options?.messageSoundId ?? "msg_default";
+  const channelId = isCall
+    ? EXPO_ANDROID_CALLS_CHANNEL_ID
+    : soundId === "msg_default"
+      ? EXPO_ANDROID_CHANNEL_ID
+      : `videh_msg_${soundId}`;
+  const sound = isCall ? "default" : soundId === "msg_default" ? "default" : soundId;
   void sendExpoPush(tokens.map((token) => ({
     to: token,
     title,
     body,
     data,
-    sound: "default",
+    sound,
     priority: isCall ? "high" : "high",
-    channelId: isCall ? EXPO_ANDROID_CALLS_CHANNEL_ID : EXPO_ANDROID_CHANNEL_ID,
+    channelId,
     categoryId: options?.categoryId,
     threadId: options?.threadId,
   })));

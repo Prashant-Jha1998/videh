@@ -12,6 +12,12 @@ type ChatPushOptions = {
   threadId?: string;
   isCall?: boolean;
   imageUrl?: string;
+  messageSoundId?: string;
+};
+
+export type NotifyMember = {
+  user_id: number;
+  push_token: string | null;
 };
 
 /** FCM (Videh on Android) → Web Push (web) → Expo relay fallback. */
@@ -35,6 +41,7 @@ export async function sendChatPush(
         categoryId: options?.categoryId,
         imageUrl: options?.imageUrl,
         threadId: options?.threadId,
+        messageSoundId: options?.messageSoundId,
       }));
     } else {
       console.warn("FCM tokens present but FIREBASE_SERVICE_ACCOUNT_JSON is not set on server");
@@ -50,6 +57,37 @@ export async function sendChatPush(
   }
 
   await Promise.all(tasks);
+}
+
+/** Per-recipient FCM/Expo push with premium message sound from DB prefs. */
+export async function sendChatPushToMembers(
+  members: NotifyMember[],
+  title: string,
+  body: string,
+  data: Record<string, unknown>,
+  options: {
+    isGroup: boolean;
+    categoryId?: string;
+    threadId?: string;
+    imageUrl?: string;
+    chatId: string;
+  },
+): Promise<void> {
+  const { resolveUserMessageSoundId } = await import("./soundPrefsDb");
+  for (const m of members) {
+    if (!isValidPushToken(m.push_token)) continue;
+    const messageSoundId = await resolveUserMessageSoundId(
+      Number(m.user_id),
+      options.chatId,
+      options.isGroup,
+    );
+    await sendChatPush(m.push_token!, title, body, data, {
+      categoryId: options.categoryId,
+      threadId: options.threadId,
+      imageUrl: options.imageUrl,
+      messageSoundId,
+    });
+  }
 }
 
 export async function sendPushBatch(

@@ -19,16 +19,20 @@ export async function showIncomingCallNotification(call: IncomingCallNotificatio
 
   const title = call.type === "video" ? "Incoming video call" : "Incoming voice call";
   const body = `${call.callerName} is calling`;
+  const { getSoundPrefs } = await import("./soundPrefs");
+  const prefs = await getSoundPrefs();
+  const callSound = prefs.globalCallSound === "none" ? undefined : prefs.globalCallSound;
 
   await Notifications.scheduleNotificationAsync({
     identifier: `incoming_call_${call.callId}`,
     content: {
       title,
       body,
-      sound: "default",
+      sound: callSound ?? "default",
       priority: Notifications.AndroidNotificationPriority.MAX,
       sticky: true,
       autoDismiss: false,
+      interruptionLevel: "timeSensitive",
       categoryIdentifier: VIDEH_INCOMING_CALL_CATEGORY_ID,
       data: {
         callId: call.callId,

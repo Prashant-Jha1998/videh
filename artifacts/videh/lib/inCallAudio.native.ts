@@ -8,6 +8,7 @@ let InCallManager: {
   setForceSpeakerphoneOn: (on: boolean) => void;
   turnScreenOff: () => void;
   turnScreenOn: () => void;
+  chooseAudioRoute: (route: string) => Promise<unknown>;
 } | null = null;
 
 try {
@@ -52,6 +53,28 @@ export function applySpeakerRoute(enabled: boolean, isVideo: boolean): void {
   const on = enabled || isVideo;
   InCallManager.setSpeakerphoneOn(on);
   InCallManager.setForceSpeakerphoneOn(on);
+}
+
+export type InCallAudioRoute = "EARPIECE" | "SPEAKER_PHONE" | "BLUETOOTH";
+
+export async function chooseInCallAudioRoute(route: InCallAudioRoute): Promise<void> {
+  if (!InCallManager) return;
+  try {
+    await InCallManager.chooseAudioRoute(route);
+  } catch {
+    if (route === "SPEAKER_PHONE") {
+      InCallManager.setSpeakerphoneOn(true);
+      InCallManager.setForceSpeakerphoneOn(true);
+    } else if (route === "EARPIECE") {
+      InCallManager.setSpeakerphoneOn(false);
+      InCallManager.setForceSpeakerphoneOn(false);
+    }
+  }
+}
+
+export function audioRouteFromSpeakerToggle(speakerOn: boolean, isVideo: boolean): InCallAudioRoute {
+  if (speakerOn || isVideo) return "SPEAKER_PHONE";
+  return "EARPIECE";
 }
 
 export function setProximityScreenOff(enabled: boolean): void {

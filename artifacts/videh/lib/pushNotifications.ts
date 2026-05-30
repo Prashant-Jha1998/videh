@@ -18,6 +18,8 @@ export const NOTIFICATION_ACTION_DECLINE_CALL = "decline_call";
 
 export async function ensureVidehNotificationSetup(): Promise<void> {
   if (Platform.OS === "web") return;
+  const { applyVidehNotificationSounds } = await import("./applyNotificationChannels");
+  await applyVidehNotificationSounds();
   await Notifications.setNotificationCategoryAsync(VIDEH_CHAT_MESSAGE_CATEGORY_ID, [
     {
       identifier: NOTIFICATION_ACTION_REPLY,
@@ -48,23 +50,6 @@ export async function ensureVidehNotificationSetup(): Promise<void> {
       options: { opensAppToForeground: false, isDestructive: true },
     },
   ] as any);
-  if (Platform.OS !== "android") return;
-  await Notifications.setNotificationChannelAsync(VIDEH_PUSH_CHANNEL_ID, {
-    name: "Messages",
-    importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 250, 250, 250],
-    sound: "default",
-  });
-  await Notifications.setNotificationChannelAsync(VIDEH_CALLS_CHANNEL_ID, {
-    name: "Calls",
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 1000, 500, 1000, 500, 1000],
-    sound: "default",
-    bypassDnd: true,
-    enableLights: true,
-    lightColor: "#00A884",
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-  });
 }
 
 export const ensureVidehAndroidNotificationChannel = ensureVidehNotificationSetup;
@@ -96,6 +81,8 @@ async function requestNotificationPermission(): Promise<boolean> {
 export async function registerPushTokenWithServer(dbId: number): Promise<void> {
   if (!dbId) return;
   await ensureVidehNotificationSetup();
+  const { syncSoundPrefsToServer } = await import("./syncSoundPrefs");
+  void syncSoundPrefsToServer();
 
   if (!(await requestNotificationPermission())) {
     throw new Error("Notification permission not granted");

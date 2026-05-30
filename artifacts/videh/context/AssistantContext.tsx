@@ -17,7 +17,7 @@ import {
 } from "@/lib/assistantApi";
 import { tryLocalAssistantCommand } from "@/lib/assistantLocal";
 import { shouldPauseAssistantListening, setAssistantChatInputFocused, setAssistantKeyboardVisible } from "@/lib/assistantPause";
-import { localActivationGreeting } from "@/lib/assistantGreeting";
+import { wakeListenPrompt } from "@/lib/assistantGreeting";
 import {
   detectLocaleFromTranscript,
   normalizeLangCode,
@@ -64,12 +64,12 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const [transcript, setTranscript] = useState("");
   const [lastResponse, setLastResponse] = useState("");
   const [lastError, setLastError] = useState<string | null>(null);
-  const [activeLang, setActiveLang] = useState<AssistantLangCode>("hi");
+  const [activeLang, setActiveLang] = useState<AssistantLangCode>("en");
   const listeningRef = useRef(false);
   const phaseRef = useRef<AssistantPhase>("idle");
   const commandBufferRef = useRef("");
   const pendingWakeCommandRef = useRef("");
-  const listenLocaleRef = useRef<AssistantLangCode>("hi");
+  const listenLocaleRef = useRef<AssistantLangCode>("en");
   const prefsRef = useRef<AssistantPrefs | null>(null);
   const wakeRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -106,7 +106,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         voiceEnrolled: false,
         listenWhenLocked: local.listenWhenLocked ?? true,
         userName: user.name ?? "User",
-        lastLangCode: local.lastLangCode ?? "hi",
+        lastLangCode: local.lastLangCode ?? "en",
       };
     }
     // Default ON unless user explicitly turned off in Settings (local.enabled === false).
@@ -119,7 +119,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       ...p,
       enabled,
       listenWhenLocked: p.listenWhenLocked ?? local.listenWhenLocked ?? true,
-      lastLangCode: p.lastLangCode ?? local.lastLangCode ?? "hi",
+      lastLangCode: p.lastLangCode ?? local.lastLangCode ?? "en",
     };
     setPrefs(finalPrefs);
     listenLocaleRef.current = finalPrefs.lastLangCode ?? "hi";
@@ -188,8 +188,8 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     }
 
     setLastError(null);
-    const guessed = detectLocaleFromTranscript(cleaned);
-    const langHint = listenLocaleRef.current !== "hi" ? listenLocaleRef.current : guessed;
+    const langHint = detectLocaleFromTranscript(cleaned);
+    listenLocaleRef.current = langHint;
 
     await stopSpeaking();
     setPhaseSafe("processing");
@@ -236,7 +236,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       setLastError("Please sign in again to use Hey Videh.");
       return;
     }
-    const lang = prefs?.lastLangCode ?? "hi";
+    const lang = prefs?.lastLangCode ?? "en";
     listenLocaleRef.current = lang;
     setActiveLang(lang);
     setLastError(null);
@@ -252,11 +252,10 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const displayName = prefs?.userName || user.name || "User";
-    const greeting = localActivationGreeting(displayName, lang);
-    setLastResponse(greeting);
+    const ack = wakeListenPrompt(lang);
+    setLastResponse(ack);
     setPhaseSafe("speaking");
-    await speakAssistant(greeting, lang);
+    await speakAssistant(ack, lang);
 
     setPhaseSafe("listening");
     setTranscript("");
@@ -340,6 +339,12 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const onWakeTranscript = useCallback((text: string) => {
     const chunk = text.trim();
     if (!chunk) return;
+    if (/^(hey|he|hay|hi|hello|oye)(?:\s+videh)?[,.!?\s]*$/i.test(chunk)) {
+      wakeBufferRef.current = "";
+      pendingWakeCommandRef.current = "";
+      void tryWakeActivationRef.current("");
+      return;
+    }
     wakeBufferRef.current = `${wakeBufferRef.current} ${chunk}`.trim().slice(-240);
     const { hasWake, command } = parseWakeUtterance(wakeBufferRef.current);
     if (!hasWake) return;
@@ -364,7 +369,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
     try {
       await startListening({
-        locale: p.lastLangCode ?? "hi",
+        locale: p.lastLangCode ?? "en",
         wakeMode: true,
         onPartial: (text: string) => {
           if (phaseRef.current !== "idle") return;

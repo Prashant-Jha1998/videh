@@ -14,7 +14,8 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts",
-    "expo-media-library.d.ts"
+    "expo-media-library.d.ts",
+    "types/**/*.d.ts"
   ],
   "references": [
     {

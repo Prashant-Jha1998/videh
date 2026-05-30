@@ -230,11 +230,13 @@ router.post("/command", async (req: Request, res: Response) => {
 
     if (plan.intent === "unknown") {
       const dbSpeak = await answerFromDatabase(text, ctx, lang);
-      const unknownSpeak = dbSpeak ?? databaseAssistantFallback(lang, ctx.userName);
+      const qaSpeak = dbSpeak
+        ?? await answerVidehQuestion(text, ctx.userName, lang, dbSpeak)
+        ?? databaseAssistantFallback(lang, ctx.userName);
       jsonLang(res, lang, {
         success: true,
-        intent: dbSpeak ? "db_answer" : "unknown",
-        speak: unknownSpeak,
+        intent: dbSpeak ? "db_answer" : "qa",
+        speak: qaSpeak,
         actions: [],
       });
       return;
@@ -269,7 +271,7 @@ router.post("/command", async (req: Request, res: Response) => {
 router.get("/greeting/:userId", async (req: Request, res: Response) => {
   const userId = Number(req.params.userId);
   if (!assertSameUser(req, res, userId)) return;
-  const lang = normalizeLangCode(String(req.query.locale ?? "hi"));
+  const lang = normalizeLangCode(String(req.query.locale ?? "en"));
   try {
     const ctx = await loadAssistantUserContext(userId);
     jsonLang(res, lang, {

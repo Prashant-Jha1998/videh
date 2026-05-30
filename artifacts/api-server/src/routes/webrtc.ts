@@ -34,6 +34,7 @@ type CallInvite = {
   updatedAt: number;
   connectedAt?: number;
   logged?: boolean;
+  holdByUser?: Record<number, boolean>;
 };
 
 const router = Router();
@@ -163,7 +164,9 @@ function participantCallStatus(call: CallInvite, participantId: number): string 
   const s = call.statuses[participantId];
   if (s === "busy") return "busy";
   if (s === "declined") return "declined";
-  if (s === "accepted" && call.connectedAt) return "answered";
+  // connected call — "ended" is set on hangup after "accepted"
+  if (call.connectedAt && (s === "accepted" || s === "ended")) return "answered";
+  if (s === "missed" || s === "ringing") return "missed";
   return "missed";
 }
 
@@ -647,6 +650,55 @@ router.post("/calls/:callId/participants", async (req: Request, res: Response) =
   }
 });
 
+/** Put call on hold / resume (WhatsApp-style call waiting). */
+router.post("/calls/:callId/hold", async (req: Request, res: Response) => {
+  const call = await getCall(String(req.params.callId));
+  const userId = Number((req as any).authUserId);
+  const body = req.body as { hold?: boolean };
+  const onHold = body.hold !== false;
+  if (!call || !userId || !isCallParticipant(call, userId)) {
+    res.status(404).json({ success: false, message: "Call not found." });
+    return;
+  }
+  if (!call.holdByUser) call.holdByUser = {};
+  call.holdByUser[userId] = onHold;
+  call.updatedAt = Date.now();
+  publishCallSignal({
+    chatId: call.chatId,
+    userIds: [call.callerId, ...call.participantIds],
+    action: onHold ? "hold" : "resume",
+    payload: { callId: call.callId, userId, hold: onHold },
+  });
+  await saveCall(call);
+  res.json({ success: true, hold: onHold });
+});
+
+/** Switch ongoing call between voice and video (WhatsApp-style upgrade). */
+router.post("/calls/:callId/media-type", async (req: Request, res: Response) => {
+  const call = await getCall(String(req.params.callId));
+  const userId = Number((req as any).authUserId);
+  const body = req.body as { type?: "audio" | "video" };
+  const nextType = body.type === "video" ? "video" : "audio";
+  if (!call || !userId || !isCallParticipant(call, userId)) {
+    res.status(404).json({ success: false, message: "Call not found." });
+    return;
+  }
+  if (!call.connectedAt) {
+    res.status(400).json({ success: false, message: "Call is not connected yet." });
+    return;
+  }
+  call.type = nextType;
+  call.updatedAt = Date.now();
+  publishCallSignal({
+    chatId: call.chatId,
+    userIds: [call.callerId, ...call.participantIds],
+    action: "media_type",
+    payload: { callId: call.callId, type: nextType, byUserId: userId },
+  });
+  await saveCall(call);
+  res.json({ success: true, type: nextType });
+});
+
 router.post("/calls/:callId/end", async (req: Request, res: Response) => {
   const call = await getCall(String(req.params.callId));
   const userId = Number((req as any).authUserId);
@@ -656,7 +708,12 @@ router.post("/calls/:callId/end", async (req: Request, res: Response) => {
   }
   if (call) {
     clearRingExpiryTimer(call.callId);
-    Object.keys(call.statuses).forEach((uid) => { call.statuses[Number(uid)] = "ended"; });
+    for (const uid of Object.keys(call.statuses)) {
+      const id = Number(uid);
+      const cur = call.statuses[id];
+      if (cur === "accepted") call.statuses[id] = "ended";
+      else if (cur === "ringing") call.statuses[id] = "missed";
+    }
     call.updatedAt = Date.now();
     await persistCallHistory(call);
     await saveCall(call);

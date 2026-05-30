@@ -1,18 +1,8 @@
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
 import { Platform, Vibration } from "react-native";
-import { getCallAudioPrefs, type CallRingtoneId } from "./callAudioPrefs";
-
-const SOUNDS = {
-  incoming: require("../assets/sounds/incoming_call.ogg"),
-  ringback: require("../assets/sounds/ringback.ogg"),
-  busy: require("../assets/sounds/call_busy.ogg"),
-  unavailable: require("../assets/sounds/call_unavailable.ogg"),
-} as const;
-
-const RING_ASSETS: Record<Exclude<CallRingtoneId, "none">, number> = {
-  default: SOUNDS.incoming,
-  classic: SOUNDS.incoming,
-};
+import { SOUND_ASSETS } from "./premiumSounds";
+import { resolveLegacyCallRingtone, type CallSoundId } from "./premiumSounds";
+import { getCallAudioPrefsFull } from "./callAudioPrefs";
 
 let ringSound: Audio.Sound | null = null;
 let ringbackSound: Audio.Sound | null = null;
@@ -20,6 +10,12 @@ let effectSound: Audio.Sound | null = null;
 let ringSession = 0;
 let ringbackSession = 0;
 let vibrateActive = false;
+
+function ringAsset(id: CallSoundId): number | null {
+  if (id === "none") return null;
+  const key = id === "call_default" ? "incoming_call" : id;
+  return SOUND_ASSETS[key] ?? SOUND_ASSETS.incoming_call ?? null;
+}
 
 async function configureCallAudioMode(earpiece = false): Promise<void> {
   await Audio.setAudioModeAsync({
@@ -45,7 +41,7 @@ async function stopSound(sound: Audio.Sound | null): Promise<void> {
 
 export async function startCallVibration(): Promise<void> {
   if (Platform.OS === "web") return;
-  const prefs = await getCallAudioPrefs();
+  const prefs = await getCallAudioPrefsFull();
   if (!prefs.vibrate) return;
   vibrateActive = true;
   Vibration.vibrate([0, 700, 450], true);
@@ -57,22 +53,27 @@ export function stopCallVibration(): void {
   Vibration.cancel();
 }
 
-/** Callee: Videh-style incoming ring + vibration. */
 export async function startIncomingCallAlert(): Promise<void> {
   if (Platform.OS === "web") return;
   await stopOutgoingRingback();
   const session = ++ringSession;
-  const prefs = await getCallAudioPrefs();
-  if (prefs.ringtone === "none") {
+  const prefs = await getCallAudioPrefsFull();
+  const ringId = resolveLegacyCallRingtone(prefs.ringtone);
+  if (ringId === "none") {
     await startCallVibration();
     return;
   }
 
   await stopCallRingtoneInternal();
+  const asset = ringAsset(ringId);
+  if (!asset) {
+    await startCallVibration();
+    return;
+  }
 
   try {
     await configureCallAudioMode(false);
-    const { sound } = await Audio.Sound.createAsync(RING_ASSETS[prefs.ringtone], {
+    const { sound } = await Audio.Sound.createAsync(asset, {
       isLooping: true,
       volume: 1,
       shouldPlay: false,
@@ -88,7 +89,6 @@ export async function startIncomingCallAlert(): Promise<void> {
   }
 }
 
-/** Caller: ringback tone while waiting (not the callee ring). */
 export async function startOutgoingRingback(): Promise<void> {
   if (Platform.OS === "web") return;
   await stopCallRingtoneInternal();
@@ -96,7 +96,8 @@ export async function startOutgoingRingback(): Promise<void> {
 
   try {
     await configureCallAudioMode(true);
-    const { sound } = await Audio.Sound.createAsync(SOUNDS.ringback, {
+    const asset = SOUND_ASSETS.ringback;
+    const { sound } = await Audio.Sound.createAsync(asset, {
       isLooping: true,
       volume: 0.9,
       shouldPlay: false,
@@ -150,19 +151,16 @@ async function stopEffectInternal(): Promise<void> {
   await stopSound(s);
 }
 
-/** Callee busy / line engaged (short beeps). */
 export async function playCallBusyTone(): Promise<void> {
   await stopCallAlert();
-  await playEffect(SOUNDS.busy);
+  await playEffect(SOUND_ASSETS.call_busy);
 }
 
-/** Could not reach / no answer on network (short tone). */
 export async function playCallUnavailableTone(): Promise<void> {
   await stopCallAlert();
-  await playEffect(SOUNDS.unavailable);
+  await playEffect(SOUND_ASSETS.call_unavailable);
 }
 
-/** @deprecated Use startIncomingCallAlert or startOutgoingRingback */
 export async function startCallAlert(): Promise<void> {
   await startIncomingCallAlert();
 }
@@ -171,7 +169,6 @@ export async function stopCallRingtone(): Promise<void> {
   await stopCallRingtoneInternal();
 }
 
-/** Stop all call sounds + vibration. */
 export async function stopCallAlert(): Promise<void> {
   stopCallVibration();
   await Promise.all([stopCallRingtoneInternal(), stopOutgoingRingback(), stopEffectInternal()]);

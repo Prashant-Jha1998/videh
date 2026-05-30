@@ -3,7 +3,7 @@ import * as Haptics from "expo-haptics";
 import * as Contacts from "expo-contacts";
 import type { ExistingContact } from "expo-contacts";
 import { Image } from "expo-image";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -822,6 +822,32 @@ export default function ChatInfoScreen() {
 
         {/* Settings */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
+          <InfoRow
+            icon="color-palette-outline"
+            iconBg="#E91E63"
+            label="Chat theme"
+            value="Accent, bubbles & background"
+            colors={colors}
+            onPress={() =>
+              router.push({
+                pathname: "/settings/chat-theme",
+                params: { chatId: id!, name: name ?? "Chat" },
+              } as unknown as Href)
+            }
+          />
+          <InfoRow
+            icon="musical-notes-outline"
+            iconBg="#7C4DFF"
+            label="Custom notification sound"
+            value="Romantic, VIP, office & more"
+            colors={colors}
+            onPress={() =>
+              router.push({
+                pathname: "/settings/chat-sound/[chatId]",
+                params: { chatId: id!, name: name ?? "Chat" },
+              } as unknown as Href)
+            }
+          />
           <InfoRow
             icon="notifications-outline"
             iconBg="#FF9800"

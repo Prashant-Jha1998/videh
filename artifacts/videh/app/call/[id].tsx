@@ -1,12 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
   PanResponder,
   Platform,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -15,9 +16,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { VidehLocalView, VidehRemoteView } from "@/components/VidehVideoView";
 import { AddCallParticipantModal } from "@/components/AddCallParticipantModal";
+import { GroupCallGrid, type RemoteCallPeer } from "@/components/GroupCallGrid";
 import { useCallSession } from "@/context/CallSessionContext";
+import { useApp } from "@/context/AppContext";
+import type { InCallAudioRoute } from "@/lib/inCallAudio";
 import { CALL_DECLINE_QUICK_MESSAGES } from "@/lib/callDeclineQuickMessages";
 import { phaseLabel } from "@/lib/callState";
+import { createCallLink } from "@/lib/callLinks";
+import { isScreenShareSupported } from "@/lib/screenShare";
 
 export default function CallScreen() {
   const insets = useSafeAreaInsets();
@@ -41,9 +47,9 @@ export default function CallScreen() {
     speakerOn,
     remoteCount,
     hasRemoteVideo,
+    remoteStreamUrl,
     statusText,
     localStreamUrl,
-    remoteStreamUrl,
     localVideoId,
     remoteVideoId,
     participantCount,
@@ -58,10 +64,17 @@ export default function CallScreen() {
     toggleSpeaker,
     addParticipants,
     inviteeUserIds,
+    remotePeers,
+    switchCallMediaType,
+    setInCallAudioRoute,
+    shareScreen,
+    stopScreenShare,
   } = useCallSession();
+  const { chats, user } = useApp();
 
   const [addPeopleOpen, setAddPeopleOpen] = useState(false);
   const [addingPeople, setAddingPeople] = useState(false);
+  const [screenSharing, setScreenSharing] = useState(false);
 
   useEffect(() => {
     initFromRoute(params);
@@ -123,6 +136,36 @@ export default function CallScreen() {
   const hue = (name ?? "?").charCodeAt(0) * 37 % 360;
   const avatarBg = `hsl(${hue},50%,45%)`;
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+
+  const gridPeers: RemoteCallPeer[] = useMemo(() => {
+    if (remotePeers.length > 0) {
+      return remotePeers.map((p) => ({
+        peerId: p.peerId,
+        streamUrl: p.streamUrl,
+        hasVideo: p.hasVideo,
+        name: chats.find((c) => c.otherUserId === p.peerId)?.name ?? name,
+      }));
+    }
+    if (joined && remoteStreamUrl) {
+      return [{ peerId: 0, streamUrl: remoteStreamUrl, hasVideo: hasRemoteVideo, name }];
+    }
+    return [];
+  }, [remotePeers, joined, remoteStreamUrl, hasRemoteVideo, chats, name]);
+
+  const pickAudioRoute = () => {
+    const routes: { label: string; route: InCallAudioRoute }[] = [
+      { label: "Phone", route: "EARPIECE" },
+      { label: "Speaker", route: "SPEAKER_PHONE" },
+      { label: "Bluetooth", route: "BLUETOOTH" },
+    ];
+    Alert.alert("Audio output", "", [
+      ...routes.map((r) => ({
+        text: r.label,
+        onPress: () => { void setInCallAudioRoute(r.route); },
+      })),
+      { text: "Cancel", style: "cancel" as const },
+    ]);
+  };
 
   const displayStatus = joined && remoteCount > 0
     ? statusText
@@ -247,7 +290,9 @@ export default function CallScreen() {
 
       {isVideo ? (
         <View style={styles.videoContainer}>
-          {hasRemoteVideo || remoteStreamUrl ? (
+          {participantCount > 2 && gridPeers.length > 1 ? (
+            <GroupCallGrid peers={gridPeers} placeholderColor={avatarBg} />
+          ) : hasRemoteVideo || remoteStreamUrl ? (
             <VidehRemoteView nativeId={remoteVideoId} streamUrl={remoteStreamUrl} style={styles.remoteVideo} />
           ) : (
             <View style={[styles.remoteVideo, styles.videoPlaceholder]}>
@@ -297,10 +342,28 @@ export default function CallScreen() {
           />
           <ControlBtn
             icon={speakerOn ? "volume-high" : "volume-medium"}
-            label="Speaker"
-            onPress={() => { toggleSpeaker(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+            label="Audio"
+            onPress={() => {
+              if (Platform.OS === "web") {
+                toggleSpeaker();
+              } else {
+                pickAudioRoute();
+              }
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            }}
             active={speakerOn}
           />
+          {joined ? (
+            <ControlBtn
+              icon={isVideo ? "call" : "videocam"}
+              label={isVideo ? "Voice only" : "Video"}
+              onPress={() => {
+                void switchCallMediaType(!isVideo);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              active={false}
+            />
+          ) : null}
           {isVideo && (
             <ControlBtn
               icon={cameraOff ? "videocam-off" : "videocam"}
@@ -315,6 +378,55 @@ export default function CallScreen() {
             onPress={minimizeCall}
             active={false}
           />
+          {joined ? (
+            <ControlBtn
+              icon="link-outline"
+              label="Link"
+              onPress={() => {
+                void (async () => {
+                  const chatId = Number(session?.chatId ?? params.id);
+                  const link = await createCallLink(user?.sessionToken, {
+                    chatId: Number.isFinite(chatId) ? chatId : undefined,
+                    type: isVideo ? "video" : "audio",
+                    title: name,
+                  });
+                  if (!link) {
+                    Alert.alert("Call link", "Could not create link. Try again.");
+                    return;
+                  }
+                  await Share.share({ message: link.deepLink });
+                })();
+              }}
+              active={false}
+            />
+          ) : null}
+          {joined && isVideo ? (
+            <ControlBtn
+              icon="desktop-outline"
+              label={screenSharing ? "Stop share" : "Share"}
+              onPress={() => {
+                void (async () => {
+                  if (screenSharing) {
+                    await stopScreenShare();
+                    setScreenSharing(false);
+                    return;
+                  }
+                  if (!isScreenShareSupported()) {
+                    Alert.alert(
+                      "Screen share",
+                      Platform.OS === "web"
+                        ? "Your browser blocked screen sharing."
+                        : "Screen sharing is available on Videh Web for now.",
+                    );
+                    return;
+                  }
+                  const ok = await shareScreen();
+                  if (ok) setScreenSharing(true);
+                })();
+              }}
+              active={screenSharing}
+            />
+          ) : null}
         </View>
 
         <TouchableOpacity style={styles.endBtn} onPress={() => void endCall()} activeOpacity={0.85}>

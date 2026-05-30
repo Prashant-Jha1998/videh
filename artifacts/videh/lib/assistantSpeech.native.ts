@@ -122,7 +122,7 @@ export async function startListening(opts: ListenOpts): Promise<void> {
     Platform.OS === "android" ? resolveAndroidRecognitionServicePackage() : undefined;
   try {
     ExpoSpeechRecognitionModule.start({
-      lang: opts.wakeMode ? wakeLang : toRecognitionLocale(code),
+      lang: opts.wakeMode ? toRecognitionLocale("en") : toRecognitionLocale(code),
       interimResults: true,
       continuous: true,
       maxAlternatives: 1,

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
@@ -187,6 +187,18 @@ export default function ChatsSettingsScreen() {
                 { text: t("common.cancel"), style: "cancel" },
               ])
             }
+            colors={colors}
+          />
+          <TappableRow
+            label="Advanced theme"
+            value="Accent · Bubbles · Packs"
+            onPress={() => router.push("/settings/advanced-theme" as Href)}
+            colors={colors}
+          />
+          <TappableRow
+            label="All color themes"
+            value="50+ solid & gradient"
+            onPress={() => router.push("/settings/theme")}
             colors={colors}
           />
           <TappableRow

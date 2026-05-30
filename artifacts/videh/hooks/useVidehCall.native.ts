@@ -1,15 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PermissionsAndroid, Platform } from "react-native";
 import { applySpeakerRoute, setProximityScreenOff, startInCallSession, stopInCallSession } from "@/lib/inCallAudio";
+import { buildCallMediaConstraints, getCallMediaSettings } from "@/lib/callMediaSettings";
 import { loadIceServers } from "@/lib/webrtcIce";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import type { CallUiPhase } from "@/lib/callState";
-import type { VidehCallState } from "./videhCallTypes";
+import type { RemoteCallPeerStream, VidehCallState } from "./videhCallTypes";
 
 export type { VidehCallState } from "./videhCallTypes";
 
 type Role = "caller" | "callee";
 const SIGNAL_POLL_MS = 250;
+
+function peerIdFromChannel(channel: string, localUid: number): number {
+  const m = channel.match(/_peer_(\d+)_(\d+)$/);
+  if (!m) return 0;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === localUid) return b;
+  if (b === localUid) return a;
+  return 0;
+}
+
+function upsertRemotePeer(
+  map: Map<number, { streamUrl?: string; hasVideo: boolean }>,
+  peerId: number,
+  streamUrl: string | undefined,
+  hasVideo: boolean,
+) {
+  if (!peerId) return;
+  const prev = map.get(peerId);
+  map.set(peerId, {
+    streamUrl: streamUrl ?? prev?.streamUrl,
+    hasVideo: hasVideo || prev?.hasVideo || false,
+  });
+}
 
 function channelsForCall(baseChannel: string, uid: number, remotePeerIds: number[]): string[] {
   if (!baseChannel) return [];
@@ -38,11 +63,14 @@ export function useVidehCall(
   const [joined, setJoined] = useState(false);
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
+  const onHoldRef = useRef(false);
   const [speakerOn, setSpeakerOn] = useState(!isVideo ? false : true);
   const [remoteCount, setRemoteCount] = useState(0);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [localStreamUrl, setLocalStreamUrl] = useState<string | undefined>();
   const [remoteStreamUrl, setRemoteStreamUrl] = useState<string | undefined>();
+  const remotePeersRef = useRef<Map<number, { streamUrl?: string; hasVideo: boolean }>>(new Map());
+  const [remotePeers, setRemotePeers] = useState<RemoteCallPeerStream[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [connectionPhase, setConnectionPhase] = useState<CallUiPhase>("connecting");
 
@@ -65,6 +93,16 @@ export function useVidehCall(
     const reconnecting = states.some((s) => s === "disconnected" || s === "connecting");
     setJoined(connected > 0);
     setRemoteCount(connected);
+    const peerList: RemoteCallPeerStream[] = [...remotePeersRef.current.entries()].map(([peerId, p]) => ({
+      peerId,
+      streamUrl: p.streamUrl,
+      hasVideo: p.hasVideo,
+    }));
+    setRemotePeers(peerList);
+    if (peerList.length > 0) {
+      setRemoteStreamUrl(peerList[0].streamUrl);
+      setHasRemoteVideo(peerList.some((p) => p.hasVideo));
+    }
     if (connected > 0) {
       setError(null);
       setConnectionPhase("connected");
@@ -122,19 +160,19 @@ export function useVidehCall(
           void postJson(`/sessions/${encodeURIComponent(channel)}/candidates`, { role, candidate });
         }
       };
-      pc.ontrack = (event: any) => {
-        const stream = event.streams?.[0] ?? event.stream;
+      const noteRemoteStream = (stream: any) => {
         if (!stream) return;
-        setHasRemoteVideo(stream.getVideoTracks?.().length > 0);
-        setRemoteStreamUrl(typeof stream.toURL === "function" ? stream.toURL() : undefined);
+        const url = typeof stream.toURL === "function" ? stream.toURL() : undefined;
+        const hasVid = (stream.getVideoTracks?.().length ?? 0) > 0;
+        const pid = peerIdFromChannel(channel, uid) || remotePeerIds[0] || 0;
+        upsertRemotePeer(remotePeersRef.current, pid, url, hasVid);
         refreshAggregate();
       };
+      pc.ontrack = (event: any) => {
+        noteRemoteStream(event.streams?.[0] ?? event.stream);
+      };
       pc.onaddstream = (event: any) => {
-        const stream = event.stream;
-        if (!stream) return;
-        setHasRemoteVideo(stream.getVideoTracks?.().length > 0);
-        setRemoteStreamUrl(typeof stream.toURL === "function" ? stream.toURL() : undefined);
-        refreshAggregate();
+        noteRemoteStream(event.stream);
       };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "failed") setError("Call connection failed.");
@@ -214,7 +252,8 @@ export function useVidehCall(
       await startInCallSession(isVideo);
       applySpeakerRoute(speakerOnRef.current, isVideo);
       const { mediaDevices } = require("react-native-webrtc");
-      const stream = await mediaDevices.getUserMedia({ audio: true, video: isVideo });
+      const lowData = (await getCallMediaSettings()).lowDataMode;
+      const stream = await mediaDevices.getUserMedia(buildCallMediaConstraints(isVideo, lowData));
       localStreamRef.current = stream;
       setLocalStreamUrl(typeof stream.toURL === "function" ? stream.toURL() : undefined);
       return stream;
@@ -287,9 +326,15 @@ export function useVidehCall(
     remoteStreamUrl,
     hasRemoteVideo,
     remoteUid: null,
+    remotePeers,
     toggleMute: () => {
-      localStreamRef.current?.getAudioTracks?.().forEach((track: any) => { track.enabled = muted; });
-      setMuted((m) => !m);
+      setMuted((m) => {
+        const next = !m;
+        localStreamRef.current?.getAudioTracks?.().forEach((track: any) => {
+          track.enabled = !next && !onHoldRef.current;
+        });
+        return next;
+      });
     },
     toggleCamera: () => {
       localStreamRef.current?.getVideoTracks?.().forEach((track: any) => { track.enabled = cameraOff; });
@@ -303,6 +348,26 @@ export function useVidehCall(
         return next;
       });
     },
+    setSpeaker: (enabled: boolean) => {
+      speakerOnRef.current = enabled;
+      setSpeakerOn(enabled);
+      applySpeakerRoute(enabled, isVideo);
+    },
+    setHeld: (held: boolean) => {
+      onHoldRef.current = held;
+      localStreamRef.current?.getAudioTracks?.().forEach((track: any) => {
+        track.enabled = !held && !muted;
+      });
+      for (const pc of pcsRef.current.values()) {
+        try {
+          pc.getReceivers?.().forEach((r: any) => {
+            if (r.track?.kind === "audio") r.track.enabled = !held;
+          });
+        } catch { /* ignore */ }
+      }
+    },
+    shareScreen: async () => false,
+    stopScreenShare: async () => {},
     leave: async () => {
       setProximityScreenOff(false);
       await stopInCallSession();

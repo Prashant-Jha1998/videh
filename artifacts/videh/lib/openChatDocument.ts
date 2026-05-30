@@ -2,7 +2,13 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { Linking, Platform } from "react-native";
 import { authFetchHeaders } from "./authenticatedMedia";
-import { ensureUploadableFileUri, guessMimeFromFilename } from "./prepareFileUpload";
+import {
+  assertValidDocumentFile,
+  downloadChatDocument,
+  mimeForDocument,
+  resolveDocumentCachePath,
+} from "./chatDocumentDownload";
+import { ensureUploadableFileUri } from "./prepareFileUpload";
 import { resolvePublicAssetUrl } from "./publicAssetUrl";
 
 const MIME_EXTENSION_MAP: Record<string, string> = {
@@ -16,25 +22,11 @@ const MIME_EXTENSION_MAP: Record<string, string> = {
   "text/plain": "txt",
 };
 
-function safeFileName(name: string, fallback: string, ext: string): string {
-  const cleaned = (name || fallback).replace(/[^\w.\-() ]+/g, "_").replace(/^_+|_+$/g, "");
-  if (!cleaned) return `${fallback}.${ext}`;
-  return cleaned.toLowerCase().endsWith(`.${ext.toLowerCase()}`) ? cleaned : `${cleaned}.${ext}`;
-}
-
 function extFromFilename(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "");
   return ext && ext.length <= 8 ? ext : "bin";
 }
 
-async function assertNonEmptyFile(fileUri: string, minBytes = 64): Promise<void> {
-  const info = await FileSystem.getInfoAsync(fileUri);
-  if (!info.exists || (info.size ?? 0) < minBytes) {
-    throw new Error("File is empty or could not be read.");
-  }
-}
-
-/** Copy content:// / ph:// / fragile file:// to a stable cache file before upload or open. */
 async function materializeLocalFile(uri: string, filename: string): Promise<string> {
   if (uri.startsWith("content:") || uri.startsWith("ph://") || uri.startsWith("file:")) {
     return ensureUploadableFileUri(uri, filename);
@@ -42,103 +34,36 @@ async function materializeLocalFile(uri: string, filename: string): Promise<stri
   return uri;
 }
 
-async function downloadRemoteDocument(
-  url: string,
-  filename: string,
-  sessionToken?: string | null,
-): Promise<string> {
-  const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
-  if (!cacheDir) throw new Error("No writable cache directory");
-
-  const ext = extFromFilename(filename);
-  const downloadTarget = `${cacheDir}${safeFileName(filename, `document_${Date.now()}`, ext)}`;
-  const headers = url.includes("/api/chats/media/")
-    ? (authFetchHeaders(sessionToken) as Record<string, string> | undefined)
-    : undefined;
-
-  const downloaded = await FileSystem.downloadAsync(
-    url,
-    downloadTarget,
-    headers ? { headers } : undefined,
-  );
-
-  if (downloaded.status < 200 || downloaded.status >= 300) {
-    await FileSystem.deleteAsync(downloaded.uri, { idempotent: true }).catch(() => {});
-    if (downloaded.status === 403) {
-      throw new Error("Document is still syncing. Wait a moment and tap again.");
-    }
-    throw new Error(`Could not download document (${downloaded.status}).`);
+/** Copy content:// / ph:// to stable cache before open. */
+async function useLocalCopyIfNeeded(localUri: string, filename: string): Promise<string> {
+  const info = await FileSystem.getInfoAsync(localUri);
+  if (!info.exists || (info.size ?? 0) < 32) {
+    return materializeLocalFile(localUri, filename);
   }
-
-  await assertNonEmptyFile(downloaded.uri);
-  return downloaded.uri;
+  if (localUri.startsWith("content:") || localUri.startsWith("ph://")) {
+    return materializeLocalFile(localUri, filename);
+  }
+  return localUri;
 }
 
-/** Download to app cache (Wi‑Fi auto-download); returns local file URI. */
-export async function cacheChatDocument(opts: {
-  mediaUrl: string;
-  filename: string;
-  sessionToken?: string | null;
-  /** Prefer on-device copy (sender right after send). */
-  localUri?: string | null;
-}): Promise<string> {
-  const { mediaUrl, filename, sessionToken, localUri } = opts;
-
-  if (localUri?.trim()) {
-    try {
-      const fileUri = await materializeLocalFile(localUri.trim(), filename);
-      await assertNonEmptyFile(fileUri);
-      return fileUri;
-    } catch {
-      // fall through to remote
-    }
+async function openWithSystemApp(fileUri: string, mime: string, filename: string): Promise<void> {
+  if (Platform.OS === "web") {
+    await Linking.openURL(fileUri);
+    return;
   }
-
-  const uri = resolvePublicAssetUrl(mediaUrl) ?? mediaUrl;
-  const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
-  if (!cacheDir) throw new Error("No writable cache directory");
-
-  if (uri.startsWith("file:") || uri.startsWith("content:") || uri.startsWith("ph://")) {
-    const fileUri = await materializeLocalFile(uri, filename);
-    await assertNonEmptyFile(fileUri);
-    return fileUri;
-  }
-
-  if (uri.startsWith("data:")) {
-    const mimeMatch = uri.match(/^data:([^;]+);base64,/);
-    const base64 = uri.replace(/^data:[^;]+;base64,/, "");
-    const mime = mimeMatch?.[1] ?? guessMimeFromFilename(filename);
-    const ext = MIME_EXTENSION_MAP[mime] ?? extFromFilename(filename);
-    const fileUri = `${cacheDir}${safeFileName(filename, `document_${Date.now()}`, ext)}`;
-    await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-    await assertNonEmptyFile(fileUri);
-    return fileUri;
-  }
-
-  if (/^https?:\/\//i.test(uri)) {
-    return downloadRemoteDocument(uri, filename, sessionToken);
-  }
-
-  throw new Error("Unsupported document location.");
-}
-
-async function launchDocumentViewer(fileUri: string, mime: string, filename: string): Promise<void> {
-  const getContentUri = (FileSystem as unknown as { getContentUriAsync?: (u: string) => Promise<string> }).getContentUriAsync;
-  const openUri = Platform.OS === "android" && getContentUri ? await getContentUri(fileUri) : fileUri;
 
   if (Platform.OS === "android") {
     try {
-      await Linking.openURL(openUri);
+      const IntentLauncher = await import("expo-intent-launcher");
+      const contentUri = await FileSystem.getContentUriAsync(fileUri);
+      await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
+        data: contentUri,
+        flags: 1,
+        type: mime,
+      });
       return;
     } catch {
-      // fall through
-    }
-  } else {
-    try {
-      await Linking.openURL(openUri);
-      return;
-    } catch {
-      // fall through
+      /* fall through to share sheet */
     }
   }
 
@@ -151,26 +76,105 @@ async function launchDocumentViewer(fileUri: string, mime: string, filename: str
     return;
   }
 
-  throw new Error("No app available to open this file.");
+  throw new Error("No app available to open this file. Install a PDF or Office viewer.");
 }
 
 /**
- * Videh-style: use local copy when available, else download with auth + size checks, then open.
+ * Resolve local file (cache / picker copy), optionally download with auth, then open in system app.
  */
 export async function openChatDocument(opts: {
   mediaUrl: string;
   filename: string;
   sessionToken?: string | null;
   localUri?: string | null;
-}): Promise<void> {
-  const { mediaUrl, filename, sessionToken, localUri } = opts;
-  const mime = guessMimeFromFilename(filename);
-  const fileUri = await cacheChatDocument({ mediaUrl, filename, sessionToken, localUri });
+  onDownloadProgress?: (percent: number) => void;
+}): Promise<{ localUri: string; sizeBytes?: number }> {
+  const { mediaUrl, filename, sessionToken, localUri, onDownloadProgress } = opts;
+  const mime = mimeForDocument(filename);
+  let fileUri: string | undefined;
+  let sizeBytes: number | undefined;
 
-  if (Platform.OS === "web") {
-    await Linking.openURL(fileUri);
-    return;
+  if (localUri?.trim()) {
+    try {
+      fileUri = await useLocalCopyIfNeeded(localUri.trim(), filename);
+      await assertValidDocumentFile(fileUri, filename);
+      const info = await FileSystem.getInfoAsync(fileUri);
+      sizeBytes = info.exists && "size" in info ? (info.size ?? undefined) : undefined;
+    } catch {
+      fileUri = undefined;
+    }
   }
 
-  await launchDocumentViewer(fileUri, mime, filename);
+  if (!fileUri) {
+    const uri = resolvePublicAssetUrl(mediaUrl) ?? mediaUrl;
+    if (uri.startsWith("file:") || uri.startsWith("content:") || uri.startsWith("ph://")) {
+      fileUri = await materializeLocalFile(uri, filename);
+      await assertValidDocumentFile(fileUri, filename);
+    } else if (uri.startsWith("data:")) {
+      const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
+      if (!cacheDir) throw new Error("No writable cache directory");
+      const mimeMatch = uri.match(/^data:([^;]+);base64,/);
+      const base64 = uri.replace(/^data:[^;]+;base64,/, "");
+      const mimeFromData = mimeMatch?.[1] ?? mime;
+      const ext = MIME_EXTENSION_MAP[mimeFromData] ?? extFromFilename(filename);
+      fileUri = `${cacheDir}doc_${Date.now()}.${ext}`;
+      await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+      await assertValidDocumentFile(fileUri, filename);
+    } else if (/^https?:\/\//i.test(uri)) {
+      const cached = await resolveDocumentCachePath(filename, uri);
+      const hit = await FileSystem.getInfoAsync(cached);
+      const hitBytes = hit.exists && "size" in hit ? (hit.size ?? 0) : 0;
+      if (hit.exists && hitBytes > 64) {
+        try {
+          await assertValidDocumentFile(cached, filename);
+          fileUri = cached;
+          sizeBytes = hitBytes;
+        } catch {
+          await FileSystem.deleteAsync(cached, { idempotent: true }).catch(() => {});
+        }
+      }
+      if (!fileUri) {
+        const dl = await downloadChatDocument({
+          mediaUrl,
+          filename,
+          sessionToken,
+          onProgress: onDownloadProgress,
+        });
+        fileUri = dl.localUri;
+        sizeBytes = dl.sizeBytes;
+      }
+    } else {
+      throw new Error("Unsupported document location.");
+    }
+  }
+
+  await openWithSystemApp(fileUri, mime, filename);
+  return { localUri: fileUri, sizeBytes };
+}
+
+/** Background cache (Wi‑Fi auto-download). */
+export async function cacheChatDocument(opts: {
+  mediaUrl: string;
+  filename: string;
+  sessionToken?: string | null;
+  localUri?: string | null;
+  onProgress?: (percent: number) => void;
+}): Promise<string> {
+  const { mediaUrl, filename, sessionToken, localUri, onProgress } = opts;
+  if (localUri?.trim()) {
+    try {
+      const fileUri = await useLocalCopyIfNeeded(localUri.trim(), filename);
+      await assertValidDocumentFile(fileUri, filename);
+      return fileUri;
+    } catch {
+      /* remote */
+    }
+  }
+  const { localUri: downloaded } = await downloadChatDocument({
+    mediaUrl,
+    filename,
+    sessionToken,
+    onProgress,
+  });
+  return downloaded;
 }

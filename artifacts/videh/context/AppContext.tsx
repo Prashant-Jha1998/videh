@@ -2,6 +2,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
+import { agentDebugLog } from "@/lib/agentDebugLog";
+import {
+  deliverPremiumChatMessageNotification,
+  setNotificationActiveChatId,
+  setNotificationRuntimeState,
+} from "@/lib/incomingMessageNotify";
 import * as Location from "expo-location";
 import { getApiUrl } from "@/lib/api";
 import { registerPushTokenWithServer } from "@/lib/pushNotifications";
@@ -84,6 +90,8 @@ export interface Message {
   /** 0–99 while uploading; undefined when sent. */
   uploadProgress?: number;
   uploadFailed?: boolean;
+  /** 0–99 while downloading on receiver; undefined when cached. */
+  downloadProgress?: number;
   /** Stable on-device copy for documents (open before/without server download). */
   localMediaUri?: string;
 }
@@ -232,6 +240,7 @@ interface AppContextType {
   /** Who is typing per chat (names), updated via API poll + realtime. */
   typingByChatId: Record<string, string[]>;
   reportRemoteTyping: (chatId: string, names: string[]) => void;
+  patchChatMessage: (chatId: string, messageId: string, patch: Partial<Message>) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -679,6 +688,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Load messages for a chat from DB
   const setActiveChatId = useCallback((chatId: string | null) => {
     activeChatIdRef.current = chatId;
+    setNotificationActiveChatId(chatId);
+  }, []);
+
+  useEffect(() => {
+    setNotificationRuntimeState({
+      chats: chats.map((c) => ({
+        id: c.id,
+        name: c.name,
+        avatar: c.avatar,
+        lastMessage: c.lastMessage,
+        isGroup: c.isGroup,
+        isMuted: c.isMuted,
+      })),
+      activeChatId: activeChatIdRef.current,
+    });
+  }, [chats]);
+
+  const patchChatMessage = useCallback((chatId: string, messageId: string, patch: Partial<Message>) => {
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id !== chatId
+          ? c
+          : { ...c, messages: c.messages.map((m) => (m.id === messageId ? { ...m, ...patch } : m)) },
+      ),
+    );
   }, []);
 
   const loadMessages = useCallback(async (chatId: string) => {
@@ -692,49 +726,59 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ? data.messages.filter((m: any) => new Date(m.created_at).getTime() > clearedAt)
         : data.messages;
 
-      const msgs: Message[] = rawMessages.map((m: any) => {
-        const isMe = String(m.sender_id) === String(u?.dbId);
-        // Determine tick status: sent by me → check delivery_status from DB
-        let status: "sent" | "delivered" | "read" = "sent";
-        if (isMe) {
-          if (m.delivery_status === "read") status = "read";
-          else if (m.delivery_status === "delivered") status = "delivered";
-          else status = "sent";
-        }
-        return {
-          id: String(m.id),
-          text: m.is_deleted ? "This message was deleted" : (m.content ?? ""),
-          timestamp: new Date(m.created_at).getTime(),
-          senderId: isMe ? "me" : String(m.sender_id),
-          senderName: m.sender_name ?? undefined,
-          type: m.is_deleted ? "deleted" : (m.type ?? "text"),
-          status,
-          mediaUrl: m.media_url ?? undefined,
-          isStarred: m.is_starred,
-          isForwarded: m.is_forwarded,
-          forwardCount: m.forward_count ?? 0,
-          isViewOnce: m.is_view_once,
-          viewOnceOpened: !!m.view_once_opened_at,
-          isEdited: !!m.edited_at,
-          editedAt: m.edited_at ? new Date(m.edited_at).getTime() : undefined,
-          reactions: m.reactions ?? [],
-          replyToId: m.reply_to_id ? String(m.reply_to_id) : undefined,
-          replyType: m.reply_type ?? undefined,
-          replyQuotedSenderId: m.reply_sender_id != null ? String(m.reply_sender_id) : undefined,
-          replyText: m.reply_content
-            ? messageReplyPreviewText({
-                type: m.reply_is_deleted ? "deleted" : (m.reply_type ?? "text"),
-                text: m.reply_content,
-                senderId: String(m.reply_sender_id) === String(u?.dbId) ? "me" : String(m.reply_sender_id),
-                isDeleted: !!m.reply_is_deleted,
-              })
-            : undefined,
-          replySenderName: m.reply_sender_name ?? undefined,
-        };
-      });
+      let mergedMessages: Message[] = [];
 
-      setChats((prev) =>
-        prev.map((c) => {
+      setChats((prev) => {
+        const prevChat = prev.find((c) => c.id === chatId);
+        const prevById = new Map((prevChat?.messages ?? []).map((pm) => [pm.id, pm]));
+
+        const msgs: Message[] = rawMessages.map((m: any) => {
+          const isMe = String(m.sender_id) === String(u?.dbId);
+          const prevLocal = prevById.get(String(m.id));
+          let status: "sent" | "delivered" | "read" = "sent";
+          if (isMe) {
+            if (m.delivery_status === "read") status = "read";
+            else if (m.delivery_status === "delivered") status = "delivered";
+            else status = "sent";
+          }
+          return {
+            id: String(m.id),
+            text: m.is_deleted ? "This message was deleted" : (m.content ?? ""),
+            timestamp: new Date(m.created_at).getTime(),
+            senderId: isMe ? "me" : String(m.sender_id),
+            senderName: m.sender_name ?? undefined,
+            type: m.is_deleted ? "deleted" : (m.type ?? "text"),
+            status,
+            mediaUrl: m.media_url ?? undefined,
+            isStarred: m.is_starred,
+            isForwarded: m.is_forwarded,
+            forwardCount: m.forward_count ?? 0,
+            isViewOnce: m.is_view_once,
+            viewOnceOpened: !!m.view_once_opened_at,
+            isEdited: !!m.edited_at,
+            editedAt: m.edited_at ? new Date(m.edited_at).getTime() : undefined,
+            reactions: m.reactions ?? [],
+            replyToId: m.reply_to_id ? String(m.reply_to_id) : undefined,
+            replyType: m.reply_type ?? undefined,
+            replyQuotedSenderId: m.reply_sender_id != null ? String(m.reply_sender_id) : undefined,
+            replyText: m.reply_content
+              ? messageReplyPreviewText({
+                  type: m.reply_is_deleted ? "deleted" : (m.reply_type ?? "text"),
+                  text: m.reply_content,
+                  senderId: String(m.reply_sender_id) === String(u?.dbId) ? "me" : String(m.reply_sender_id),
+                  isDeleted: !!m.reply_is_deleted,
+                })
+              : undefined,
+            replySenderName: m.reply_sender_name ?? undefined,
+            localMediaUri: prevLocal?.localMediaUri,
+            downloadProgress: prevLocal?.downloadProgress,
+            uploadProgress: prevLocal?.uploadProgress,
+            uploadFailed: prevLocal?.uploadFailed,
+            fileSizeBytes: prevLocal?.fileSizeBytes,
+          };
+        });
+
+        return prev.map((c) => {
           if (c.id !== chatId) return c;
           const prevMsgs = c.messages ?? [];
           if (
@@ -775,13 +819,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             if (!merged.some((m) => m.id === p.id)) merged.push(p);
           }
           merged.sort((a, b) => a.timestamp - b.timestamp);
+          mergedMessages = merged;
           return { ...c, messages: merged };
-        })
-      );
+        });
+      });
 
       const settings = await loadChatMediaSettings().catch(() => null);
       if (settings && Platform.OS !== "web") {
-        for (const m of msgs) {
+        for (const m of mergedMessages) {
           if (!m.mediaUrl || m.senderId === "me" || m.isViewOnce) continue;
           if (m.type === "video" && (await shouldAutoDownload("video", settings))) {
             void cacheChatVideoUrl(m.mediaUrl, authSessionToken).catch(() => {});
@@ -789,18 +834,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (m.type === "image" && (await shouldAutoDownload("image", settings))) {
             void cacheChatImageUrl(m.mediaUrl, authSessionToken).catch(() => {});
           }
-          if (m.type === "document" && (await shouldAutoDownload("document", settings))) {
-            const { cacheChatDocument } = await import("@/lib/openChatDocument");
-            void cacheChatDocument({
-              mediaUrl: m.mediaUrl,
-              filename: m.text,
-              sessionToken: authSessionToken,
-            }).catch(() => {});
+          if (
+            m.type === "document"
+            && (await shouldAutoDownload("document", settings))
+            && !m.localMediaUri
+            && typeof m.downloadProgress !== "number"
+          ) {
+            const msgId = m.id;
+            const mediaUrl = m.mediaUrl;
+            const filename = m.text;
+            void (async () => {
+              patchChatMessage(chatId, msgId, { downloadProgress: 0 });
+              try {
+                const { cacheChatDocument } = await import("@/lib/openChatDocument");
+                const localUri = await cacheChatDocument({
+                  mediaUrl,
+                  filename,
+                  sessionToken: authSessionToken,
+                  onProgress: (pct) => patchChatMessage(chatId, msgId, { downloadProgress: pct }),
+                });
+                const info = await FileSystem.getInfoAsync(localUri);
+                const cachedSize = info.exists && "size" in info ? (info.size ?? undefined) : undefined;
+                patchChatMessage(chatId, msgId, {
+                  localMediaUri: localUri,
+                  fileSizeBytes: cachedSize,
+                  downloadProgress: undefined,
+                });
+              } catch {
+                patchChatMessage(chatId, msgId, { downloadProgress: undefined });
+              }
+            })();
           }
         }
       }
     } catch {}
-  }, []);
+  }, [patchChatMessage]);
 
   // Auto-refresh chats, statuses and call logs (+ reload open chat on new API messages)
   useEffect(() => {
@@ -837,10 +905,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try {
         const raw = ev?.data;
         if (!raw) return;
-        const parsed = JSON.parse(raw) as { chatId?: string | number };
+        const parsed = JSON.parse(raw) as {
+          chatId?: string | number;
+          payload?: { messageId?: string | number };
+        };
         const cid = parsed.chatId != null ? String(parsed.chatId) : null;
+        const messageId =
+          parsed.payload?.messageId != null ? String(parsed.payload.messageId) : undefined;
         if (cid && activeChatIdRef.current === cid) {
           void loadMessages(cid);
+        }
+        if (cid) {
+          const uid = userRef.current?.dbId;
+          void deliverPremiumChatMessageNotification({
+            chatId: cid,
+            messageId,
+            reloadChats: uid
+              ? async () => {
+                  await loadChats(uid);
+                }
+              : undefined,
+          }).then((delivered) => {
+            agentDebugLog(
+              "AppContext.tsx:onChatEvent",
+              "SSE message event",
+              {
+                chatId: cid,
+                messageId,
+                appState: AppState.currentState,
+                activeChatId: activeChatIdRef.current,
+                deliveredPremiumNotify: delivered,
+              },
+              "H1",
+              "post-fix",
+            );
+          });
         }
       } catch {
         /* ignore malformed SSE payload */
@@ -1869,7 +1968,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, reportUser, setChatDisappear,
       updateLocationOnServer, startLiveLocationSession, stopLiveLocationSession,
-      setActiveChatId, refreshCallLogs, typingByChatId, reportRemoteTyping,
+      setActiveChatId, refreshCallLogs, typingByChatId, reportRemoteTyping, patchChatMessage,
     }}>
       {children}
     </AppContext.Provider>

@@ -9,7 +9,7 @@ import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { KeyboardStickyView } from "react-native-keyboard-controller";
+import { KeyboardStickyView, useKeyboardState } from "react-native-keyboard-controller";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -34,6 +34,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Swipeable } from "react-native-gesture-handler";
 import { useColors } from "@/hooks/useColors";
+import { useChatAppearance } from "@/hooks/useChatAppearance";
+import { AnimatedChatWallpaper } from "@/components/AnimatedChatWallpaper";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { useApp, type Message } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
@@ -95,7 +97,7 @@ import Svg, { Path } from "react-native-svg";
 
 const BASE_URL = getApiUrl();
 const { width: W } = Dimensions.get("window");
-const REACTION_EMOJIS = ["â¤ï¸", "ðŸ‘", "ðŸ˜‚", "ðŸ˜®", "ðŸ˜¢", "ðŸ™"];
+const REACTION_EMOJIS = ["\u2764\uFE0F", "\uD83D\uDC4D", "\uD83D\uDE02", "\uD83D\uDE2E", "\uD83D\uDE22", "\uD83D\uDE4F"];
 const REPLY_SWIPE_ACTION_W = 56;
 
 type ChatListRow =
@@ -960,8 +962,8 @@ export default function ChatScreen() {
     setTyping, clearTyping, markAsRead, deleteMessage, deleteForEveryone,
     editMessage, reactToMessage, starMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
-    loadMessages, forwardMessage, updateLocationOnServer, stopLiveLocationSession, setActiveChatId,
-    typingByChatId, reportRemoteTyping,
+    loadMessages, forwardMessage, updateLocationOnServer,     stopLiveLocationSession, setActiveChatId,
+    typingByChatId, reportRemoteTyping, patchChatMessage,
   } = useApp();
 
   const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
@@ -1006,8 +1008,18 @@ export default function ChatScreen() {
     sendAudioMessage(chatId, uri, durationSec, waveform);
   }, [chatId, sendAudioMessage]);
 
-  const colors = useColors();
-  const { chatFontScale, chatWallpaperColor } = useUiPreferences();
+  const baseColors = useColors();
+  const chatLook = useChatAppearance(chatId);
+  const colors = useMemo(
+    () => ({
+      ...baseColors,
+      chatBubbleSent: chatLook.chatBubbleSent,
+      chatBubbleReceived: chatLook.chatBubbleReceived,
+      chatBackground: chatLook.chatBackground,
+    }),
+    [baseColors, chatLook.chatBubbleSent, chatLook.chatBubbleReceived, chatLook.chatBackground],
+  );
+  const { chatFontScale } = useUiPreferences();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const messagePollInFlightRef = useRef(false);
@@ -1341,6 +1353,16 @@ export default function ChatScreen() {
     }
     prevMessageCountRef.current = count;
   }, [messages.length, searching, scrollToLatest]);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      () => {
+        if (!searching && !userScrolledUpRef.current) scrollToLatest(true);
+      },
+    );
+    return () => showSub.remove();
+  }, [searching, scrollToLatest]);
 
   // @mentions state
   const [groupMembers, setGroupMembers] = useState<{ id: number; name: string }[]>([]);
@@ -1699,19 +1721,37 @@ export default function ChatScreen() {
     if (item.uploadFailed) {
       deleteMessage(chatId, item.id);
       const mime = guessMimeFromFilename(item.text);
-      sendDocumentMessage(chatId, item.mediaUrl, item.text, item.fileSizeBytes ?? 0, mime);
+      sendDocumentMessage(chatId, item.localMediaUri ?? item.mediaUrl, item.text, item.fileSizeBytes ?? 0, mime);
       return;
     }
     if (typeof item.uploadProgress === "number" && item.uploadProgress < 100) return;
-    void openChatDocument({
-      mediaUrl: item.mediaUrl,
-      filename: item.text,
-      sessionToken: user?.sessionToken,
-      localUri: item.localMediaUri,
-    }).catch((e) => {
-      Alert.alert("Error", e instanceof Error ? e.message : "Could not open this document on your device.");
-    });
-  }, [chatId, deleteMessage, sendDocumentMessage, user?.sessionToken]);
+    if (typeof item.downloadProgress === "number" && item.downloadProgress < 100) return;
+
+    void (async () => {
+      try {
+        if (!item.localMediaUri && item.senderId !== "me") {
+          patchChatMessage(chatId, item.id, { downloadProgress: 0 });
+        }
+        const result = await openChatDocument({
+          mediaUrl: item.mediaUrl!,
+          filename: item.text,
+          sessionToken: user?.sessionToken,
+          localUri: item.localMediaUri,
+          onDownloadProgress: (pct) => {
+            patchChatMessage(chatId, item.id, { downloadProgress: pct });
+          },
+        });
+        patchChatMessage(chatId, item.id, {
+          localMediaUri: result.localUri,
+          fileSizeBytes: result.sizeBytes ?? item.fileSizeBytes,
+          downloadProgress: undefined,
+        });
+      } catch (e) {
+        patchChatMessage(chatId, item.id, { downloadProgress: undefined });
+        Alert.alert("Error", e instanceof Error ? e.message : "Could not open this document on your device.");
+      }
+    })();
+  }, [chatId, deleteMessage, sendDocumentMessage, user?.sessionToken, patchChatMessage]);
 
   const saveImageToGallery = useCallback(async (uri: string) => {
     const allowGallery = await loadMediaVisibilityEnabled();
@@ -1744,15 +1784,15 @@ export default function ChatScreen() {
     const isMe = msg.senderId === "me";
 
     const opts: any[] = [
-      { text: "â†© Reply", onPress: () => { setReplyTo(toReplyData(msg)); inputRef.current?.focus(); } },
-      { text: "ðŸ“‹ Copy", onPress: () => { Clipboard.setString(msg.text); } },
-      { text: "ðŸ˜Š React", onPress: () => setReactionTarget(msg) },
+      { text: "Reply", onPress: () => { setReplyTo(toReplyData(msg)); inputRef.current?.focus(); } },
+      { text: "Copy", onPress: () => { Clipboard.setString(msg.text); } },
+      { text: "React", onPress: () => setReactionTarget(msg) },
       ...(msg.type === "image" && msg.mediaUrl && !msg.isViewOnce && Platform.OS !== "web"
-        ? [{ text: "ðŸ’¾ Save image", onPress: () => { void saveImageToGallery(msg.mediaUrl!); } }]
+        ? [{ text: "Save image", onPress: () => { void saveImageToGallery(msg.mediaUrl!); } }]
         : []),
-      ...(!msg.isViewOnce ? [{ text: "â†— Forward to Videh chat", onPress: () => { setForwardSearch(""); setForwardMsg(msg); } }] : []),
-      { text: "â­ Star", onPress: () => { if (chatId) starMessage(chatId, msg.id); } },
-      { text: "ðŸŒ Translate", onPress: () => Alert.alert("Translate to:", "", [
+      ...(!msg.isViewOnce ? [{ text: "Forward", onPress: () => { setForwardSearch(""); setForwardMsg(msg); } }] : []),
+      { text: "Star", onPress: () => { if (chatId) starMessage(chatId, msg.id); } },
+      { text: "Translate", onPress: () => Alert.alert("Translate to:", "", [
           { text: "à¤¹à¤¿à¤‚à¤¦à¥€ (Hindi)", onPress: () => translateMsg(msg, "hi") },
           { text: "English", onPress: () => translateMsg(msg, "en") },
           { text: "à¦¬à¦¾à¦‚à¦²à¦¾ (Bengali)", onPress: () => translateMsg(msg, "bn") },
@@ -1763,11 +1803,11 @@ export default function ChatScreen() {
         ]) },
     ];
     if (isMe) {
-      opts.push({ text: "â„¹ï¸ Info", onPress: () => router.push({ pathname: "/chat/message-info", params: { chatId: chatId!, messageId: msg.id } }) });
-      opts.push({ text: "âœï¸ Edit", onPress: () => { setEditTarget(msg); setEditText(msg.text); inputRef.current?.focus(); } });
+      opts.push({ text: "Info", onPress: () => router.push({ pathname: "/chat/message-info", params: { chatId: chatId!, messageId: msg.id } }) });
+      opts.push({ text: "Edit", onPress: () => { setEditTarget(msg); setEditText(msg.text); inputRef.current?.focus(); } });
     }
     opts.push({
-      text: "ðŸ—‘ Delete",
+      text: "Delete",
       style: "destructive" as const,
       onPress: () => setDeleteTarget(msg),
     });
@@ -2311,7 +2351,12 @@ export default function ChatScreen() {
     router.push({ pathname: "/chat/message-info", params: { chatId, messageId: selectedMessage.id } });
   };
 
-  const inputBarBottomPad = Math.max(insets.bottom, Platform.OS === "web" ? 34 : 10);
+  const keyboardVisible = useKeyboardState((s) => s.isVisible);
+  const inputBarBottomPad = keyboardVisible
+    ? Platform.OS === "ios"
+      ? Math.max(insets.bottom, 8)
+      : 8
+    : Math.max(insets.bottom, Platform.OS === "web" ? 34 : 10);
 
   const composerFooter = (
     <>
@@ -2516,16 +2561,30 @@ export default function ChatScreen() {
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: wallpaper ? "transparent" : (chatWallpaperColor ?? colors.chatBackground) }]}>
-      {/* Wallpaper background */}
-      {wallpaper && (
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: wallpaper
+            ? "transparent"
+            : chatLook.chatBackground,
+        },
+      ]}
+    >
+      {!wallpaper && chatLook.animatedWallpaper !== "none" ? (
+        <AnimatedChatWallpaper
+          id={chatLook.animatedWallpaper}
+          accent={chatLook.appearance.accent[0]}
+          isDark={chatLook.isDark}
+        />
+      ) : null}
+      {wallpaper ? (
         <Image
           source={{ uri: wallpaper }}
           style={StyleSheet.absoluteFillObject}
           contentFit="cover"
-          blurRadius={wallpaper.startsWith("data:") ? 0 : 0}
         />
-      )}
+      ) : null}
       {/* Header */}
       {selectionActive ? (
         <ThemedHeader style={[styles.header, styles.selectionHeader, { paddingTop: topPad }]}>
@@ -2749,7 +2808,7 @@ export default function ChatScreen() {
           }
         />
 
-        {Platform.OS === "ios" ? (
+        {Platform.OS !== "web" ? (
           <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>{composerFooter}</KeyboardStickyView>
         ) : (
           composerFooter
@@ -2957,7 +3016,7 @@ export default function ChatScreen() {
       {/* Reaction picker modal */}
       <DismissibleModal visible={!!reactionTarget} onClose={() => setReactionTarget(null)} animationType="fade">
         <View style={[styles.reactionPickerWrap, { paddingBottom: insets.bottom + 96 }]}>
-          <View style={styles.reactionPicker}>
+          <View style={[styles.reactionPicker, { backgroundColor: colors.card }]}>
             {REACTION_EMOJIS.map((e) => (
               <TouchableOpacity key={e} style={styles.reactionPickerBtn} onPress={() => {
                 if (chatId && reactionTarget) { reactToMessage(chatId, reactionTarget.id, e); }
@@ -2966,8 +3025,11 @@ export default function ChatScreen() {
                 <Text style={{ fontSize: 28 }}>{e}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={styles.reactionPickerPlus} onPress={() => setReactionTarget(null)}>
-              <Ionicons name="add" size={20} color="#64748b" />
+            <TouchableOpacity
+              style={[styles.reactionPickerPlus, { backgroundColor: colors.muted }]}
+              onPress={() => setReactionTarget(null)}
+            >
+              <Ionicons name="close" size={20} color={colors.mutedForeground} />
             </TouchableOpacity>
           </View>
         </View>

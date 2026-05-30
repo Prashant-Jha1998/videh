@@ -69,7 +69,7 @@ export function normalizeLangCode(raw?: string | null): AssistantLangCode {
   if (v === "or" || v.startsWith("or-")) return "or";
   if (v === "as" || v.startsWith("as-")) return "as";
   if (v === "ur" || v.startsWith("ur-")) return "ur";
-  return "hi";
+  return "en";
 }
 
 function scriptScore(text: string): Partial<Record<AssistantLangCode, number>> {
@@ -96,11 +96,10 @@ const HINGLISH_HINTS = /\b(bhej|batao|sunao|karo|kya|aaj|message|bhai|ji|nahi|ha
 
 /** Detect primary language from user utterance (script + common words). */
 export function detectAssistantLanguage(text: string, hint?: string | null): AssistantLangCode {
-  const hinted = normalizeLangCode(hint);
-  if (hint && hinted !== "hi") return hinted;
+  if (hint?.trim()) return normalizeLangCode(hint);
 
   const scores = scriptScore(text);
-  let best: AssistantLangCode = "hi";
+  let best: AssistantLangCode = "en";
   let bestScore = 0;
   for (const [lang, score] of Object.entries(scores) as Array<[AssistantLangCode, number]>) {
     if (score > bestScore) {
@@ -112,7 +111,7 @@ export function detectAssistantLanguage(text: string, hint?: string | null): Ass
   if (bestScore === 0) {
     if (HINGLISH_HINTS.test(text)) return "hi";
     if (/^[a-zA-Z0-9\s.,!?'"-]+$/.test(text.trim())) return "en";
-    return "hi";
+    return "en";
   }
 
   if (best === "hi" && MARATHI_HINTS.test(text)) return "mr";
