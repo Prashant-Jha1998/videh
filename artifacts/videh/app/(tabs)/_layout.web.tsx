@@ -2,7 +2,7 @@ import { Slot, usePathname, useRouter } from "expo-router";
 import React from "react";
 import { StyleSheet, useWindowDimensions, View } from "react-native";
 import { WebDesktopShell } from "@/components/web/WebDesktopShell";
-import { ClassicTabLayout } from "./_TabLayoutImpl";
+import { ClassicTabLayout } from "@/components/TabLayout";
 import { WEB_DESKTOP_MIN_WIDTH } from "@/lib/web/webDesktop";
 
 /** WhatsApp Web–style desktop: nav rail + list pane + main content. */

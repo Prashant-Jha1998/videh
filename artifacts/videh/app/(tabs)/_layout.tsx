@@ -1,1 +1,1 @@
-export { default } from "./_TabLayoutImpl";
+export { default } from "@/components/TabLayout";
