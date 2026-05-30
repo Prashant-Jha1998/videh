@@ -61,7 +61,33 @@ export type DeliverIncomingMessageOpts = {
 export async function deliverPremiumChatMessageNotification(
   opts: DeliverIncomingMessageOpts,
 ): Promise<boolean> {
-  if (Platform.OS === "web") return false;
+  if (Platform.OS === "web") {
+    if (opts.reloadChats) {
+      try {
+        await opts.reloadChats();
+      } catch {
+        /* optional */
+      }
+    }
+    const chat = findChat(opts.chatId);
+    if (chat?.isMuted) return false;
+    if (AppState.currentState === "active" && activeChatId === opts.chatId) return false;
+    if (!shouldDeliverNotification(opts.chatId, opts.messageId)) return false;
+    const { showWebBrowserNotification } = await import("./web/webBrowserNotify");
+    const title = opts.senderName?.trim() || chat?.name || "Videh";
+    const body = opts.body?.trim() || chat?.lastMessage?.trim() || "New message";
+    showWebBrowserNotification(title, body, {
+      tag: `chat-${opts.chatId}`,
+      data: { chatId: opts.chatId },
+      onClick: () => {
+        if (typeof window !== "undefined") {
+          window.location.hash = "";
+          window.dispatchEvent(new CustomEvent("videh-open-chat", { detail: { chatId: opts.chatId } }));
+        }
+      },
+    });
+    return true;
+  }
 
   if (opts.reloadChats) {
     try {

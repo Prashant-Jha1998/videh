@@ -1,5 +1,7 @@
+import { Platform } from "react-native";
 import { getApiUrl } from "./api";
 import { ensureUploadableFileUri } from "./prepareFileUpload";
+import { getWebFile } from "./web/webFileRegistry";
 
 export type UploadProgress = {
   loaded: number;
@@ -61,7 +63,12 @@ export function uploadChatMediaWithProgress(opts: UploadChatMediaOptions): Promi
     }
 
     const form = new FormData();
-    form.append("file", { uri: uploadUri, name: filename, type: mime } as unknown as Blob);
+    const webFile = Platform.OS === "web" ? getWebFile(uploadUri) : undefined;
+    if (webFile) {
+      form.append("file", webFile, filename);
+    } else {
+      form.append("file", { uri: uploadUri, name: filename, type: mime } as unknown as Blob);
+    }
     xhr.send(form);
   }));
 }

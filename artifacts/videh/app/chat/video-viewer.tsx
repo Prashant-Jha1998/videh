@@ -73,7 +73,7 @@ export default function ChatVideoViewerScreen() {
     try {
       const res = await saveVideoUriToLibrary(rawUri, user?.sessionToken);
       if (res.ok) {
-        Alert.alert("Saved", "Video saved to your gallery.");
+        Alert.alert("Saved", Platform.OS === "web" ? "Video downloaded." : "Video saved to your gallery.");
       } else {
         Alert.alert("Could not save", res.message);
       }
@@ -102,22 +102,18 @@ export default function ChatVideoViewerScreen() {
             {sub}
           </Text>
         </View>
-        {Platform.OS !== "web" ? (
-          <TouchableOpacity
-            onPress={() => { void onDownload(); }}
-            style={styles.headerIcon}
-            disabled={saving || !rawUri}
-            hitSlop={12}
-          >
-            {saving ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Ionicons name="download-outline" size={26} color="#fff" />
-            )}
-          </TouchableOpacity>
-        ) : (
-          <View style={{ width: 40 }} />
-        )}
+        <TouchableOpacity
+          onPress={() => { void onDownload(); }}
+          style={styles.headerIcon}
+          disabled={saving || !rawUri}
+          hitSlop={12}
+        >
+          {saving ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Ionicons name="download-outline" size={26} color="#fff" />
+          )}
+        </TouchableOpacity>
       </View>
 
       <View style={styles.body}>

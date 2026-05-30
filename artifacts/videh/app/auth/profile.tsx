@@ -110,7 +110,7 @@ export default function ProfileSetupScreen() {
       about: about.trim(),
       avatar: user.avatar ?? avatarUri,
     });
-    if (user.dbId && Platform.OS !== "web") {
+    if (user.dbId) {
       try {
         await registerPushTokenWithServer(user.dbId);
       } catch {

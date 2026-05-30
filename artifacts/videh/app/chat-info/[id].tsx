@@ -31,6 +31,8 @@ import { useApp } from "@/context/AppContext";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { formatTime } from "@/utils/time";
 import { formatPresenceSubtitle } from "@/lib/presence";
+import { MemberProfileSheet } from "@/components/MemberProfileSheet";
+import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { getApiUrl } from "@/lib/api";
 
 const BASE_URL = getApiUrl();
@@ -156,6 +158,8 @@ export default function ChatInfoScreen() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [memberMenuVisible, setMemberMenuVisible] = useState(false);
   const [selectedMember, setSelectedMember] = useState<GroupMember | null>(null);
+  const [profileMember, setProfileMember] = useState<GroupMember | null>(null);
+  const [otherContact, setOtherContact] = useState<GroupMember | null>(null);
   const [disappearPickerOpen, setDisappearPickerOpen] = useState(false);
   const [addPickRows, setAddPickRows] = useState<AddPickRow[]>([]);
   const [addPickLoading, setAddPickLoading] = useState(false);
@@ -202,6 +206,7 @@ export default function ChatInfoScreen() {
         const other = data.members.find((m: GroupMember) => m.id !== user?.dbId);
         if (other) {
           chatOtherUserId.current = other.id;
+          setOtherContact(other);
           setAboutText(other.about || "Hey there! I am using Videh.");
           fetch(`${BASE_URL}/api/users/${user?.dbId}/block-status?otherUserId=${other.id}`)
             .then((r) => r.json())
@@ -352,12 +357,20 @@ export default function ChatInfoScreen() {
   };
 
   useEffect(() => {
-    if (!addMemberModal || Platform.OS === "web") return;
+    if (!addMemberModal) return;
     let cancelled = false;
     setAddPickLoading(true);
     setAddPickPermissionDenied(false);
     void (async () => {
       try {
+        if (Platform.OS === "web") {
+          const { chatsToWebMembers } = await import("@/lib/web/webContacts");
+          const candidates = chatsToWebMembers(chats, user?.dbId)
+            .filter((m) => !members.some((gm) => gm.id === m.id))
+            .map((m) => ({ id: `videh_${m.id}`, name: m.name, phone: m.phone ?? "" }));
+          if (!cancelled) setAddPickRows(candidates);
+          return;
+        }
         const { status } = await Contacts.requestPermissionsAsync();
         if (status !== "granted") {
           if (!cancelled) {
@@ -378,7 +391,7 @@ export default function ChatInfoScreen() {
     return () => {
       cancelled = true;
     };
-  }, [addMemberModal]);
+  }, [addMemberModal, chats, members, user?.dbId]);
 
   const addPickFiltered = useMemo(() => {
     const q = searchPhone.trim().toLowerCase();
@@ -626,11 +639,22 @@ export default function ChatInfoScreen() {
     );
   };
 
+  const openMemberProfile = (member: GroupMember) => {
+    if (member.id === user?.dbId) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setProfileMember(member);
+  };
+
   const openMemberMenu = (member: GroupMember) => {
     if (member.id === user?.dbId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedMember(member);
     setMemberMenuVisible(true);
+  };
+
+  const downloadProfilePhoto = async (uri: string) => {
+    const res = await saveImageUriToLibrary(uri, user?.sessionToken);
+    Alert.alert(res.ok ? "Saved" : "Error", res.ok ? (Platform.OS === "web" ? "Photo downloaded." : "Photo saved to gallery.") : res.message);
   };
 
   const goToChat = async (member: GroupMember) => {
@@ -670,9 +694,6 @@ export default function ChatInfoScreen() {
                 <Text style={styles.bigAvatarText}>{initials}</Text>
               </View>
             )}
-            <View style={styles.cameraOverlay}>
-              <Ionicons name="camera" size={16} color="#fff" />
-            </View>
           </TouchableOpacity>
           <Text style={[styles.contactName, { color: colors.foreground }]}>{name ?? chat?.name}</Text>
           {!isGroup && (
@@ -715,10 +736,18 @@ export default function ChatInfoScreen() {
 
         {/* About / Group Description */}
         {!isGroup && (
-          <View style={[styles.section, { backgroundColor: colors.card }]}>
-            <Text style={[styles.sectionLabel, { color: colors.primary }]}>About</Text>
-            <Text style={[styles.sectionValue, { color: colors.foreground }]}>{aboutText}</Text>
-          </View>
+          <>
+            {otherContact?.phone ? (
+              <View style={[styles.section, { backgroundColor: colors.card }]}>
+                <Text style={[styles.sectionLabel, { color: colors.primary }]}>Phone</Text>
+                <Text style={[styles.sectionValue, { color: colors.foreground }]}>{otherContact.phone}</Text>
+              </View>
+            ) : null}
+            <View style={[styles.section, { backgroundColor: colors.card }]}>
+              <Text style={[styles.sectionLabel, { color: colors.primary }]}>About</Text>
+              <Text style={[styles.sectionValue, { color: colors.foreground }]}>{aboutText}</Text>
+            </View>
+          </>
         )}
         {isGroup && (
           <View style={[styles.section, { backgroundColor: colors.card }]}>
@@ -923,7 +952,8 @@ export default function ChatInfoScreen() {
                 <TouchableOpacity
                   key={m.id}
                   style={[styles.memberRow, { borderBottomColor: colors.border }]}
-                  onPress={() => !isMe && openMemberMenu(m)}
+                  onPress={() => !isMe && openMemberProfile(m)}
+                  onLongPress={() => !isMe && isAdmin && openMemberMenu(m)}
                   activeOpacity={isMe ? 1 : 0.7}
                 >
                   {m.avatar_url ? (
@@ -995,9 +1025,20 @@ export default function ChatInfoScreen() {
       {/* Profile Photo Fullscreen — tap outside / back closes */}
       <Modal visible={photoVisible} transparent animationType="fade" onRequestClose={() => setPhotoVisible(false)}>
         <Pressable style={styles.photoModal} onPress={() => setPhotoVisible(false)}>
-          <TouchableOpacity style={styles.photoClose} onPress={() => setPhotoVisible(false)} activeOpacity={0.8}>
-            <Ionicons name="close" size={28} color="#fff" />
-          </TouchableOpacity>
+          <View style={styles.photoTopBar}>
+            <TouchableOpacity style={styles.photoClose} onPress={() => setPhotoVisible(false)} activeOpacity={0.8}>
+              <Ionicons name="close" size={28} color="#fff" />
+            </TouchableOpacity>
+            {chat?.avatar ? (
+              <TouchableOpacity
+                onPress={() => void downloadProfilePhoto(chat.avatar!)}
+                style={styles.photoClose}
+                activeOpacity={0.8}
+              >
+                <Ionicons name={Platform.OS === "web" ? "download-outline" : "save-outline"} size={26} color="#fff" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
           <Text style={styles.photoName}>{name ?? chat?.name}</Text>
           {chat?.avatar ? (
             <Image source={{ uri: chat.avatar }} style={styles.photoFull} contentFit="contain" />
@@ -1164,7 +1205,7 @@ export default function ChatInfoScreen() {
                 !addPickLoading && !addPickPermissionDenied ? (
                   <Text style={[styles.addPickHint, { color: colors.mutedForeground }]}>
                     {Platform.OS === "web"
-                      ? "Contact list is available on the mobile app. Use search above to add by phone."
+                      ? "Pick someone you chat with, or search by phone above."
                       : addPickRows.length === 0
                         ? "No contacts on this device, or contacts could not be loaded."
                         : "No contacts match your search."}
@@ -1175,6 +1216,50 @@ export default function ChatInfoScreen() {
           </View>
         </KeyboardAvoidingView>
       </DismissibleModal>
+
+      <MemberProfileSheet
+        visible={!!profileMember}
+        member={profileMember}
+        colors={colors}
+        isGroupContext={isGroup}
+        showAdminActions={isAdmin}
+        onClose={() => setProfileMember(null)}
+        onMessage={() => {
+          if (profileMember) void goToChat(profileMember);
+          setProfileMember(null);
+        }}
+        onAudioCall={
+          profileMember
+            ? () => {
+                setProfileMember(null);
+                void createDirectChat(profileMember.id, profileMember.name, profileMember.avatar_url).then((cid) => {
+                  router.push({ pathname: "/call/[id]", params: { id: cid, name: profileMember.name, type: "audio" } });
+                });
+              }
+            : undefined
+        }
+        onVideoCall={
+          profileMember
+            ? () => {
+                setProfileMember(null);
+                void createDirectChat(profileMember.id, profileMember.name, profileMember.avatar_url).then((cid) => {
+                  router.push({ pathname: "/call/[id]", params: { id: cid, name: profileMember.name, type: "video" } });
+                });
+              }
+            : undefined
+        }
+        onViewPhoto={() => {
+          if (profileMember?.avatar_url) {
+            setMediaPreviewUri(profileMember.avatar_url);
+          }
+        }}
+        onMoreOptions={() => {
+          if (profileMember) {
+            setProfileMember(null);
+            openMemberMenu(profileMember);
+          }
+        }}
+      />
 
       {/* Member Context Menu */}
       <DismissibleModal visible={memberMenuVisible} onClose={() => setMemberMenuVisible(false)} animationType="fade">
@@ -1282,6 +1367,16 @@ const styles = StyleSheet.create({
   dangerText: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
 
   photoModal: { flex: 1, backgroundColor: "#000", justifyContent: "center", alignItems: "center" },
+  photoTopBar: {
+    position: "absolute",
+    top: 48,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 8,
+  },
   disappearCenter: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 28 },
   disappearCard: { width: "100%", maxWidth: 320, borderRadius: 14, paddingVertical: 8, overflow: "hidden" },
   disappearTitle: { fontSize: 18, fontFamily: "Inter_700Bold", paddingHorizontal: 18, paddingTop: 14, paddingBottom: 4 },
@@ -1289,7 +1384,7 @@ const styles = StyleSheet.create({
   disappearRow: { paddingVertical: 14, paddingHorizontal: 18 },
   disappearRowText: { fontSize: 17, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   disappearCancel: { fontSize: 17, fontFamily: "Inter_500Medium", textAlign: "center" },
-  photoClose: { position: "absolute", top: 56, left: 16, zIndex: 10, padding: 8 },
+  photoClose: { padding: 8 },
   photoName: { position: "absolute", top: 60, alignSelf: "center", color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold", zIndex: 10 },
   photoFull: { width: "100%", height: "80%" },
   bigAvatarFull: { width: 220, height: 220, borderRadius: 110, alignItems: "center", justifyContent: "center" },

@@ -7,7 +7,14 @@ export async function saveImageUriToLibrary(
   sessionToken?: string | null,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   if (Platform.OS === "web") {
-    return { ok: false, message: "Saving to gallery is not supported on web." };
+    const { downloadUrlToDevice } = await import("./web/webDownload");
+    const ext = sourceUri.toLowerCase().includes(".png") ? "png" : sourceUri.toLowerCase().includes(".gif") ? "gif" : "jpg";
+    const headers: Record<string, string> = {};
+    if (sourceUri.includes("/api/chats/media/") && sessionToken) {
+      const { authFetchHeaders } = await import("./authenticatedMedia");
+      Object.assign(headers, (authFetchHeaders(sessionToken) as Record<string, string>) ?? {});
+    }
+    return downloadUrlToDevice(sourceUri, `videh_image_${Date.now()}.${ext}`, headers);
   }
   const { status } = await MediaLibrary.requestPermissionsAsync();
   if (status !== "granted") {

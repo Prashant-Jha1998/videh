@@ -96,6 +96,52 @@ export interface Message {
   localMediaUri?: string;
 }
 
+const OLDER_MESSAGES_PAGE = 40;
+
+function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal?: Message): Message {
+  const isMe = String(m.sender_id) === String(viewerDbId);
+  let status: "sent" | "delivered" | "read" = "sent";
+  if (isMe) {
+    if (m.delivery_status === "read") status = "read";
+    else if (m.delivery_status === "delivered") status = "delivered";
+  }
+  return {
+    id: String(m.id),
+    text: m.is_deleted ? "This message was deleted" : (m.content ?? ""),
+    timestamp: new Date(m.created_at).getTime(),
+    senderId: isMe ? "me" : String(m.sender_id),
+    senderName: m.sender_name ?? undefined,
+    type: m.is_deleted ? "deleted" : (m.type ?? "text"),
+    status,
+    mediaUrl: m.media_url ?? undefined,
+    isStarred: m.is_starred,
+    isForwarded: m.is_forwarded,
+    forwardCount: m.forward_count ?? 0,
+    isViewOnce: m.is_view_once,
+    viewOnceOpened: !!m.view_once_opened_at,
+    isEdited: !!m.edited_at,
+    editedAt: m.edited_at ? new Date(m.edited_at).getTime() : undefined,
+    reactions: m.reactions ?? [],
+    replyToId: m.reply_to_id ? String(m.reply_to_id) : undefined,
+    replyType: m.reply_type ?? undefined,
+    replyQuotedSenderId: m.reply_sender_id != null ? String(m.reply_sender_id) : undefined,
+    replyText: m.reply_content
+      ? messageReplyPreviewText({
+          type: m.reply_is_deleted ? "deleted" : (m.reply_type ?? "text"),
+          text: m.reply_content,
+          senderId: String(m.reply_sender_id) === String(viewerDbId) ? "me" : String(m.reply_sender_id),
+          isDeleted: !!m.reply_is_deleted,
+        })
+      : undefined,
+    replySenderName: m.reply_sender_name ?? undefined,
+    localMediaUri: prevLocal?.localMediaUri,
+    downloadProgress: prevLocal?.downloadProgress,
+    uploadProgress: prevLocal?.uploadProgress,
+    uploadFailed: prevLocal?.uploadFailed,
+    fileSizeBytes: prevLocal?.fileSizeBytes,
+  };
+}
+
 export interface Chat {
   id: string;
   name: string;
@@ -205,6 +251,10 @@ interface AppContextType {
   updateAvatar: (base64: string, mimeType?: string) => Promise<void>;
   createDirectChat: (otherUserId: number, otherName: string, otherAvatar?: string) => Promise<string>;
   loadMessages: (chatId: string) => Promise<void>;
+  loadOlderMessages: (
+    chatId: string,
+    beforeTimestamp: number,
+  ) => Promise<{ loaded: number; hasMore: boolean }>;
   refreshChats: () => Promise<void>;
   clearAllChatHistory: () => Promise<void>;
   sendImageMessage: (chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean, mediaKind?: "image" | "video") => void;
@@ -733,49 +783,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const prevById = new Map((prevChat?.messages ?? []).map((pm) => [pm.id, pm]));
 
         const msgs: Message[] = rawMessages.map((m: any) => {
-          const isMe = String(m.sender_id) === String(u?.dbId);
           const prevLocal = prevById.get(String(m.id));
-          let status: "sent" | "delivered" | "read" = "sent";
-          if (isMe) {
-            if (m.delivery_status === "read") status = "read";
-            else if (m.delivery_status === "delivered") status = "delivered";
-            else status = "sent";
-          }
-          return {
-            id: String(m.id),
-            text: m.is_deleted ? "This message was deleted" : (m.content ?? ""),
-            timestamp: new Date(m.created_at).getTime(),
-            senderId: isMe ? "me" : String(m.sender_id),
-            senderName: m.sender_name ?? undefined,
-            type: m.is_deleted ? "deleted" : (m.type ?? "text"),
-            status,
-            mediaUrl: m.media_url ?? undefined,
-            isStarred: m.is_starred,
-            isForwarded: m.is_forwarded,
-            forwardCount: m.forward_count ?? 0,
-            isViewOnce: m.is_view_once,
-            viewOnceOpened: !!m.view_once_opened_at,
-            isEdited: !!m.edited_at,
-            editedAt: m.edited_at ? new Date(m.edited_at).getTime() : undefined,
-            reactions: m.reactions ?? [],
-            replyToId: m.reply_to_id ? String(m.reply_to_id) : undefined,
-            replyType: m.reply_type ?? undefined,
-            replyQuotedSenderId: m.reply_sender_id != null ? String(m.reply_sender_id) : undefined,
-            replyText: m.reply_content
-              ? messageReplyPreviewText({
-                  type: m.reply_is_deleted ? "deleted" : (m.reply_type ?? "text"),
-                  text: m.reply_content,
-                  senderId: String(m.reply_sender_id) === String(u?.dbId) ? "me" : String(m.reply_sender_id),
-                  isDeleted: !!m.reply_is_deleted,
-                })
-              : undefined,
-            replySenderName: m.reply_sender_name ?? undefined,
-            localMediaUri: prevLocal?.localMediaUri,
-            downloadProgress: prevLocal?.downloadProgress,
-            uploadProgress: prevLocal?.uploadProgress,
-            uploadFailed: prevLocal?.uploadFailed,
-            fileSizeBytes: prevLocal?.fileSizeBytes,
-          };
+          return mapServerRowToMessage(m, u?.dbId, prevLocal);
         });
 
         return prev.map((c) => {
@@ -869,6 +878,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     } catch {}
   }, [patchChatMessage]);
+
+  const loadOlderMessages = useCallback(
+    async (chatId: string, beforeTimestamp: number): Promise<{ loaded: number; hasMore: boolean }> => {
+      const u = userRef.current;
+      if (!u?.dbId || !beforeTimestamp) return { loaded: 0, hasMore: false };
+      try {
+        const before = new Date(beforeTimestamp).toISOString();
+        const data = await api(
+          `/chats/${chatId}/messages?limit=${OLDER_MESSAGES_PAGE}&before=${encodeURIComponent(before)}&userId=${u.dbId}`,
+        ) as { success: boolean; messages: any[] };
+        if (!data.success || !data.messages?.length) {
+          return { loaded: 0, hasMore: false };
+        }
+
+        const clearedAt = clearedHistoryAtRef.current;
+        const rawMessages =
+          clearedAt > 0
+            ? data.messages.filter((m: any) => new Date(m.created_at).getTime() > clearedAt)
+            : data.messages;
+
+        let loaded = 0;
+        setChats((prev) =>
+          prev.map((c) => {
+            if (c.id !== chatId) return c;
+            const prevById = new Map(c.messages.map((pm) => [pm.id, pm]));
+            const existingIds = new Set(c.messages.map((m) => m.id));
+            const older: Message[] = [];
+            for (const m of rawMessages) {
+              const id = String(m.id);
+              if (existingIds.has(id)) continue;
+              older.push(mapServerRowToMessage(m, u.dbId, prevById.get(id)));
+            }
+            loaded = older.length;
+            if (loaded === 0) return c;
+            const merged = [...older, ...c.messages].sort((a, b) => a.timestamp - b.timestamp);
+            return { ...c, messages: merged };
+          }),
+        );
+        return { loaded, hasMore: rawMessages.length >= OLDER_MESSAGES_PAGE };
+      } catch {
+        return { loaded: 0, hasMore: false };
+      }
+    },
+    [],
+  );
 
   // Auto-refresh chats, statuses and call logs (+ reload open chat on new API messages)
   useEffect(() => {
@@ -1962,7 +2016,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setUser, logout, sendMessage, createGroup, markAsRead, markAllAsRead,
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, forwardMessage, starredMessages, updateAvatar,
-      createDirectChat, loadMessages, refreshChats, clearAllChatHistory,
+      createDirectChat, loadMessages, loadOlderMessages, refreshChats, clearAllChatHistory,
       sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage, sendDocumentMessage,
       sendContactMessage, setTyping, clearTyping,
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,

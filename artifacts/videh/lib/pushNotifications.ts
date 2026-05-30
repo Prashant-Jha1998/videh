@@ -17,7 +17,11 @@ export const NOTIFICATION_ACTION_ACCEPT_CALL = "accept_call";
 export const NOTIFICATION_ACTION_DECLINE_CALL = "decline_call";
 
 export async function ensureVidehNotificationSetup(): Promise<void> {
-  if (Platform.OS === "web") return;
+  if (Platform.OS === "web") {
+    const { ensureWebNotificationPermission } = await import("./web/webBrowserNotify");
+    await ensureWebNotificationPermission();
+    return;
+  }
   const { applyVidehNotificationSounds } = await import("./applyNotificationChannels");
   await applyVidehNotificationSounds();
   await Notifications.setNotificationCategoryAsync(VIDEH_CHAT_MESSAGE_CATEGORY_ID, [

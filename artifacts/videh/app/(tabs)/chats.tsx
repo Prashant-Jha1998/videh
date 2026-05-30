@@ -628,6 +628,10 @@ export default function ChatsScreen() {
                 <Text style={[styles.previewStatusHint, { color: colors.mutedForeground }]}>
                   Tap photo to view status
                 </Text>
+              ) : Platform.OS === "web" ? (
+                <Text style={[styles.previewStatusHint, { color: colors.mutedForeground }]}>
+                  Use the info button for full profile
+                </Text>
               ) : null}
               <View style={[styles.previewActions, { borderTopColor: colors.border }]}>
                 {previewStatusIds.length > 0 ? (
@@ -652,6 +656,7 @@ export default function ChatsScreen() {
                     setPreviewChat(null);
                     openChatInfo(chat);
                   }}
+                  accessibilityLabel="View profile"
                 >
                   <Ionicons name="information-circle-outline" size={22} color={colors.primary} />
                 </TouchableOpacity>

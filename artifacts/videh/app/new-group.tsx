@@ -44,7 +44,7 @@ export default function NewGroupScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { createGroup, user } = useApp();
+  const { createGroup, user, chats } = useApp();
   const [selected, setSelected] = useState<number[]>([]);
   const [members, setMembers] = useState<GroupCandidate[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(true);
@@ -58,7 +58,14 @@ export default function NewGroupScreen() {
     setLoadingMembers(true);
     try {
       if (Platform.OS === "web") {
-        setMembers([]);
+        const { chatsToWebMembers } = await import("@/lib/web/webContacts");
+        const candidates = chatsToWebMembers(chats, user?.dbId).map((m) => ({
+          id: m.id,
+          name: m.name,
+          phone: m.phone ?? "",
+          avatarUrl: m.avatarUrl,
+        }));
+        setMembers(candidates);
         setLoadingMembers(false);
         return;
       }
@@ -105,7 +112,7 @@ export default function NewGroupScreen() {
     } finally {
       setLoadingMembers(false);
     }
-  }, []);
+  }, [chats, user?.dbId, user?.sessionToken]);
 
   useEffect(() => {
     loadGroupCandidates();

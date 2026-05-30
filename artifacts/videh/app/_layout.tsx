@@ -74,7 +74,9 @@ async function declineIncomingCallSilently(callId: string, userId: number, sessi
 }
 
 function canPresentIncomingCallUi(): boolean {
-  if (Platform.OS === "web") return false;
+  if (Platform.OS === "web") {
+    return typeof document === "undefined" || document.visibilityState !== "hidden";
+  }
   const state = AppState.currentState;
   return state === "active" || state === "background" || state === "inactive";
 }
@@ -205,8 +207,8 @@ function RootLayoutNav() {
     setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
     pendingIncomingRef.current = callPayload;
 
+    void startIncomingCallExperience(callPayload);
     if (Platform.OS !== "web") {
-      void startIncomingCallExperience(callPayload);
       void showIncomingCallNotification(callPayload);
     }
 

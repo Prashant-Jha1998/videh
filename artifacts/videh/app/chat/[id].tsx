@@ -9,7 +9,13 @@ import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { KeyboardStickyView, useKeyboardState } from "react-native-keyboard-controller";
+import {
+  KeyboardAvoidingView,
+  KeyboardStickyView,
+  useGenericKeyboardHandler,
+  useKeyboardState,
+} from "react-native-keyboard-controller";
+import { runOnJS } from "react-native-reanimated";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -75,6 +81,15 @@ import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { formatTypingLabel } from "@/lib/typingIndicator";
 import { TypingIndicator } from "@/components/TypingIndicator";
 import { formatChatBubbleTime } from "@/utils/time";
+import {
+  isChatNearBottom,
+  WHATSAPP_CHAT_NEAR_BOTTOM_PX,
+  WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS,
+} from "@/lib/whatsappChatScroll";
+import { extractUrls, primaryUrlFromText } from "@/lib/chatUrls";
+import { ComposerLinkPreview } from "@/components/ComposerLinkPreview";
+import { pickWebFile } from "@/lib/web/webFilePicker";
+import { useWebKeyboardShortcuts } from "@/lib/useWebKeyboardShortcuts";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { DropdownMenu } from "@/components/DropdownMenu";
 import { ThemedHeader } from "@/components/ThemedHeader";
@@ -214,12 +229,6 @@ function toReplyData(msg: {
     senderName: msg.senderName,
     type: msg.type,
   };
-}
-
-// Extract URLs from text
-function extractUrls(text: string): string[] {
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  return text.match(urlRegex) ?? [];
 }
 
 // Mention-aware text renderer
@@ -963,7 +972,7 @@ export default function ChatScreen() {
     setTyping, clearTyping, markAsRead, deleteMessage, deleteForEveryone,
     editMessage, reactToMessage, starMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
-    loadMessages, forwardMessage, updateLocationOnServer,     stopLiveLocationSession, setActiveChatId,
+    loadMessages, loadOlderMessages, forwardMessage, updateLocationOnServer,     stopLiveLocationSession, setActiveChatId,
     typingByChatId, reportRemoteTyping, patchChatMessage,
   } = useApp();
 
@@ -1333,21 +1342,78 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList<ChatListRow>>(null);
   const pendingScrollToEndRef = useRef(true);
   const userScrolledUpRef = useRef(false);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [unreadBelowCount, setUnreadBelowCount] = useState(0);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [dismissedComposerLink, setDismissedComposerLink] = useState<string | null>(null);
+  const frozenMessageCountRef = useRef(0);
+  const hasMoreOlderRef = useRef(true);
+  const loadingOlderRef = useRef(false);
+  const lastOlderLoadAtRef = useRef(0);
   const scrollLockRef = useRef(false);
   const hadRemoteTypingRef = useRef(false);
-  const NEAR_BOTTOM_THRESHOLD = 80;
+  const pinToBottomTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const scrollToLatest = useCallback((animated = false) => {
     if (searching || scrollLockRef.current) return;
     listRef.current?.scrollToEnd({ animated });
   }, [searching]);
+  /** WhatsApp: after keyboard/composer layout, scroll to latest more than once. */
+  const schedulePinToBottom = useCallback(() => {
+    if (searching || userScrolledUpRef.current) return;
+    for (const t of pinToBottomTimersRef.current) clearTimeout(t);
+    pinToBottomTimersRef.current = [];
+    const run = (animated: boolean) => {
+      if (!userScrolledUpRef.current && !searching) scrollToLatest(animated);
+    };
+    for (const delay of WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS) {
+      const t = setTimeout(() => run(delay >= 150), delay);
+      pinToBottomTimersRef.current.push(t);
+    }
+  }, [searching, scrollToLatest]);
   const pinChatToBottom = useCallback(
     (animated = false) => {
       userScrolledUpRef.current = false;
+      setShowJumpToLatest(false);
+      setUnreadBelowCount(0);
+      frozenMessageCountRef.current = messages.length;
       pendingScrollToEndRef.current = true;
-      scrollToLatest(animated);
+      if (animated) scrollToLatest(true);
+      else schedulePinToBottom();
     },
-    [scrollToLatest],
+    [messages.length, schedulePinToBottom, scrollToLatest],
   );
+  const syncScrollAwayFromBottom = useCallback(
+    (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
+      const away = !isChatNearBottom(
+        contentOffsetY,
+        contentHeight,
+        layoutHeight,
+        WHATSAPP_CHAT_NEAR_BOTTOM_PX,
+      );
+      if (away && !userScrolledUpRef.current) {
+        frozenMessageCountRef.current = messages.length;
+      }
+      userScrolledUpRef.current = away;
+      const unread = away ? Math.max(0, messages.length - frozenMessageCountRef.current) : 0;
+      setUnreadBelowCount(unread);
+      setShowJumpToLatest((away && !searching && listRows.length > 6) || unread > 0);
+    },
+    [listRows.length, messages.length, searching],
+  );
+  const tryLoadOlderMessages = useCallback(async () => {
+    if (loadingOlderRef.current || !hasMoreOlderRef.current || searching || !chatId) return;
+    const oldest = messages.find((m) => !m.id.startsWith("tmp_"));
+    if (!oldest) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const { hasMore } = await loadOlderMessages(chatId, oldest.timestamp);
+      hasMoreOlderRef.current = hasMore;
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [chatId, loadOlderMessages, messages, searching]);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevMessageCountRef = useRef(0);
   const keyboardScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1355,9 +1421,42 @@ export default function ChatScreen() {
   useEffect(() => {
     pendingScrollToEndRef.current = true;
     userScrolledUpRef.current = false;
+    setShowJumpToLatest(false);
+    setUnreadBelowCount(0);
+    frozenMessageCountRef.current = 0;
+    hasMoreOlderRef.current = true;
     prevMessageCountRef.current = 0;
     hadRemoteTypingRef.current = false;
   }, [chatId]);
+
+  useEffect(() => {
+    if (!userScrolledUpRef.current) {
+      frozenMessageCountRef.current = messages.length;
+      if (unreadBelowCount > 0) setUnreadBelowCount(0);
+    } else {
+      const unread = Math.max(0, messages.length - frozenMessageCountRef.current);
+      setUnreadBelowCount(unread);
+      if (unread > 0) setShowJumpToLatest(true);
+    }
+  }, [messages.length]);
+
+  const composerLinkUrl = useMemo(() => {
+    if (editTarget || selectionActive) return null;
+    const url = primaryUrlFromText(text);
+    if (!url || url === dismissedComposerLink) return null;
+    return url;
+  }, [text, editTarget, selectionActive, dismissedComposerLink]);
+
+  /** WhatsApp: pin when keyboard animation finishes (works with adjustResize on Android). */
+  useGenericKeyboardHandler(
+    {
+      onEnd: () => {
+        "worklet";
+        runOnJS(schedulePinToBottom)();
+      },
+    },
+    [schedulePinToBottom],
+  );
 
   useEffect(() => {
     if (searching || messages.length === 0) return;
@@ -1377,19 +1476,36 @@ export default function ChatScreen() {
   const keyboardVisible = useKeyboardState((s) => s.isVisible);
   const keyboardHeight = useKeyboardState((s) => s.height);
 
+  /** WhatsApp: bottom inset = composer only; keyboard handled by window resize (Android) / KAV (iOS). */
+  const listBottomPadding = useMemo(
+    () => Math.max(12, composerHeight + 8),
+    [composerHeight],
+  );
+
+  useEffect(() => {
+    return () => {
+      for (const t of pinToBottomTimersRef.current) clearTimeout(t);
+      pinToBottomTimersRef.current = [];
+    };
+  }, []);
+
   useEffect(() => {
     if (searching || !keyboardVisible || userScrolledUpRef.current) return;
-    const run = () => scrollToLatest(false);
-    run();
+    schedulePinToBottom();
     const task = InteractionManager.runAfterInteractions(() => {
-      run();
-      keyboardScrollTimerRef.current = setTimeout(run, 120);
+      schedulePinToBottom();
     });
     return () => {
       task.cancel();
       if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
     };
-  }, [keyboardHeight, keyboardVisible, searching, scrollToLatest]);
+  }, [keyboardHeight, keyboardVisible, searching, schedulePinToBottom]);
+
+  /** Reply strip / emoji panel / mention bar grew — keep last message visible (WhatsApp). */
+  useEffect(() => {
+    if (searching || userScrolledUpRef.current) return;
+    schedulePinToBottom();
+  }, [composerHeight, searching, schedulePinToBottom]);
 
   useEffect(() => {
     if (searching) return;
@@ -1444,10 +1560,15 @@ export default function ChatScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setEmojiPanelOpen((open) => {
       const next = !open;
-      if (next) Keyboard.dismiss();
+      if (next) {
+        Keyboard.dismiss();
+        userScrolledUpRef.current = false;
+        pendingScrollToEndRef.current = true;
+        requestAnimationFrame(() => schedulePinToBottom());
+      }
       return next;
     });
-  }, [composerEnabled, editTarget]);
+  }, [composerEnabled, editTarget, schedulePinToBottom]);
 
   const sendGifOrSticker = useCallback(async (item: GifMediaItem, kind: "gif" | "sticker") => {
     if (!chatId || !composerEnabled || editTarget) return;
@@ -1471,6 +1592,9 @@ export default function ChatScreen() {
   }, [sendGifOrSticker]);
 
   const handleTextChange = useCallback((val: string) => {
+    if (dismissedComposerLink && !val.includes(dismissedComposerLink)) {
+      setDismissedComposerLink(null);
+    }
     if (editTarget) { setEditText(val); return; }
     setText(val);
     if (!chatId) return;
@@ -1601,11 +1725,24 @@ export default function ChatScreen() {
       void goToMediaComposeBatch(images, isViewOnce);
 
     } else if (type === "audiofile") {
+      setAttachVisible(false);
       if (Platform.OS === "web") {
-        Alert.alert("Not supported on web", "Use the mobile app to send audio files.");
+        const picked = await pickWebFile("audio/*,.mp3,.m4a,.wav,.aac,.ogg,.webm");
+        if (!picked) return;
+        try {
+          const upload = await uploadChatMediaWithProgress({
+            uri: picked.uri,
+            mime: picked.mime,
+            filename: picked.name,
+            sessionToken: user?.sessionToken,
+          });
+          sendSpecialMessage(chatId, picked.name, "audio", upload.url);
+          pinChatToBottom(true);
+        } catch (e) {
+          Alert.alert("Error", e instanceof Error ? e.message : "Could not send this audio file.");
+        }
         return;
       }
-      setAttachVisible(false);
       const result = await DocumentPicker.getDocumentAsync({
         type: ["audio/*", "audio/mpeg", "audio/mp4", "audio/mp3", "audio/wav", "audio/x-wav", "audio/aac"],
         copyToCacheDirectory: true,
@@ -1627,8 +1764,19 @@ export default function ChatScreen() {
       }
 
     } else if (type === "document") {
-      if (Platform.OS === "web") { Alert.alert("Not supported on web", "Use the mobile app to share documents."); return; }
       setAttachVisible(false);
+      if (Platform.OS === "web") {
+        const picked = await pickWebFile("*/*");
+        if (!picked) return;
+        const fileSizeMB = picked.size / 1024 / 1024;
+        if (fileSizeMB > 100) {
+          Alert.alert("File too large", "Maximum allowed file size is 100 MB.");
+          return;
+        }
+        sendDocumentMessage(chatId, picked.uri, picked.name, picked.size, picked.mime);
+        pinChatToBottom(true);
+        return;
+      }
       const result = await DocumentPicker.getDocumentAsync({
         type: "*/*",
         copyToCacheDirectory: true,
@@ -1648,7 +1796,6 @@ export default function ChatScreen() {
       router.push({ pathname: "/chat/send-location", params: { id: chatId } } as unknown as Href);
 
     } else if (type === "contact") {
-      if (Platform.OS === "web") { Alert.alert("Not supported on web", "Use the mobile app to share contacts."); return; }
       setAttachVisible(false);
       setContactToConfirm(null);
       setContactPickerOpen(true);
@@ -1722,6 +1869,12 @@ export default function ChatScreen() {
   const saveSharedContactToPhone = useCallback(async (text: string) => {
     const parsed = parseContactMessage(text);
     if (!parsed) return;
+    if (Platform.OS === "web") {
+      const { downloadContactVCardFromMessage } = await import("@/lib/web/webVCard");
+      const res = downloadContactVCardFromMessage(text);
+      Alert.alert(res.ok ? "Downloaded" : "Error", res.ok ? "Contact saved as .vcf file." : res.message);
+      return;
+    }
     try {
       const { status } = await Contacts.requestPermissionsAsync();
       if (status !== "granted") {
@@ -1801,13 +1954,35 @@ export default function ChatScreen() {
     }
     const res = await saveImageUriToLibrary(uri, user?.sessionToken);
     if (res.ok) {
-      Alert.alert("Saved", "Image saved to your gallery.");
+      Alert.alert("Saved", Platform.OS === "web" ? "Image downloaded." : "Image saved to your gallery.");
     } else {
       Alert.alert("Error", res.message);
     }
   }, [user?.sessionToken]);
 
   const [attachVisible, setAttachVisible] = useState(false);
+
+  useWebKeyboardShortcuts({
+    enabled: Platform.OS === "web" && !selectionActive && !attachVisible,
+    onSend: () => handleSend(),
+    onSearch: () => {
+      setSearching(true);
+      setSearchQuery("");
+    },
+    onEscape: () => {
+      if (attachVisible) setAttachVisible(false);
+      else if (searching) {
+        setSearching(false);
+        setSearchQuery("");
+      } else if (emojiPanelOpen) setEmojiPanelOpen(false);
+      else if (replyTo) setReplyTo(null);
+      else if (editTarget) {
+        setEditTarget(null);
+        setEditText("");
+      }
+    },
+  });
+
   const [cameraSheetOpen, setCameraSheetOpen] = useState(false);
   const [mediaPreview, setMediaPreview] = useState<{ uri: string; caption?: string; type: "image" | "video" } | null>(null);
   const showAttachMenu = () => {
@@ -1824,8 +1999,11 @@ export default function ChatScreen() {
       { text: "Reply", onPress: () => { setReplyTo(toReplyData(msg)); inputRef.current?.focus(); } },
       { text: "Copy", onPress: () => { Clipboard.setString(msg.text); } },
       { text: "React", onPress: () => setReactionTarget(msg) },
-      ...(msg.type === "image" && msg.mediaUrl && !msg.isViewOnce && Platform.OS !== "web"
-        ? [{ text: "Save image", onPress: () => { void saveImageToGallery(msg.mediaUrl!); } }]
+      ...(msg.type === "image" && msg.mediaUrl && !msg.isViewOnce
+        ? [{
+            text: Platform.OS === "web" ? "Download image" : "Save image",
+            onPress: () => { void saveImageToGallery(msg.mediaUrl!); },
+          }]
         : []),
       ...(!msg.isViewOnce ? [{ text: "Forward", onPress: () => { setForwardSearch(""); setForwardMsg(msg); } }] : []),
       { text: "Star", onPress: () => { if (chatId) starMessage(chatId, msg.id); } },
@@ -2479,6 +2657,14 @@ export default function ChatScreen() {
         </View>
       )}
 
+      {composerLinkUrl ? (
+        <ComposerLinkPreview
+          url={composerLinkUrl}
+          colors={colors}
+          onDismiss={() => setDismissedComposerLink(composerLinkUrl)}
+        />
+      ) : null}
+
       {!selectionActive && (
         <View
           style={[
@@ -2534,6 +2720,7 @@ export default function ChatScreen() {
                     setAssistantChatInputFocused(true);
                     userScrolledUpRef.current = false;
                     pendingScrollToEndRef.current = true;
+                    schedulePinToBottom();
                     if (chatId && inputVal.length > 0) setTyping(chatId);
                   }}
                   onBlur={() => {
@@ -2705,7 +2892,11 @@ export default function ChatScreen() {
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
 
-          <View style={styles.headerAvatarWrap}>
+          <TouchableOpacity
+            style={styles.headerAvatarWrap}
+            activeOpacity={0.8}
+            onPress={() => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } })}
+          >
             {contactAvatar ? (
               <Image source={{ uri: contactAvatar }} style={styles.headerAvatarImg} contentFit="cover" />
             ) : (
@@ -2713,7 +2904,7 @@ export default function ChatScreen() {
                 <Text style={styles.headerAvatarText}>{initials}</Text>
               </View>
             )}
-          </View>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.headerInfo}
@@ -2779,96 +2970,182 @@ export default function ChatScreen() {
       )}
 
       <View style={styles.chatBody}>
-        <FlatList
-          style={styles.messageList}
-          ref={listRef}
-          data={listRows}
-          extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}|${composerHeight}`}
-          ListFooterComponent={
-            !searching && remoteTypingNames.length > 0 ? (
-              <TypingIndicator
-                bubbleColor={colors.chatBubbleReceived}
-                dotColor={colors.mutedForeground}
-                textColor={colors.mutedForeground}
-                label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
-              />
-            ) : null
+        {(() => {
+          const chatMessageList = (
+            <FlatList
+              style={styles.messageList}
+              ref={listRef}
+              data={listRows}
+              ListHeaderComponent={
+                !searching && loadingOlder ? (
+                  <View style={styles.olderLoader}>
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  </View>
+                ) : null
+              }
+              ListFooterComponent={
+                !searching && remoteTypingNames.length > 0 ? (
+                  <TypingIndicator
+                    bubbleColor={colors.chatBubbleReceived}
+                    dotColor={colors.mutedForeground}
+                    textColor={colors.mutedForeground}
+                    label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
+                  />
+                ) : null
+              }
+              keyExtractor={(row) => {
+                if (row.rowType === "date") return row.id;
+                const m = row.message;
+                return m.id.startsWith("tmp_") ? `${m.id}-${m.timestamp}` : m.id;
+              }}
+              renderItem={renderChatListRow}
+              contentContainerStyle={[
+                styles.messageListContent,
+                {
+                  paddingBottom: listBottomPadding,
+                  flexGrow: 1,
+                  justifyContent: searching ? "flex-start" : "flex-end",
+                },
+              ]}
+              extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}|${composerHeight}|${keyboardVisible}|${unreadBelowCount}|${loadingOlder}`}
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              removeClippedSubviews={Platform.OS === "android"}
+              maintainVisibleContentPosition={
+                searching ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
+              }
+              initialNumToRender={18}
+              maxToRenderPerBatch={12}
+              windowSize={9}
+              updateCellsBatchingPeriod={50}
+              onScrollBeginDrag={() => {
+                scrollLockRef.current = true;
+              }}
+              onScrollEndDrag={(e) => {
+                scrollLockRef.current = false;
+                const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+                syncScrollAwayFromBottom(
+                  contentOffset.y,
+                  contentSize.height,
+                  layoutMeasurement.height,
+                );
+              }}
+              onMomentumScrollEnd={(e) => {
+                const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+                syncScrollAwayFromBottom(
+                  contentOffset.y,
+                  contentSize.height,
+                  layoutMeasurement.height,
+                );
+              }}
+              onScroll={(e) => {
+                const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+                if (
+                  !searching
+                  && contentOffset.y < 140
+                  && hasMoreOlderRef.current
+                  && Date.now() - lastOlderLoadAtRef.current > 700
+                ) {
+                  lastOlderLoadAtRef.current = Date.now();
+                  void tryLoadOlderMessages();
+                }
+                if (
+                  isChatNearBottom(
+                    contentOffset.y,
+                    contentSize.height,
+                    layoutMeasurement.height,
+                    WHATSAPP_CHAT_NEAR_BOTTOM_PX,
+                  )
+                ) {
+                  userScrolledUpRef.current = false;
+                  if (showJumpToLatest) setShowJumpToLatest(false);
+                  if (unreadBelowCount > 0) setUnreadBelowCount(0);
+                }
+              }}
+              scrollEventThrottle={16}
+              onContentSizeChange={() => {
+                if (searching) return;
+                if (pendingScrollToEndRef.current || !userScrolledUpRef.current) {
+                  pendingScrollToEndRef.current = false;
+                  scrollToLatest(false);
+                }
+              }}
+              onLayout={() => {
+                if (!userScrolledUpRef.current) scrollToLatest(false);
+              }}
+              onScrollToIndexFailed={(info) => {
+                listRef.current?.scrollToOffset({
+                  offset: Math.max(0, info.averageItemLength * info.index),
+                  animated: true,
+                });
+                setTimeout(() => {
+                  listRef.current?.scrollToIndex({
+                    index: info.index,
+                    animated: true,
+                    viewPosition: 0.5,
+                  });
+                }, 120);
+              }}
+              ListEmptyComponent={
+                initializing ? (
+                  <View style={styles.initWrap}>
+                    <Text style={[styles.initText, { color: colors.mutedForeground }]}>Starting chat...</Text>
+                  </View>
+                ) : searching ? (
+                  <View style={styles.initWrap}>
+                    <Text style={[styles.initText, { color: colors.mutedForeground }]}>No messages found</Text>
+                  </View>
+                ) : null
+              }
+            />
+          );
+          if (Platform.OS === "web") {
+            return (
+              <KeyboardAvoidingView style={styles.messageListAvoid} behavior="padding" enabled>
+                {chatMessageList}
+                <View
+                  onLayout={(e) => {
+                    const h = Math.ceil(e.nativeEvent.layout.height);
+                    if (h > 0 && h !== composerHeight) setComposerHeight(h);
+                  }}
+                >
+                  {composerFooter}
+                </View>
+              </KeyboardAvoidingView>
+            );
           }
-          keyExtractor={(row) => {
-            if (row.rowType === "date") return row.id;
-            const m = row.message;
-            return m.id.startsWith("tmp_") ? `${m.id}-${m.timestamp}` : m.id;
-          }}
-          renderItem={renderChatListRow}
-          contentContainerStyle={[
-            styles.messageListContent,
-            { paddingBottom: Math.max(16, composerHeight + 10), flexGrow: listRows.length > 0 ? 0 : 1 },
-          ]}
-          keyboardDismissMode="on-drag"
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          removeClippedSubviews={Platform.OS === "android"}
-          initialNumToRender={18}
-          maxToRenderPerBatch={12}
-          windowSize={9}
-          updateCellsBatchingPeriod={50}
-          onScrollBeginDrag={() => {
-            scrollLockRef.current = true;
-          }}
-          onScrollEndDrag={(e) => {
-            scrollLockRef.current = false;
-            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-            const distFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-            userScrolledUpRef.current = distFromBottom > NEAR_BOTTOM_THRESHOLD;
-          }}
-          onMomentumScrollEnd={(e) => {
-            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-            const distFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-            userScrolledUpRef.current = distFromBottom > NEAR_BOTTOM_THRESHOLD;
-          }}
-          onScroll={(e) => {
-            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-            const distFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-            if (distFromBottom <= NEAR_BOTTOM_THRESHOLD) {
-              userScrolledUpRef.current = false;
-            }
-          }}
-          scrollEventThrottle={16}
-          onContentSizeChange={() => {
-            if (searching) return;
-            if (pendingScrollToEndRef.current || !userScrolledUpRef.current) {
-              pendingScrollToEndRef.current = false;
-              scrollToLatest(false);
-            }
-          }}
-          onLayout={() => {
-            if (!userScrolledUpRef.current) scrollToLatest(false);
-          }}
-          onScrollToIndexFailed={(info) => {
-            listRef.current?.scrollToOffset({
-              offset: Math.max(0, info.averageItemLength * info.index),
-              animated: true,
-            });
-            setTimeout(() => {
-              listRef.current?.scrollToIndex({
-                index: info.index,
-                animated: true,
-                viewPosition: 0.5,
-              });
-            }, 120);
-          }}
-          ListEmptyComponent={
-            initializing ? (
-              <View style={styles.initWrap}>
-                <Text style={[styles.initText, { color: colors.mutedForeground }]}>Starting chat...</Text>
+          return (
+            <KeyboardAvoidingView
+              style={styles.messageListAvoid}
+              behavior="padding"
+              enabled={Platform.OS === "ios"}
+            >
+              {chatMessageList}
+            </KeyboardAvoidingView>
+          );
+        })()}
+
+        {showJumpToLatest ? (
+          <TouchableOpacity
+            style={[
+              styles.scrollToBottomFab,
+              { bottom: listBottomPadding + 12, backgroundColor: colors.card },
+            ]}
+            onPress={() => pinChatToBottom(true)}
+            activeOpacity={0.88}
+            accessibilityLabel="Scroll to latest messages"
+          >
+            <Ionicons name="chevron-down" size={22} color={colors.primary} />
+            {unreadBelowCount > 0 ? (
+              <View style={[styles.unreadFabBadge, { backgroundColor: colors.primary }]}>
+                <Text style={styles.unreadFabBadgeText}>
+                  {unreadBelowCount > 99 ? "99+" : String(unreadBelowCount)}
+                </Text>
               </View>
-            ) : searching ? (
-              <View style={styles.initWrap}>
-                <Text style={[styles.initText, { color: colors.mutedForeground }]}>No messages found</Text>
-              </View>
-            ) : null
-          }
-        />
+            ) : null}
+          </TouchableOpacity>
+        ) : null}
 
         {Platform.OS !== "web" ? (
           <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
@@ -2881,9 +3158,7 @@ export default function ChatScreen() {
               {composerFooter}
             </View>
           </KeyboardStickyView>
-        ) : (
-          composerFooter
-        )}
+        ) : null}
       </View>
 
 
@@ -3065,13 +3340,32 @@ export default function ChatScreen() {
                       <Text style={[styles.contactViewActionTxt, { color: colors.foreground }]}>{phone}</Text>
                     </TouchableOpacity>
                   ))}
-                  {Platform.OS !== "web" ? (
+                  <TouchableOpacity
+                    style={[styles.contactViewAction, { borderColor: colors.border }]}
+                    onPress={() => { void saveSharedContactToPhone(viewContactMsg.text); }}
+                  >
+                    <Ionicons name={Platform.OS === "web" ? "download-outline" : "person-add-outline"} size={20} color={colors.primary} />
+                    <Text style={[styles.contactViewActionTxt, { color: colors.foreground }]}>
+                      {Platform.OS === "web" ? "Download contact (.vcf)" : "Add to contacts"}
+                    </Text>
+                  </TouchableOpacity>
+                  {parsed.phones[0] ? (
                     <TouchableOpacity
                       style={[styles.contactViewAction, { borderColor: colors.border }]}
-                      onPress={() => { void saveSharedContactToPhone(viewContactMsg.text); }}
+                      onPress={() => {
+                        if (Platform.OS === "web") {
+                          void import("@/lib/web/webVCard").then((m) => {
+                            void m.copyTextToClipboard(parsed.phones[0]!);
+                            Alert.alert("Copied", "Phone number copied.");
+                          });
+                        } else {
+                          Clipboard.setString(parsed.phones[0]!);
+                          Alert.alert("Copied", "Phone number copied.");
+                        }
+                      }}
                     >
-                      <Ionicons name="person-add-outline" size={20} color={colors.primary} />
-                      <Text style={[styles.contactViewActionTxt, { color: colors.foreground }]}>Add to contacts</Text>
+                      <Ionicons name="copy-outline" size={20} color={colors.primary} />
+                      <Text style={[styles.contactViewActionTxt, { color: colors.foreground }]}>Copy number</Text>
                     </TouchableOpacity>
                   ) : null}
                   <TouchableOpacity style={styles.contactViewClose} onPress={() => setViewContactMsg(null)}>
@@ -3286,8 +3580,37 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   chatBody: { flex: 1 },
+  messageListAvoid: { flex: 1 },
   messageList: { flex: 1 },
-  messageListContent: { paddingHorizontal: 10, paddingTop: 8, paddingBottom: 12 },
+  messageListContent: { paddingHorizontal: 10, paddingTop: 8 },
+  scrollToBottomFab: {
+    position: "absolute",
+    right: 14,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    zIndex: 8,
+  },
+  unreadFabBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  unreadFabBadgeText: { color: "#fff", fontSize: 11, fontFamily: "Inter_700Bold" },
+  olderLoader: { paddingVertical: 12, alignItems: "center" },
   // @mention autocomplete
   mentionList: { borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)", maxHeight: 220, elevation: 4, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4 },
   mentionRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, gap: 12, borderBottomWidth: 0.5 },

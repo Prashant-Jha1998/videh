@@ -57,7 +57,37 @@ export default function ContactsScreen() {
   const loadContacts = useCallback(async () => {
     setStatus("loading");
     if (Platform.OS === "web") {
-      setStatus("denied");
+      const { chatsToWebMembers, searchUsersByPhoneWeb } = await import("@/lib/web/webContacts");
+      const fromChats = chatsToWebMembers(chats, user?.dbId).map((m) => ({
+        id: `videh_${m.id}`,
+        name: m.name,
+        phone: m.phone ?? "",
+        normalizedPhone: m.phone ?? "",
+        videhId: m.id,
+        videhName: m.name,
+        about: m.about ?? undefined,
+        avatarUrl: m.avatarUrl,
+      }));
+      if (search.trim().length >= 3) {
+        const found = await searchUsersByPhoneWeb(search, user?.sessionToken);
+        for (const u of found) {
+          if (!fromChats.some((c) => c.videhId === u.id)) {
+            fromChats.push({
+              id: `videh_${u.id}`,
+              name: u.name,
+              phone: u.phone ?? "",
+              normalizedPhone: u.phone ?? "",
+              videhId: u.id,
+              videhName: u.name,
+              about: u.about,
+              avatarUrl: u.avatarUrl,
+            });
+          }
+        }
+      }
+      setVidehContacts(fromChats.sort((a, b) => a.videhName.localeCompare(b.videhName)));
+      setInviteContacts([]);
+      setStatus("done");
       return;
     }
 
@@ -116,9 +146,11 @@ export default function ContactsScreen() {
     }
 
     setStatus("done");
-  }, [user?.phone]);
+  }, [user?.phone, user?.dbId, user?.sessionToken, chats, search]);
 
-  useEffect(() => { loadContacts(); }, []);
+  useEffect(() => {
+    void loadContacts();
+  }, [loadContacts]);
 
   const openChat = (contact: VidehContact) => {
     // Check if chat already exists by otherUserId or by name
@@ -241,7 +273,7 @@ export default function ContactsScreen() {
           <Text style={[styles.permTitle, { color: colors.foreground }]}>Contacts access needed</Text>
           <Text style={[styles.permText, { color: colors.mutedForeground }]}>
             {Platform.OS === "web"
-              ? "Contacts access is only available on the mobile app."
+              ? "Search by phone number (3+ digits) or open chats from your list."
               : "Allow Videh to access your contacts to find friends on Videh."}
           </Text>
           {Platform.OS !== "web" && (

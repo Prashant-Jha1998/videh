@@ -44,6 +44,12 @@ function safeUploadName(name: string): string {
 export async function ensureUploadableFileUri(uri: string, filename: string): Promise<string> {
   if (!uri) throw new Error("No file selected.");
 
+  if (Platform.OS === "web" && uri.startsWith("blob:")) {
+    const { getWebFile } = await import("./web/webFileRegistry");
+    if (getWebFile(uri)) return uri;
+    throw new Error("Could not read the selected file. Pick it again.");
+  }
+
   if (uri.startsWith("file://")) {
     const info = await FileSystem.getInfoAsync(uri);
     if (info.exists) return uri;

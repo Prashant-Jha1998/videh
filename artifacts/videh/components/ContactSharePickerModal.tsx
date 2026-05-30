@@ -13,7 +13,9 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useApp } from "@/context/AppContext";
 import { loadDeviceContactsForShare, type ContactShareRow } from "@/lib/loadDeviceContactsForShare";
+import { searchUsersForContactShare } from "@/lib/web/webContacts";
 
 type SectionRow =
   | { kind: "header"; key: string; title: string }
@@ -70,6 +72,7 @@ function contactInitials(name: string): string {
 
 export function ContactSharePickerModal({ visible, colors, onClose, onPick }: Props) {
   const insets = useSafeAreaInsets();
+  const { chats, user } = useApp();
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<ContactShareRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -93,11 +96,26 @@ export function ContactSharePickerModal({ visible, colors, onClose, onPick }: Pr
     setLoading(true);
     setError(null);
     try {
-      const list = await loadDeviceContactsForShare({ forceRefresh: force });
+      let list = await loadDeviceContactsForShare({
+        forceRefresh: force,
+        webChats: Platform.OS === "web" ? chats : undefined,
+        sessionToken: user?.sessionToken,
+      });
       if (gen !== loadGen.current) return;
+      if (Platform.OS === "web" && query.trim().length >= 3) {
+        const extra = await searchUsersForContactShare(query.trim(), user?.sessionToken);
+        const seen = new Set(list.map((r) => r.id));
+        for (const row of extra) {
+          if (!seen.has(row.id)) list.push(row);
+        }
+      }
       if (!list.length) {
         setRows([]);
-        setError("No contacts found on this device.");
+        setError(
+          Platform.OS === "web"
+            ? "Search by phone number (3+ digits) or start a chat first."
+            : "No contacts found on this device.",
+        );
         return;
       }
       setRows(list);
@@ -116,7 +134,7 @@ export function ContactSharePickerModal({ visible, colors, onClose, onPick }: Pr
     } finally {
       if (gen === loadGen.current) setLoading(false);
     }
-  }, [close]);
+  }, [close, chats, query, user?.sessionToken]);
 
   useEffect(() => {
     if (!visible) return;
@@ -125,6 +143,12 @@ export function ContactSharePickerModal({ visible, colors, onClose, onPick }: Pr
       loadGen.current += 1;
     };
   }, [visible, loadContacts]);
+
+  useEffect(() => {
+    if (!visible || Platform.OS !== "web" || query.trim().length < 3) return;
+    const t = setTimeout(() => void loadContacts(true), 300);
+    return () => clearTimeout(t);
+  }, [visible, query, loadContacts]);
 
   const flatData = useMemo(() => buildFlatRows(rows, query), [rows, query]);
 

@@ -130,7 +130,7 @@ function mediaExt(uri: string, type: "image" | "video"): string {
 export default function StatusCreateScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { addStatus, user } = useApp();
+  const { addStatus, user, chats } = useApp();
   const params = useLocalSearchParams<{ mode?: string }>();
   const [mode, setMode] = useState<"text" | "media">(params.mode === "camera" ? "media" : "text");
   const [stage, setStage] = useState<"compose" | "audience">("compose");
@@ -300,7 +300,18 @@ export default function StatusCreateScreen() {
 
   const loadAudienceContacts = async () => {
     if (Platform.OS === "web") {
-      setAudienceContacts([]);
+      setAudienceLoading(true);
+      try {
+        const { chatsToWebMembers } = await import("@/lib/web/webContacts");
+        const entries = chatsToWebMembers(chats, user?.dbId).map((m) => ({
+          id: m.id,
+          name: m.name,
+          phone: m.phone ?? "",
+        }));
+        setAudienceContacts(entries);
+      } finally {
+        setAudienceLoading(false);
+      }
       return;
     }
     setAudienceLoading(true);

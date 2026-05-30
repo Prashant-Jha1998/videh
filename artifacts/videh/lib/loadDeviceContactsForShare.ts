@@ -1,6 +1,9 @@
 import * as Contacts from "expo-contacts";
 import type { ExistingContact } from "expo-contacts";
+import { Platform } from "react-native";
+import type { Chat } from "@/context/AppContext";
 import { contactDisplayName, dedupeEmails, dedupePhones } from "./contactMessage";
+import { chatsToContactShareRows, searchUsersForContactShare } from "./web/webContacts";
 
 export type ContactShareRow = {
   id: string;
@@ -128,10 +131,25 @@ async function loadFresh(): Promise<ContactShareRow[]> {
   return dedupeAndSort(rows);
 }
 
+async function loadWebContacts(webChats: Chat[], sessionToken?: string | null): Promise<ContactShareRow[]> {
+  const fromChats = chatsToContactShareRows(webChats);
+  if (fromChats.length > 0) return fromChats;
+  return searchUsersForContactShare("", sessionToken);
+}
+
 /** Load phone contacts for share picker (cached, paginated, crash-safe). */
-export function loadDeviceContactsForShare(opts?: { forceRefresh?: boolean }): Promise<ContactShareRow[]> {
+export function loadDeviceContactsForShare(opts?: {
+  forceRefresh?: boolean;
+  webChats?: Chat[];
+  sessionToken?: string | null;
+}): Promise<ContactShareRow[]> {
   const force = opts?.forceRefresh ?? false;
   const now = Date.now();
+
+  if (Platform.OS === "web") {
+    return loadWebContacts(opts?.webChats ?? [], opts?.sessionToken);
+  }
+
   if (!force && cachedRows && now - cacheAt < CACHE_TTL_MS) {
     return Promise.resolve(cachedRows);
   }
