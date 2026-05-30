@@ -1489,8 +1489,8 @@ export default function ChatScreen() {
    */
   const listBottomPadding = useMemo(() => 12, []);
   const jumpFabBottom = useMemo(
-    () => Math.max(12, composerHeight + 12),
-    [composerHeight],
+    () => Math.max(12, composerHeight + 12 + (keyboardVisible && Platform.OS === "android" ? 4 : 0)),
+    [composerHeight, keyboardVisible],
   );
 
   useEffect(() => {
@@ -3136,30 +3136,12 @@ export default function ChatScreen() {
             </View>
           );
 
-          if (Platform.OS === "web") {
-            return (
-              <KeyboardAvoidingView style={styles.messageListAvoid} behavior="padding" enabled>
-                {chatMessageList}
-                {composerBlock}
-              </KeyboardAvoidingView>
-            );
-          }
-
-          if (Platform.OS === "ios") {
-            return (
-              <KeyboardAvoidingView style={styles.messageListAvoid} behavior="padding" enabled>
-                {chatMessageList}
-                {composerBlock}
-              </KeyboardAvoidingView>
-            );
-          }
-
-          /** Android: adjustResize shrinks chatBody; list + composer column (WhatsApp). */
+          /** WhatsApp-style: list + composer column; keyboard lifts both (resize + KAV on Android). */
           return (
-            <View style={styles.messageListAvoid}>
+            <KeyboardAvoidingView style={styles.messageListAvoid} behavior="padding" enabled>
               {chatMessageList}
               {composerBlock}
-            </View>
+            </KeyboardAvoidingView>
           );
         })()}
 
