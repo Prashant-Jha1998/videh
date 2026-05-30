@@ -106,7 +106,6 @@ import { safeJsonParse } from "@/lib/safeJson";
 import { formatCallMessageLabel, parseCallMessageMeta } from "@/lib/callMessage";
 import { normalizeMessageType } from "@/lib/normalizeMessage";
 import { messageReplyPreviewText, replyQuoteSenderLabel } from "@/lib/messageReplyPreview";
-import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { downloadUrlToDevice } from "@/lib/web/webDownload";
 import { formatPresenceSubtitle, type PresenceView } from "@/lib/presence";
 import { setAssistantChatInputFocused } from "@/lib/assistantPause";
