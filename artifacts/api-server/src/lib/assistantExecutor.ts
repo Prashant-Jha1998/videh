@@ -579,6 +579,45 @@ export async function executeAssistantAction(
       }
     }
 
+    case "last_incoming_message": {
+      const r = await query(
+        `SELECT
+           CASE WHEN c.is_group THEN c.group_name ELSE u.name END AS label,
+           m.content,
+           m.type,
+           m.created_at
+         FROM messages m
+         JOIN chats c ON c.id = m.chat_id
+         JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1
+         JOIN users u ON u.id = m.sender_id
+         WHERE m.sender_id != $1 AND m.is_deleted = FALSE
+         ORDER BY m.created_at DESC
+         LIMIT 1`,
+        [userId],
+      );
+      if (!r.rows.length) {
+        return {
+          intent: "last_incoming_message",
+          success: true,
+          speak: isEn(lang)
+            ? `${name}, you have not received any message yet.`
+            : `${name} ji, abhi tak kisi ka message nahi aaya.`,
+          actions: [],
+        };
+      }
+      const row = r.rows[0] as { label: string; content: string; type: string };
+      const preview = messagePreview(row.type ?? "text", row.content ?? "");
+      const chat = matchChatByName(ctx, row.label);
+      return {
+        intent: "last_incoming_message",
+        success: true,
+        speak: isEn(lang)
+          ? `${name}, your last message is from ${row.label}: ${preview}.`
+          : `${name} ji, aapka last message ${row.label} se aaya: ${preview}.`,
+        actions: chat ? [{ type: "open_chat", chatId: String(chat.chatId) }] : [],
+      };
+    }
+
     case "messages_today": {
       const r = await query(
         `SELECT

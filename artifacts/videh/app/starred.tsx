@@ -7,8 +7,11 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
+import { WebDesktopShell } from "@/components/web/WebDesktopShell";
+import { WEB_DESKTOP_MIN_WIDTH } from "@/lib/web/webDesktop";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, Message } from "@/context/AppContext";
@@ -18,8 +21,10 @@ export default function StarredScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const webDesktop = Platform.OS === "web" && width >= WEB_DESKTOP_MIN_WIDTH;
   const { starredMessages, starMessage } = useApp();
-  const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+  const topPad = insets.top + (webDesktop ? 16 : Platform.OS === "web" ? 67 : 0);
 
   const renderItem = ({ item }: { item: Message }) => (
     <View style={[styles.item, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
@@ -43,13 +48,17 @@ export default function StarredScreen() {
     </View>
   );
 
-  return (
+  const screen = (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Starred Messages</Text>
+        {!webDesktop ? (
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={22} color="#fff" />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.backBtn} />
+        )}
+        <Text style={styles.headerTitle}>Starred messages</Text>
       </View>
 
       {starredMessages.length === 0 ? (
@@ -70,6 +79,11 @@ export default function StarredScreen() {
       )}
     </View>
   );
+
+  if (webDesktop) {
+    return <WebDesktopShell forceMainContent>{screen}</WebDesktopShell>;
+  }
+  return screen;
 }
 
 const styles = StyleSheet.create({

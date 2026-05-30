@@ -2,6 +2,7 @@ export type AssistantIntent =
   | { type: "greeting" }
   | { type: "send_message"; contactName: string; messageText: string }
   | { type: "messages_today" }
+  | { type: "last_incoming_message" }
   | { type: "messages_from"; contactName: string }
   | { type: "last_message_from"; contactName: string }
   | { type: "unread_count" }
@@ -217,6 +218,19 @@ export function parseAssistantIntent(text: string): AssistantIntent {
       amount: Number(khataAdd[2]),
       note: khataAdd[3]?.trim() || undefined,
     };
+  }
+
+  if (
+    /(?:last|latest|sabse\s+(?:last|naya|recent))\s+message/.test(n)
+    && /(?:kis|kaun|who|kiska|mera|mere)/.test(n)
+    || /kiska\s+(?:message|msg)\s+(?:aaya|aaye|aya|aye)/.test(n)
+    || /kis\s+ne\s+(?:last|latest|sabse\s+last)\s+(?:message|msg)/.test(n)
+    || /mera\s+last\s+message/.test(n)
+    || /(?:who|kaun)\s+(?:sent|messaged).*(?:last|latest)/.test(n)
+    || /last\s+message\s+(?:kis|kaun|who|kiska)/.test(n)
+    || /mujhe\s+last\s+message/.test(n)
+  ) {
+    return { type: "last_incoming_message" };
   }
 
   if (

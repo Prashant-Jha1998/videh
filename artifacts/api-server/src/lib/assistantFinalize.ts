@@ -81,12 +81,12 @@ export async function answerVidehQuestion(
 
   if (!openAiKey) {
     if (lang === "en") {
-      return `${name}, I can help with your messages, calls, chats, and Videh settings. Try asking who called last or who messaged today.`;
+      return `${name}, I am Videh assistant. Ask anything about your chats, calls, contacts, khata, status, or how to use the app — for example who messaged last or call a contact by name.`;
     }
     if (lang === "hi") {
-      return `${name} ji, main messages, calls, chats aur settings mein madad kar sakta hoon. Poochhiye: last call kis ka tha, aaj kis ka message aaya.`;
+      return `${name} ji, main Videh assistant hoon. Chats, calls, contacts, khata, status ya app ke baare mein kuch bhi poochhiye — jaise last message kis ka aaya ya kisi ko call karo.`;
     }
-    return `${name}, ask about messages, calls, or say a contact name to call.`;
+    return `${name}, ask about Videh chats, calls, or app features in your language.`;
   }
 
   try {

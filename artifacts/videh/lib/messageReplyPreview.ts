@@ -4,6 +4,7 @@ import {
   parseCallMessageMeta,
 } from "@/lib/callMessage";
 import { contactChatPreview } from "@/lib/contactMessage";
+import { normalizeMessageType } from "@/lib/normalizeMessage";
 import { stripWaveformMeta } from "@/lib/voiceWaveform";
 
 export type MessageReplyPreviewInput = {
@@ -18,9 +19,9 @@ export type MessageReplyPreviewInput = {
 export function messageReplyPreviewText(msg: MessageReplyPreviewInput): string {
   if (msg.isDeleted || msg.type === "deleted") return "This message was deleted";
 
-  const type = String(msg.type ?? "text").toLowerCase();
   const content = String(msg.text ?? "").trim();
   const isMe = msg.senderId === "me";
+  const type = normalizeMessageType(msg.type, content);
 
   if (content.startsWith("__VCONTACT__:") || type === "contact") {
     return contactChatPreview(content);

@@ -50,3 +50,10 @@ export function documentMetaLine(fileSizeBytes?: number | null): string {
   const size = formatFileSize(fileSizeBytes);
   return size ? `${size} · Document · Tap to open` : "Document · Tap to open";
 }
+
+/** WhatsApp Web: `CSV • 3 MB` */
+export function whatsappDocumentMetaLine(filename: string, fileSizeBytes?: number | null): string {
+  const ext = (filename.split(".").pop() ?? "FILE").toUpperCase();
+  const size = formatFileSize(fileSizeBytes);
+  return size ? `${ext} • ${size}` : ext;
+}

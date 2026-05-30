@@ -1,18 +1,27 @@
-import { Stack, usePathname } from "expo-router";
-import React from "react";
+import { Stack, useLocalSearchParams, usePathname } from "expo-router";
+import React, { useEffect, useState } from "react";
 import { useWindowDimensions, View } from "react-native";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ScreenErrorFallback } from "@/components/ScreenErrorFallback";
-import { WebChatsSidebar } from "@/components/web/WebChatsSidebar";
-
-const DESKTOP_MIN = 900;
-const SIDEBAR_WIDTH = 400;
+import { WebDesktopShell } from "@/components/web/WebDesktopShell";
+import { WebContactInfoPanel } from "@/components/web/WebContactInfoPanel";
+import { activeChatIdFromPath, WEB_DESKTOP_MIN_WIDTH } from "@/lib/web/webDesktop";
+import { useApp } from "@/context/AppContext";
 
 export default function ChatWebLayout() {
   const { width } = useWindowDimensions();
   const pathname = usePathname();
-  const split = width >= DESKTOP_MIN;
-  const activeChatId = pathname?.match(/\/chat\/([^/]+)/)?.[1];
+  const split = width >= WEB_DESKTOP_MIN_WIDTH;
+  const activeChatId = activeChatIdFromPath(pathname);
+  const { chats } = useApp();
+  const params = useLocalSearchParams<{ id?: string; name?: string }>();
+  const chatId = activeChatId ?? params.id;
+  const chat = chatId ? chats.find((c) => c.id === chatId) : undefined;
+  const [contactPanelOpen, setContactPanelOpen] = useState(true);
+  useEffect(() => {
+    setContactPanelOpen(true);
+  }, [chatId]);
+  const showContactPanel = split && chatId && chat && !chat.isGroup && contactPanelOpen;
 
   const stack = (
     <Stack screenOptions={{ headerShown: false }}>
@@ -41,6 +50,8 @@ export default function ChatWebLayout() {
     );
   }
 
+  const chatName = params.name ?? chat?.name ?? "Chat";
+
   return (
     <ErrorBoundary
       FallbackComponent={(props) => (
@@ -51,10 +62,18 @@ export default function ChatWebLayout() {
         />
       )}
     >
-      <View style={{ flex: 1, flexDirection: "row", height: "100%" }}>
-        <WebChatsSidebar width={SIDEBAR_WIDTH} activeChatId={activeChatId} />
-        <View style={{ flex: 1, minWidth: 0 }}>{stack}</View>
-      </View>
+      <WebDesktopShell forceMainContent>
+        <View style={{ flex: 1, flexDirection: "row", minWidth: 0 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>{stack}</View>
+          {showContactPanel ? (
+            <WebContactInfoPanel
+              chatId={chatId}
+              chatName={chatName}
+              onClose={() => setContactPanelOpen(false)}
+            />
+          ) : null}
+        </View>
+      </WebDesktopShell>
     </ErrorBoundary>
   );
 }

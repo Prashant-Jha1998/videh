@@ -28,8 +28,8 @@ export async function startIncomingCallExperience(call: IncomingCallInfo & { cal
   await startIncomingCallAlert();
 }
 
-export async function stopIncomingCallExperience(callId?: string): Promise<void> {
-  if (callId && ringingCallId && ringingCallId !== callId) {
+export async function stopIncomingCallExperience(callId?: string, opts?: { force?: boolean }): Promise<void> {
+  if (!opts?.force && callId && ringingCallId && ringingCallId !== callId) {
     return;
   }
   ringingCallId = null;

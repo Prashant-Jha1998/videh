@@ -207,6 +207,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
           'id', m.id,
           'content', m.content,
           'type', m.type,
+          'media_url', m.media_url,
           'sender_id', m.sender_id,
           'created_at', m.created_at,
           'is_deleted', m.is_deleted

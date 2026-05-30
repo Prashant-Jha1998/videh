@@ -92,7 +92,8 @@ function scriptScore(text: string): Partial<Record<AssistantLangCode, number>> {
 }
 
 const MARATHI_HINTS = /\b(aani|kay|mala|tumhi|nahi|ahe|hot|kar|sang)\b/i;
-const HINGLISH_HINTS = /\b(bhej|batao|sunao|karo|kya|aaj|message|bhai|ji|nahi|haan|theek|kaam|ho gaya)\b/i;
+const HINGLISH_HINTS =
+  /\b(aaj|aaya|aaye|aapka|apka|batao|bata|bhej|boliye|bolo|chahiye|dikhao|hai|haan|ji|kaise|karo|karoon|kya|kis|kiska|kaun|kitne|likho|madad|main|mera|meri|mujhe|nahi|padho|pooch|pucho|suno|sunao|theek|tumhara|tumhari|udhar|vah|woh|yaad|baje|meeting|naam|message|msg|call|chat|sunao|kholo|band|on|off)\b/i;
 
 /** Detect primary language from user utterance (script + common words). */
 export function detectAssistantLanguage(text: string, hint?: string | null): AssistantLangCode {
@@ -111,8 +112,10 @@ export function detectAssistantLanguage(text: string, hint?: string | null): Ass
   if (bestScore === 0) {
     if (HINGLISH_HINTS.test(text)) return "hi";
     if (/^[a-zA-Z0-9\s.,!?'"-]+$/.test(text.trim())) return "en";
-    return "en";
+    return "hi";
   }
+
+  if (best === "en" && HINGLISH_HINTS.test(text)) return "hi";
 
   if (best === "hi" && MARATHI_HINTS.test(text)) return "mr";
   if (best === "bn" && /\b(apuni|kene|kio|noi)\b/i.test(text)) return "as";

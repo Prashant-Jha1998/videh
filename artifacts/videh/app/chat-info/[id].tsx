@@ -32,6 +32,8 @@ import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { formatTime } from "@/utils/time";
 import { formatPresenceSubtitle } from "@/lib/presence";
 import { MemberProfileSheet } from "@/components/MemberProfileSheet";
+import { ChatMediaGalleryModal } from "@/components/web/ChatMediaGalleryModal";
+import { fetchChatSharedMedia } from "@/lib/chatSharedMedia";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { getApiUrl } from "@/lib/api";
 
@@ -165,7 +167,9 @@ export default function ChatInfoScreen() {
   const [addPickLoading, setAddPickLoading] = useState(false);
   const [addPickPermissionDenied, setAddPickPermissionDenied] = useState(false);
   const [lastServerSearchEmpty, setLastServerSearchEmpty] = useState(false);
-  const [mediaMessages, setMediaMessages] = useState<Array<{ id: number; type: string; media_url: string; content: string }>>([]);
+  const [mediaMessages, setMediaMessages] = useState<Array<{ id: string; type: string; media_url: string; content: string }>>([]);
+  const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false);
+  const [mediaTotalCount, setMediaTotalCount] = useState(0);
   const [groupMessagingPolicy, setGroupMessagingPolicy] = useState<"everyone" | "admins_only" | "allowlist">("everyone");
 
   const chatOtherUserId = useRef<number | null>(null);
@@ -235,18 +239,19 @@ export default function ChatInfoScreen() {
   }, [id, isGroup, user?.dbId]);
 
   const fetchMedia = useCallback(async () => {
-    if (!id) return;
+    if (!id || !user?.dbId) return;
     try {
-      const res = await fetch(`${BASE_URL}/api/chats/${id}/messages?limit=200&offset=0`);
-      const data = await res.json();
-      if (data.success && data.messages) {
-        const media = data.messages.filter((m: any) =>
-          (m.type === "image" || m.type === "video") && m.media_url && !m.is_deleted
-        );
-        setMediaMessages(media.slice(0, 18));
-      }
+      const buckets = await fetchChatSharedMedia(id, user.dbId, user.sessionToken, 300);
+      const combined = [...buckets.media, ...buckets.docs].map((m) => ({
+        id: m.id,
+        type: m.kind,
+        media_url: m.mediaUrl ?? "",
+        content: m.content,
+      }));
+      setMediaTotalCount(combined.length + buckets.links.length);
+      setMediaMessages(combined.slice(0, 9));
     } catch { }
-  }, [id]);
+  }, [id, user?.dbId, user?.sessionToken]);
 
   const fetchChatDetails = useCallback(async () => {
     if (!id) return;
@@ -811,36 +816,38 @@ export default function ChatInfoScreen() {
 
         {/* Media, Links, Docs */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionLabel, { color: colors.primary }]}>Media, Links, and Docs</Text>
-            {mediaMessages.length > 0 && (
-              <Text style={[styles.seeAll, { color: colors.primary }]}>{mediaMessages.length} items</Text>
-            )}
-          </View>
+          <TouchableOpacity style={styles.sectionHeaderRow} onPress={() => setMediaGalleryOpen(true)} activeOpacity={0.8}>
+            <Text style={[styles.sectionLabel, { color: colors.primary, marginBottom: 0 }]}>Media, Links, and Docs</Text>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              {mediaTotalCount > 0 ? (
+                <Text style={[styles.seeAll, { color: colors.primary }]}>{mediaTotalCount}</Text>
+              ) : null}
+              <Ionicons name="chevron-forward" size={16} color={colors.primary} style={{ marginLeft: 4 }} />
+            </View>
+          </TouchableOpacity>
           {mediaMessages.length > 0 ? (
-            <View style={styles.mediaGrid}>
-              {mediaMessages.slice(0, 9).map((m) => (
-                <TouchableOpacity
-                  key={m.id}
-                  style={[styles.mediaThumbnail, { backgroundColor: colors.muted }]}
-                  activeOpacity={0.85}
-                  onPress={() => openSharedMedia(m)}
-                >
+            <TouchableOpacity style={styles.mediaGrid} onPress={() => setMediaGalleryOpen(true)} activeOpacity={0.9}>
+              {mediaMessages.map((m) => (
+                <View key={m.id} style={[styles.mediaThumbnail, { backgroundColor: colors.muted }]}>
                   {m.type === "image" && m.media_url ? (
                     <Image source={mediaImageSource(m.media_url)} style={styles.mediaThumbnailImg} contentFit="cover" />
+                  ) : m.type === "document" ? (
+                    <View style={[styles.mediaThumbnail, { alignItems: "center", justifyContent: "center" }]}>
+                      <Ionicons name="document-text" size={24} color={colors.mutedForeground} />
+                    </View>
                   ) : (
-                    <View style={[styles.mediaThumbnail, { backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }]}>
+                    <View style={[styles.mediaThumbnail, { alignItems: "center", justifyContent: "center" }]}>
                       <Ionicons name="videocam" size={24} color={colors.mutedForeground} />
                     </View>
                   )}
-                </TouchableOpacity>
-              ))}
-              {mediaMessages.length > 9 && (
-                <View style={[styles.mediaThumbnail, { backgroundColor: colors.muted + "cc", alignItems: "center", justifyContent: "center" }]}>
-                  <Text style={[styles.moreMediaText, { color: colors.foreground }]}>+{mediaMessages.length - 9}</Text>
                 </View>
-              )}
-            </View>
+              ))}
+              {mediaTotalCount > 9 ? (
+                <View style={[styles.mediaThumbnail, { backgroundColor: colors.muted + "cc", alignItems: "center", justifyContent: "center" }]}>
+                  <Text style={[styles.moreMediaText, { color: colors.foreground }]}>+{mediaTotalCount - 9}</Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
           ) : (
             <View style={styles.noMediaRow}>
               <Ionicons name="image-outline" size={32} color={colors.mutedForeground} />
@@ -1303,6 +1310,15 @@ export default function ChatInfoScreen() {
           </View>
         </View>
       </DismissibleModal>
+
+      {id ? (
+        <ChatMediaGalleryModal
+          visible={mediaGalleryOpen}
+          chatId={id}
+          chatName={name}
+          onClose={() => setMediaGalleryOpen(false)}
+        />
+      ) : null}
     </View>
   );
 }

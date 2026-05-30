@@ -11,7 +11,6 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video 
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import {
   KeyboardAvoidingView,
-  KeyboardStickyView,
   useGenericKeyboardHandler,
   useKeyboardState,
 } from "react-native-keyboard-controller";
@@ -105,7 +104,10 @@ import { loadEnterIsSend, loadMediaVisibilityEnabled } from "@/lib/chatSettings"
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { safeJsonParse } from "@/lib/safeJson";
 import { formatCallMessageLabel, parseCallMessageMeta } from "@/lib/callMessage";
+import { normalizeMessageType } from "@/lib/normalizeMessage";
 import { messageReplyPreviewText, replyQuoteSenderLabel } from "@/lib/messageReplyPreview";
+import { authFetchHeaders } from "@/lib/authenticatedMedia";
+import { downloadUrlToDevice } from "@/lib/web/webDownload";
 import { formatPresenceSubtitle, type PresenceView } from "@/lib/presence";
 import { setAssistantChatInputFocused } from "@/lib/assistantPause";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -1447,9 +1449,13 @@ export default function ChatScreen() {
     return url;
   }, [text, editTarget, selectionActive, dismissedComposerLink]);
 
-  /** WhatsApp: pin when keyboard animation finishes (works with adjustResize on Android). */
+  /** WhatsApp: pin while keyboard opens/closes (adjustResize on Android shrinks chat area). */
   useGenericKeyboardHandler(
     {
+      onStart: () => {
+        "worklet";
+        runOnJS(schedulePinToBottom)();
+      },
       onEnd: () => {
         "worklet";
         runOnJS(schedulePinToBottom)();
@@ -1457,6 +1463,9 @@ export default function ChatScreen() {
     },
     [schedulePinToBottom],
   );
+
+  const keyboardVisible = useKeyboardState((s) => s.isVisible);
+  const keyboardHeight = useKeyboardState((s) => s.height);
 
   useEffect(() => {
     if (searching || messages.length === 0) return;
@@ -1468,17 +1477,20 @@ export default function ChatScreen() {
     }
     const count = messages.length;
     if (count > prevMessageCountRef.current && !userScrolledUpRef.current) {
-      scrollToLatest(count - prevMessageCountRef.current <= 2);
+      const animated = count - prevMessageCountRef.current <= 2;
+      scrollToLatest(animated);
+      if (keyboardVisible) schedulePinToBottom();
     }
     prevMessageCountRef.current = count;
-  }, [messages.length, searching, scrollToLatest]);
+  }, [messages.length, searching, scrollToLatest, keyboardVisible, schedulePinToBottom]);
 
-  const keyboardVisible = useKeyboardState((s) => s.isVisible);
-  const keyboardHeight = useKeyboardState((s) => s.height);
-
-  /** WhatsApp: bottom inset = composer only; keyboard handled by window resize (Android) / KAV (iOS). */
-  const listBottomPadding = useMemo(
-    () => Math.max(12, composerHeight + 8),
+  /**
+   * WhatsApp native: composer sits below the list (not over it); window resize / KAV lift the column.
+   * Web: composer is a sibling under the list inside KAV — only a small list tail gap is needed.
+   */
+  const listBottomPadding = useMemo(() => 12, []);
+  const jumpFabBottom = useMemo(
+    () => Math.max(12, composerHeight + 12),
     [composerHeight],
   );
 
@@ -1943,6 +1955,17 @@ export default function ChatScreen() {
     })();
   }, [chatId, deleteMessage, sendDocumentMessage, user?.sessionToken, patchChatMessage]);
 
+  const handleDocumentSaveAs = useCallback((item: Message) => {
+    if (!item.mediaUrl) return;
+    void (async () => {
+      const url = resolvePublicAssetUrl(item.mediaUrl) ?? item.mediaUrl;
+      if (!url) return;
+      const headers = authFetchHeaders(user?.sessionToken);
+      const res = await downloadUrlToDevice(url, item.text || "document", headers);
+      if (!res.ok) Alert.alert("Download failed", res.message);
+    })();
+  }, [user?.sessionToken]);
+
   const saveImageToGallery = useCallback(async (uri: string) => {
     const allowGallery = await loadMediaVisibilityEnabled();
     if (!allowGallery) {
@@ -2057,10 +2080,11 @@ export default function ChatScreen() {
     const isImage = item.type === "image" && !!item.mediaUrl && !isViewOncePending;
     const isVideo = item.type === "video" && !!item.mediaUrl && !isViewOncePending;
     const isAudio = item.type === "audio" && !!item.mediaUrl;
-    const isDocument = item.type === "document";
-    const isLocation = item.type === "location";
-    const isContact = item.type === "contact";
-    const isCall = item.type === "call";
+    const effectiveType = normalizeMessageType(item.type, item.text, item.mediaUrl);
+    const isDocument = effectiveType === "document";
+    const isLocation = effectiveType === "location";
+    const isContact = effectiveType === "contact";
+    const isCall = effectiveType === "call";
     const callMeta = isCall ? parseCallMessageMeta(item.text) : null;
     const isSpecial = isDocument || isLocation || isContact || isCall;
     const urls = (!isDeleted && !isImage && !isAudio && !isSpecial) ? extractUrls(item.text) : [];
@@ -2295,7 +2319,9 @@ export default function ChatScreen() {
               item={item}
               isMe={isMe}
               colors={colors}
+              sessionToken={user?.sessionToken}
               onPress={() => handleDocumentPress(item)}
+              onSaveAs={Platform.OS === "web" ? () => handleDocumentSaveAs(item) : undefined}
             />
           ) : isLocation ? (
             <LocationMessageBubble
@@ -3100,29 +3126,41 @@ export default function ChatScreen() {
               }
             />
           );
+          const composerBlock = (
+            <View
+              onLayout={(e) => {
+                const h = Math.ceil(e.nativeEvent.layout.height);
+                if (h > 0 && h !== composerHeight) setComposerHeight(h);
+              }}
+            >
+              {composerFooter}
+            </View>
+          );
+
           if (Platform.OS === "web") {
             return (
               <KeyboardAvoidingView style={styles.messageListAvoid} behavior="padding" enabled>
                 {chatMessageList}
-                <View
-                  onLayout={(e) => {
-                    const h = Math.ceil(e.nativeEvent.layout.height);
-                    if (h > 0 && h !== composerHeight) setComposerHeight(h);
-                  }}
-                >
-                  {composerFooter}
-                </View>
+                {composerBlock}
               </KeyboardAvoidingView>
             );
           }
+
+          if (Platform.OS === "ios") {
+            return (
+              <KeyboardAvoidingView style={styles.messageListAvoid} behavior="padding" enabled>
+                {chatMessageList}
+                {composerBlock}
+              </KeyboardAvoidingView>
+            );
+          }
+
+          /** Android: adjustResize shrinks chatBody; list + composer column (WhatsApp). */
           return (
-            <KeyboardAvoidingView
-              style={styles.messageListAvoid}
-              behavior="padding"
-              enabled={Platform.OS === "ios"}
-            >
+            <View style={styles.messageListAvoid}>
               {chatMessageList}
-            </KeyboardAvoidingView>
+              {composerBlock}
+            </View>
           );
         })()}
 
@@ -3130,7 +3168,7 @@ export default function ChatScreen() {
           <TouchableOpacity
             style={[
               styles.scrollToBottomFab,
-              { bottom: listBottomPadding + 12, backgroundColor: colors.card },
+              { bottom: jumpFabBottom, backgroundColor: colors.card },
             ]}
             onPress={() => pinChatToBottom(true)}
             activeOpacity={0.88}
@@ -3145,19 +3183,6 @@ export default function ChatScreen() {
               </View>
             ) : null}
           </TouchableOpacity>
-        ) : null}
-
-        {Platform.OS !== "web" ? (
-          <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
-            <View
-              onLayout={(e) => {
-                const h = Math.ceil(e.nativeEvent.layout.height);
-                if (h > 0 && h !== composerHeight) setComposerHeight(h);
-              }}
-            >
-              {composerFooter}
-            </View>
-          </KeyboardStickyView>
         ) : null}
       </View>
 

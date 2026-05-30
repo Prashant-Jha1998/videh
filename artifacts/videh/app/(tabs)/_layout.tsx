@@ -1,1 +1,1 @@
-export { default } from "./TabLayoutImpl";
+export { default } from "./_TabLayoutImpl";

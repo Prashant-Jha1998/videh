@@ -1,36 +1,16 @@
-import { usePathname, useRouter } from "expo-router";
+import { Slot, usePathname, useRouter } from "expo-router";
 import React from "react";
-import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import { useColors } from "@/hooks/useColors";
-import { WebChatsSidebar } from "@/components/web/WebChatsSidebar";
-import { ClassicTabLayout } from "./TabLayoutImpl";
+import { StyleSheet, useWindowDimensions, View } from "react-native";
+import { WebDesktopShell } from "@/components/web/WebDesktopShell";
+import { ClassicTabLayout } from "./_TabLayoutImpl";
+import { WEB_DESKTOP_MIN_WIDTH } from "@/lib/web/webDesktop";
 
-const DESKTOP_MIN = 900;
-const SIDEBAR_WIDTH = 400;
-
-function WebDesktopEmptyPane() {
-  const colors = useColors();
-  return (
-    <View style={[styles.emptyPane, { backgroundColor: colors.background, borderLeftColor: colors.border }]}>
-      <Text style={[styles.emptyTitle, { color: colors.mutedForeground }]}>Videh Web</Text>
-      <Text style={[styles.emptySub, { color: colors.mutedForeground }]}>
-        Select a chat to start messaging
-      </Text>
-    </View>
-  );
-}
-
-/** WhatsApp Web–style: chat list stays visible on wide screens. */
+/** WhatsApp Web–style desktop: nav rail + list pane + main content. */
 export default function WebTabsLayout() {
   const { width } = useWindowDimensions();
   const pathname = usePathname();
   const router = useRouter();
-  const split = width >= DESKTOP_MIN;
-  const onChatsTab =
-    !pathname ||
-    pathname.includes("/chats") ||
-    pathname.endsWith("/(tabs)") ||
-    pathname === "/";
+  const split = width >= WEB_DESKTOP_MIN_WIDTH;
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -42,31 +22,31 @@ export default function WebTabsLayout() {
     return () => window.removeEventListener("videh-open-chat", onOpenChat);
   }, [router]);
 
-  if (!split || !onChatsTab) {
+  if (!split) {
     return <ClassicTabLayout />;
   }
 
+  const hideTabContent =
+    !pathname?.includes("/starred") &&
+    (pathname?.includes("/chats") ||
+      pathname?.includes("/calls") ||
+      pathname?.includes("/status") ||
+      (pathname?.includes("/settings") && !pathname?.includes("/settings/")));
+
   return (
-    <View style={styles.splitRoot}>
-      <WebChatsSidebar width={SIDEBAR_WIDTH} />
-      <WebDesktopEmptyPane />
+    <WebDesktopShell>
+      <View style={[styles.mainSlot, hideTabContent && styles.hiddenSlot]}>
+        <Slot />
+      </View>
       <View style={styles.hiddenTabs} pointerEvents="none">
         <ClassicTabLayout />
       </View>
-    </View>
+    </WebDesktopShell>
   );
 }
 
 const styles = StyleSheet.create({
-  splitRoot: { flex: 1, flexDirection: "row", height: "100%" },
-  emptyPane: {
-    flex: 1,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 32,
-  },
-  emptyTitle: { fontSize: 28, fontFamily: "Inter_300Light", marginBottom: 8 },
-  emptySub: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", maxWidth: 420 },
+  mainSlot: { flex: 1, minWidth: 0, height: "100%" },
+  hiddenSlot: { position: "absolute", width: 1, height: 1, overflow: "hidden", opacity: 0 },
   hiddenTabs: { position: "absolute", width: 1, height: 1, overflow: "hidden", opacity: 0 },
 });

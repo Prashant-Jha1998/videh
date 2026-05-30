@@ -29,13 +29,18 @@ type Props = {
   onDeclineWithMessage: (text: string) => void;
 };
 
-const SWIPE_ACCEPT_DY = -72;
+const SWIPE_ACCEPT_DY = -48;
 
 export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMessage }: Props) {
   const insets = useSafeAreaInsets();
   const pulse = useRef(new Animated.Value(1)).current;
   const swipeY = useRef(new Animated.Value(0)).current;
   const acceptedRef = useRef(false);
+
+  useEffect(() => {
+    acceptedRef.current = false;
+    swipeY.setValue(0);
+  }, [call.callId, swipeY]);
 
   useEffect(() => {
     const anim = Animated.loop(
@@ -56,7 +61,8 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
         swipeY.setValue(Math.min(0, g.dy));
       },
       onPanResponderRelease: (_, g) => {
-        if (g.dy <= SWIPE_ACCEPT_DY && !acceptedRef.current) {
+        const swipedUp = g.dy <= SWIPE_ACCEPT_DY || g.vy < -0.45;
+        if (swipedUp && !acceptedRef.current) {
           acceptedRef.current = true;
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           onAccept();
@@ -86,7 +92,7 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
       : callTypeLabel;
 
   return (
-    <Modal visible transparent animationType="fade" statusBarTranslucent>
+    <Modal visible key={call.callId} transparent animationType="fade" statusBarTranslucent>
       <View style={[styles.root, { paddingBottom: Math.max(insets.bottom, 12) + 28 }]}>
         <View style={styles.header}>
           <Animated.View style={[styles.avatarRing, { transform: [{ scale: pulse }] }]}>
@@ -118,7 +124,7 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
         </View>
 
         <View style={styles.footer}>
-          <Text style={styles.swipeHint}>Swipe up on Accept to answer</Text>
+          <Text style={styles.swipeHint}>Swipe up on Accept to answer, or tap Accept</Text>
           <View style={styles.actions}>
             <View style={styles.actionItem}>
               <TouchableOpacity style={styles.declineCircle} onPress={onDecline} activeOpacity={0.85}>

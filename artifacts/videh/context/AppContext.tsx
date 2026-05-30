@@ -21,6 +21,8 @@ import { ensureUploadableFileUri } from "@/lib/prepareFileUpload";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { encodeVoiceMessageText, stripWaveformMeta } from "@/lib/voiceWaveform";
 import { messageReplyPreviewText } from "@/lib/messageReplyPreview";
+import { inferChatListPreview, normalizeMessageType } from "@/lib/normalizeMessage";
+import { parseLocationPayload } from "@/lib/locationMessage";
 
 const BASE_URL = getApiUrl();
 const STATUS_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -105,15 +107,20 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     if (m.delivery_status === "read") status = "read";
     else if (m.delivery_status === "delivered") status = "delivered";
   }
+  const content = m.is_deleted ? "This message was deleted" : (m.content ?? "");
+  const mediaUrl = m.media_url ?? undefined;
+  const type = m.is_deleted
+    ? "deleted"
+    : normalizeMessageType(m.type, content, mediaUrl);
   return {
     id: String(m.id),
-    text: m.is_deleted ? "This message was deleted" : (m.content ?? ""),
+    text: content,
     timestamp: new Date(m.created_at).getTime(),
     senderId: isMe ? "me" : String(m.sender_id),
     senderName: m.sender_name ?? undefined,
-    type: m.is_deleted ? "deleted" : (m.type ?? "text"),
+    type,
     status,
-    mediaUrl: m.media_url ?? undefined,
+    mediaUrl,
     isStarred: m.is_starred,
     isForwarded: m.is_forwarded,
     forwardCount: m.forward_count ?? 0,
@@ -315,41 +322,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     is_deleted?: boolean;
     type?: string;
     content?: string;
+    media_url?: string;
   } | null | undefined): string | undefined => {
     if (!lastMsg) return undefined;
     if (lastMsg.is_deleted) return "This message was deleted";
-    const type = String(lastMsg.type ?? "text");
-    const content = String(lastMsg.content ?? "").trim();
-    if (type === "image") return content && content !== "📷 Photo" ? content : "Photo";
-    if (type === "video") return content && content !== "🎥 Video" ? content : "Video";
-    if (type === "audio") {
-      const clean = stripWaveformMeta(content);
-      return clean || "🎤 Voice message";
-    }
-    if (type === "call") {
-      const { callMessagePreviewText } = require("@/lib/callMessage") as typeof import("@/lib/callMessage");
-      return callMessagePreviewText(content);
-    }
-    if (type === "document") return content || "Document";
-    if (type === "contact") {
-      const { contactChatPreview } = require("@/lib/contactMessage") as typeof import("@/lib/contactMessage");
-      return contactChatPreview(content);
-    }
-    if (type === "location") {
-      const { parseLocationPayload } = require("@/lib/locationMessage") as typeof import("@/lib/locationMessage");
-      const loc = parseLocationPayload(content);
+    const preview = inferChatListPreview(lastMsg.type, String(lastMsg.content ?? ""), lastMsg.media_url);
+    if (preview === "Location") {
+      const loc = parseLocationPayload(String(lastMsg.content ?? ""));
       const isLive = loc?.mode === "live" && !loc?.stopped;
       const label = loc?.label?.trim();
       const base = isLive ? "📍 Live location" : "📍 Location";
       return label ? `${base} · ${label}` : base;
     }
-    return content || undefined;
+    if (preview === "Voice message") return "🎤 Voice message";
+    return preview || undefined;
   };
 
   /** Chat-list preview for a locally-held Message (handles location/media/etc). */
-  const messagePreviewText = (m: { type?: string; text?: string } | null | undefined): string | undefined =>
+  const messagePreviewText = (
+    m: { type?: string; text?: string; mediaUrl?: string } | null | undefined,
+  ): string | undefined =>
     formatLastMessagePreview(
-      m ? { type: m.type, content: m.text, is_deleted: m.type === "deleted" } : null,
+      m
+        ? {
+            type: m.type,
+            content: m.text,
+            media_url: m.mediaUrl,
+            is_deleted: m.type === "deleted",
+          }
+        : null,
     );
 
   const mapDbChats = (rows: any[]): Chat[] =>

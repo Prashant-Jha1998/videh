@@ -3,7 +3,7 @@
  *
  * Parity checklist (see app/chat/[id].tsx):
  * - stackFromEnd: flexGrow + justifyContent flex-end
- * - composer inset only (not keyboard; resize / KAV handle keyboard)
+ * - composer below list on native (not overlay); resize / KAV handle keyboard
  * - pin after keyboard onEnd + staged delays
  * - no auto-pin when user scrolled up (near-bottom threshold)
  * - jump-to-latest FAB when scrolled up (with unread count badge)

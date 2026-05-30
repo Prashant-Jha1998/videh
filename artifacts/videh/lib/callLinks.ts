@@ -3,7 +3,7 @@ import { getApiUrl } from "@/lib/api";
 export async function createCallLink(
   sessionToken: string | null | undefined,
   opts?: { chatId?: number; type?: "audio" | "video"; title?: string; hoursValid?: number },
-): Promise<{ token: string; deepLink: string; callType: string } | null> {
+): Promise<{ token: string; deepLink: string; webPath?: string; callType: string } | null> {
   const res = await fetch(`${getApiUrl()}/api/call-links`, {
     method: "POST",
     headers: {
@@ -17,7 +17,10 @@ export async function createCallLink(
       hoursValid: opts?.hoursValid ?? 24,
     }),
   });
-  const data = await res.json() as { success?: boolean; link?: { token: string; deepLink: string; callType: string } };
+  const data = await res.json() as {
+    success?: boolean;
+    link?: { token: string; deepLink: string; webPath?: string; callType: string };
+  };
   if (!data.success || !data.link) return null;
   return data.link;
 }

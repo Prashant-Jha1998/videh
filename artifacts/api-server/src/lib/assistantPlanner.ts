@@ -122,10 +122,7 @@ export async function resolveAssistantPlan(
   }
 
   if (!useOpenAiAssistant()) {
-    if (isLikelyProjectQuestion(text)) {
-      return { intent: "project_qa" };
-    }
-    return { intent: "unknown" };
+    return { intent: "project_qa" };
   }
 
   if (isLikelyProjectQuestion(text)) {

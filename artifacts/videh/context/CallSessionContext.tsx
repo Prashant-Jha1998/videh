@@ -22,6 +22,7 @@ import { addUsersToOngoingCall } from "@/lib/callParticipants";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import { chooseInCallAudioRoute, wakeScreenForIncomingCall, type InCallAudioRoute } from "@/lib/inCallAudio";
 import { onCallSignal } from "@/lib/callEvents";
+import { requestDismissIncomingCallUi } from "@/lib/incomingCallUiBridge";
 import { startNativeOngoingCallSession } from "@/lib/videhNativeCallUi";
 import {
   endCallKeep,
@@ -75,7 +76,7 @@ type CallSessionContextValue = {
   ringingCount: number;
   initFromRoute: (params: RouteParams) => void;
   presentIncomingCall: (call: IncomingCallInfo) => void;
-  acceptIncoming: () => Promise<void>;
+  acceptIncoming: (callInfo?: IncomingCallInfo) => Promise<void>;
   declineIncoming: (declineMessage?: string) => Promise<void>;
   minimizeCall: () => void;
   returnToCallScreen: () => void;
@@ -158,10 +159,18 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const onCallEnded = useCallback(() => {
     if (endingCallRef.current) return;
     endingCallRef.current = true;
-    void refreshCallLogs();
-    clearSession();
-    if (router.canGoBack()) router.back();
-  }, [clearSession, refreshCallLogs, router]);
+    const endedCallId = session?.callId;
+    const shouldLeave = session?.engineActive;
+    requestDismissIncomingCallUi(endedCallId);
+    void (async () => {
+      await stopCallAlert();
+      if (shouldLeave) await call.leave();
+      if (endedCallId) endCallKeep(endedCallId);
+      void refreshCallLogs();
+      clearSession();
+      if (router.canGoBack()) router.back();
+    })();
+  }, [clearSession, refreshCallLogs, router, session?.callId, session?.engineActive, call]);
 
   const pushCallRoute = useCallback((s: CallSession, replace = false) => {
     const route = {
@@ -183,10 +192,12 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const endCall = useCallback(async () => {
     await stopCallAlert();
     setVideoCallPipEnabled(false);
+    const endingCallId = session?.callId;
     if (session?.engineActive) await call.leave();
-    if (session?.callId) {
-      endCallKeep(session.callId);
-      await webrtcFetch(`/calls/${session.callId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+    if (endingCallId) {
+      endCallKeep(endingCallId);
+      requestDismissIncomingCallUi(endingCallId);
+      await webrtcFetch(`/calls/${endingCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
     }
     void refreshCallLogs();
     clearSession();
@@ -327,17 +338,37 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     }
   }, [user?.dbId, user?.sessionToken, onCallEnded]);
 
-  const acceptIncoming = useCallback(async () => {
-    if (!session?.callId || !user?.dbId) return;
+  const acceptIncoming = useCallback(async (callInfo?: IncomingCallInfo) => {
+    const callId = callInfo?.callId ?? session?.callId;
+    if (!callId || !user?.dbId) return;
+
+    if (callInfo) {
+      const next: CallSession = {
+        chatId: String(callInfo.chatId),
+        contactName: callInfo.callerName,
+        isVideo: callInfo.type === "video",
+        channel: callInfo.channel,
+        callId: callInfo.callId,
+        isIncoming: true,
+        ringing: false,
+        minimized: false,
+        engineActive: true,
+      };
+      setSession(next);
+      pushCallRoute(next);
+    }
+
     await stopCallAlert();
-    await webrtcFetch(`/calls/${session.callId}/respond`, user.sessionToken, {
+    await webrtcFetch(`/calls/${callId}/respond`, user.sessionToken, {
       method: "POST",
       body: JSON.stringify({ userId: user.dbId, action: "accept" }),
     }).catch(() => {});
     setSession((prev) =>
-      prev ? { ...prev, ringing: false, engineActive: true, minimized: false } : prev,
+      prev && prev.callId === callId
+        ? { ...prev, ringing: false, engineActive: true, minimized: false }
+        : prev,
     );
-  }, [session?.callId, user?.dbId, user?.sessionToken]);
+  }, [session?.callId, user?.dbId, user?.sessionToken, pushCallRoute]);
 
   const declineIncoming = useCallback(async (declineMessage?: string) => {
     if (!session?.callId || !user?.dbId) return;

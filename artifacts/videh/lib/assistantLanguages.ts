@@ -54,6 +54,9 @@ export function toRecognitionLocale(code: AssistantLangCode): string {
   return SPEECH_LOCALE[code] ?? "en-IN";
 }
 
+const HINGLISH_HINTS =
+  /\b(aaj|aaya|aaye|aapka|apka|batao|bata|bhej|boliye|bolo|chahiye|dikhao|hai|haan|ji|kaise|karo|karoon|kya|kis|kiska|kaun|kitne|likho|madad|main|mera|meri|mujhe|nahi|padho|pooch|pucho|suno|sunao|theek|tumhara|tumhari|udhar|vah|woh|naam|message|msg|call|chat)\b/i;
+
 function scriptHint(text: string): AssistantLangCode | null {
   for (const ch of text) {
     const cp = ch.codePointAt(0) ?? 0;
@@ -74,5 +77,9 @@ function scriptHint(text: string): AssistantLangCode | null {
 
 /** Quick client-side locale guess from partial transcript (for STT). */
 export function detectLocaleFromTranscript(text: string): AssistantLangCode {
-  return scriptHint(text) ?? "en";
+  const script = scriptHint(text);
+  if (script) return script;
+  if (HINGLISH_HINTS.test(text)) return "hi";
+  if (/^[a-zA-Z0-9\s.,!?'"-]+$/.test(text.trim())) return "en";
+  return "hi";
 }

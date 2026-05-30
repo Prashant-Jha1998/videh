@@ -271,8 +271,8 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
     if (!user?.sessionToken || !cleaned) {
       const hint = lang === "en"
-        ? "I did not catch that. Ask about messages, calls, schedule message, or say a contact name to call."
-        : "Samajh nahi aaya. Messages, calls, schedule message poochhiye, ya contact ka naam bolein call ke liye.";
+        ? "I did not catch that. Ask anything about your chats, calls, or Videh app."
+        : "Samajh nahi aaya. Chats, calls, ya Videh app ke baare mein kuch bhi poochhiye.";
       await continueConversation(hint, lang);
       return;
     }

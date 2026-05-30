@@ -4,7 +4,8 @@ import { Tabs } from "expo-router";
 import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Platform, StyleSheet, View, useColorScheme } from "react-native";
+import { Platform, StyleSheet, View, useColorScheme, useWindowDimensions } from "react-native";
+import { WEB_DESKTOP_MIN_WIDTH } from "@/lib/web/webDesktop";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
@@ -40,6 +41,8 @@ export function ClassicTabLayout() {
   const isDark = colorScheme === "dark";
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
+  const { width } = useWindowDimensions();
+  const hideWebTabBar = isWeb && width >= WEB_DESKTOP_MIN_WIDTH;
   const { chats } = useApp();
   const totalUnread = chats.reduce((acc, c) => acc + c.unreadCount, 0);
 
@@ -49,14 +52,16 @@ export function ClassicTabLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.mutedForeground,
-        tabBarStyle: {
-          position: "absolute",
-          backgroundColor: isIOS ? "transparent" : colors.tabBar,
-          borderTopWidth: 0.5,
-          borderTopColor: colors.border,
-          elevation: 0,
-          ...(isWeb ? { height: 84 } : {}),
-        },
+        tabBarStyle: hideWebTabBar
+          ? { display: "none", height: 0 }
+          : {
+              position: "absolute",
+              backgroundColor: isIOS ? "transparent" : colors.tabBar,
+              borderTopWidth: 0.5,
+              borderTopColor: colors.border,
+              elevation: 0,
+              ...(isWeb ? { height: 84 } : {}),
+            },
         tabBarBackground: () =>
           isIOS ? (
             <BlurView intensity={100} tint={isDark ? "dark" : "light"} style={StyleSheet.absoluteFill} />

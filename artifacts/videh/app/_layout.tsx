@@ -50,6 +50,7 @@ import {
   stopIncomingCallExperience,
 } from "@/lib/incomingCallExperience";
 import { installGlobalErrorHandlers } from "@/lib/globalErrorHandlers";
+import { registerIncomingCallDismissHandler } from "@/lib/incomingCallUiBridge";
 import { loadCachedSilenceUnknownCallers } from "@/lib/privacySettings";
 import type { Chat } from "@/context/AppContext";
 
@@ -128,6 +129,7 @@ function RootLayoutNav() {
   const pendingIncomingRef = useRef<IncomingCallInfo | null>(null);
   const offeredCallIdRef = useRef<string | null>(null);
   const activeCallIdRef = useRef<string | null>(null);
+  const dismissedIncomingCallIdsRef = useRef<Set<string>>(new Set());
   const respondToIncomingCallRef = useRef<(action: "accept" | "decline", msg?: string) => void>(() => {});
   const handledLaunchCallNotificationRef = useRef(false);
   const incomingRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -140,6 +142,25 @@ function RootLayoutNav() {
       incomingRingTimerRef.current = null;
     }
   }, []);
+
+  const dismissIncomingCallUi = useCallback((callId?: string, permanently = false) => {
+    clearIncomingAutoEnd();
+    if (callId && permanently) {
+      dismissedIncomingCallIdsRef.current.add(callId);
+      setTimeout(() => dismissedIncomingCallIdsRef.current.delete(callId), 5 * 60_000);
+    }
+    offeredCallIdRef.current = null;
+    pendingIncomingRef.current = null;
+    void stopIncomingCallExperience(callId, { force: true });
+    setCallWaiting((prev) => (!callId || prev?.callId === callId ? null : prev));
+    setIncomingCall((prev) => {
+      if (!prev) return null;
+      if (callId && prev.callId !== callId) return prev;
+      return null;
+    });
+  }, [clearIncomingAutoEnd]);
+
+  useEffect(() => registerIncomingCallDismissHandler(dismissIncomingCallUi), [dismissIncomingCallUi]);
 
   const scheduleIncomingAutoEnd = useCallback((callId: string) => {
     clearIncomingAutoEnd();
@@ -165,11 +186,15 @@ function RootLayoutNav() {
     participantCount?: number;
   }) => {
     const next = toIncomingCallInfo(raw);
+    if (dismissedIncomingCallIdsRef.current.has(next.callId)) return;
     if (activeCallIdRef.current === next.callId) return;
+    if (activeCallSession?.callId === next.callId) return;
 
     const callPayload = { ...next, callerName: next.callerName };
     const isRepeatOffer = offeredCallIdRef.current === next.callId || !claimIncomingCallRing(next.callId);
     if (isRepeatOffer) {
+      if (dismissedIncomingCallIdsRef.current.has(next.callId)) return;
+      if (activeCallSession?.callId === next.callId) return;
       offeredCallIdRef.current = next.callId;
       setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
       pendingIncomingRef.current = callPayload;
@@ -214,6 +239,7 @@ function RootLayoutNav() {
 
     scheduleIncomingAutoEnd(next.callId);
   }, [
+    activeCallSession?.callId,
     activeCallSession?.engineActive,
     activeCallSession?.ringing,
     chats,
@@ -282,9 +308,9 @@ function RootLayoutNav() {
                 callerName: String(data.callerName ?? "Videh user"),
                 participantCount: 2,
               });
-              setIncomingCall(null);
-              presentIncomingCall(call);
-              await acceptIncoming();
+              dismissIncomingCallUi(call.callId);
+              activeCallIdRef.current = call.callId;
+              await acceptIncoming(call);
             }
           } catch {
             /* ignore */
@@ -295,7 +321,8 @@ function RootLayoutNav() {
       if (data?.callId && isAuthenticated) {
         void fetch(`${getApiUrl()}/api/webrtc/calls/${data.callId}/status?userId=${user?.dbId ?? ""}`)
           .then((res) => res.json())
-          .then((payload: { success?: boolean; call?: IncomingCallInfo }) => {
+          .then((payload: { success?: boolean; ended?: boolean; call?: IncomingCallInfo }) => {
+            if (payload.ended) return;
             const call = payload.call;
             if (!call) return;
             void offerIncomingCall({
@@ -347,15 +374,12 @@ function RootLayoutNav() {
         if (cancelled) return;
         const next = data.calls?.[0] ?? null;
         if (!next) {
-          pendingIncomingRef.current = null;
-          clearIncomingAutoEnd();
-          offeredCallIdRef.current = null;
-          setIncomingCall((prev) => {
-            if (prev) void stopIncomingCallExperience(prev.callId);
-            return null;
-          });
+          dismissIncomingCallUi();
           return;
         }
+        const pollCallId = String(next.callId ?? "");
+        if (dismissedIncomingCallIdsRef.current.has(pollCallId)) return;
+        if (activeCallSession?.callId === pollCallId) return;
         await offerIncomingCall({
           callId: next.callId,
           channel: next.channel,
@@ -372,6 +396,8 @@ function RootLayoutNav() {
       const action = String(payload.action ?? "");
       const callId = payload.callId ? String(payload.callId) : "";
       if (action === "ringing" && callId && user.dbId) {
+        if (dismissedIncomingCallIdsRef.current.has(callId)) return;
+        if (activeCallIdRef.current === callId) return;
         const callInfo: IncomingCallInfo = {
           callId,
           channel: String(payload.channel ?? ""),
@@ -387,16 +413,12 @@ function RootLayoutNav() {
         void stopIncomingCallExperience(callId);
       }
       if (action === "declined" || action === "ended" || action === "missed" || action === "busy") {
-        clearIncomingAutoEnd();
-        offeredCallIdRef.current = null;
-        if (callId) void stopIncomingCallExperience(callId);
-        setCallWaiting((prev) => (prev?.callId === callId ? null : prev));
-        setIncomingCall((prev) => {
-          if (!prev) return prev;
-          if (callId && prev.callId !== callId) return prev;
-          void loadMessages(String(prev.chatId));
-          return null;
-        });
+        if (callId) {
+          dismissIncomingCallUi(callId, true);
+          void loadMessages(String(payload.chatId ?? ""));
+        } else {
+          dismissIncomingCallUi(undefined, true);
+        }
       }
     });
     return () => {
@@ -407,7 +429,7 @@ function RootLayoutNav() {
       offeredCallIdRef.current = null;
       void stopIncomingCallExperience();
     };
-  }, [isAuthenticated, user?.dbId, user?.sessionToken, chats, loadMessages, activeCallSession?.callId, offerIncomingCall, clearIncomingAutoEnd]);
+  }, [isAuthenticated, user?.dbId, user?.sessionToken, activeCallSession?.callId, offerIncomingCall, dismissIncomingCallUi]);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -477,32 +499,30 @@ function RootLayoutNav() {
         participantCount: 2,
       });
       if (activeCallIdRef.current === info.callId) return;
+      if (dismissedIncomingCallIdsRef.current.has(info.callId)) return;
+      if (activeCallSession?.callId === info.callId) return;
       void offerIncomingCall(info);
     });
     return () => sub.remove();
-  }, [isAuthenticated, scheduleIncomingAutoEnd]);
+  }, [isAuthenticated, activeCallSession?.callId, offerIncomingCall]);
 
   const respondToIncomingCall = async (action: "accept" | "decline", declineMessage?: string) => {
     if (!incomingCall || !user?.dbId) return;
     const call = incomingCall;
-    clearIncomingAutoEnd();
-    offeredCallIdRef.current = null;
-    setIncomingCall(null);
-    setCallWaiting(null);
+    dismissIncomingCallUi(call.callId, action === "decline");
     try {
-      await stopIncomingCallExperience(call.callId);
-      await webrtcFetch(`/calls/${call.callId}/respond`, user.sessionToken, {
-        method: "POST",
-        body: JSON.stringify({
-          userId: user.dbId,
-          action,
-          ...(action === "decline" && declineMessage ? { declineMessage } : {}),
-        }),
-      }).catch(() => {});
       if (action === "accept") {
-        presentIncomingCall(call);
-        await acceptIncoming();
+        activeCallIdRef.current = call.callId;
+        await acceptIncoming(call);
       } else {
+        await webrtcFetch(`/calls/${call.callId}/respond`, user.sessionToken, {
+          method: "POST",
+          body: JSON.stringify({
+            userId: user.dbId,
+            action: "decline",
+            ...(declineMessage ? { declineMessage } : {}),
+          }),
+        }).catch(() => {});
         void loadMessages(String(call.chatId));
       }
     } catch {
@@ -527,12 +547,8 @@ function RootLayoutNav() {
           if (waiting?.callId === callId) {
             setCallWaiting(null);
             await holdActiveCall();
-            await webrtcFetch(`/calls/${callId}/respond`, user.sessionToken, {
-              method: "POST",
-              body: JSON.stringify({ userId: user.dbId, action: "accept" }),
-            }).catch(() => {});
-            presentIncomingCall(waiting);
-            await acceptIncoming();
+            activeCallIdRef.current = callId;
+            await acceptIncoming(waiting);
             return;
           }
           if (incomingCall?.callId === callId) {
@@ -600,6 +616,7 @@ function RootLayoutNav() {
       const pathChatId = String(parsed.path ?? "").replace(/^\//, "").split("/")[0];
       const chatId = Number(pathChatId) || Number(qp.chatId ?? 0);
       if (!callId || !incoming) return;
+      if (dismissedIncomingCallIdsRef.current.has(callId)) return;
       void offerIncomingCall({
         callId,
         channel: String(qp.channel ?? ""),
@@ -675,12 +692,8 @@ function RootLayoutNav() {
           offeredCallIdRef.current = null;
           await stopIncomingCallExperience(waiting.callId);
           await holdActiveCall();
-            await webrtcFetch(`/calls/${waiting.callId}/respond`, user.sessionToken, {
-              method: "POST",
-              body: JSON.stringify({ userId: user.dbId, action: "accept" }),
-            }).catch(() => {});
-            presentIncomingCall(waiting);
-            await acceptIncoming();
+            activeCallIdRef.current = waiting.callId;
+            await acceptIncoming(waiting);
           }}
           onEndAndAnswer={async () => {
             const waiting = callWaiting;
@@ -690,14 +703,8 @@ function RootLayoutNav() {
             await stopIncomingCallExperience(waiting?.callId);
             await endCall();
             if (waiting) {
-              await offerIncomingCall({
-                callId: waiting.callId,
-                channel: waiting.channel,
-                chatId: waiting.chatId,
-                type: waiting.type,
-                callerName: waiting.callerName,
-                participantCount: waiting.participantCount,
-              });
+              activeCallIdRef.current = waiting.callId;
+              await acceptIncoming(waiting);
             }
           }}
           onDecline={async () => {

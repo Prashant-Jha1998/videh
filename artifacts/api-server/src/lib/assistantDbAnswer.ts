@@ -9,6 +9,42 @@ function isEn(lang: AssistantLangCode): boolean {
   return lang === "en";
 }
 
+/** Identity & general Videh questions — no OpenAI required. */
+function answerConversationalQuestion(question: string, lang: AssistantLangCode, name: string): string | null {
+  const n = question.toLowerCase();
+
+  if (
+    /(tumhara|aapka|apka|tera|your)\s+(?:naam|name)/.test(n)
+    || /naam\s+kya\s+hai/.test(n)
+    || /who\s+are\s+you/.test(n)
+    || /what\s+(?:is|'s)\s+your\s+name/.test(n)
+    || /kaun\s+ho\s+tum/.test(n)
+    || /aap\s+kaun\s+ho/.test(n)
+  ) {
+    return isEn(lang)
+      ? `${name}, I am Videh — your voice assistant in Videh Messenger. I help with chats, calls, status, khata, broadcasts, and settings.`
+      : `${name} ji, main Videh hoon — Videh Messenger ka voice assistant. Main aapke messages, calls, status, khata, broadcast aur settings mein madad karta hoon.`;
+  }
+
+  if (
+    /(?:videh|hey\s+videh)\s+(?:kya\s+hai|kya\s+he|what\s+is)/.test(n)
+    || /what\s+is\s+videh/.test(n)
+    || /videh\s+app\s+kya/.test(n)
+  ) {
+    return isEn(lang)
+      ? `${name}, Videh is a secure messenger for India — chats, voice and video calls, status, groups, khata, broadcasts, and Hey Videh voice assistant.`
+      : `${name} ji, Videh ek secure messenger hai — chat, voice/video call, status, groups, khata, broadcast, aur Hey Videh voice assistant ke saath.`;
+  }
+
+  if (/(?:kya\s+kar\s+sakte|what\s+can\s+you\s+do|help\s+kya)/.test(n)) {
+    return isEn(lang)
+      ? `${name}, you can ask: who messaged today, who called last, unread count, send a message to any contact, open a chat, khata summary, or how to use any Videh feature.`
+      : `${name} ji, aap pooch sakte hain: aaj kis ka message aaya, last call kis ka tha, kitne unread, kisi ko message bhejo, chat kholo, khata batao, ya koi Videh feature kaise use karein.`;
+  }
+
+  return null;
+}
+
 /** Pattern-based app help — no external AI, from Videh product docs. */
 function answerSettingsHelp(question: string, lang: AssistantLangCode, name: string): string | null {
   const n = question.toLowerCase();
@@ -147,6 +183,9 @@ export async function answerFromDatabase(
   const trimmed = question.trim();
   if (!trimmed) return null;
 
+  const conversational = answerConversationalQuestion(trimmed, lang, name);
+  if (conversational) return conversational;
+
   const help = answerSettingsHelp(trimmed, lang, name);
   if (help) return help;
 
@@ -171,9 +210,9 @@ export async function answerFromDatabase(
 
 const FALLBACK_BY_LANG: Partial<Record<AssistantLangCode, (name: string) => string>> = {
   en: (name) =>
-    `${name}, I did not quite get that. Ask about messages, calls, unread chats, or say a contact name to call.`,
+    `${name}, try again in simple words — for example: who messaged today, last message from Rahul, call Monty, or how to schedule a message.`,
   hi: (name) =>
-    `${name} ji, mujhe poori tarah samajh nahi aaya. Messages, calls, unread, ya kisi contact ko call karne ke liye boliye.`,
+    `${name} ji, dubara simple shabdon mein boliye — jaise: aaj kis ka message aaya, Rahul ka last message, Monty ko call karo, ya schedule message kaise karein.`,
   pa: (name) =>
     `${name}, ਮੈਨੂੰ ਪੂਰੀ ਤਰ੍ਹਾਂ ਸਮਝ ਨਹੀਂ ਆਈ। ਸੁਨੇਹੇ, ਕਾਲਾਂ, ਜਾਂ ਕਿਸੇ contact ਨੂੰ ਕਾਲ ਕਰਨ ਲਈ ਬੋਲੋ।`,
   ta: (name) =>
