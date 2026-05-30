@@ -64,8 +64,8 @@ async function expireRingingCall(callId: string): Promise<void> {
   }
   if (!changed) return;
   call.updatedAt = Date.now();
-  if (isCallEnded(call)) await persistCallHistory(call);
-  await saveCall(call);
+  if (isCallEnded(call)) await finalizeCall(call);
+  else await saveCall(call);
 }
 
 function scheduleRingExpiry(callId: string): void {
@@ -118,8 +118,8 @@ async function cleanupSessions() {
         }
       }
       if (changed) {
-        if (isCallEnded(call)) await persistCallHistory(call);
-        await saveCall(call);
+        if (isCallEnded(call)) await finalizeCall(call);
+        else await saveCall(call);
       }
     }
   }
@@ -147,12 +147,27 @@ async function listActiveCalls(): Promise<CallInvite[]> {
   return calls.filter((c): c is CallInvite => c != null && !isCallEnded(c));
 }
 
-/** User is already on a connected call (busy). */
+/** User is already in an active call (used for busy detection). */
 function userIsOnLiveCall(calls: CallInvite[], userId: number, exceptCallId?: string): boolean {
   return calls.some((call) => {
     if (exceptCallId && call.callId === exceptCallId) return false;
     if (isCallEnded(call)) return false;
-    return call.statuses[userId] === "accepted";
+
+    const status = call.statuses[userId];
+    if (!status || status === "ringing") return false;
+
+    if (status === "accepted") {
+      if (call.connectedAt) return true;
+      if (call.callerId === userId) {
+        return call.participantIds.some((id) => {
+          const peer = call.statuses[id];
+          return peer === "ringing" || peer === "accepted";
+        });
+      }
+      return true;
+    }
+
+    return false;
   });
 }
 
@@ -178,15 +193,33 @@ function aggregateCallResult(call: CallInvite): "answered" | "missed" | "decline
   return "missed";
 }
 
-async function persistCallHistory(call: CallInvite): Promise<void> {
-  if (call.logged || call.participantIds.length === 0) return;
+async function persistCallHistory(call: CallInvite): Promise<boolean> {
+  if (call.logged || call.participantIds.length === 0) return false;
   const durationSeconds = call.connectedAt
     ? Math.max(0, Math.round((Date.now() - call.connectedAt) / 1000))
     : 0;
   const result = aggregateCallResult(call);
   const startedAt = call.connectedAt ?? call.createdAt;
+  const metaContent = JSON.stringify({
+    callType: call.type,
+    result,
+    durationSeconds: durationSeconds || undefined,
+  });
 
   try {
+    const dup = await query(
+      `SELECT id FROM messages
+       WHERE chat_id = $1 AND type = 'call' AND content = $2
+         AND created_at > NOW() - INTERVAL '15 seconds'
+       LIMIT 1`,
+      [call.chatId, metaContent],
+    );
+    if (dup.rows.length > 0) {
+      call.logged = true;
+      await saveCall(call);
+      return false;
+    }
+
     for (const participantId of call.participantIds) {
       const status = participantCallStatus(call, participantId);
       await query(
@@ -196,6 +229,7 @@ async function persistCallHistory(call: CallInvite): Promise<void> {
       );
     }
     call.logged = true;
+    await saveCall(call);
     await insertCallChatMessage({
       chatId: call.chatId,
       callerId: call.callerId,
@@ -217,9 +251,19 @@ async function persistCallHistory(call: CallInvite): Promise<void> {
         conference: call.participantIds.length > 1,
       },
     });
+    return true;
   } catch (err) {
     console.error("persistCallHistory error", err);
+    return false;
   }
+}
+
+/** Write call history once and remove in-memory call so it cannot block future calls. */
+async function finalizeCall(call: CallInvite): Promise<void> {
+  clearRingExpiryTimer(call.callId);
+  await persistCallHistory(call);
+  await stateDelete(callKey(call.callId));
+  await stateDelete(sessionKey(call.channel));
 }
 
 function serializeIncoming(call: CallInvite, userId: number) {
@@ -294,13 +338,21 @@ router.post("/calls", async (req: Request, res: Response) => {
       return;
     }
 
+    const liveCalls = await listActiveCalls();
+    for (const stale of liveCalls) {
+      if (stale.chatId !== chatId) continue;
+      if (stale.callerId !== callerId && !stale.participantIds.includes(callerId)) continue;
+      if (isCallEnded(stale)) await finalizeCall(stale);
+      else if (Date.now() - stale.updatedAt > 90_000) await finalizeCall(stale);
+    }
+    const refreshedLive = await listActiveCalls();
+
     const callId = `call_${chatId}_${Date.now()}`;
     const channel = `videh_${chatId}_${Date.now()}`;
-    const liveCalls = await listActiveCalls();
     const statuses: CallInvite["statuses"] = {};
     const busyParticipantIds: number[] = [];
     callableParticipantIds.forEach((id) => {
-      if (userIsOnLiveCall(liveCalls, id)) {
+      if (userIsOnLiveCall(refreshedLive, id)) {
         statuses[id] = "busy";
         busyParticipantIds.push(id);
       } else {
@@ -360,7 +412,7 @@ router.post("/calls", async (req: Request, res: Response) => {
     }
     const allInviteesBusy = callableParticipantIds.length > 0 && ringingIds.length === 0;
     if (allInviteesBusy) {
-      await persistCallHistory(invite);
+      await finalizeCall(invite);
     }
     res.json({
       success: true,
@@ -410,8 +462,8 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
         action: "busy",
         payload: serializeIncoming(call, userId),
       });
-      if (isCallEnded(call)) await persistCallHistory(call);
-      await saveCall(call);
+      if (isCallEnded(call)) await finalizeCall(call);
+      else await saveCall(call);
       res.json({ success: true, call: serializeIncoming(call, userId), busy: true });
       return;
     }
@@ -461,10 +513,10 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
     payload: serializeIncoming(call, userId),
   });
   if (isCallEnded(call)) {
-    clearRingExpiryTimer(call.callId);
-    await persistCallHistory(call);
+    await finalizeCall(call);
+  } else {
+    await saveCall(call);
   }
-  await saveCall(call);
   res.json({ success: true, call: serializeIncoming(call, userId) });
 });
 
@@ -707,7 +759,6 @@ router.post("/calls/:callId/end", async (req: Request, res: Response) => {
     return;
   }
   if (call) {
-    clearRingExpiryTimer(call.callId);
     for (const uid of Object.keys(call.statuses)) {
       const id = Number(uid);
       const cur = call.statuses[id];
@@ -715,9 +766,7 @@ router.post("/calls/:callId/end", async (req: Request, res: Response) => {
       else if (cur === "ringing") call.statuses[id] = "missed";
     }
     call.updatedAt = Date.now();
-    await persistCallHistory(call);
-    await saveCall(call);
-    await stateDelete(sessionKey(call.channel));
+    await finalizeCall(call);
   }
   res.json({ success: true });
 });

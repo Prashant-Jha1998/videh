@@ -121,6 +121,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const endedTonePlayed = useRef(false);
   const endingCallRef = useRef(false);
   const sessionCallIdRef = useRef<string | null>(null);
+  const outgoingCallInitRef = useRef<string | null>(null);
+  const busyEndHandledRef = useRef<string | null>(null);
 
   useEffect(() => {
     sessionCallIdRef.current = session?.callId ?? null;
@@ -154,6 +156,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     setStatusHint(null);
     endedTonePlayed.current = false;
     endingCallRef.current = false;
+    outgoingCallInitRef.current = null;
+    busyEndHandledRef.current = null;
   }, []);
 
   const onCallEnded = useCallback(() => {
@@ -299,6 +303,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     });
 
     if (!isIncoming && !params.channel && user?.dbId) {
+      const outgoingKey = `${chatId}:${isVideo ? "video" : "audio"}`;
+      if (outgoingCallInitRef.current === outgoingKey) return;
+      outgoingCallInitRef.current = outgoingKey;
+
       void webrtcFetch("/calls", user.sessionToken, {
         method: "POST",
         body: JSON.stringify({ chatId: Number(chatId), type: isVideo ? "video" : "audio" }),
@@ -325,11 +333,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           setRingingCount(data.call!.ringingCount ?? 0);
           if (data.allInviteesBusy) {
             void (async () => {
+              if (busyEndHandledRef.current === data.call?.callId) return;
+              busyEndHandledRef.current = data.call?.callId ?? "busy";
               await stopCallAlert();
               await playCallBusyTone();
-              if (data.call?.callId) {
-                await webrtcFetch(`/calls/${data.call.callId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
-              }
               onCallEnded();
             })();
           }
@@ -478,28 +485,26 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
           if (!call.joined && !endedTonePlayed.current) {
             if (data.allInviteesBusy || ((data.busyCount ?? 0) > 0 && (data.ringingCount ?? 0) === 0 && !remoteAccepted)) {
+              if (busyEndHandledRef.current === polledCallId) return;
+              busyEndHandledRef.current = polledCallId;
               endedTonePlayed.current = true;
               void (async () => {
                 try {
                   await stopCallAlert();
                   await playCallBusyTone();
-                  if (sessionCallIdRef.current === polledCallId) {
-                    await webrtcFetch(`/calls/${polledCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
-                  }
                   onCallEnded();
                 } catch { /* ignore */ }
               })();
               return;
             }
             if ((data.declinedCount ?? 0) > 0 && (data.ringingCount ?? 0) === 0 && !remoteAccepted) {
+              if (busyEndHandledRef.current === polledCallId) return;
+              busyEndHandledRef.current = polledCallId;
               endedTonePlayed.current = true;
               void (async () => {
                 try {
                   await stopCallAlert();
-                  await playCallBusyTone();
-                  if (sessionCallIdRef.current === polledCallId) {
-                    await webrtcFetch(`/calls/${polledCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
-                  }
+                  await playCallUnavailableTone();
                   onCallEnded();
                 } catch { /* ignore */ }
               })();
