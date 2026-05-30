@@ -80,7 +80,16 @@ export async function insertCallChatMessage(args: {
 export function publishCallSignal(args: {
   chatId: number;
   userIds: number[];
-  action: "ringing" | "accepted" | "declined" | "ended" | "missed" | "busy";
+  action:
+    | "ringing"
+    | "accepted"
+    | "declined"
+    | "ended"
+    | "missed"
+    | "busy"
+    | "hold"
+    | "resume"
+    | "media_type";
   payload: unknown;
 }): void {
   publishChatEvent({

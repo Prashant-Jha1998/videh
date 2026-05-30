@@ -15,16 +15,24 @@ jobs:
     name: Deploy EC2
     runs-on: ubuntu-latest
     steps:
+      - name: Validate secrets
+        run: |
+          test -n "${{ secrets.EC2_HOST }}" || (echo "::error::Missing GitHub secret EC2_HOST" && exit 1)
+          test -n "${{ secrets.EC2_USER }}" || (echo "::error::Missing GitHub secret EC2_USER" && exit 1)
+          test -n "${{ secrets.EC2_SSH_KEY }}" || (echo "::error::Missing GitHub secret EC2_SSH_KEY" && exit 1)
+
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/videh_ec2_key
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/videh_ec2_key
           chmod 600 ~/.ssh/videh_ec2_key
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Deploy on EC2
         run: |
           ssh -i ~/.ssh/videh_ec2_key \
-            -o StrictHostKeyChecking=no \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=30 \
             "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" <<'EOF'
           set -euo pipefail
 
@@ -32,10 +40,12 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
 
-          command -v pnpm
-          pnpm install --frozen-lockfile
+          export PATH="/usr/local/bin:/usr/bin:/bin:$HOME/.local/share/pnpm:$PATH"
+          corepack enable 2>/dev/null || true
+          command -v pnpm >/dev/null || (echo "pnpm not found on EC2" && exit 1)
 
-          pnpm --filter @workspace/api-server build
+          pnpm install --frozen-lockfile
+          pnpm --filter @workspace/api-server run build:api
           BASE_PATH=/ pnpm --filter @workspace/admin-web build
           BASE_PATH=/ pnpm --filter @workspace/videh-web build
           BASE_PATH=/ pnpm --filter @workspace/developer-web build
@@ -52,12 +62,15 @@ jobs:
             if curl --fail --silent --show-error https://videh.co.in/api/readyz \
               && curl --fail --silent --show-error https://videh.co.in/ | grep -q "Videh" \
               && curl --fail --silent --show-error https://developer.videh.co.in/ | grep -q "Videh"; then
+              echo "Deploy health checks passed."
               exit 0
             fi
             echo "Health check failed on attempt ${attempt}; retrying..."
             sleep 5
           done
 
-          pm2 logs videh-api --lines 80 --nostream
+          echo "::group::PM2 logs"
+          pm2 logs videh-api --lines 80 --nostream || true
+          echo "::endgroup::"
           exit 1
           EOF
