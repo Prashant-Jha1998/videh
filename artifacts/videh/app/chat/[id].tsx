@@ -9,7 +9,7 @@ import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { KeyboardStickyView, useGenericKeyboardHandler } from "react-native-keyboard-controller";
+import { useGenericKeyboardHandler } from "react-native-keyboard-controller";
 import { useChatKeyboard } from "@/hooks/useChatKeyboard";
 import { runOnJS } from "react-native-reanimated";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -25,6 +25,7 @@ import {
   Modal,
   Image as NativeImage,
   Keyboard,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -3132,23 +3133,25 @@ export default function ChatScreen() {
             </View>
           );
 
-          /** WhatsApp-style: messages flex; composer sticks above keyboard (resize + KeyboardStickyView). */
-          if (Platform.OS === "web") {
+          /** WhatsApp-style: list + composer column; Android resize shrinks window; iOS uses RN KAV. */
+          const chatColumn = (
+            <>
+              {chatMessageList}
+              {composerBlock}
+            </>
+          );
+          if (Platform.OS === "ios") {
             return (
-              <View style={styles.messageListAvoid}>
-                {chatMessageList}
-                {composerBlock}
-              </View>
+              <KeyboardAvoidingView
+                style={styles.messageListAvoid}
+                behavior="padding"
+                keyboardVerticalOffset={topPad}
+              >
+                {chatColumn}
+              </KeyboardAvoidingView>
             );
           }
-          return (
-            <View style={styles.messageListAvoid}>
-              {chatMessageList}
-              <KeyboardStickyView offset={{ closed: 0, opened: 0 }} style={styles.composerSticky}>
-                {composerBlock}
-              </KeyboardStickyView>
-            </View>
-          );
+          return <View style={styles.messageListAvoid}>{chatColumn}</View>;
         })()}
 
         {showJumpToLatest ? (
@@ -3593,7 +3596,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   chatBody: { flex: 1 },
   messageListAvoid: { flex: 1 },
-  composerSticky: { width: "100%" },
   messageList: { flex: 1 },
   messageListContent: { paddingHorizontal: 10, paddingTop: 8 },
   scrollToBottomFab: {
