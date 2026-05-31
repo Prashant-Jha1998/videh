@@ -1,6 +1,6 @@
 const { withAndroidManifest } = require("expo/config-plugins");
 
-/** Force adjustResize so chat composer lifts with the soft keyboard (WhatsApp-style). */
+/** adjustPan + JS keyboard inset lifts composer (resize often fails with edge-to-edge / RN 0.81). */
 function withAndroidAdjustResize(config) {
   return withAndroidManifest(config, (cfg) => {
     const app = cfg.modResults.manifest?.application?.[0];
@@ -9,7 +9,7 @@ function withAndroidAdjustResize(config) {
     for (const activity of app.activity) {
       const name = String(activity.$?.["android:name"] ?? "");
       if (!name.endsWith("MainActivity")) continue;
-      activity.$["android:windowSoftInputMode"] = "adjustResize";
+      activity.$["android:windowSoftInputMode"] = "adjustPan";
     }
 
     return cfg;

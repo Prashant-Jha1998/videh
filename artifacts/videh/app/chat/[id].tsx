@@ -1485,9 +1485,10 @@ export default function ChatScreen() {
    * Web: composer is a sibling under the list inside KAV — only a small list tail gap is needed.
    */
   const listBottomPadding = useMemo(() => 12, []);
+  const androidKeyboardLift = Platform.OS === "android" ? keyboardHeight : 0;
   const jumpFabBottom = useMemo(
-    () => Math.max(12, composerHeight + 12 + (keyboardVisible && Platform.OS === "android" ? 4 : 0)),
-    [composerHeight, keyboardVisible],
+    () => Math.max(12, composerHeight + 12 + androidKeyboardLift + (keyboardVisible && Platform.OS === "ios" ? 4 : 0)),
+    [composerHeight, keyboardVisible, androidKeyboardLift],
   );
 
   useEffect(() => {
@@ -3133,7 +3134,7 @@ export default function ChatScreen() {
             </View>
           );
 
-          /** WhatsApp-style: list + composer column; Android resize shrinks window; iOS uses RN KAV. */
+          /** WhatsApp-style: list + composer; Android lifts via keyboard height inset (works in EAS APK). */
           const chatColumn = (
             <>
               {chatMessageList}
@@ -3151,7 +3152,16 @@ export default function ChatScreen() {
               </KeyboardAvoidingView>
             );
           }
-          return <View style={styles.messageListAvoid}>{chatColumn}</View>;
+          return (
+            <View
+              style={[
+                styles.messageListAvoid,
+                androidKeyboardLift > 0 ? { paddingBottom: androidKeyboardLift } : null,
+              ]}
+            >
+              {chatColumn}
+            </View>
+          );
         })()}
 
         {showJumpToLatest ? (
