@@ -1,12 +1,22 @@
-name: Build Android AAB
+name: Build Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: "EAS profile (preview = test APK, apkRelease = release-signed APK)"
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - apkRelease
 
 jobs:
-  build-aab:
-    name: Production AAB (EAS local)
+  build-apk:
+    name: Signed APK (EAS local, no cloud quota)
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,7 +43,7 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: eas whoami
 
-      - name: Build signed AAB
+      - name: Build signed APK
         working-directory: artifacts/videh
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -42,16 +52,20 @@ jobs:
           EAS_SKIP_AUTO_FINGERPRINT: "1"
         run: |
           mkdir -p build
+          VERSION=$(node -p "require('./app.json').expo.version")
+          CODE=$(node -p "require('./app.json').expo.android.versionCode")
+          OUT="./build/videh-${VERSION}-b${CODE}-${{ inputs.profile }}.apk"
           eas build \
             --platform android \
-            --profile production \
+            --profile "${{ inputs.profile }}" \
             --local \
             --non-interactive \
-            --output ./build/videh-release.aab
+            --output "$OUT"
+          echo "APK_PATH=$OUT" >> "$GITHUB_ENV"
 
-      - name: Upload AAB
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: videh-android-aab-v${{ github.run_number }}
-          path: artifacts/videh/build/videh-release.aab
+          name: videh-apk-${{ inputs.profile }}-run${{ github.run_number }}
+          path: artifacts/videh/build/*.apk
           if-no-files-found: error

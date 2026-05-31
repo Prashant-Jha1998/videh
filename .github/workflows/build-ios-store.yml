@@ -1,12 +1,13 @@
-name: Build Android AAB
+name: Build iOS (App Store)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-aab:
-    name: Production AAB (EAS local)
-    runs-on: ubuntu-latest
+  build-ios:
+    name: Signed IPA (EAS local, macOS)
+    runs-on: macos-latest
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,7 +34,7 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: eas whoami
 
-      - name: Build signed AAB
+      - name: Build signed iOS archive
         working-directory: artifacts/videh
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -42,16 +43,17 @@ jobs:
           EAS_SKIP_AUTO_FINGERPRINT: "1"
         run: |
           mkdir -p build
+          VERSION=$(node -p "require('./app.json').expo.version")
           eas build \
-            --platform android \
+            --platform ios \
             --profile production \
             --local \
             --non-interactive \
-            --output ./build/videh-release.aab
+            --output "./build/videh-${VERSION}-ios.tar.gz"
 
-      - name: Upload AAB
+      - name: Upload iOS build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: videh-android-aab-v${{ github.run_number }}
-          path: artifacts/videh/build/videh-release.aab
+          name: videh-ios-run${{ github.run_number }}
+          path: artifacts/videh/build/*
           if-no-files-found: error

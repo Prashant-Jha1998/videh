@@ -1,0 +1,80 @@
+name: Build Play Store + Test APK
+
+# One click: signed AAB (Play Store) + signed APK (testing) — no EAS cloud quota.
+on:
+  workflow_dispatch:
+
+jobs:
+  android-apk:
+    name: Android APK (preview)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: npm install -g eas-cli@18.13.0
+      - name: Verify Expo token
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: eas whoami
+      - name: Build signed APK
+        working-directory: artifacts/videh
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_DOMAIN: videh.co.in
+          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
+          EAS_SKIP_AUTO_FINGERPRINT: "1"
+        run: |
+          mkdir -p build
+          VERSION=$(node -p "require('./app.json').expo.version")
+          CODE=$(node -p "require('./app.json').expo.android.versionCode")
+          eas build -p android --profile preview --local --non-interactive \
+            --output "./build/videh-${VERSION}-b${CODE}-preview.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: videh-apk-preview
+          path: artifacts/videh/build/*.apk
+
+  android-aab:
+    name: Android AAB (Play Store)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: npm install -g eas-cli@18.13.0
+      - name: Verify Expo token
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: eas whoami
+      - name: Build signed AAB
+        working-directory: artifacts/videh
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_DOMAIN: videh.co.in
+          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
+          EAS_SKIP_AUTO_FINGERPRINT: "1"
+        run: |
+          mkdir -p build
+          VERSION=$(node -p "require('./app.json').expo.version")
+          CODE=$(node -p "require('./app.json').expo.android.versionCode")
+          eas build -p android --profile production --local --non-interactive \
+            --output "./build/videh-${VERSION}-b${CODE}-playstore.aab"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: videh-aab-playstore
+          path: artifacts/videh/build/*.aab
