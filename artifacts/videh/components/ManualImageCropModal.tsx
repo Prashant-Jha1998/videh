@@ -12,10 +12,11 @@ import {
   type LayoutRectangle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { computeDisplayBounds } from "@/lib/imageDisplayLayout";
 import { clampCropRect, getImageDimensions, type CropRect } from "@/lib/imageEdit";
 
 const MIN_CROP_PX = 72;
-const HANDLE = 28;
+const HANDLE_HIT = 36;
 
 type DisplayCrop = { x: number; y: number; w: number; h: number };
 type DisplayBounds = { x: number; y: number; w: number; h: number };
@@ -32,22 +33,6 @@ type HandleId =
 
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
-}
-
-function computeDisplayBounds(
-  container: LayoutRectangle,
-  imageW: number,
-  imageH: number,
-): DisplayBounds {
-  const scale = Math.min(container.width / imageW, container.height / imageH);
-  const w = imageW * scale;
-  const h = imageH * scale;
-  return {
-    x: (container.width - w) / 2,
-    y: (container.height - h) / 2,
-    w,
-    h,
-  };
 }
 
 function fullCrop(bounds: DisplayBounds): DisplayCrop {
@@ -136,6 +121,33 @@ function displayCropToPixels(crop: DisplayCrop, bounds: DisplayBounds, imageW: n
   return clampCropRect(rect, imageW, imageH);
 }
 
+/** Pick handle from touch in container coordinates. */
+function hitTestHandle(
+  touchX: number,
+  touchY: number,
+  crop: DisplayCrop,
+  bounds: DisplayBounds,
+): HandleId {
+  const left = bounds.x + crop.x;
+  const top = bounds.y + crop.y;
+  const right = left + crop.w;
+  const bottom = top + crop.h;
+  const h = HANDLE_HIT / 2;
+
+  const near = (px: number, py: number) => Math.abs(touchX - px) <= h && Math.abs(touchY - py) <= h;
+
+  if (near(left, top)) return "tl";
+  if (near(right, top)) return "tr";
+  if (near(left, bottom)) return "bl";
+  if (near(right, bottom)) return "br";
+  if (Math.abs(touchY - top) <= h && touchX >= left && touchX <= right) return "t";
+  if (Math.abs(touchY - bottom) <= h && touchX >= left && touchX <= right) return "b";
+  if (Math.abs(touchX - left) <= h && touchY >= top && touchY <= bottom) return "l";
+  if (Math.abs(touchX - right) <= h && touchY >= top && touchY <= bottom) return "r";
+  if (touchX >= left && touchX <= right && touchY >= top && touchY <= bottom) return "move";
+  return "move";
+}
+
 type Props = {
   visible: boolean;
   imageUri: string;
@@ -151,6 +163,8 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
   const [crop, setCrop] = useState<DisplayCrop | null>(null);
   const cropRef = useRef<DisplayCrop | null>(null);
   const startCropRef = useRef<DisplayCrop | null>(null);
+  const activeHandleRef = useRef<HandleId>("move");
+  const boundsKeyRef = useRef("");
   cropRef.current = crop;
 
   const displayBounds = useMemo(() => {
@@ -164,6 +178,7 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
     setLoading(true);
     setCrop(null);
     setImageSize(null);
+    boundsKeyRef.current = "";
     void (async () => {
       try {
         const size = await getImageDimensions(imageUri);
@@ -178,39 +193,38 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
   }, [visible, imageUri, onCancel]);
 
   useEffect(() => {
-    if (displayBounds && !crop) setCrop(fullCrop(displayBounds));
-  }, [displayBounds, crop]);
+    if (!displayBounds) return;
+    const key = `${Math.round(displayBounds.w)}x${Math.round(displayBounds.h)}`;
+    if (boundsKeyRef.current !== key) {
+      boundsKeyRef.current = key;
+      setCrop(fullCrop(displayBounds));
+    }
+  }, [displayBounds]);
 
-  const makeResponder = useCallback(
-    (handle: HandleId) =>
+  const panResponder = useMemo(
+    () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: () => {
-          startCropRef.current = cropRef.current;
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: (evt) => {
+          const c = cropRef.current;
+          if (!c || !displayBounds) return;
+          activeHandleRef.current = hitTestHandle(
+            evt.nativeEvent.locationX,
+            evt.nativeEvent.locationY,
+            c,
+            displayBounds,
+          );
+          startCropRef.current = c;
         },
         onPanResponderMove: (_, gesture) => {
           const start = startCropRef.current;
           if (!start || !displayBounds) return;
-          setCrop(adjustCrop(start, handle, gesture.dx, gesture.dy, displayBounds));
+          setCrop(adjustCrop(start, activeHandleRef.current, gesture.dx, gesture.dy, displayBounds));
         },
       }),
     [displayBounds],
-  );
-
-  const responders = useMemo(
-    () => ({
-      move: makeResponder("move"),
-      tl: makeResponder("tl"),
-      tr: makeResponder("tr"),
-      bl: makeResponder("bl"),
-      br: makeResponder("br"),
-      t: makeResponder("t"),
-      b: makeResponder("b"),
-      l: makeResponder("l"),
-      r: makeResponder("r"),
-    }),
-    [makeResponder],
   );
 
   const handleDone = () => {
@@ -244,54 +258,50 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
         <View
           style={styles.canvas}
           onLayout={(e) => setContainer(e.nativeEvent.layout)}
+          {...(!loading && crop && displayBounds ? panResponder.panHandlers : {})}
         >
-          {loading || !imageSize ? (
+          {loading || !imageSize || !displayBounds ? (
             <ActivityIndicator color="#00a884" size="large" />
           ) : (
             <>
-              <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFill} contentFit="contain" />
-              {absCrop && displayBounds ? (
+              <View
+                pointerEvents="none"
+                style={{
+                  position: "absolute",
+                  left: displayBounds.x,
+                  top: displayBounds.y,
+                  width: displayBounds.w,
+                  height: displayBounds.h,
+                }}
+              >
+                <Image
+                  source={{ uri: imageUri }}
+                  style={{ width: displayBounds.w, height: displayBounds.h }}
+                  contentFit="fill"
+                />
+              </View>
+
+              {absCrop ? (
                 <>
+                  <View style={[styles.dim, { left: 0, top: 0, right: 0, height: absCrop.top }]} pointerEvents="none" />
                   <View
-                    style={[
-                      styles.dim,
-                      { left: 0, top: 0, right: 0, height: absCrop.top },
-                    ]}
+                    style={[styles.dim, { left: 0, top: absCrop.top + absCrop.height, right: 0, bottom: 0 }]}
+                    pointerEvents="none"
+                  />
+                  <View
+                    style={[styles.dim, { left: 0, top: absCrop.top, width: absCrop.left, height: absCrop.height }]}
                     pointerEvents="none"
                   />
                   <View
                     style={[
                       styles.dim,
-                      { left: 0, top: absCrop.top + absCrop.height, right: 0, bottom: 0 },
-                    ]}
-                    pointerEvents="none"
-                  />
-                  <View
-                    style={[
-                      styles.dim,
-                      {
-                        left: 0,
-                        top: absCrop.top,
-                        width: absCrop.left,
-                        height: absCrop.height,
-                      },
-                    ]}
-                    pointerEvents="none"
-                  />
-                  <View
-                    style={[
-                      styles.dim,
-                      {
-                        left: absCrop.left + absCrop.width,
-                        top: absCrop.top,
-                        right: 0,
-                        height: absCrop.height,
-                      },
+                      { left: absCrop.left + absCrop.width, top: absCrop.top, right: 0, height: absCrop.height },
                     ]}
                     pointerEvents="none"
                   />
 
                   <View
+                    pointerEvents="none"
                     style={[
                       styles.cropBox,
                       {
@@ -301,102 +311,26 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
                         height: absCrop.height,
                       },
                     ]}
-                    {...responders.move.panHandlers}
                   >
                     {[1 / 3, 2 / 3].map((f) => (
                       <React.Fragment key={`g-${f}`}>
                         <View
                           style={[styles.gridLine, { left: `${f * 100}%`, top: 0, bottom: 0, width: 1 }]}
-                          pointerEvents="none"
                         />
                         <View
                           style={[styles.gridLine, { top: `${f * 100}%`, left: 0, right: 0, height: 1 }]}
-                          pointerEvents="none"
                         />
                       </React.Fragment>
                     ))}
-
-                    <View style={[styles.corner, styles.cornerTL]} pointerEvents="none" />
-                    <View style={[styles.corner, styles.cornerTR]} pointerEvents="none" />
-                    <View style={[styles.corner, styles.cornerBL]} pointerEvents="none" />
-                    <View style={[styles.corner, styles.cornerBR]} pointerEvents="none" />
-                    <View style={[styles.edgeBar, styles.edgeT]} pointerEvents="none" />
-                    <View style={[styles.edgeBar, styles.edgeB]} pointerEvents="none" />
-                    <View style={[styles.edgeBar, styles.edgeL]} pointerEvents="none" />
-                    <View style={[styles.edgeBar, styles.edgeR]} pointerEvents="none" />
+                    <View style={[styles.corner, styles.cornerTL]} />
+                    <View style={[styles.corner, styles.cornerTR]} />
+                    <View style={[styles.corner, styles.cornerBL]} />
+                    <View style={[styles.corner, styles.cornerBR]} />
+                    <View style={[styles.edgeBar, styles.edgeT]} />
+                    <View style={[styles.edgeBar, styles.edgeB]} />
+                    <View style={[styles.edgeBar, styles.edgeL]} />
+                    <View style={[styles.edgeBar, styles.edgeR]} />
                   </View>
-
-                  <View
-                    style={[
-                      styles.handleTouch,
-                      { left: absCrop.left - HANDLE / 2, top: absCrop.top - HANDLE / 2 },
-                    ]}
-                    {...responders.tl.panHandlers}
-                  />
-                  <View
-                    style={[
-                      styles.handleTouch,
-                      { left: absCrop.left + absCrop.width - HANDLE / 2, top: absCrop.top - HANDLE / 2 },
-                    ]}
-                    {...responders.tr.panHandlers}
-                  />
-                  <View
-                    style={[
-                      styles.handleTouch,
-                      { left: absCrop.left - HANDLE / 2, top: absCrop.top + absCrop.height - HANDLE / 2 },
-                    ]}
-                    {...responders.bl.panHandlers}
-                  />
-                  <View
-                    style={[
-                      styles.handleTouch,
-                      {
-                        left: absCrop.left + absCrop.width - HANDLE / 2,
-                        top: absCrop.top + absCrop.height - HANDLE / 2,
-                      },
-                    ]}
-                    {...responders.br.panHandlers}
-                  />
-                  <View
-                    style={[
-                      styles.handleTouch,
-                      {
-                        left: absCrop.left + absCrop.width / 2 - HANDLE / 2,
-                        top: absCrop.top - HANDLE / 2,
-                      },
-                    ]}
-                    {...responders.t.panHandlers}
-                  />
-                  <View
-                    style={[
-                      styles.handleTouch,
-                      {
-                        left: absCrop.left + absCrop.width / 2 - HANDLE / 2,
-                        top: absCrop.top + absCrop.height - HANDLE / 2,
-                      },
-                    ]}
-                    {...responders.b.panHandlers}
-                  />
-                  <View
-                    style={[
-                      styles.handleTouch,
-                      {
-                        left: absCrop.left - HANDLE / 2,
-                        top: absCrop.top + absCrop.height / 2 - HANDLE / 2,
-                      },
-                    ]}
-                    {...responders.l.panHandlers}
-                  />
-                  <View
-                    style={[
-                      styles.handleTouch,
-                      {
-                        left: absCrop.left + absCrop.width - HANDLE / 2,
-                        top: absCrop.top + absCrop.height / 2 - HANDLE / 2,
-                      },
-                    ]}
-                    {...responders.r.panHandlers}
-                  />
                 </>
               ) : null}
             </>
@@ -450,12 +384,6 @@ const styles = StyleSheet.create({
   edgeB: { bottom: -2, left: "35%", right: "35%", height: 4, borderRadius: 2 },
   edgeL: { left: -2, top: "35%", bottom: "35%", width: 4, borderRadius: 2 },
   edgeR: { right: -2, top: "35%", bottom: "35%", width: 4, borderRadius: 2 },
-  handleTouch: {
-    position: "absolute",
-    width: HANDLE,
-    height: HANDLE,
-    zIndex: 10,
-  },
   hint: {
     color: "#8696a0",
     textAlign: "center",

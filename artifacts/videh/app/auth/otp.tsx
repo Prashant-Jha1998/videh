@@ -30,6 +30,7 @@ export default function OtpScreen() {
   const [loading, setLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(30);
   const [error, setError] = useState("");
+  const [lockSeconds, setLockSeconds] = useState(0);
   const inputs = useRef<(TextInput | null)[]>([]);
   const autoSubmittedRef = useRef<string | null>(null);
 
@@ -38,6 +39,12 @@ export default function OtpScreen() {
     const t = setTimeout(() => setResendTimer((p) => p - 1), 1000);
     return () => clearTimeout(t);
   }, [resendTimer]);
+
+  useEffect(() => {
+    if (lockSeconds <= 0) return;
+    const t = setTimeout(() => setLockSeconds((s) => Math.max(0, s - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [lockSeconds]);
 
   const submitIfComplete = (nextDigits: string[]) => {
     if (!nextDigits.every((d) => d !== "")) return;
@@ -89,7 +96,7 @@ export default function OtpScreen() {
 
   const handleVerify = useCallback(async (code?: string) => {
     const enteredOtp = code ?? digits.join("");
-    if (enteredOtp.length !== 6) return;
+    if (enteredOtp.length !== 6 || lockSeconds > 0) return;
     setLoading(true);
 
     try {
@@ -101,11 +108,24 @@ export default function OtpScreen() {
       });
       const data = await res.json() as {
         success: boolean; message?: string;
+        locked?: boolean;
+        retryAfterSeconds?: number;
+        attemptsRemaining?: number;
         dbId?: number; isNew?: boolean;
         twoStepRequired?: boolean;
         sessionToken?: string;
         name?: string | null; about?: string | null; avatarUrl?: string | null;
       };
+
+      if (data.locked && data.retryAfterSeconds) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setLockSeconds(data.retryAfterSeconds);
+        setError(data.message ?? "Too many wrong attempts. Please wait.");
+        autoSubmittedRef.current = null;
+        setDigits(["", "", "", "", "", ""]);
+        setLoading(false);
+        return;
+      }
 
       if (data.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -151,9 +171,10 @@ export default function OtpScreen() {
     }
 
     setLoading(false);
-  }, [digits, phone, router, setUser]);
+  }, [digits, lockSeconds, phone, router, setUser]);
 
   const resend = async () => {
+    if (lockSeconds > 0) return;
     setResendTimer(30);
     autoSubmittedRef.current = null;
     setDigits(["", "", "", "", "", ""]);
@@ -215,11 +236,17 @@ export default function OtpScreen() {
               onKeyPress={(e) => handleKeyPress(e, idx)}
               autoFocus={idx === 0}
               selectTextOnFocus
+              editable={!loading && lockSeconds <= 0}
             />
           ))}
         </View>
 
         {error ? <Text style={[styles.error, { color: colors.destructive }]}>{error}</Text> : null}
+        {lockSeconds > 0 ? (
+          <Text style={[styles.error, { color: colors.destructive }]}>
+            Locked for {Math.floor(lockSeconds / 60)}:{String(lockSeconds % 60).padStart(2, "0")}. Use Resend OTP after unlock.
+          </Text>
+        ) : null}
 
         {loading ? (
           <ActivityIndicator color={colors.primary} size="large" style={{ marginTop: 24 }} />
@@ -227,13 +254,13 @@ export default function OtpScreen() {
           <TouchableOpacity
             style={[styles.verifyBtn, { backgroundColor: colors.primary }, digits.join("").length !== 6 && { opacity: 0.5 }]}
             onPress={() => handleVerify()}
-            disabled={digits.join("").length !== 6}
+            disabled={digits.join("").length !== 6 || lockSeconds > 0}
           >
             <Text style={styles.verifyText}>Verify & Continue</Text>
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity onPress={resend} disabled={resendTimer > 0} style={{ marginTop: 20 }}>
+        <TouchableOpacity onPress={resend} disabled={resendTimer > 0 || lockSeconds > 0} style={{ marginTop: 20 }}>
           <Text style={[styles.resend, { color: resendTimer > 0 ? colors.mutedForeground : colors.primary }]}>
             {resendTimer > 0 ? `Resend OTP in ${resendTimer}s` : "Resend OTP"}
           </Text>

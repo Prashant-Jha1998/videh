@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -28,11 +28,18 @@ export default function TwoStepLoginScreen() {
   const [digits, setDigits] = useState<string[]>(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [lockSeconds, setLockSeconds] = useState(0);
   const inputs = useRef<(TextInput | null)[]>([]);
+
+  useEffect(() => {
+    if (lockSeconds <= 0) return;
+    const t = setTimeout(() => setLockSeconds((s) => Math.max(0, s - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [lockSeconds]);
 
   const submitIfComplete = useCallback(
     async (nextDigits: string[]) => {
-      if (!nextDigits.every((d) => d !== "")) return;
+      if (!nextDigits.every((d) => d !== "") || lockSeconds > 0) return;
       const pin = nextDigits.join("");
       const id = Number(dbId);
       if (!id || Number.isNaN(id)) return;
@@ -48,12 +55,22 @@ export default function TwoStepLoginScreen() {
         const data = (await res.json()) as {
           success?: boolean;
           noPin?: boolean;
+          locked?: boolean;
+          retryAfterSeconds?: number;
           name?: string | null;
           about?: string | null;
           avatarUrl?: string | null;
           sessionToken?: string;
           message?: string;
         };
+        if (data.locked && data.retryAfterSeconds) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          setLockSeconds(data.retryAfterSeconds);
+          setError(data.message ?? t("auth.twoStepWrong"));
+          setDigits(["", "", "", "", "", ""]);
+          setLoading(false);
+          return;
+        }
         if (res.ok && data.success) {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           const isReturning = ret === "1";
@@ -69,7 +86,7 @@ export default function TwoStepLoginScreen() {
           router.replace(isReturning ? "/(tabs)/chats" : "/auth/profile");
         } else {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          setError(t("auth.twoStepWrong"));
+          setError(data.message ?? t("auth.twoStepWrong"));
           setDigits(["", "", "", "", "", ""]);
           inputs.current[0]?.focus();
         }
@@ -81,7 +98,7 @@ export default function TwoStepLoginScreen() {
       }
       setLoading(false);
     },
-    [dbId, phone, ret, router, sessionToken, setUser, t],
+    [dbId, lockSeconds, phone, ret, router, sessionToken, setUser, t],
   );
 
   const handleChange = (text: string, idx: number) => {
@@ -154,11 +171,16 @@ export default function TwoStepLoginScreen() {
               value={d}
               onChangeText={(txt) => handleChange(txt, idx)}
               onKeyPress={(e) => handleKeyPress(e, idx)}
-              editable={!loading}
+              editable={!loading && lockSeconds <= 0}
             />
           ))}
         </View>
         {error ? <Text style={[styles.err, { color: colors.destructive }]}>{error}</Text> : null}
+        {lockSeconds > 0 ? (
+          <Text style={[styles.err, { color: colors.destructive }]}>
+            Locked for {Math.floor(lockSeconds / 60)}:{String(lockSeconds % 60).padStart(2, "0")}
+          </Text>
+        ) : null}
         {loading ? <ActivityIndicator style={{ marginTop: 16 }} color={colors.primary} /> : null}
       </View>
     </View>

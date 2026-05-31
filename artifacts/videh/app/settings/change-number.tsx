@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+
 const API_URL = `${getApiUrl()}/api`;
 
 type Step = "phone" | "otp";
@@ -30,6 +31,13 @@ export default function ChangeNumberScreen() {
   const [newPhone, setNewPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
+  const [lockSeconds, setLockSeconds] = useState(0);
+
+  useEffect(() => {
+    if (lockSeconds <= 0) return;
+    const t = setTimeout(() => setLockSeconds((s) => Math.max(0, s - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [lockSeconds]);
 
   const sendOtp = async () => {
     const cleaned = newPhone.replace(/\D/g, "");
@@ -40,39 +48,60 @@ export default function ChangeNumberScreen() {
     if (ec.exists) { Alert.alert("Error", "This number is already linked to another account."); return; }
     setLoading(true);
     try {
-      const r = await fetch(`${API_URL}/auth/send-otp`, {
+      const r = await fetch(`${API_URL}/otp/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: cleaned }),
       });
       const d = await r.json();
-      if (d.success) { setStep("otp"); }
+      if (d.success) { setStep("otp"); setLockSeconds(0); }
       else Alert.alert("Error", d.message ?? "There was a problem sending OTP.");
     } catch { Alert.alert("Error", "Network error"); }
     setLoading(false);
   };
 
   const verifyOtp = async () => {
-    if (otp.length !== 6) { Alert.alert("Error", "Enter the 6-digit OTP."); return; }
+    if (otp.length !== 6 || lockSeconds > 0) { Alert.alert("Error", "Enter the 6-digit OTP."); return; }
+    const cleaned = newPhone.replace(/\D/g, "");
     setLoading(true);
     try {
-      const r = await fetch(`${API_URL}/auth/verify-otp`, {
+      const r = await fetch(`${API_URL}/otp/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: newPhone.replace(/\D/g, ""), otp }),
+        body: JSON.stringify({ phone: cleaned, otp, verifyOnly: true }),
       });
       const d = await r.json();
-      if (d.success && d.user) {
-        await fetch(`${API_URL}/users/${user?.dbId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone: newPhone.replace(/\D/g, "") }),
-        });
+      if (d.locked && d.retryAfterSeconds) {
+        setLockSeconds(d.retryAfterSeconds);
+        Alert.alert("Locked", d.message ?? "Too many wrong attempts. Try again later.");
+        setOtp("");
+        setLoading(false);
+        return;
+      }
+      if (!d.success) {
+        Alert.alert("Error", d.message ?? "Invalid or expired OTP.");
+        setOtp("");
+        setLoading(false);
+        return;
+      }
+
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (user?.sessionToken) headers.Authorization = `Bearer ${user.sessionToken}`;
+
+      const patch = await fetch(`${API_URL}/users/${user?.dbId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ phone: `+91${cleaned}` }),
+      });
+      const patchData = await patch.json();
+      if (patch.ok && patchData.success) {
         if (user) {
-          await setUser({ ...user, phone: newPhone.replace(/\D/g, "") });
+          await setUser({ ...user, phone: cleaned });
         }
         Alert.alert("Done", "Your number was updated successfully.", [{ text: "OK", onPress: () => router.replace("/(tabs)/settings") }]);
-      } else Alert.alert("Error", "Invalid or expired OTP.");
+      } else {
+        Alert.alert("Error", patchData.message ?? "Could not update number.");
+      }
     } catch { Alert.alert("Error", "Network error"); }
     setLoading(false);
   };
@@ -137,16 +166,22 @@ export default function ChangeNumberScreen() {
               maxLength={6}
               value={otp}
               onChangeText={setOtp}
+              editable={!loading && lockSeconds <= 0}
             />
+            {lockSeconds > 0 ? (
+              <Text style={{ color: colors.destructive, fontSize: 13 }}>
+                Locked {Math.floor(lockSeconds / 60)}:{String(lockSeconds % 60).padStart(2, "0")}
+              </Text>
+            ) : null}
             <TouchableOpacity
-              style={[styles.btn, { backgroundColor: colors.primary, opacity: loading ? 0.7 : 1 }]}
+              style={[styles.btn, { backgroundColor: colors.primary, opacity: loading || lockSeconds > 0 ? 0.7 : 1 }]}
               onPress={verifyOtp}
-              disabled={loading}
+              disabled={loading || lockSeconds > 0}
             >
               <Text style={styles.btnText}>{loading ? "Verifying..." : "Verify"}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setStep("phone"); setOtp(""); }}>
-              <Text style={[styles.back, { color: colors.primary }]}>Change number again</Text>
+            <TouchableOpacity onPress={() => { setStep("phone"); setOtp(""); setLockSeconds(0); }}>
+              <Text style={[styles.backLink, { color: colors.primary }]}>Change number again</Text>
             </TouchableOpacity>
           </>
         )}
@@ -170,5 +205,5 @@ const styles = StyleSheet.create({
   otpInput: { borderWidth: 1, borderRadius: 12, paddingVertical: 16, paddingHorizontal: 20, fontSize: 32, fontFamily: "Inter_700Bold", letterSpacing: 10, textAlign: "center", width: "100%" },
   btn: { width: "100%", paddingVertical: 16, borderRadius: 14, alignItems: "center" },
   btnText: { color: "#fff", fontSize: 17, fontFamily: "Inter_600SemiBold" },
-  back: { fontSize: 14, fontFamily: "Inter_500Medium", marginTop: 4 },
+  backLink: { fontSize: 14, fontFamily: "Inter_500Medium", marginTop: 4 },
 });

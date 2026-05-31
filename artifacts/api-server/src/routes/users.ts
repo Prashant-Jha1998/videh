@@ -3,6 +3,14 @@ import { query } from "../lib/db";
 import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { assertSameUser, getAuthUserId, issueSessionToken, requireAuth } from "../lib/auth";
+import {
+  activeLockExpiry,
+  clearLoginGuard,
+  readLoginGuard,
+  registerLoginFailure,
+  retryAfterSeconds,
+  secretMatches,
+} from "../lib/loginAttemptGuard";
 import { clientIp, isRateLimited } from "../lib/rateLimit";
 import {
   ensurePrivacyColumns,
@@ -68,10 +76,13 @@ router.post("/register", async (req: Request, res: Response) => {
 
 // Check single phone number exists (must be before /:id)
 router.get("/check-phone", async (req: Request, res: Response) => {
-  const { phone } = req.query as { phone?: string };
-  if (!phone) { res.status(400).json({ success: false }); return; }
+  const raw = (req.query as { phone?: string }).phone ?? "";
+  const digits = raw.replace(/\D/g, "");
+  const fullPhone =
+    digits.length === 10 ? `+91${digits}` : raw.startsWith("+") ? raw : digits.length === 12 ? `+${digits}` : raw;
+  if (!fullPhone) { res.status(400).json({ success: false }); return; }
   try {
-    const r = await query("SELECT id FROM users WHERE phone = $1", [phone]);
+    const r = await query("SELECT id FROM users WHERE phone = $1", [fullPhone]);
     res.json({ success: true, exists: r.rows.length > 0 });
   } catch { res.status(500).json({ success: false }); }
 });
@@ -426,8 +437,13 @@ router.post("/check-phones", requireAuth, async (req: Request, res: Response) =>
 });
 
 // PATCH: partial update (phone, preferredLang, fontSize)
-router.patch("/:id", async (req: Request, res: Response) => {
-  const { phone, preferredLang, fontSize } = req.body as any;
+router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
+  const { phone, preferredLang, fontSize } = req.body as {
+    phone?: string;
+    preferredLang?: string;
+    fontSize?: string;
+  };
   try {
     const result = await query(
       `UPDATE users SET 
@@ -484,10 +500,32 @@ router.delete("/:id/two-step-pin", async (req: Request, res: Response) => {
 /** After OTP: confirm 6-digit account PIN before completing login. */
 router.post("/:id/verify-two-step", async (req: Request, res: Response) => {
   const { pin } = req.body as { pin?: string };
+  const userId = String(req.params.id ?? "");
   if (!pin || pin.length !== 6 || !/^\d+$/.test(pin)) {
     res.status(400).json({ success: false, message: "6-digit numeric PIN required" });
     return;
   }
+
+  const ip = clientIp(req);
+  if (isRateLimited(`twostep:ip:${ip}`, 30, 15 * 60 * 1000)) {
+    res.status(429).json({ success: false, message: "Too many attempts. Please wait." });
+    return;
+  }
+
+  const TWO_STEP_SCOPE = "twostep";
+  const guard = await readLoginGuard(TWO_STEP_SCOPE, userId);
+  const locked = activeLockExpiry(guard);
+  if (locked) {
+    const sec = retryAfterSeconds(locked);
+    res.status(429).json({
+      success: false,
+      locked: true,
+      retryAfterSeconds: sec,
+      message: `Too many wrong PIN attempts. Try again in ${Math.ceil(sec / 60)} minutes.`,
+    });
+    return;
+  }
+
   try {
     const r = await query(
       "SELECT id, phone, name, about, avatar_url, two_step_pin FROM users WHERE id = $1",
@@ -506,6 +544,7 @@ router.post("/:id/verify-two-step", async (req: Request, res: Response) => {
       two_step_pin?: string | null;
     };
     if (!row.two_step_pin) {
+      await clearLoginGuard(TWO_STEP_SCOPE, userId);
       res.json({
         success: true,
         noPin: true,
@@ -516,10 +555,28 @@ router.post("/:id/verify-two-step", async (req: Request, res: Response) => {
       });
       return;
     }
-    if (row.two_step_pin !== pin) {
-      res.status(403).json({ success: false, message: "Incorrect PIN" });
+    if (!secretMatches(row.two_step_pin, pin)) {
+      const fail = await registerLoginFailure(TWO_STEP_SCOPE, userId, 15 * 60 * 1000);
+      if (fail.locked) {
+        res.status(429).json({
+          success: false,
+          locked: true,
+          retryAfterSeconds: fail.retryAfterSeconds,
+          message: `Too many wrong PIN attempts. Locked for ${Math.ceil(fail.retryAfterSeconds / 60)} minutes.`,
+        });
+        return;
+      }
+      res.status(403).json({
+        success: false,
+        attemptsRemaining: fail.attemptsRemaining,
+        message:
+          fail.attemptsRemaining === 1
+            ? "Incorrect PIN. One attempt left before a 15-minute lock."
+            : "Incorrect PIN",
+      });
       return;
     }
+    await clearLoginGuard(TWO_STEP_SCOPE, userId);
     res.json({
       success: true,
       name: row.name ?? null,

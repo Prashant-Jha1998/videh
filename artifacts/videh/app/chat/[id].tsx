@@ -20,7 +20,6 @@ import {
   Clipboard,
   Dimensions,
   FlatList,
-  InteractionManager,
   Linking,
   Modal,
   Image as NativeImage,
@@ -81,6 +80,7 @@ import { formatChatBubbleTime } from "@/utils/time";
 import {
   isChatNearBottom,
   isCompactChatText,
+  shouldWhatsAppAutoPin,
   WHATSAPP_CHAT_NEAR_BOTTOM_PX,
   WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS,
 } from "@/lib/whatsappChatScroll";
@@ -1363,20 +1363,26 @@ export default function ChatScreen() {
   const userDraggingRef = useRef(false);
   const hadRemoteTypingRef = useRef(false);
   const pinToBottomTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const scrollCoalesceRef = useRef<number | null>(null);
+  const composerPinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollToLatest = useCallback((animated = false) => {
-    if (searching || scrollLockRef.current || userScrolledUpRef.current || userDraggingRef.current) return;
-    listRef.current?.scrollToEnd({ animated });
+    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || scrollLockRef.current || userDraggingRef.current) {
+      return;
+    }
+    if (scrollCoalesceRef.current != null) cancelAnimationFrame(scrollCoalesceRef.current);
+    scrollCoalesceRef.current = requestAnimationFrame(() => {
+      scrollCoalesceRef.current = null;
+      if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
+      listRef.current?.scrollToEnd({ animated });
+    });
   }, [searching]);
   /** WhatsApp: after keyboard/composer layout, scroll to latest more than once. */
   const schedulePinToBottom = useCallback(() => {
-    if (searching || userScrolledUpRef.current) return;
+    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
     for (const t of pinToBottomTimersRef.current) clearTimeout(t);
     pinToBottomTimersRef.current = [];
-    const run = (animated: boolean) => {
-      if (!userScrolledUpRef.current && !searching) scrollToLatest(animated);
-    };
     for (const delay of WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS) {
-      const t = setTimeout(() => run(delay >= 150), delay);
+      const t = setTimeout(() => scrollToLatest(delay >= 150), delay);
       pinToBottomTimersRef.current.push(t);
     }
   }, [searching, scrollToLatest]);
@@ -1461,12 +1467,9 @@ export default function ChatScreen() {
   }, [text, editTarget, selectionActive, dismissedComposerLink]);
 
   /** WhatsApp: pin while keyboard opens/closes (adjustResize on Android shrinks chat area). */
+  /** WhatsApp: pin once when keyboard finishes opening — not on every frame while it animates. */
   useGenericKeyboardHandler(
     {
-      onStart: () => {
-        "worklet";
-        runOnJS(schedulePinToBottom)();
-      },
       onEnd: () => {
         "worklet";
         runOnJS(schedulePinToBottom)();
@@ -1509,26 +1512,29 @@ export default function ChatScreen() {
     return () => {
       for (const t of pinToBottomTimersRef.current) clearTimeout(t);
       pinToBottomTimersRef.current = [];
+      if (scrollCoalesceRef.current != null) cancelAnimationFrame(scrollCoalesceRef.current);
+      if (composerPinTimerRef.current) clearTimeout(composerPinTimerRef.current);
     };
   }, []);
 
   useEffect(() => {
-    if (searching || !keyboardVisible || userScrolledUpRef.current) return;
-    schedulePinToBottom();
-    const task = InteractionManager.runAfterInteractions(() => {
-      schedulePinToBottom();
-    });
+    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
+    if (!keyboardVisible) return;
+    if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
+    keyboardScrollTimerRef.current = setTimeout(() => schedulePinToBottom(), 60);
     return () => {
-      task.cancel();
       if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
     };
-  }, [keyboardHeight, keyboardVisible, searching, schedulePinToBottom]);
+  }, [keyboardVisible, searching, schedulePinToBottom]);
 
-  /** Reply strip / link preview grew — one quiet pin when already at bottom (WhatsApp). */
+  /** Composer grew (reply / link preview) — debounced pin only if user is already at bottom. */
   useEffect(() => {
-    if (searching || userScrolledUpRef.current || userDraggingRef.current) return;
-    const frame = requestAnimationFrame(() => scrollToLatest(false));
-    return () => cancelAnimationFrame(frame);
+    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current) return;
+    if (composerPinTimerRef.current) clearTimeout(composerPinTimerRef.current);
+    composerPinTimerRef.current = setTimeout(() => scrollToLatest(false), 120);
+    return () => {
+      if (composerPinTimerRef.current) clearTimeout(composerPinTimerRef.current);
+    };
   }, [composerHeight, searching, scrollToLatest]);
 
   useEffect(() => {
@@ -3154,16 +3160,17 @@ export default function ChatScreen() {
               }}
               scrollEventThrottle={16}
               onContentSizeChange={() => {
-                if (searching || userScrolledUpRef.current || userDraggingRef.current || scrollLockRef.current) {
+                if (!pendingScrollToEndRef.current) return;
+                if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current || scrollLockRef.current) {
                   return;
                 }
-                if (!pendingScrollToEndRef.current) return;
                 pendingScrollToEndRef.current = false;
                 scrollToLatest(false);
               }}
               onLayout={() => {
-                if (searching || userScrolledUpRef.current || userDraggingRef.current) return;
-                if (pendingScrollToEndRef.current) scrollToLatest(false);
+                if (!pendingScrollToEndRef.current) return;
+                if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current) return;
+                scrollToLatest(false);
               }}
               onScrollToIndexFailed={(info) => {
                 listRef.current?.scrollToOffset({

@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ImageDrawModal } from "@/components/ImageDrawModal";
 import { ManualImageCropModal } from "@/components/ManualImageCropModal";
 import { useApp } from "@/context/AppContext";
 import { authFetchHeaders, authPlaybackSource } from "@/lib/authenticatedMedia";
@@ -51,6 +52,7 @@ export default function ChatMediaComposeScreen() {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [cropOpen, setCropOpen] = useState(false);
+  const [drawOpen, setDrawOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -131,8 +133,31 @@ export default function ChatMediaComposeScreen() {
   }
 
   function onCropPress() {
-    if (kind !== "image" || isGif || editing || cropOpen) return;
+    if (kind !== "image" || isGif || editing || cropOpen || drawOpen) return;
     setCropOpen(true);
+  }
+
+  async function onDrawDone(drawnUri: string) {
+    setDrawOpen(false);
+    if (kind !== "image" || isGif || editing) return;
+    setEditing(true);
+    try {
+      const local = await ensureEditableImageUri(drawnUri);
+      setUri(local);
+    } catch (e) {
+      Alert.alert("Edit failed", e instanceof Error ? e.message : "Could not save drawing.");
+    } finally {
+      setEditing(false);
+    }
+  }
+
+  function onDrawPress() {
+    if (kind !== "image" || isGif || editing || cropOpen || drawOpen) return;
+    if (Platform.OS === "web") {
+      Alert.alert("Not available", "Drawing is supported in the mobile app.");
+      return;
+    }
+    setDrawOpen(true);
   }
 
   function onCancelUpload() {
@@ -210,6 +235,10 @@ export default function ChatMediaComposeScreen() {
             <Ionicons name="crop" size={20} color="#fff" />
             <Text style={styles.editBtnText}>Crop</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.editBtn} onPress={onDrawPress} disabled={busy || editing}>
+            <Ionicons name="brush" size={20} color="#fff" />
+            <Text style={styles.editBtnText}>Draw</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.editBtn} onPress={() => void onRotate()} disabled={busy || editing}>
             <Ionicons name="refresh" size={20} color="#fff" />
             <Text style={styles.editBtnText}>Rotate</Text>
@@ -248,6 +277,12 @@ export default function ChatMediaComposeScreen() {
         imageUri={uri}
         onCancel={() => setCropOpen(false)}
         onDone={(rect) => void onCropDone(rect)}
+      />
+      <ImageDrawModal
+        visible={drawOpen}
+        imageUri={uri}
+        onCancel={() => setDrawOpen(false)}
+        onDone={(drawnUri) => void onDrawDone(drawnUri)}
       />
     </View>
   );
