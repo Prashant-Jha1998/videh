@@ -132,6 +132,12 @@ cron.schedule("* * * * *", async () => {
       );
       // Mark as sent
       await query("UPDATE scheduled_messages SET sent = TRUE WHERE id = $1", [sm.id]);
+      if (sm.khata_entry_id) {
+        await query(
+          `UPDATE khata_entries SET reminder_sent = TRUE WHERE id = $1`,
+          [sm.khata_entry_id],
+        );
+      }
 
       // Push to all chat members
       const members = await query(

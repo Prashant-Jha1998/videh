@@ -235,6 +235,12 @@ export default function ChatsSettingsScreen() {
         {/* Chat settings */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>{t("chats.sectionChat")}</Text>
+          <TappableRow
+            label="Khata ledger"
+            value="Expenses & udhar · any name"
+            onPress={() => router.push("/settings/khata" as Href)}
+            colors={colors}
+          />
           <SwitchRow
             label={t("chats.enterSend")}
             hint={t("chats.enterSendHint")}

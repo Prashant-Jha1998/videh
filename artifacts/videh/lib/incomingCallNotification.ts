@@ -2,10 +2,10 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import type { IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
+import { resolveCallNotificationSound } from "@/lib/applyNotificationChannels";
 import {
   NOTIFICATION_ACTION_ACCEPT_CALL,
   NOTIFICATION_ACTION_DECLINE_CALL,
-  VIDEH_CALLS_CHANNEL_ID,
   VIDEH_INCOMING_CALL_CATEGORY_ID,
 } from "@/lib/pushNotifications";
 
@@ -19,12 +19,13 @@ export async function showIncomingCallNotification(call: IncomingCallNotificatio
 
   const title = call.type === "video" ? "Incoming video call" : "Incoming voice call";
   const body = `${call.callerName} is calling`;
+  const { sound, channelId } = await resolveCallNotificationSound();
   await Notifications.scheduleNotificationAsync({
     identifier: `incoming_call_${call.callId}`,
     content: {
       title,
       body,
-      sound: undefined,
+      sound,
       priority: Notifications.AndroidNotificationPriority.MAX,
       sticky: true,
       autoDismiss: false,
@@ -42,11 +43,7 @@ export async function showIncomingCallNotification(call: IncomingCallNotificatio
       },
     },
     trigger: null,
-    ...(Platform.OS === "android"
-      ? {
-          channelId: VIDEH_CALLS_CHANNEL_ID,
-        }
-      : {}),
+    ...(Platform.OS === "android" && channelId ? { channelId } : {}),
   });
 
   // Full-screen call UI is opened from _layout when the app wakes (lock screen / background).

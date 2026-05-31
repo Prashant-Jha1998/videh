@@ -1,11 +1,23 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
-import {
-  View, Text, FlatList, Pressable, TextInput, Modal,
-  StyleSheet, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { useApp } from "@/context/AppContext";
@@ -30,6 +42,8 @@ type KhataEntry = {
   paid_by_name: string | null;
   created_at: string;
   creator_name: string;
+  reminder_at?: string | null;
+  reminder_sent?: boolean;
 };
 
 type MemberBalance = {
@@ -48,6 +62,8 @@ type PairwiseBalance = {
   amount: number;
 };
 
+type PartyMode = "member" | "manual";
+
 function authHeaders(token?: string | null, extra?: Record<string, string>) {
   return {
     "Content-Type": "application/json",
@@ -60,8 +76,37 @@ function monthKey(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function defaultReminderDate(): Date {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  return d;
+}
+
+function formatReminderLabel(d: Date): string {
+  return d.toLocaleDateString("en-IN", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 export default function KhataScreen() {
-  const { chatId, name } = useLocalSearchParams<{ chatId: string; name: string }>();
+  const params = useLocalSearchParams<{
+    chatId: string;
+    name?: string;
+    fromChat?: string;
+    manual?: string;
+    peerUserId?: string;
+    isGroup?: string;
+  }>();
+  const chatId = params.chatId;
+  const name = params.name;
+  const fromChat = params.fromChat === "1";
+  const manualMode = params.manual === "1";
+  const peerUserId = params.peerUserId ? Number(params.peerUserId) : null;
+  const isGroupChat = params.isGroup === "1";
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useApp();
@@ -75,8 +120,16 @@ export default function KhataScreen() {
   const [showAdd, setShowAdd] = useState(false);
   const [debtorUserId, setDebtorUserId] = useState<number | null>(null);
   const [creditorUserId, setCreditorUserId] = useState<number | null>(null);
+  const [debtorMode, setDebtorMode] = useState<PartyMode>("member");
+  const [creditorMode, setCreditorMode] = useState<PartyMode>("member");
+  const [debtorManualName, setDebtorManualName] = useState("");
+  const [creditorManualName, setCreditorManualName] = useState("");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [manualPick, setManualPick] = useState(manualMode);
+  const [reminderEnabled, setReminderEnabled] = useState(false);
+  const [reminderAt, setReminderAt] = useState(defaultReminderDate);
+  const [showReminderDatePicker, setShowReminderDatePicker] = useState(false);
   const [saving, setSaving] = useState(false);
   const [sharingPdf, setSharingPdf] = useState(false);
   const [filter, setFilter] = useState<"all" | "pending" | "paid">("pending");
@@ -131,28 +184,94 @@ export default function KhataScreen() {
     void load();
   }, [loadMembers, load]);
 
-  useEffect(() => {
-    if (selfId && creditorUserId == null) setCreditorUserId(selfId);
-  }, [selfId, creditorUserId]);
+  const oneToOneAuto = fromChat && !manualMode && !manualPick && !!peerUserId && !isGroupChat && !!selfId;
+  const groupCreditorAuto = fromChat && !manualMode && !manualPick && isGroupChat && !!selfId;
+
+  const resetPartyFields = useCallback(() => {
+    setDebtorMode("member");
+    setCreditorMode("member");
+    setDebtorManualName("");
+    setCreditorManualName("");
+    setDebtorUserId(null);
+    setCreditorUserId(selfId);
+  }, [selfId]);
+
+  const openAdd = useCallback(() => {
+    setAmount("");
+    setNote("");
+    setReminderEnabled(false);
+    setReminderAt(defaultReminderDate());
+    setShowReminderDatePicker(false);
+    setManualPick(manualMode);
+    setDebtorMode("member");
+    setCreditorMode("member");
+    setDebtorManualName("");
+    setCreditorManualName("");
+
+    if (fromChat && !manualMode && selfId) {
+      setCreditorUserId(selfId);
+      setCreditorMode("member");
+      if (peerUserId && !isGroupChat) {
+        setDebtorUserId(peerUserId);
+        setDebtorMode("member");
+      } else {
+        setDebtorUserId(null);
+      }
+    } else {
+      setCreditorUserId(selfId);
+      setDebtorUserId(null);
+    }
+    setShowAdd(true);
+  }, [fromChat, manualMode, selfId, peerUserId, isGroupChat]);
 
   const debtorLabel = useMemo(() => {
+    if (debtorMode === "manual") return debtorManualName.trim() || "Enter name";
     if (!debtorUserId) return "Select member";
     return members.find((m) => m.id === debtorUserId)?.name ?? "Member";
-  }, [debtorUserId, members]);
+  }, [debtorMode, debtorManualName, debtorUserId, members]);
 
   const creditorLabel = useMemo(() => {
+    if (creditorMode === "manual") return creditorManualName.trim() || "Enter name";
     if (!creditorUserId) return "Select member";
     return members.find((m) => m.id === creditorUserId)?.name ?? "Member";
-  }, [creditorUserId, members]);
+  }, [creditorMode, creditorManualName, creditorUserId, members]);
 
   const addEntry = async () => {
     const parsedAmount = Number(amount);
-    if (!debtorUserId || !creditorUserId || !amount.trim() || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert("Incomplete", "Select who owes, who lent, and enter a valid amount.");
+    if (!amount.trim() || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert("Incomplete", "Enter a valid amount.");
       return;
     }
-    if (debtorUserId === creditorUserId) {
+    if (debtorMode === "member" && !debtorUserId) {
+      Alert.alert("Incomplete", "Select who owes, or switch to “Not on Videh” and type a name.");
+      return;
+    }
+    if (debtorMode === "manual" && !debtorManualName.trim()) {
+      Alert.alert("Incomplete", "Enter who owes (name).");
+      return;
+    }
+    if (creditorMode === "member" && !creditorUserId) {
+      Alert.alert("Incomplete", "Select who lent, or switch to “Not on Videh” and type a name.");
+      return;
+    }
+    if (creditorMode === "manual" && !creditorManualName.trim()) {
+      Alert.alert("Incomplete", "Enter who lent (name).");
+      return;
+    }
+    if (debtorMode === "member" && creditorMode === "member" && debtorUserId === creditorUserId) {
       Alert.alert("Invalid", "Debtor and creditor must be different people.");
+      return;
+    }
+    if (
+      debtorMode === "manual"
+      && creditorMode === "manual"
+      && debtorManualName.trim().toLowerCase() === creditorManualName.trim().toLowerCase()
+    ) {
+      Alert.alert("Invalid", "Debtor and creditor cannot be the same.");
+      return;
+    }
+    if (reminderEnabled && reminderAt.getTime() <= Date.now() + 60_000) {
+      Alert.alert("Reminder date", "Choose a future date for the auto reminder.");
       return;
     }
     if (!user?.dbId || !user.sessionToken) {
@@ -167,20 +286,28 @@ export default function KhataScreen() {
         body: JSON.stringify({
           chatId: Number(chatId),
           createdBy: user.dbId,
-          debtorUserId,
-          creditorUserId,
           amount: parsedAmount,
           note: note.trim() || null,
+          enableReminder: reminderEnabled,
+          ...(reminderEnabled ? { reminderAt: reminderAt.toISOString() } : {}),
+          ...(debtorMode === "member"
+            ? { debtorUserId }
+            : { debtorName: debtorManualName.trim() }),
+          ...(creditorMode === "member"
+            ? { creditorUserId }
+            : { creditorName: creditorManualName.trim() }),
         }),
       });
       const d = await r.json();
       if (d.success) {
         setShowAdd(false);
-        setDebtorUserId(null);
-        setCreditorUserId(selfId);
-        setAmount("");
-        setNote("");
         await load();
+        if (d.reminderScheduled) {
+          Alert.alert(
+            "Entry saved",
+            `A polite Videh reminder will be sent in this chat on ${formatReminderLabel(reminderAt)}, even if someone has blocked the other person.`,
+          );
+        }
       } else Alert.alert("Could not save entry", d.message ?? "Please try again.");
     } catch {
       Alert.alert("Could not save entry", "Please check your connection and try again.");
@@ -268,6 +395,66 @@ export default function KhataScreen() {
     filter === "all" ? true : filter === "pending" ? !e.paid : e.paid,
   );
 
+  const renderPartyPicker = (
+    title: string,
+    mode: PartyMode,
+    setMode: (m: PartyMode) => void,
+    userId: number | null,
+    setUserId: (id: number | null) => void,
+    manualName: string,
+    setManualName: (name: string) => void,
+    excludeUserId: number | null,
+    manualPlaceholder: string,
+  ) => (
+    <View style={styles.partyBlock}>
+      <Text style={styles.label}>{title}</Text>
+      <View style={styles.modeRow}>
+        <Pressable
+          style={[styles.modeChip, mode === "member" && styles.modeChipActive]}
+          onPress={() => setMode("member")}
+        >
+          <Text style={[styles.modeChipText, mode === "member" && styles.modeChipTextActive]}>Videh member</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.modeChip, mode === "manual" && styles.modeChipActive]}
+          onPress={() => {
+            setMode("manual");
+            setUserId(null);
+          }}
+        >
+          <Text style={[styles.modeChipText, mode === "manual" && styles.modeChipTextActive]}>Not on Videh</Text>
+        </Pressable>
+      </View>
+      {mode === "member" ? (
+        <>
+          <View style={styles.chipRow}>
+            {members
+              .filter((m) => m.id !== excludeUserId)
+              .map((m) =>
+                renderMemberChip(m, userId === m.id, () => {
+                  setUserId(m.id);
+                  setManualName("");
+                }),
+              )}
+          </View>
+          <Text style={styles.pickerHint}>Selected: {userId ? members.find((m) => m.id === userId)?.name ?? "Member" : "Pick someone"}</Text>
+        </>
+      ) : (
+        <>
+          <TextInput
+            style={styles.input}
+            placeholder={manualPlaceholder}
+            placeholderTextColor="#667781"
+            value={manualName}
+            onChangeText={setManualName}
+            autoCapitalize="words"
+          />
+          <Text style={styles.pickerHint}>No Videh account needed — for shop, family, office, etc.</Text>
+        </>
+      )}
+    </View>
+  );
+
   const renderMemberChip = (
     member: ChatMember,
     selected: boolean,
@@ -299,7 +486,7 @@ export default function KhataScreen() {
         <Pressable onPress={() => void sharePdf()} style={styles.iconBtn} disabled={sharingPdf}>
           {sharingPdf ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="document-text-outline" size={24} color="#fff" />}
         </Pressable>
-        <Pressable onPress={() => setShowAdd(true)} style={styles.iconBtn}>
+        <Pressable onPress={openAdd} style={styles.iconBtn}>
           <Ionicons name="add" size={26} color="#fff" />
         </Pressable>
       </View>
@@ -382,8 +569,14 @@ export default function KhataScreen() {
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <Text style={styles.debtorName}>{debtor}</Text>
+                    {!item.debtor_user_id ? (
+                      <View style={styles.manualTag}><Text style={styles.manualTagTxt}>manual</Text></View>
+                    ) : null}
                     <Ionicons name="arrow-forward" size={14} color="#8696A0" />
                     <Text style={styles.creditorName}>{creditor}</Text>
+                    {!item.creditor_user_id ? (
+                      <View style={styles.manualTag}><Text style={styles.manualTagTxt}>manual</Text></View>
+                    ) : null}
                     {item.paid && (
                       <View style={styles.paidBadge}>
                         <Text style={styles.paidBadgeTxt}>✓ Paid</Text>
@@ -392,6 +585,14 @@ export default function KhataScreen() {
                   </View>
                   <Text style={styles.amountText}>₹{Number(item.amount).toFixed(2)}</Text>
                   {item.note ? <Text style={styles.noteText}>{item.note}</Text> : null}
+                  {item.reminder_at && !item.paid && !item.reminder_sent ? (
+                    <View style={styles.reminderBadge}>
+                      <Ionicons name="alarm-outline" size={12} color="#00A884" />
+                      <Text style={styles.reminderBadgeTxt}>
+                        Reminder {formatReminderLabel(new Date(item.reminder_at))}
+                      </Text>
+                    </View>
+                  ) : null}
                   <Text style={styles.metaText}>
                     By {item.creator_name} • {new Date(item.created_at).toLocaleDateString("en-IN")}
                     {item.paid && item.paid_by_name ? ` • Paid by ${item.paid_by_name}` : ""}
@@ -420,21 +621,131 @@ export default function KhataScreen() {
             <ScrollView style={[styles.modal, { paddingBottom: insets.bottom + 16 }]} keyboardShouldPersistTaps="handled">
               <Text style={styles.modalTitle}>Add Khata Entry</Text>
 
-              <Text style={styles.label}>Who owes (debtor)</Text>
-              <View style={styles.chipRow}>
-                {members.filter((m) => m.id !== creditorUserId).map((m) =>
-                  renderMemberChip(m, debtorUserId === m.id, () => setDebtorUserId(m.id)),
-                )}
-              </View>
-              <Text style={styles.pickerHint}>Selected: {debtorLabel}</Text>
-
-              <Text style={styles.label}>Who lent (creditor)</Text>
-              <View style={styles.chipRow}>
-                {members.filter((m) => m.id !== debtorUserId).map((m) =>
-                  renderMemberChip(m, creditorUserId === m.id, () => setCreditorUserId(m.id)),
-                )}
-              </View>
-              <Text style={styles.pickerHint}>Selected: {creditorLabel}</Text>
+              {oneToOneAuto ? (
+                <>
+                  <View style={styles.autoBox}>
+                    <View style={styles.autoRow}>
+                      <Text style={styles.autoLabel}>Who owes</Text>
+                      <Text style={styles.autoValue}>{debtorLabel}</Text>
+                    </View>
+                    <View style={styles.autoRow}>
+                      <Text style={styles.autoLabel}>Who lent</Text>
+                      <Text style={styles.autoValue}>{creditorLabel}</Text>
+                    </View>
+                  </View>
+                  <Pressable
+                    onPress={() => {
+                      setManualPick(true);
+                      setDebtorMode("member");
+                      setCreditorMode("member");
+                    }}
+                    style={styles.changeBtn}
+                  >
+                    <Ionicons name="create-outline" size={16} color="#00A884" />
+                    <Text style={styles.changeBtnTxt}>Change people or add manual name</Text>
+                  </Pressable>
+                </>
+              ) : groupCreditorAuto ? (
+                <>
+                  <View style={styles.autoBox}>
+                    <View style={styles.autoRow}>
+                      <Text style={styles.autoLabel}>Who lent</Text>
+                      <Text style={styles.autoValue}>{creditorLabel}</Text>
+                    </View>
+                  </View>
+                  {renderPartyPicker(
+                    "Who owes (debtor)",
+                    debtorMode,
+                    setDebtorMode,
+                    debtorUserId,
+                    setDebtorUserId,
+                    debtorManualName,
+                    setDebtorManualName,
+                    creditorMode === "member" ? creditorUserId : null,
+                    "e.g. Ramesh, Kirana shop, Papa…",
+                  )}
+                  <Pressable
+                    onPress={() => {
+                      setManualPick(true);
+                      setCreditorMode("member");
+                      setCreditorUserId(selfId);
+                    }}
+                    style={styles.changeBtn}
+                  >
+                    <Ionicons name="create-outline" size={16} color="#00A884" />
+                    <Text style={styles.changeBtnTxt}>Change creditor or manual name</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  {manualMode ? (
+                    <Text style={styles.manualBanner}>
+                      Record expenses for this chat — pick Videh members or type any name (not on Videh).
+                    </Text>
+                  ) : null}
+                  {fromChat && !manualMode ? (
+                    <Pressable
+                      onPress={() => {
+                        setManualPick(false);
+                        resetPartyFields();
+                        if (selfId) {
+                          setCreditorUserId(selfId);
+                          if (peerUserId && !isGroupChat) setDebtorUserId(peerUserId);
+                        }
+                      }}
+                      style={styles.backAutoBtn}
+                    >
+                      <Text style={styles.backAutoTxt}>Use auto-fill from this chat</Text>
+                    </Pressable>
+                  ) : null}
+                  {renderPartyPicker(
+                    "Who owes (debtor)",
+                    debtorMode,
+                    setDebtorMode,
+                    debtorUserId,
+                    setDebtorUserId,
+                    debtorManualName,
+                    setDebtorManualName,
+                    creditorMode === "member" ? creditorUserId : null,
+                    "e.g. Ramesh, Kirana shop, Office…",
+                  )}
+                  {renderPartyPicker(
+                    "Who lent (creditor)",
+                    creditorMode,
+                    setCreditorMode,
+                    creditorUserId,
+                    setCreditorUserId,
+                    creditorManualName,
+                    setCreditorManualName,
+                    debtorMode === "member" ? debtorUserId : null,
+                    "e.g. You, Papa, Friend…",
+                  )}
+                  {selfId ? (
+                    <View style={styles.quickRow}>
+                      <Pressable
+                        style={styles.quickBtn}
+                        onPress={() => {
+                          setCreditorMode("member");
+                          setCreditorUserId(selfId);
+                          setCreditorManualName("");
+                        }}
+                      >
+                        <Text style={styles.quickBtnText}>I lent (I am creditor)</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.quickBtn}
+                        onPress={() => {
+                          setDebtorMode("member");
+                          setDebtorUserId(selfId);
+                          setDebtorManualName("");
+                        }}
+                      >
+                        <Text style={styles.quickBtnText}>I owe (I am debtor)</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </>
+              )}
 
               <Text style={styles.label}>Amount (₹)</Text>
               <TextInput
@@ -455,6 +766,48 @@ export default function KhataScreen() {
                 onChangeText={setNote}
               />
 
+              <View style={styles.reminderRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.reminderTitle}>Auto reminder</Text>
+                  <Text style={styles.reminderSub}>
+                    Videh sends a polite reminder in this chat on your chosen date — even if someone blocked the other person.
+                  </Text>
+                </View>
+                <Switch
+                  value={reminderEnabled}
+                  onValueChange={setReminderEnabled}
+                  trackColor={{ false: "#3B4A54", true: "#00A88480" }}
+                  thumbColor={reminderEnabled ? "#00A884" : "#8696A0"}
+                />
+              </View>
+
+              {reminderEnabled ? (
+                <>
+                  {Platform.OS === "ios" ? (
+                    <DateTimePicker
+                      value={reminderAt}
+                      mode="date"
+                      display="compact"
+                      minimumDate={new Date()}
+                      themeVariant="dark"
+                      accentColor="#00A884"
+                      onChange={(_, d) => { if (d) setReminderAt(d); }}
+                    />
+                  ) : (
+                    <Pressable style={styles.pickerRow} onPress={() => setShowReminderDatePicker(true)}>
+                      <Ionicons name="calendar-outline" size={20} color="#00A884" />
+                      <Text style={styles.pickerRowTxt}>{formatReminderLabel(reminderAt)}</Text>
+                      <Ionicons name="chevron-forward" size={18} color="#667781" />
+                    </Pressable>
+                  )}
+                  <View style={styles.previewReminder}>
+                    <Text style={styles.previewReminderTxt}>
+                      Preview: Namaste reminder with amount and a kind note from Videh.
+                    </Text>
+                  </View>
+                </>
+              ) : null}
+
               <Pressable style={[styles.saveBtn, saving && { opacity: 0.6 }]} onPress={() => void addEntry()} disabled={saving}>
                 {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnTxt}>Save entry</Text>}
               </Pressable>
@@ -462,6 +815,18 @@ export default function KhataScreen() {
           </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      {showReminderDatePicker ? (
+        <DateTimePicker
+          value={reminderAt}
+          mode="date"
+          minimumDate={new Date()}
+          onChange={(event: DateTimePickerEvent, d?: Date) => {
+            setShowReminderDatePicker(false);
+            if (event.type !== "dismissed" && d) setReminderAt(d);
+          }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -519,4 +884,79 @@ const styles = StyleSheet.create({
   input: { backgroundColor: "#2A3942", color: "#E9EEF0", borderRadius: 10, padding: 12, fontSize: 15 },
   saveBtn: { backgroundColor: "#00A884", borderRadius: 12, padding: 14, alignItems: "center", marginTop: 20 },
   saveBtnTxt: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  autoBox: { backgroundColor: "#2A3942", borderRadius: 12, padding: 14, gap: 10 },
+  autoRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  autoLabel: { color: "#8696A0", fontSize: 13 },
+  autoValue: { color: "#E9EDEF", fontSize: 16, fontWeight: "700", flex: 1, textAlign: "right" },
+  changeBtn: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", marginTop: 8, marginBottom: 4 },
+  changeBtnTxt: { color: "#00A884", fontSize: 14, fontWeight: "600" },
+  backAutoBtn: { marginBottom: 8 },
+  backAutoTxt: { color: "#00A884", fontSize: 13, fontWeight: "600" },
+  reminderRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 16 },
+  reminderTitle: { color: "#E9EDEF", fontSize: 15, fontWeight: "700" },
+  reminderSub: { color: "#8696A0", fontSize: 12, lineHeight: 17, marginTop: 4 },
+  pickerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#2A3942",
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 8,
+  },
+  pickerRowTxt: { flex: 1, color: "#E9EDEF", fontSize: 15, fontWeight: "600" },
+  previewReminder: {
+    backgroundColor: "rgba(0,168,132,0.12)",
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 8,
+  },
+  previewReminderTxt: { color: "#00E5B0", fontSize: 12, lineHeight: 17 },
+  reminderBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  reminderBadgeTxt: { color: "#00A884", fontSize: 12, fontWeight: "600" },
+  partyBlock: { marginTop: 4 },
+  modeRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
+  modeChip: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 20,
+    backgroundColor: "#2A3942",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  modeChipActive: { backgroundColor: "rgba(0,168,132,0.2)", borderColor: "#00A884" },
+  modeChipText: { color: "#8696A0", fontSize: 12, fontWeight: "700" },
+  modeChipTextActive: { color: "#00E5B0" },
+  manualBanner: {
+    color: "#8696A0",
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 10,
+    backgroundColor: "#2A3942",
+    padding: 12,
+    borderRadius: 10,
+  },
+  quickRow: { flexDirection: "row", gap: 8, marginTop: 4 },
+  quickBtn: {
+    flex: 1,
+    backgroundColor: "#2A3942",
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  quickBtnText: { color: "#00A884", fontSize: 12, fontWeight: "700" },
+  manualTag: {
+    backgroundColor: "#3B4A54",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  manualTagTxt: { color: "#8696A0", fontSize: 10, fontWeight: "700", textTransform: "uppercase" },
 });

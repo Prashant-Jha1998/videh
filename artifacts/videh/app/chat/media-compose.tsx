@@ -4,7 +4,6 @@ import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Platform,
@@ -15,19 +14,18 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ManualImageCropModal } from "@/components/ManualImageCropModal";
 import { useApp } from "@/context/AppContext";
 import { authFetchHeaders, authPlaybackSource } from "@/lib/authenticatedMedia";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 import {
   applyImageQuality,
-  cropImageToAspect,
+  cropImageRect,
   ensureEditableImageUri,
   imageExtFromUri,
   imageMimeFromUri,
   isGifUri,
   rotateImage,
-  squareCropImage,
-  type ImageDimensionHints,
   type MediaQuality,
 } from "@/lib/imageEdit";
 
@@ -40,26 +38,19 @@ export default function ChatMediaComposeScreen() {
     uri?: string;
     kind?: string;
     viewOnce?: string;
-    imgW?: string;
-    imgH?: string;
   }>();
 
   const chatId = String(params.chatId ?? "");
   const initialUri = params.uri ? decodeURIComponent(String(params.uri)) : "";
   const kind = params.kind === "video" ? "video" : "image";
   const isViewOnce = params.viewOnce === "1";
-  const dimHints: ImageDimensionHints = useMemo(() => {
-    const w = params.imgW ? Number(params.imgW) : undefined;
-    const h = params.imgH ? Number(params.imgH) : undefined;
-    return w && h && w > 0 && h > 0 ? { width: w, height: h } : {};
-  }, [params.imgW, params.imgH]);
-
   const [uri, setUri] = useState(initialUri);
   const [caption, setCaption] = useState("");
   const [quality, setQuality] = useState<MediaQuality>("standard");
   const [uploadPct, setUploadPct] = useState(0);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [cropOpen, setCropOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -114,15 +105,12 @@ export default function ChatMediaComposeScreen() {
     }
   }
 
-  async function applyCrop(aspectW: number, aspectH: number) {
+  async function onCropDone(rect: { originX: number; originY: number; width: number; height: number }) {
+    setCropOpen(false);
     if (kind !== "image" || isGif || editing) return;
     setEditing(true);
     try {
-      const next =
-        aspectW === 1 && aspectH === 1
-          ? await squareCropImage(uri, quality, dimHints)
-          : await cropImageToAspect(uri, quality, aspectW, aspectH, dimHints);
-      setUri(next);
+      setUri(await cropImageRect(uri, quality, rect));
     } catch (e) {
       Alert.alert("Edit failed", e instanceof Error ? e.message : "Could not crop this photo.");
     } finally {
@@ -134,7 +122,7 @@ export default function ChatMediaComposeScreen() {
     if (kind !== "image" || isGif || editing) return;
     setEditing(true);
     try {
-      setUri(await rotateImage(uri, quality, dimHints));
+      setUri(await rotateImage(uri, quality));
     } catch (e) {
       Alert.alert("Edit failed", e instanceof Error ? e.message : "Could not rotate this photo.");
     } finally {
@@ -143,32 +131,8 @@ export default function ChatMediaComposeScreen() {
   }
 
   function onCropPress() {
-    if (kind !== "image" || isGif || editing) return;
-
-    const pick = (index: number) => {
-      if (index === 0) void applyCrop(1, 1);
-      else if (index === 1) void applyCrop(4, 5);
-      else if (index === 2) void applyCrop(16, 9);
-    };
-
-    if (Platform.OS === "ios") {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ["Square (1:1)", "Portrait (4:5)", "Landscape (16:9)", "Cancel"],
-          cancelButtonIndex: 3,
-          title: "Crop photo",
-        },
-        (i) => { if (i < 3) pick(i); },
-      );
-      return;
-    }
-
-    Alert.alert("Crop photo", "Choose crop shape", [
-      { text: "Square (1:1)", onPress: () => pick(0) },
-      { text: "Portrait (4:5)", onPress: () => pick(1) },
-      { text: "Landscape (16:9)", onPress: () => pick(2) },
-      { text: "Cancel", style: "cancel" },
-    ]);
+    if (kind !== "image" || isGif || editing || cropOpen) return;
+    setCropOpen(true);
   }
 
   function onCancelUpload() {
@@ -278,6 +242,13 @@ export default function ChatMediaComposeScreen() {
           <Text style={styles.sendText}>Send</Text>
         </TouchableOpacity>
       )}
+
+      <ManualImageCropModal
+        visible={cropOpen}
+        imageUri={uri}
+        onCancel={() => setCropOpen(false)}
+        onDone={(rect) => void onCropDone(rect)}
+      />
     </View>
   );
 }

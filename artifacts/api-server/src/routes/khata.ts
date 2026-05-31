@@ -3,6 +3,7 @@ import { assertSameUser, getAuthUserId, requireAuth } from "../lib/auth";
 import { query } from "../lib/db";
 import { assertChatMember, getUserDisplayName } from "../lib/khataAccess";
 import { buildKhataPdf } from "../lib/khataPdf";
+import { buildKhataReminderMessage, formatKhataReminderDateLabel } from "../lib/khataReminder";
 
 const router = Router();
 router.use(requireAuth);
@@ -32,6 +33,11 @@ async function ensureKhataTables() {
   await query(`CREATE INDEX IF NOT EXISTS idx_khata_entries_chat_paid ON khata_entries (chat_id, paid)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_khata_entries_debtor_user ON khata_entries (chat_id, debtor_user_id)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_khata_entries_creditor_user ON khata_entries (chat_id, creditor_user_id)`);
+  await query(`ALTER TABLE khata_entries ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE khata_entries ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN NOT NULL DEFAULT FALSE`);
+  await query(`ALTER TABLE khata_entries ADD COLUMN IF NOT EXISTS reminder_scheduled_id INTEGER`);
+  await query(`ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS khata_entry_id INTEGER REFERENCES khata_entries(id) ON DELETE CASCADE`);
+  await query(`ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS bypass_block BOOLEAN NOT NULL DEFAULT FALSE`);
   khataTablesEnsured = true;
 }
 
@@ -53,6 +59,9 @@ type KhataRow = {
   debtor_user_name?: string | null;
   creditor_user_name?: string | null;
   paid_by_name?: string | null;
+  reminder_at?: string | null;
+  reminder_sent?: boolean;
+  reminder_scheduled_id?: number | null;
 };
 
 const ENTRY_SELECT = `
@@ -257,6 +266,8 @@ router.post("/", async (req: Request, res: Response) => {
     creditorName,
     amount,
     note,
+    reminderAt,
+    enableReminder,
   } = req.body as {
     chatId?: number;
     createdBy?: number;
@@ -266,6 +277,8 @@ router.post("/", async (req: Request, res: Response) => {
     creditorName?: string;
     amount?: number | string;
     note?: string | null;
+    reminderAt?: string;
+    enableReminder?: boolean;
   };
 
   if (!chatId || !createdBy || amount == null) {
@@ -312,13 +325,23 @@ router.post("/", async (req: Request, res: Response) => {
         return;
       }
       resolvedCreditorName = await getUserDisplayName(resolvedCreditorUserId);
-    } else if (!resolvedCreditorName) {
+    } else if (resolvedCreditorName) {
+      resolvedCreditorUserId = null;
+    } else {
       resolvedCreditorName = await getUserDisplayName(createdBy);
       resolvedCreditorUserId = createdBy;
     }
 
     if (resolvedDebtorUserId && resolvedCreditorUserId && resolvedDebtorUserId === resolvedCreditorUserId) {
       res.status(400).json({ success: false, message: "Debtor and creditor cannot be the same person." });
+      return;
+    }
+    if (
+      !resolvedDebtorUserId
+      && !resolvedCreditorUserId
+      && resolvedDebtorName.toLowerCase() === resolvedCreditorName.toLowerCase()
+    ) {
+      res.status(400).json({ success: false, message: "Debtor and creditor cannot be the same." });
       return;
     }
 
@@ -340,13 +363,43 @@ router.post("/", async (req: Request, res: Response) => {
     );
 
     const entry = result.rows[0] as KhataRow;
+
+    let reminderScheduledId: number | null = null;
+    if (enableReminder && reminderAt) {
+      const reminderDate = new Date(reminderAt);
+      if (Number.isNaN(reminderDate.getTime()) || reminderDate.getTime() <= Date.now()) {
+        res.status(400).json({ success: false, message: "Reminder must be a future date." });
+        return;
+      }
+      const reminderContent = buildKhataReminderMessage({
+        debtorName: resolvedDebtorName,
+        creditorName: resolvedCreditorName,
+        amount: parsedAmount,
+        note: note?.trim() || null,
+        reminderDateLabel: formatKhataReminderDateLabel(reminderDate),
+      });
+      const scheduled = await query(
+        `INSERT INTO scheduled_messages (
+           chat_id, sender_id, content, type, scheduled_at, bypass_block, khata_entry_id
+         ) VALUES ($1,$2,$3,'text',$4,TRUE,$5) RETURNING id`,
+        [chatId, createdBy, reminderContent, reminderDate.toISOString(), entry.id],
+      );
+      reminderScheduledId = Number((scheduled.rows[0] as { id: number }).id);
+      await query(
+        `UPDATE khata_entries SET reminder_at = $2, reminder_scheduled_id = $3 WHERE id = $1`,
+        [entry.id, reminderDate.toISOString(), reminderScheduledId],
+      );
+      entry.reminder_at = reminderDate.toISOString();
+      entry.reminder_scheduled_id = reminderScheduledId;
+    }
+
     const msgContent = `📒 Khata: ${resolvedDebtorName} owes ${resolvedCreditorName} ₹${parsedAmount.toFixed(2)}${note?.trim() ? ` — ${note.trim()}` : ""}`;
     await query(
       `INSERT INTO messages (chat_id, sender_id, content, type) VALUES ($1,$2,$3,'text')`,
       [chatId, createdBy, msgContent],
     );
 
-    res.json({ success: true, entry });
+    res.json({ success: true, entry, reminderScheduled: Boolean(reminderScheduledId) });
   } catch (err) {
     req.log.error({ err }, "add khata error");
     res.status(500).json({ success: false, message: "Server error" });
@@ -383,6 +436,16 @@ router.put("/:id/pay", async (req: Request, res: Response) => {
       [entryId, payerId],
     );
     const entry = result.rows[0] as KhataRow;
+    if (entry.reminder_scheduled_id) {
+      await query(
+        `DELETE FROM scheduled_messages WHERE id = $1 AND sent = FALSE`,
+        [entry.reminder_scheduled_id],
+      );
+      await query(
+        `UPDATE khata_entries SET reminder_sent = TRUE WHERE id = $1`,
+        [entryId],
+      );
+    }
     const debtor = displayDebtor(entry);
     const creditor = displayCreditor(entry);
     const payerName = await getUserDisplayName(payerId);

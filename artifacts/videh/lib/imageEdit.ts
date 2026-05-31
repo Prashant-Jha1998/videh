@@ -11,6 +11,25 @@ export const QUALITY_COMPRESS: Record<MediaQuality, number> = {
 
 export type ImageDimensionHints = { width?: number; height?: number };
 
+export type CropRect = {
+  originX: number;
+  originY: number;
+  width: number;
+  height: number;
+};
+
+export function clampCropRect(rect: CropRect, imageW: number, imageH: number): CropRect {
+  const w = Math.max(1, Math.floor(imageW));
+  const h = Math.max(1, Math.floor(imageH));
+  let originX = Math.max(0, Math.min(Math.floor(rect.originX), w - 1));
+  let originY = Math.max(0, Math.min(Math.floor(rect.originY), h - 1));
+  let width = Math.max(1, Math.min(Math.floor(rect.width), w - originX));
+  let height = Math.max(1, Math.min(Math.floor(rect.height), h - originY));
+  if (originX + width > w) width = w - originX;
+  if (originY + height > h) height = h - originY;
+  return { originX, originY, width, height };
+}
+
 export function isGifUri(uri: string): boolean {
   return uri.toLowerCase().includes(".gif") || uri.toLowerCase().includes("image/gif");
 }
@@ -25,10 +44,6 @@ export async function getImageDimensions(
   uri: string,
   hints?: ImageDimensionHints,
 ): Promise<{ width: number; height: number }> {
-  if (hints?.width && hints?.height && hints.width > 0 && hints.height > 0) {
-    return { width: Math.round(hints.width), height: Math.round(hints.height) };
-  }
-
   const local = await ensureEditableImageUri(uri);
 
   try {
@@ -38,6 +53,10 @@ export async function getImageDimensions(
     if (size.width > 0 && size.height > 0) return size;
   } catch {
     /* fall through */
+  }
+
+  if (hints?.width && hints?.height && hints.width > 0 && hints.height > 0) {
+    return { width: Math.round(hints.width), height: Math.round(hints.height) };
   }
 
   const probe = await ImageManipulator.manipulateAsync(local, [], {
@@ -96,7 +115,7 @@ export async function cropImageToAspect(
   if (aspectW <= 0 || aspectH <= 0) throw new Error("Invalid crop aspect.");
 
   const local = await ensureEditableImageUri(uri);
-  const { width, height } = await getImageDimensions(local, hints);
+  const { width, height } = await getImageDimensions(local);
   const targetAspect = aspectW / aspectH;
   const currentAspect = width / height;
 
@@ -117,9 +136,29 @@ export async function cropImageToAspect(
     originY = Math.max(0, Math.floor((height - cropH) / 2));
   }
 
+  const crop = clampCropRect({ originX, originY, width: cropW, height: cropH }, width, height);
+
   const result = await ImageManipulator.manipulateAsync(
     local,
-    [{ crop: { originX, originY, width: cropW, height: cropH } }],
+    [{ crop: crop }],
+    { compress: QUALITY_COMPRESS[quality], format: ImageManipulator.SaveFormat.JPEG },
+  );
+  return result.uri;
+}
+
+/** Crop to pixel rectangle (e.g. from manual crop UI). */
+export async function cropImageRect(
+  uri: string,
+  quality: MediaQuality,
+  rect: CropRect,
+): Promise<string> {
+  if (isGifUri(uri)) return uri;
+  const local = await ensureEditableImageUri(uri);
+  const { width, height } = await getImageDimensions(local);
+  const crop = clampCropRect(rect, width, height);
+  const result = await ImageManipulator.manipulateAsync(
+    local,
+    [{ crop }],
     { compress: QUALITY_COMPRESS[quality], format: ImageManipulator.SaveFormat.JPEG },
   );
   return result.uri;

@@ -1,6 +1,8 @@
 import { AppState, Platform } from "react-native";
 import { agentDebugLog } from "./agentDebugLog";
 import { showChatMessageNotification } from "./chatMessageNotification";
+import { playInAppSoundAsset } from "./playInAppSound";
+import { getEffectiveMessageSound, getSoundPrefs } from "./soundPrefs";
 
 export type NotificationChatSnapshot = {
   id: string;
@@ -135,6 +137,12 @@ export async function deliverPremiumChatMessageNotification(
   const senderName = opts.senderName?.trim() || chat?.name || "Videh";
   const body = opts.body?.trim() || chat?.lastMessage?.trim() || "New message";
   const isGroup = opts.isGroup ?? chat?.isGroup ?? false;
+
+  if (appActive) {
+    const prefs = await getSoundPrefs();
+    const soundId = getEffectiveMessageSound(prefs, opts.chatId, isGroup);
+    void playInAppSoundAsset(soundId);
+  }
 
   await showChatMessageNotification({
     chatId: opts.chatId,

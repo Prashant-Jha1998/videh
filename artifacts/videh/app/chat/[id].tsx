@@ -80,6 +80,7 @@ import { TypingIndicator } from "@/components/TypingIndicator";
 import { formatChatBubbleTime } from "@/utils/time";
 import {
   isChatNearBottom,
+  isCompactChatText,
   WHATSAPP_CHAT_NEAR_BOTTOM_PX,
   WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS,
 } from "@/lib/whatsappChatScroll";
@@ -1359,10 +1360,11 @@ export default function ChatScreen() {
   const loadingOlderRef = useRef(false);
   const lastOlderLoadAtRef = useRef(0);
   const scrollLockRef = useRef(false);
+  const userDraggingRef = useRef(false);
   const hadRemoteTypingRef = useRef(false);
   const pinToBottomTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const scrollToLatest = useCallback((animated = false) => {
-    if (searching || scrollLockRef.current) return;
+    if (searching || scrollLockRef.current || userScrolledUpRef.current || userDraggingRef.current) return;
     listRef.current?.scrollToEnd({ animated });
   }, [searching]);
   /** WhatsApp: after keyboard/composer layout, scroll to latest more than once. */
@@ -1398,10 +1400,13 @@ export default function ChatScreen() {
         layoutHeight,
         WHATSAPP_CHAT_NEAR_BOTTOM_PX,
       );
-      if (away && !userScrolledUpRef.current) {
+      if (away === userScrolledUpRef.current) return;
+      userScrolledUpRef.current = away;
+      if (away) {
+        frozenMessageCountRef.current = messages.length;
+      } else {
         frozenMessageCountRef.current = messages.length;
       }
-      userScrolledUpRef.current = away;
       const unread = away ? Math.max(0, messages.length - frozenMessageCountRef.current) : 0;
       setUnreadBelowCount(unread);
       setShowJumpToLatest((away && !searching && listRows.length > 6) || unread > 0);
@@ -1440,12 +1445,12 @@ export default function ChatScreen() {
   useEffect(() => {
     if (!userScrolledUpRef.current) {
       frozenMessageCountRef.current = messages.length;
-      if (unreadBelowCount > 0) setUnreadBelowCount(0);
-    } else {
-      const unread = Math.max(0, messages.length - frozenMessageCountRef.current);
-      setUnreadBelowCount(unread);
-      if (unread > 0) setShowJumpToLatest(true);
+      setUnreadBelowCount((prev) => (prev > 0 ? 0 : prev));
+      return;
     }
+    const unread = Math.max(0, messages.length - frozenMessageCountRef.current);
+    setUnreadBelowCount((prev) => (prev !== unread ? unread : prev));
+    if (unread > 0) setShowJumpToLatest(true);
   }, [messages.length]);
 
   const composerLinkUrl = useMemo(() => {
@@ -1519,11 +1524,12 @@ export default function ChatScreen() {
     };
   }, [keyboardHeight, keyboardVisible, searching, schedulePinToBottom]);
 
-  /** Reply strip / emoji panel / mention bar grew — keep last message visible (WhatsApp). */
+  /** Reply strip / link preview grew — one quiet pin when already at bottom (WhatsApp). */
   useEffect(() => {
-    if (searching || userScrolledUpRef.current) return;
-    schedulePinToBottom();
-  }, [composerHeight, searching, schedulePinToBottom]);
+    if (searching || userScrolledUpRef.current || userDraggingRef.current) return;
+    const frame = requestAnimationFrame(() => scrollToLatest(false));
+    return () => cancelAnimationFrame(frame);
+  }, [composerHeight, searching, scrollToLatest]);
 
   useEffect(() => {
     if (searching) return;
@@ -2102,6 +2108,23 @@ export default function ChatScreen() {
         : colors.mutedForeground;
 
     const showSvgTail = !isImage && !isVideo && !isLocation && !isViewOnceOpened && !isViewOncePending;
+    const isPlainText =
+      !isDeleted
+      && !isImage
+      && !isVideo
+      && !isAudio
+      && !isDocument
+      && !isLocation
+      && !isContact
+      && !isCall
+      && !isViewOnceOpened
+      && !isViewOncePending;
+    const compactTextBubble =
+      isPlainText
+      && !item.replyToId
+      && !translatedMsgs[item.id]
+      && urls.length === 0
+      && isCompactChatText(item.text);
 
     // Group reactions by emoji
     const reactionGroups: Record<string, { count: number; mine: boolean }> = {};
@@ -2188,6 +2211,7 @@ export default function ChatScreen() {
               { backgroundColor: isMe ? colors.chatBubbleSent : colors.chatBubbleReceived },
               (isImage || isVideo || isLocation || isViewOnceOpened || isViewOncePending) && styles.bubbleImg,
               isDeleted && styles.bubbleDeleted,
+              compactTextBubble && styles.bubbleCompact,
             ]}
           >
           {/* Reply strip */}
@@ -2346,6 +2370,26 @@ export default function ChatScreen() {
               onPress={() => setViewContactMsg(item)}
               onCall={(phone) => { Linking.openURL(`tel:${phone}`).catch(() => {}); }}
             />
+          ) : compactTextBubble ? (
+            <View style={styles.textMetaInlineRow}>
+              <MentionText
+                text={item.text}
+                style={[
+                  styles.msgText,
+                  styles.msgTextInline,
+                  { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 20 * chatFontScale },
+                ]}
+              />
+              <View style={styles.msgMetaInline}>
+                {item.isEdited ? (
+                  <Text style={[styles.editedLabel, { color: metaTextColor }]}>edited </Text>
+                ) : null}
+                <Text style={[styles.msgTime, styles.msgTimeInline, { color: metaTextColor }]}>
+                  {formatChatBubbleTime(item.timestamp)}
+                </Text>
+                {isMe ? <TickIcon status={item.status} color={metaTextColor} /> : null}
+              </View>
+            </View>
           ) : (
             <>
               <MentionText text={item.text} style={[styles.msgText, { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]} />
@@ -2357,15 +2401,15 @@ export default function ChatScreen() {
               )}
               {translatedMsgs[item.id] && (
                 <View style={styles.translatedBox}>
-                  <Text style={styles.translatedLabel}>ðŸŒ Translated</Text>
+                  <Text style={styles.translatedLabel}>Translated</Text>
                   <Text style={[styles.msgText, { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{translatedMsgs[item.id]}</Text>
                 </View>
               )}
             </>
           )}
 
-          {/* Footer: time + edited + ticks (hidden for deleted â€” time sits on deleted row) */}
-          {!isDeleted ? (
+          {/* Footer: time + edited + ticks (compact short text uses inline row above) */}
+          {!isDeleted && !compactTextBubble ? (
             <View style={[styles.msgMeta, (isImage || isVideo || isLocation) && styles.msgMetaOnMedia, isCall && styles.msgMetaCall]}>
               {item.isEdited && <Text style={[styles.editedLabel, { color: colors.mutedForeground }]}>edited </Text>}
               <Text style={[styles.msgTime, { color: metaTextColor }]}>
@@ -2561,8 +2605,24 @@ export default function ChatScreen() {
         ...(wallpaper ? [{ text: "Remove wallpaper", style: "destructive" as const, onPress: removeWallpaper }] : []),
         { text: "Cancel", style: "cancel" as const },
       ]) },
-    { label: "Schedule Message â°", icon: "time-outline", onPress: () => chatId && router.push({ pathname: "/scheduled/[chatId]", params: { chatId, name: displayName } }) },
-    { label: "Khata ðŸ“’", icon: "cash-outline", onPress: () => chatId && router.push({ pathname: "/khata/[chatId]", params: { chatId, name: displayName } }) },
+    { label: "Schedule message", icon: "time-outline", onPress: () => chatId && router.push({ pathname: "/scheduled/[chatId]", params: { chatId, name: displayName } }) },
+    {
+      label: "Khata",
+      icon: "cash-outline",
+      onPress: () => {
+        if (!chatId) return;
+        router.push({
+          pathname: "/khata/[chatId]",
+          params: {
+            chatId,
+            name: displayName,
+            fromChat: "1",
+            ...(chat?.isGroup ? { isGroup: "1" } : {}),
+            ...(directContactId ? { peerUserId: String(directContactId) } : {}),
+          },
+        } as unknown as Parameters<typeof router.push>[0]);
+      },
+    },
     { label: "Mute notifications", icon: "notifications-off-outline", onPress: () => chatId && muteChat(chatId) },
     { label: "Search", icon: "search-outline", onPress: () => { clearSelection(); setSearching(true); setSearchQuery(""); } },
     ...(!chat?.isGroup && directContactId ? [
@@ -3039,7 +3099,7 @@ export default function ChatScreen() {
                   justifyContent: searching ? "flex-start" : "flex-end",
                 },
               ]}
-              extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}|${composerHeight}|${keyboardVisible}|${unreadBelowCount}|${loadingOlder}`}
+              extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}`}
               keyboardDismissMode="on-drag"
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
@@ -3053,9 +3113,11 @@ export default function ChatScreen() {
               updateCellsBatchingPeriod={50}
               onScrollBeginDrag={() => {
                 scrollLockRef.current = true;
+                userDraggingRef.current = true;
               }}
               onScrollEndDrag={(e) => {
                 scrollLockRef.current = false;
+                userDraggingRef.current = false;
                 const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
                 syncScrollAwayFromBottom(
                   contentOffset.y,
@@ -3064,6 +3126,7 @@ export default function ChatScreen() {
                 );
               }}
               onMomentumScrollEnd={(e) => {
+                userDraggingRef.current = false;
                 const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
                 syncScrollAwayFromBottom(
                   contentOffset.y,
@@ -3073,38 +3136,34 @@ export default function ChatScreen() {
               }}
               onScroll={(e) => {
                 const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-                if (
-                  !searching
-                  && contentOffset.y < 140
-                  && hasMoreOlderRef.current
-                  && Date.now() - lastOlderLoadAtRef.current > 700
-                ) {
-                  lastOlderLoadAtRef.current = Date.now();
-                  void tryLoadOlderMessages();
-                }
-                if (
-                  isChatNearBottom(
+                if (!searching) {
+                  syncScrollAwayFromBottom(
                     contentOffset.y,
                     contentSize.height,
                     layoutMeasurement.height,
-                    WHATSAPP_CHAT_NEAR_BOTTOM_PX,
-                  )
-                ) {
-                  userScrolledUpRef.current = false;
-                  if (showJumpToLatest) setShowJumpToLatest(false);
-                  if (unreadBelowCount > 0) setUnreadBelowCount(0);
+                  );
+                  if (
+                    contentOffset.y < 140
+                    && hasMoreOlderRef.current
+                    && Date.now() - lastOlderLoadAtRef.current > 700
+                  ) {
+                    lastOlderLoadAtRef.current = Date.now();
+                    void tryLoadOlderMessages();
+                  }
                 }
               }}
               scrollEventThrottle={16}
               onContentSizeChange={() => {
-                if (searching) return;
-                if (pendingScrollToEndRef.current || !userScrolledUpRef.current) {
-                  pendingScrollToEndRef.current = false;
-                  scrollToLatest(false);
+                if (searching || userScrolledUpRef.current || userDraggingRef.current || scrollLockRef.current) {
+                  return;
                 }
+                if (!pendingScrollToEndRef.current) return;
+                pendingScrollToEndRef.current = false;
+                scrollToLatest(false);
               }}
               onLayout={() => {
-                if (!userScrolledUpRef.current) scrollToLatest(false);
+                if (searching || userScrolledUpRef.current || userDraggingRef.current) return;
+                if (pendingScrollToEndRef.current) scrollToLatest(false);
               }}
               onScrollToIndexFailed={(info) => {
                 listRef.current?.scrollToOffset({
@@ -3685,12 +3744,12 @@ const styles = StyleSheet.create({
   msgRight: { alignItems: "flex-end" },
   fwdLabel: { flexDirection: "row", alignItems: "center", marginBottom: 2, paddingHorizontal: 4 },
   fwdText: { fontSize: 11, fontFamily: "Inter_400Regular", fontStyle: "italic" },
-  bubbleTailWrap: { position: "relative", maxWidth: "82%" },
+  bubbleTailWrap: { position: "relative", maxWidth: "82%", flexShrink: 1 },
   bubbleTailSvg: { position: "absolute", bottom: 0, zIndex: 1 },
   bubble: {
     maxWidth: "100%",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
     borderTopLeftRadius: 10,
     borderTopRightRadius: 10,
     elevation: 1,
@@ -3698,6 +3757,33 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0.5 },
     shadowOpacity: 0.11,
     shadowRadius: 1.5,
+    alignSelf: "flex-start",
+  },
+  bubbleCompact: {
+    paddingHorizontal: 7,
+    paddingTop: 5,
+    paddingBottom: 4,
+  },
+  textMetaInlineRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "flex-end",
+    maxWidth: "100%",
+  },
+  msgTextInline: {
+    marginRight: 4,
+    paddingRight: 2,
+  },
+  msgMetaInline: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 3,
+    marginBottom: 1,
+    flexShrink: 0,
+  },
+  msgTimeInline: {
+    includeFontPadding: false,
   },
   /** Bottom corners even; SVG tail sits at corner */
   bubbleWithTailShape: { borderBottomLeftRadius: 10, borderBottomRightRadius: 10 },
@@ -3884,7 +3970,7 @@ const styles = StyleSheet.create({
   contactCallBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#00A88420", alignItems: "center", justifyContent: "center" },
   linkPreview: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, paddingTop: 4, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },
   linkText: { flex: 1, fontSize: 12, fontFamily: "Inter_400Regular" },
-  msgMeta: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 3 },
+  msgMeta: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 2 },
   msgMetaCall: { marginTop: 2, paddingRight: 2 },
   msgMetaOnMedia: {
     position: "absolute",

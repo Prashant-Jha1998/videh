@@ -2,7 +2,7 @@
   "expo": {
     "name": "Videh",
     "slug": "videh",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/images/videh_icon_foreground.png",
     "scheme": "videh",
@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "pan",
-      "versionCode": 28,
+      "versionCode": 29,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/videh_icon_foreground.png",
         "backgroundColor": "#0B141A"
@@ -136,6 +136,13 @@
             "./assets/sounds/msg_nature.wav",
             "./assets/sounds/msg_festival.wav",
             "./assets/sounds/msg_gaming.wav",
+            "./assets/sounds/msg_bell.wav",
+            "./assets/sounds/msg_ding.wav",
+            "./assets/sounds/msg_pop.wav",
+            "./assets/sounds/msg_echo.wav",
+            "./assets/sounds/msg_piano.wav",
+            "./assets/sounds/msg_marimba.wav",
+            "./assets/sounds/msg_zen.wav",
             "./assets/sounds/call_default.wav",
             "./assets/sounds/call_modern.wav",
             "./assets/sounds/call_soft.wav",
@@ -143,6 +150,12 @@
             "./assets/sounds/call_nature.wav",
             "./assets/sounds/call_musical.wav",
             "./assets/sounds/call_classic.wav",
+            "./assets/sounds/call_pulse.wav",
+            "./assets/sounds/call_digital.wav",
+            "./assets/sounds/call_marimba.wav",
+            "./assets/sounds/call_zen.wav",
+            "./assets/sounds/call_urgent.wav",
+            "./assets/sounds/call_bell.wav",
             "./assets/sounds/incoming_call.wav"
           ]
         }

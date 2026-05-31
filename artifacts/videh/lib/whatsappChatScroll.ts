@@ -32,4 +32,12 @@ export function isChatNearBottom(
 }
 
 /** Delays after keyboard / composer layout (matches WhatsApp post-layout scroll). */
-export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0, 50, 150, 300, 450] as const;
+/** Staged pin after keyboard open/close — keep short to avoid visible jitter. */
+export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0, 100, 250] as const;
+
+/** Short single-line text → inline time + ticks (WhatsApp compact bubble). */
+export function isCompactChatText(text: string, maxLen = 52): boolean {
+  const t = text.trim();
+  if (!t || t.includes("\n")) return false;
+  return t.length <= maxLen;
+}

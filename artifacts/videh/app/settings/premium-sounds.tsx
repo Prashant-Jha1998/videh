@@ -14,7 +14,6 @@ import { useColors } from "@/hooks/useColors";
 import { applyVidehNotificationSounds } from "@/lib/applyNotificationChannels";
 import {
   CALL_RINGTONES,
-  labelForSoundId,
   MESSAGE_SOUNDS,
   SOUND_PACKS,
   type CallSoundId,
@@ -47,12 +46,8 @@ export default function PremiumSoundsScreen() {
 
   const enabledSet = useMemo(() => new Set(prefs?.enabledPacks ?? []), [prefs?.enabledPacks]);
 
-  const visibleMessageSounds = useMemo(() => {
-    return MESSAGE_SOUNDS.filter((s) => {
-      if (!s.pack) return true;
-      return enabledSet.has(s.pack);
-    });
-  }, [enabledSet]);
+  const packName = (packId?: string) =>
+    SOUND_PACKS.find((p) => p.id === packId)?.name ?? packId ?? "";
 
   const togglePack = async (packId: SoundPackId) => {
     if (!prefs) return;
@@ -67,6 +62,24 @@ export default function PremiumSoundsScreen() {
     const next = await patchSoundPrefs({ enabledPacks: packs });
     setPrefs(next);
     await applyVidehNotificationSounds();
+  };
+
+  const applyPack = async (packId: SoundPackId) => {
+    const pack = SOUND_PACKS.find((p) => p.id === packId);
+    if (!pack || !prefs) return;
+    const msg = pack.messageSounds[0] ?? "msg_default";
+    const group = pack.messageSounds[1] ?? pack.messageSounds[0] ?? msg;
+    const enabledPacks = enabledSet.has(packId) ? prefs.enabledPacks : [...prefs.enabledPacks, packId];
+    const next = await patchSoundPrefs({
+      globalMessageSound: msg,
+      globalGroupMessageSound: group,
+      globalCallSound: pack.callSoundId,
+      enabledPacks,
+    });
+    setPrefs(next);
+    await setCallRingtonePref(pack.callSoundId);
+    await applyVidehNotificationSounds();
+    void previewSoundAsset(pack.callSoundId);
   };
 
   const setMessage = async (id: MessageSoundId, group: boolean) => {
@@ -123,26 +136,43 @@ export default function PremiumSoundsScreen() {
           <View style={[styles.section, { backgroundColor: colors.card }]}>
             <Text style={[styles.sectionLabel, { color: colors.primary }]}>Sound packs</Text>
             <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-              Enable packs to unlock their tones in message settings.
+              Tap Apply to set message, group, and call tones from a pack. Enable packs to organize favorites.
             </Text>
             {SOUND_PACKS.map((pack) => {
               const on = enabledSet.has(pack.id);
+              const active =
+                prefs?.globalCallSound === pack.callSoundId &&
+                pack.messageSounds.includes(prefs.globalMessageSound);
               return (
-                <TouchableOpacity
-                  key={pack.id}
-                  style={[styles.packRow, { borderBottomColor: colors.border }]}
-                  onPress={() => void togglePack(pack.id)}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.packIcon, { backgroundColor: pack.color + "22" }]}>
-                    <Ionicons name={pack.icon as keyof typeof Ionicons.glyphMap} size={22} color={pack.color} />
-                  </View>
-                  <View style={styles.packText}>
-                    <Text style={[styles.packName, { color: colors.foreground }]}>{pack.name}</Text>
-                    <Text style={[styles.packDesc, { color: colors.mutedForeground }]}>{pack.description}</Text>
-                  </View>
-                  <Ionicons name={on ? "checkbox" : "square-outline"} size={24} color={on ? colors.primary : colors.mutedForeground} />
-                </TouchableOpacity>
+                <View key={pack.id} style={[styles.packRow, { borderBottomColor: colors.border }]}>
+                  <TouchableOpacity
+                    style={styles.packMain}
+                    onPress={() => void togglePack(pack.id)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.packIcon, { backgroundColor: pack.color + "22" }]}>
+                      <Ionicons name={pack.icon as keyof typeof Ionicons.glyphMap} size={22} color={pack.color} />
+                    </View>
+                    <View style={styles.packText}>
+                      <Text style={[styles.packName, { color: colors.foreground }]}>{pack.name}</Text>
+                      <Text style={[styles.packDesc, { color: colors.mutedForeground }]}>
+                        {pack.description}
+                        {active ? " · Active" : ""}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name={on ? "checkbox" : "square-outline"}
+                      size={24}
+                      color={on ? colors.primary : colors.mutedForeground}
+                    />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.applyBtn, { backgroundColor: colors.primary + "18" }]}
+                    onPress={() => void applyPack(pack.id)}
+                  >
+                    <Text style={[styles.applyBtnText, { color: colors.primary }]}>Apply</Text>
+                  </TouchableOpacity>
+                </View>
               );
             })}
           </View>
@@ -152,13 +182,13 @@ export default function PremiumSoundsScreen() {
           <>
             <View style={[styles.section, { backgroundColor: colors.card }]}>
               <Text style={[styles.sectionLabel, { color: colors.primary }]}>Chats</Text>
-              {visibleMessageSounds.map((entry, idx) => (
+              {MESSAGE_SOUNDS.map((entry, idx) => (
                 <SoundRow
                   key={entry.id}
                   label={entry.label}
-                  subtitle={entry.subtitle}
+                  subtitle={entry.subtitle ?? (entry.pack ? `${packName(entry.pack)} pack` : undefined)}
                   selected={prefs.globalMessageSound === entry.id}
-                  last={idx === visibleMessageSounds.length - 1}
+                  last={idx === MESSAGE_SOUNDS.length - 1}
                   colors={colors}
                   onPress={() => void setMessage(entry.id as MessageSoundId, false)}
                 />
@@ -166,12 +196,13 @@ export default function PremiumSoundsScreen() {
             </View>
             <View style={[styles.section, { backgroundColor: colors.card }]}>
               <Text style={[styles.sectionLabel, { color: colors.primary }]}>Groups</Text>
-              {visibleMessageSounds.map((entry, idx) => (
+              {MESSAGE_SOUNDS.map((entry, idx) => (
                 <SoundRow
                   key={`g-${entry.id}`}
                   label={entry.label}
+                  subtitle={entry.pack ? `${packName(entry.pack)} pack` : undefined}
                   selected={prefs.globalGroupMessageSound === entry.id}
-                  last={idx === visibleMessageSounds.length - 1}
+                  last={idx === MESSAGE_SOUNDS.length - 1}
                   colors={colors}
                   onPress={() => void setMessage(entry.id as MessageSoundId, true)}
                 />
@@ -193,7 +224,7 @@ export default function PremiumSoundsScreen() {
               <SoundRow
                 key={entry.id}
                 label={entry.label}
-                subtitle={entry.pack ? `${entry.pack} pack` : undefined}
+                subtitle={entry.pack ? `${packName(entry.pack)} pack` : undefined}
                 selected={prefs.globalCallSound === entry.id}
                 last={idx === CALL_RINGTONES.length - 1}
                 colors={colors}
@@ -251,7 +282,10 @@ const styles = StyleSheet.create({
   section: { borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 10 },
   sectionLabel: { fontSize: 11, fontFamily: "Inter_600SemiBold", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 },
   hint: { fontSize: 12, fontFamily: "Inter_400Regular", marginBottom: 10 },
-  packRow: { flexDirection: "row", alignItems: "center", paddingVertical: 12, borderBottomWidth: 0.5, gap: 12 },
+  packRow: { paddingVertical: 10, borderBottomWidth: 0.5, gap: 8 },
+  packMain: { flexDirection: "row", alignItems: "center", gap: 12 },
+  applyBtn: { alignSelf: "flex-start", marginLeft: 56, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 },
+  applyBtnText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   packIcon: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   packText: { flex: 1 },
   packName: { fontSize: 15, fontFamily: "Inter_600SemiBold" },

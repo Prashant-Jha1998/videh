@@ -14,7 +14,14 @@ export type MessageSoundId =
   | "msg_office"
   | "msg_nature"
   | "msg_festival"
-  | "msg_gaming";
+  | "msg_gaming"
+  | "msg_bell"
+  | "msg_ding"
+  | "msg_pop"
+  | "msg_echo"
+  | "msg_piano"
+  | "msg_marimba"
+  | "msg_zen";
 
 export type CallSoundId =
   | "call_default"
@@ -24,6 +31,12 @@ export type CallSoundId =
   | "call_nature"
   | "call_musical"
   | "call_classic"
+  | "call_pulse"
+  | "call_digital"
+  | "call_marimba"
+  | "call_zen"
+  | "call_urgent"
+  | "call_bell"
   | "none";
 
 export type ContactSoundPresetId =
@@ -58,6 +71,13 @@ export const SOUND_ASSETS: Record<string, number> = {
   msg_nature: require("../assets/sounds/msg_nature.wav"),
   msg_festival: require("../assets/sounds/msg_festival.wav"),
   msg_gaming: require("../assets/sounds/msg_gaming.wav"),
+  msg_bell: require("../assets/sounds/msg_bell.wav"),
+  msg_ding: require("../assets/sounds/msg_ding.wav"),
+  msg_pop: require("../assets/sounds/msg_pop.wav"),
+  msg_echo: require("../assets/sounds/msg_echo.wav"),
+  msg_piano: require("../assets/sounds/msg_piano.wav"),
+  msg_marimba: require("../assets/sounds/msg_marimba.wav"),
+  msg_zen: require("../assets/sounds/msg_zen.wav"),
   call_default: require("../assets/sounds/call_default.wav"),
   call_modern: require("../assets/sounds/call_modern.wav"),
   call_soft: require("../assets/sounds/call_soft.wav"),
@@ -65,6 +85,12 @@ export const SOUND_ASSETS: Record<string, number> = {
   call_nature: require("../assets/sounds/call_nature.wav"),
   call_musical: require("../assets/sounds/call_musical.wav"),
   call_classic: require("../assets/sounds/call_classic.wav"),
+  call_pulse: require("../assets/sounds/call_pulse.wav"),
+  call_digital: require("../assets/sounds/call_digital.wav"),
+  call_marimba: require("../assets/sounds/call_marimba.wav"),
+  call_zen: require("../assets/sounds/call_zen.wav"),
+  call_urgent: require("../assets/sounds/call_urgent.wav"),
+  call_bell: require("../assets/sounds/call_bell.wav"),
   ringback: require("../assets/sounds/ringback.wav"),
   call_busy: require("../assets/sounds/call_busy.wav"),
   call_unavailable: require("../assets/sounds/call_unavailable.wav"),
@@ -78,6 +104,7 @@ export const SOUND_PACKS: Array<{
   icon: string;
   color: string;
   messageSounds: MessageSoundId[];
+  callSoundId: CallSoundId;
 }> = [
   {
     id: "modern",
@@ -85,7 +112,8 @@ export const SOUND_PACKS: Array<{
     description: "Clean chimes & alerts",
     icon: "sparkles-outline",
     color: "#6366F1",
-    messageSounds: ["msg_chime", "msg_alert", "msg_vip"],
+    messageSounds: ["msg_chime", "msg_alert", "msg_vip", "msg_pop"],
+    callSoundId: "call_modern",
   },
   {
     id: "professional",
@@ -93,7 +121,8 @@ export const SOUND_PACKS: Array<{
     description: "Business & office tones",
     icon: "briefcase-outline",
     color: "#0EA5E9",
-    messageSounds: ["msg_business", "msg_office", "msg_soft"],
+    messageSounds: ["msg_business", "msg_office", "msg_soft", "msg_ding"],
+    callSoundId: "call_business",
   },
   {
     id: "romantic",
@@ -101,7 +130,8 @@ export const SOUND_PACKS: Array<{
     description: "Soft tones for loved ones",
     icon: "heart-outline",
     color: "#EC4899",
-    messageSounds: ["msg_romantic", "msg_soft"],
+    messageSounds: ["msg_romantic", "msg_soft", "msg_piano"],
+    callSoundId: "call_soft",
   },
   {
     id: "nature",
@@ -109,7 +139,8 @@ export const SOUND_PACKS: Array<{
     description: "Calm natural alerts",
     icon: "leaf-outline",
     color: "#22C55E",
-    messageSounds: ["msg_nature", "msg_soft"],
+    messageSounds: ["msg_nature", "msg_zen", "msg_echo"],
+    callSoundId: "call_nature",
   },
   {
     id: "festival",
@@ -117,7 +148,8 @@ export const SOUND_PACKS: Array<{
     description: "Celebration sounds",
     icon: "flame-outline",
     color: "#F59E0B",
-    messageSounds: ["msg_festival", "msg_chime"],
+    messageSounds: ["msg_festival", "msg_chime", "msg_marimba"],
+    callSoundId: "call_musical",
   },
   {
     id: "gaming",
@@ -125,7 +157,8 @@ export const SOUND_PACKS: Array<{
     description: "Short arcade-style pings",
     icon: "game-controller-outline",
     color: "#A855F7",
-    messageSounds: ["msg_gaming", "msg_alert"],
+    messageSounds: ["msg_gaming", "msg_alert", "msg_pop"],
+    callSoundId: "call_pulse",
   },
 ];
 
@@ -142,6 +175,13 @@ export const MESSAGE_SOUNDS: SoundEntry[] = [
   { id: "msg_nature", label: "Nature", pack: "nature", category: "message" },
   { id: "msg_festival", label: "Festival", pack: "festival", category: "message" },
   { id: "msg_gaming", label: "Gaming ping", pack: "gaming", category: "message" },
+  { id: "msg_bell", label: "Bell", category: "message" },
+  { id: "msg_ding", label: "Ding", pack: "professional", category: "message" },
+  { id: "msg_pop", label: "Pop", pack: "modern", category: "message" },
+  { id: "msg_echo", label: "Echo", pack: "nature", category: "message" },
+  { id: "msg_piano", label: "Piano", pack: "romantic", category: "message" },
+  { id: "msg_marimba", label: "Marimba", pack: "festival", category: "message" },
+  { id: "msg_zen", label: "Zen", pack: "nature", category: "message" },
 ];
 
 export const CALL_RINGTONES: SoundEntry[] = [
@@ -150,8 +190,14 @@ export const CALL_RINGTONES: SoundEntry[] = [
   { id: "call_soft", label: "Soft ring", pack: "romantic", category: "call" },
   { id: "call_business", label: "Business", pack: "professional", category: "call" },
   { id: "call_nature", label: "Nature", pack: "nature", category: "call" },
-  { id: "call_musical", label: "Musical", pack: "modern", category: "call" },
+  { id: "call_musical", label: "Musical", pack: "festival", category: "call" },
   { id: "call_classic", label: "Classic", category: "call" },
+  { id: "call_pulse", label: "Pulse", pack: "gaming", category: "call" },
+  { id: "call_digital", label: "Digital", pack: "modern", category: "call" },
+  { id: "call_marimba", label: "Marimba", pack: "festival", category: "call" },
+  { id: "call_zen", label: "Zen", pack: "nature", category: "call" },
+  { id: "call_urgent", label: "Urgent", category: "call" },
+  { id: "call_bell", label: "Classic bell", category: "call" },
   { id: "none", label: "Silent", category: "call" },
 ];
 
@@ -182,6 +228,16 @@ export function labelForSoundId(id: string): string {
 export function notificationSoundFilename(soundId: MessageSoundId): string {
   if (soundId === "msg_default") return "default";
   return soundId;
+}
+
+export function notificationCallSoundFilename(soundId: CallSoundId): string | undefined {
+  if (soundId === "none") return undefined;
+  return soundId;
+}
+
+export function iosNotificationSoundName(filename: string | undefined): string | undefined {
+  if (!filename || filename === "default") return filename;
+  return `${filename}.wav`;
 }
 
 export function isValidMessageSoundId(id: string): id is MessageSoundId {
