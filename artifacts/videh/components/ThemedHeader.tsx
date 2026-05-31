@@ -6,20 +6,24 @@ import { useColors } from "@/hooks/useColors";
 type ThemedHeaderProps = {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
+  /** Per-chat accent (e.g. chat theme screen); falls back to global app theme. */
+  accentColors?: [string, string];
 };
 
-export function ThemedHeader({ children, style }: ThemedHeaderProps) {
+export function ThemedHeader({ children, style, accentColors }: ThemedHeaderProps) {
   const colors = useColors();
-  const [start, end] = colors.appThemeColors;
+  const themeColors = accentColors ?? colors.appThemeColors;
+  const [start, end] = themeColors;
   const isGradient = start.toLowerCase() !== end.toLowerCase();
+  const headerBg = accentColors ? start : colors.headerBg;
 
   if (!isGradient) {
-    return <View style={[style, { backgroundColor: colors.headerBg }]}>{children}</View>;
+    return <View style={[style, { backgroundColor: headerBg }]}>{children}</View>;
   }
 
   return (
     <LinearGradient
-      colors={colors.appThemeColors}
+      colors={themeColors}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={style}

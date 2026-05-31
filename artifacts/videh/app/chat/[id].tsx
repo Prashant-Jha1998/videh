@@ -1019,15 +1019,24 @@ export default function ChatScreen() {
 
   const baseColors = useColors();
   const chatLook = useChatAppearance(chatId);
-  const colors = useMemo(
-    () => ({
+  const colors = useMemo(() => {
+    const accent = chatLook.appearance.accent[0];
+    const accentPair = chatLook.appearance.accent;
+    return {
       ...baseColors,
+      primary: accent,
+      accent,
+      tint: accent,
+      headerBg: chatLook.isDark ? baseColors.headerBg : accent,
+      statusRing: accent,
+      onlineGreen: accent,
+      appThemeColors: accentPair,
       chatBubbleSent: chatLook.chatBubbleSent,
       chatBubbleReceived: chatLook.chatBubbleReceived,
       chatBackground: chatLook.chatBackground,
-    }),
-    [baseColors, chatLook.chatBubbleSent, chatLook.chatBubbleReceived, chatLook.chatBackground],
-  );
+    };
+  }, [baseColors, chatLook]);
+  const headerAccent = chatLook.appearance.accent;
   const { chatFontScale } = useUiPreferences();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -2121,7 +2130,7 @@ export default function ChatScreen() {
       inputRange: [0, 1],
       outputRange: ["rgba(255, 193, 7, 0)", "rgba(255, 193, 7, 0.38)"],
     });
-    const quoteAccent = isMe ? "#06CF9C" : "#00A884";
+    const quoteAccent = colors.primary;
     const selectionRowTint = colors.isDark ? "rgba(0, 168, 132, 0.2)" : "rgba(183, 223, 165, 0.55)";
     const deletedMeLabel = colors.isDark ? "rgba(255,255,255,0.72)" : "rgba(0,0,0,0.52)";
     const deletedMeIcon = colors.isDark ? "rgba(255,255,255,0.58)" : "rgba(0,0,0,0.42)";
@@ -2835,7 +2844,7 @@ export default function ChatScreen() {
       ) : null}
       {/* Header */}
       {selectionActive ? (
-        <ThemedHeader style={[styles.header, styles.selectionHeader, { paddingTop: topPad }]}>
+        <ThemedHeader accentColors={headerAccent} style={[styles.header, styles.selectionHeader, { paddingTop: topPad }]}>
           <TouchableOpacity style={styles.backBtn} onPress={clearSelection}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
@@ -2910,7 +2919,7 @@ export default function ChatScreen() {
           </View>
         </ThemedHeader>
       ) : (
-        <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
+        <ThemedHeader accentColors={headerAccent} style={[styles.header, { paddingTop: topPad }]}>
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>

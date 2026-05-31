@@ -52,10 +52,12 @@ export default function ChatThemeScreen() {
 
   const save = async () => {
     if (!chatId) return;
+    const prev = await getPerChatTheme(chatId);
     await setPerChatTheme(chatId, {
-      themeId: themeId !== appThemeId ? themeId : undefined,
-      bubbleSent,
-      bubbleReceived,
+      ...prev,
+      themeId,
+      bubbleSent: bubbleSent ?? undefined,
+      bubbleReceived: bubbleReceived ?? undefined,
       animatedWallpaper: animated !== "none" ? animated : undefined,
       label: appearance.name,
     });

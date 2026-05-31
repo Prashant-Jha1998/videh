@@ -83,5 +83,6 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
     globalAnimatedWallpaper,
     customBubbleOverride,
     isDark,
+    perChatRevision,
   ]);
 }
