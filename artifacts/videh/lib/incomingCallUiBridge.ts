@@ -1,13 +1,25 @@
-/** Lets CallSession dismiss the root incoming-call overlay when a call ends. */
-let dismissHandler: ((callId?: string) => void) | null = null;
+/** Root overlay ↔ CallSession sync when a call ends or is cancelled remotely. */
+let dismissOverlayHandler: ((callId?: string) => void) | null = null;
+let dismissSessionHandler: ((callId?: string) => void) | null = null;
 
 export function registerIncomingCallDismissHandler(handler: (callId?: string) => void): () => void {
-  dismissHandler = handler;
+  dismissOverlayHandler = handler;
   return () => {
-    if (dismissHandler === handler) dismissHandler = null;
+    if (dismissOverlayHandler === handler) dismissOverlayHandler = null;
+  };
+}
+
+export function registerCallSessionDismissHandler(handler: (callId?: string) => void): () => void {
+  dismissSessionHandler = handler;
+  return () => {
+    if (dismissSessionHandler === handler) dismissSessionHandler = null;
   };
 }
 
 export function requestDismissIncomingCallUi(callId?: string): void {
-  dismissHandler?.(callId);
+  dismissOverlayHandler?.(callId);
+}
+
+export function requestDismissCallSession(callId?: string): void {
+  dismissSessionHandler?.(callId);
 }

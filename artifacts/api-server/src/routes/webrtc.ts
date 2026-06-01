@@ -766,6 +766,18 @@ router.post("/calls/:callId/end", async (req: Request, res: Response) => {
       else if (cur === "ringing") call.statuses[id] = "missed";
     }
     call.updatedAt = Date.now();
+    const wasConnected = Boolean(call.connectedAt);
+    publishCallSignal({
+      chatId: call.chatId,
+      userIds: [call.callerId, ...call.participantIds],
+      action: wasConnected ? "ended" : "cancelled",
+      payload: {
+        callId: call.callId,
+        chatId: call.chatId,
+        type: call.type,
+        callerId: call.callerId,
+      },
+    });
     await finalizeCall(call);
   }
   res.json({ success: true });

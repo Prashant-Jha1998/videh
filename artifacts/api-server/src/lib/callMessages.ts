@@ -87,6 +87,7 @@ export function publishCallSignal(args: {
     | "ended"
     | "missed"
     | "busy"
+    | "cancelled"
     | "hold"
     | "resume"
     | "media_type";

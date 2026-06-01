@@ -19,13 +19,12 @@ export type NativeIncomingCallPayload = {
   isVideo: boolean;
 };
 
-/** Wake screen only — ringtone is played via premium call sound (expo-av), not system default. */
-export function displayNativeIncomingCall(payload: NativeIncomingCallPayload): void {
+/** Wake screen only — ringtone is played via premium call sound (expo-av), not InCallManager. */
+export function displayNativeIncomingCall(_payload: NativeIncomingCallPayload): void {
   wakeScreenForIncomingCall();
   if (!InCallManager || Platform.OS === "web") return;
   try {
     InCallManager.stopRingtone();
-    InCallManager.start({ media: payload.isVideo ? "video" : "audio", auto: false, ringback: "" });
   } catch {
     /* ignore */
   }

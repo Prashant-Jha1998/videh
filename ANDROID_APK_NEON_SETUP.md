@@ -22,20 +22,7 @@ Run in project root:
 
 `$env:PORT="3000"; $env:DATABASE_URL="YOUR_NEON_URL"; npx pnpm --filter @workspace/api-server run build; node --enable-source-maps artifacts/api-server/dist/index.mjs`
 
-## 4) Build Android APK (recommended: GitHub Actions, no cloud quota)
-
-Windows par `eas build --local` kaam nahi karta. EAS free cloud quota bhi limit hoti hai.
-
-1. Expo access token: https://expo.dev/accounts/settings → **Access Tokens**
-2. GitHub repo **Settings → Secrets → Actions** → `EXPO_TOKEN` = wahi token
-3. GitHub → **Actions** → **Build Android APK** → **Run workflow** (profile: `preview`)
-4. ~30–60 min baad **Artifacts** se `videh-1.0.6-b30-preview.apk` download karo
-
-**Play Store (signed AAB):** Actions → **Build Android AAB** ya **Build Play Store + Test APK** → AAB artifact upload karo Play Console par.
-
-**App Store (iOS):** Actions → **Build iOS (App Store)** — macOS runner par signed build (Apple credentials Expo par honi chahiye).
-
-## 4b) Build Android APK (EAS cloud — quota allow ho tab)
+## 4) Build Android APK (EAS cloud build)
 
 Run in project root:
 

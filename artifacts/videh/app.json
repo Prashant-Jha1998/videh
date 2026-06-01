@@ -2,7 +2,7 @@
   "expo": {
     "name": "Videh",
     "slug": "videh",
-    "version": "1.0.6",
+    "version": "1.0.8",
     "orientation": "portrait",
     "icon": "./assets/images/videh_icon_foreground.png",
     "scheme": "videh",
@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "pan",
-      "versionCode": 30,
+      "versionCode": 34,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/videh_icon_foreground.png",
         "backgroundColor": "#0B141A"
@@ -192,13 +192,13 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "prashantjha112",
+    "owner": "kumarprasun1998",
     "extra": {
-      "eas": {
-        "projectId": "72d49bc8-c465-47d0-ba9d-6aa765d6e315"
-      },
       "router": {
         "origin": "https://replit.com/"
+      },
+      "eas": {
+        "projectId": "d2a8e42c-8864-4a8f-8d0e-cbd95c97cf8c"
       }
     }
   }

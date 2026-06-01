@@ -22,7 +22,10 @@ import { addUsersToOngoingCall } from "@/lib/callParticipants";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import { chooseInCallAudioRoute, wakeScreenForIncomingCall, type InCallAudioRoute } from "@/lib/inCallAudio";
 import { onCallSignal } from "@/lib/callEvents";
-import { requestDismissIncomingCallUi } from "@/lib/incomingCallUiBridge";
+import {
+  registerCallSessionDismissHandler,
+  requestDismissIncomingCallUi,
+} from "@/lib/incomingCallUiBridge";
 import { startNativeOngoingCallSession } from "@/lib/videhNativeCallUi";
 import {
   endCallKeep,
@@ -125,11 +128,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const busyEndHandledRef = useRef<string | null>(null);
   const dismissedCallIdsRef = useRef<Set<string>>(new Set());
   const sessionRingingRef = useRef(false);
+  const sessionEngineActiveRef = useRef(false);
 
   useEffect(() => {
     sessionCallIdRef.current = session?.callId ?? null;
     sessionRingingRef.current = Boolean(session?.ringing);
-  }, [session?.callId, session?.ringing]);
+    sessionEngineActiveRef.current = Boolean(session?.engineActive);
+  }, [session?.callId, session?.ringing, session?.engineActive]);
 
   const userId = user?.dbId ?? 0;
   const remotePeerIds = useMemo(() => {
@@ -188,8 +193,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const onCallEnded = useCallback(() => {
     if (endingCallRef.current) return;
     endingCallRef.current = true;
-    const endedCallId = session?.callId;
-    const shouldLeave = session?.engineActive;
+    const endedCallId = sessionCallIdRef.current ?? undefined;
+    const shouldLeave = sessionEngineActiveRef.current;
     if (endedCallId) dismissedCallIdsRef.current.add(endedCallId);
     requestDismissIncomingCallUi(endedCallId);
     void (async () => {
@@ -200,7 +205,20 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       clearSession();
       leaveCallScreen();
     })();
-  }, [clearSession, refreshCallLogs, leaveCallScreen, session?.callId, session?.engineActive, call]);
+  }, [clearSession, refreshCallLogs, leaveCallScreen, call]);
+
+  const handleRemoteCallEnd = useCallback(
+    (callId?: string) => {
+      const id = callId ?? sessionCallIdRef.current ?? undefined;
+      if (!id || sessionCallIdRef.current !== id || endingCallRef.current) return;
+      if (sessionRingingRef.current) {
+        void dismissIncomingRinging(id);
+        return;
+      }
+      onCallEnded();
+    },
+    [dismissIncomingRinging, onCallEnded],
+  );
 
   const pushCallRoute = useCallback((s: CallSession, replace = false) => {
     const route = {
@@ -451,7 +469,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [session, pushCallRoute]);
 
   useEffect(() => {
-    if (!session || session.isIncoming || session.ringing || !session.engineActive) return;
+    if (!session || session.isIncoming || session.ringing) return;
     if (call.joined) {
       void stopCallAlert();
       return;
@@ -472,15 +490,15 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       clearTimeout(timeout);
       void stopCallAlert();
     };
-  }, [session, call.joined, user?.sessionToken, onCallEnded]);
+  }, [session?.callId, session?.isIncoming, session?.ringing, call.joined, user?.sessionToken, onCallEnded]);
 
   useEffect(() => {
     if (!session?.callId || !userId) return;
     const polledCallId = session.callId;
     const timer = setInterval(() => {
-      webrtcFetch(`/calls/${polledCallId}/status?userId=${userId}`, user?.sessionToken)
-        .then((res) => res.json())
-        .then((data: {
+      void webrtcFetch(`/calls/${polledCallId}/status?userId=${userId}`, user?.sessionToken)
+        .then(async (res) => {
+          const data = (await res.json()) as {
           success?: boolean;
           acceptedCount?: number;
           ringingCount?: number;
@@ -493,9 +511,12 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           acceptedUserIds?: number[];
           callerId?: number;
           statuses?: Record<string, string>;
-        }) => {
-          if (!data.success) return;
+        };
           if (sessionCallIdRef.current !== polledCallId || endingCallRef.current) return;
+          if (!data.success || res.status === 404) {
+            handleRemoteCallEnd(polledCallId);
+            return;
+          }
           setAcceptedCount(data.acceptedCount ?? 1);
           setRingingCount(data.ringingCount ?? 0);
           setParticipantCount(data.call?.participantCount ?? participantCount);
@@ -564,7 +585,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         .catch(() => {});
     }, 2000);
     return () => clearInterval(timer);
-  }, [session?.callId, userId, participantCount, call.joined, user?.sessionToken, onCallEnded]);
+  }, [session?.callId, userId, participantCount, call.joined, user?.sessionToken, onCallEnded, handleRemoteCallEnd]);
 
   useEffect(() => {
     if (!call.joined) return;
@@ -573,7 +594,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [call.joined]);
 
   useEffect(() => {
-    if (!session?.engineActive || session.ringing) {
+    if (!session?.engineActive || session.ringing || !call.joined) {
       setVideoCallPipEnabled(false);
       return;
     }
@@ -582,7 +603,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (session.callId && !session.isIncoming) {
       startCallKeepOutgoing(session.callId, session.contactName, session.isVideo);
     }
-  }, [session?.engineActive, session?.ringing, session?.isVideo, session?.callId, session?.isIncoming, session?.contactName]);
+  }, [session?.engineActive, session?.ringing, session?.isVideo, session?.callId, session?.isIncoming, session?.contactName, call.joined]);
 
   useEffect(() => {
     const unsub = onCallSignal((payload) => {
@@ -592,7 +613,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         callId
         && (action === "ended" || action === "declined" || action === "missed" || action === "busy" || action === "cancelled")
       ) {
-        void dismissIncomingRinging(callId);
+        handleRemoteCallEnd(callId);
         return;
       }
       if (action !== "media_type") return;
@@ -601,7 +622,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       setSession((prev) => (prev ? { ...prev, isVideo: nextVideo } : prev));
     });
     return unsub;
-  }, [dismissIncomingRinging]);
+  }, [handleRemoteCallEnd]);
+
+  useEffect(() => registerCallSessionDismissHandler(handleRemoteCallEnd), [handleRemoteCallEnd]);
 
   const switchCallMediaType = useCallback(
     async (video: boolean) => {

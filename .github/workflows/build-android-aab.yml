@@ -39,7 +39,6 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EXPO_PUBLIC_DOMAIN: videh.co.in
           EAS_BUILD_NO_EXPO_GO_WARNING: "true"
-          EAS_SKIP_AUTO_FINGERPRINT: "1"
         run: |
           mkdir -p build
           eas build \

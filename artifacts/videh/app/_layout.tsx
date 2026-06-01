@@ -50,7 +50,7 @@ import {
   stopIncomingCallExperience,
 } from "@/lib/incomingCallExperience";
 import { installGlobalErrorHandlers } from "@/lib/globalErrorHandlers";
-import { registerIncomingCallDismissHandler } from "@/lib/incomingCallUiBridge";
+import { registerIncomingCallDismissHandler, requestDismissCallSession } from "@/lib/incomingCallUiBridge";
 import { loadCachedSilenceUnknownCallers } from "@/lib/privacySettings";
 import type { Chat } from "@/context/AppContext";
 
@@ -152,6 +152,7 @@ function RootLayoutNav() {
     offeredCallIdRef.current = null;
     pendingIncomingRef.current = null;
     void stopIncomingCallExperience(callId, { force: true });
+    requestDismissCallSession(callId);
     setCallWaiting((prev) => (!callId || prev?.callId === callId ? null : prev));
     setIncomingCall((prev) => {
       if (!prev) return null;
@@ -391,7 +392,7 @@ function RootLayoutNav() {
       } catch {}
     };
     void poll();
-    const timer = setInterval(poll, 2500);
+    const timer = setInterval(poll, 1500);
     const unsubCall = onCallSignal((payload) => {
       const action = String(payload.action ?? "");
       const callId = payload.callId ? String(payload.callId) : "";
@@ -412,7 +413,7 @@ function RootLayoutNav() {
         offeredCallIdRef.current = null;
         void stopIncomingCallExperience(callId);
       }
-      if (action === "declined" || action === "ended" || action === "missed" || action === "busy") {
+      if (action === "declined" || action === "ended" || action === "missed" || action === "busy" || action === "cancelled") {
         if (callId) {
           dismissIncomingCallUi(callId, true);
           void loadMessages(String(payload.chatId ?? ""));
