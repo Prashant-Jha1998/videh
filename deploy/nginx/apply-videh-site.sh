@@ -106,6 +106,16 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
+    location = /sitemap.xml {
+        default_type application/xml;
+        try_files \$uri =404;
+    }
+
+    location = /robots.txt {
+        default_type text/plain;
+        try_files \$uri =404;
+    }
+
     location / {
         ${try_files}
     }
