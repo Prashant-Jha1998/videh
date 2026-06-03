@@ -251,19 +251,24 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [router]);
 
   const endCall = useCallback(async () => {
+    endingCallRef.current = true;
     await stopCallAlert();
     setVideoCallPipEnabled(false);
     const endingCallId = session?.callId;
-    if (session?.engineActive) await call.leave();
-    if (endingCallId) {
-      endCallKeep(endingCallId);
-      requestDismissIncomingCallUi(endingCallId);
-      await webrtcFetch(`/calls/${endingCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+    try {
+      if (session?.engineActive || call.error) await call.leave();
+      if (endingCallId) {
+        endCallKeep(endingCallId);
+        requestDismissIncomingCallUi(endingCallId);
+        await webrtcFetch(`/calls/${endingCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+      }
+    } finally {
+      void refreshCallLogs();
+      clearSession();
+      setHeldSession(null);
+      resetCallNavigationGuard();
+      leaveCallScreen();
     }
-    void refreshCallLogs();
-    clearSession();
-    setHeldSession(null);
-    leaveCallScreen();
   }, [session, call, user?.sessionToken, clearSession, refreshCallLogs, leaveCallScreen]);
 
   const holdActiveCall = useCallback(async () => {

@@ -188,7 +188,7 @@ export function useVidehCall(
         webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken, { method: "DELETE" }).catch(() => {});
       }
     };
-  }, [primaryChannel, uid, isVideo, channels.join("|"), localVideoId, remoteVideoId, refreshAggregate, sessionToken]);
+  }, [primaryChannel, uid, isVideo, channels.join("|"), localVideoId, remoteVideoId, sessionToken]);
 
   return {
     joined,

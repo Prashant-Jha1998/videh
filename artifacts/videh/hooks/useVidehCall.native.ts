@@ -70,6 +70,10 @@ export function useVidehCall(
     return (
       m.includes("called in wrong state: stable")
       || (m.includes("setremote") && m.includes("stable"))
+      || m.includes("called in wrong state: closed")
+      || m.includes("signalingstate is closed")
+      || m.includes("peerconnection not found")
+      || m.includes("call session not found")
     );
   };
 
@@ -134,6 +138,11 @@ export function useVidehCall(
     }
   }, [isVideo, uid, remotePeerIds, pruneStalePeers]);
 
+  const refreshAggregateRef = useRef(refreshAggregate);
+  useEffect(() => {
+    refreshAggregateRef.current = refreshAggregate;
+  }, [refreshAggregate]);
+
   const channelsKey = channels.join("|");
 
   useEffect(() => {
@@ -146,12 +155,31 @@ export function useVidehCall(
       await webrtcFetch(path, sessionToken, { method: "POST", body: JSON.stringify(body) });
     };
 
-    const connectChannel = async (channel: string, sharedLocalStream: any) => {
-      if (pcsRef.current.has(channel)) {
-        if (pollTimersRef.current.has(channel)) return;
-        pcsRef.current.get(channel)?.close?.();
+    const teardownChannel = async (channel: string) => {
+      const t = pollTimersRef.current.get(channel);
+      if (t) {
+        clearInterval(t);
+        pollTimersRef.current.delete(channel);
+      }
+      const existing = pcsRef.current.get(channel);
+      if (existing) {
+        try {
+          existing.close?.();
+        } catch {
+          /* ignore */
+        }
         pcsRef.current.delete(channel);
       }
+      rolesRef.current.delete(channel);
+      candidateCursorsRef.current.delete(channel);
+      await webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken, { method: "DELETE" }).catch(() => {});
+    };
+
+    const connectChannel = async (channel: string, sharedLocalStream: any) => {
+      if (stopped) return;
+      if (pcsRef.current.has(channel) && pollTimersRef.current.has(channel)) return;
+      await teardownChannel(channel);
+      if (stopped) return;
       const {
         RTCPeerConnection,
         RTCSessionDescription,
@@ -186,7 +214,7 @@ export function useVidehCall(
         const parsedPeer = peerIdFromCallChannel(channel, uid) || remotePeerIds[0];
         const storageKey = parsedPeer || SINGLE_PEER_KEY;
         upsertRemotePeer(remotePeersRef.current, storageKey, url, hasVid);
-        refreshAggregate();
+        refreshAggregateRef.current();
       };
       pc.ontrack = (event: any) => {
         const { MediaStream: NativeMediaStream } = require("react-native-webrtc");
@@ -220,20 +248,27 @@ export function useVidehCall(
           clearTimeout(iceRestartTimer);
           iceRestartTimer = null;
         }
-        refreshAggregate();
+        refreshAggregateRef.current();
       };
 
       if (role === "caller") {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        await postJson(`/sessions/${encodeURIComponent(channel)}/offer`, { offer });
+        if (pc.signalingState === "closed") return;
+        try {
+          const offer = await pc.createOffer();
+          if (stopped || pcsRef.current.get(channel) !== pc || pc.signalingState === "closed") return;
+          await pc.setLocalDescription(offer);
+          await postJson(`/sessions/${encodeURIComponent(channel)}/offer`, { offer });
+        } catch (e: any) {
+          const msg = e?.message ?? "";
+          if (!isBenignSignalingError(msg)) throw e;
+        }
       }
 
       const pollTimer = setInterval(() => {
         void (async () => {
           try {
             const pcNow = pcsRef.current.get(channel);
-            if (stopped || !pcNow) return;
+            if (stopped || !pcNow || pcNow.signalingState === "closed") return;
             const activeRole = rolesRef.current.get(channel) ?? "caller";
             const session = await webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken).then((r) => r.json()) as {
               session?: { offer?: RTCSessionDescriptionInit | null; answer?: RTCSessionDescriptionInit | null };
@@ -246,6 +281,7 @@ export function useVidehCall(
             ) {
               await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.offer));
               const answer = await pcNow.createAnswer();
+              if (stopped || pcsRef.current.get(channel) !== pcNow || pcNow.signalingState === "closed") return;
               await pcNow.setLocalDescription(answer);
               await postJson(`/sessions/${encodeURIComponent(channel)}/answer`, { answer });
             }
@@ -312,16 +348,10 @@ export function useVidehCall(
           await connectChannel(channel, localStream);
         });
         const active = new Set(channels);
-        for (const [channel, timer] of pollTimersRef.current.entries()) {
-          if (!active.has(channel)) {
-            clearInterval(timer);
-            pollTimersRef.current.delete(channel);
-            pcsRef.current.get(channel)?.close?.();
-            pcsRef.current.delete(channel);
-            webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken, { method: "DELETE" }).catch(() => {});
-          }
+        for (const [channel] of [...pollTimersRef.current.entries()]) {
+          if (!active.has(channel)) await teardownChannel(channel);
         }
-        refreshAggregate();
+        refreshAggregateRef.current();
       } catch (e: any) {
         const msg = e?.message ?? "";
         if (msg.includes("Cannot find module") || msg.includes("TurboModuleRegistry") || msg.includes("NativeModules")) {
@@ -338,8 +368,19 @@ export function useVidehCall(
       stopped = true;
       for (const timer of pollTimersRef.current.values()) clearInterval(timer);
       pollTimersRef.current.clear();
+      for (const [channel, pc] of [...pcsRef.current.entries()]) {
+        try {
+          pc?.close?.();
+        } catch {
+          /* ignore */
+        }
+        webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken, { method: "DELETE" }).catch(() => {});
+      }
+      pcsRef.current.clear();
+      rolesRef.current.clear();
+      candidateCursorsRef.current.clear();
     };
-  }, [primaryChannel, uid, isVideo, channelsKey, refreshAggregate, sessionToken]);
+  }, [primaryChannel, uid, isVideo, channelsKey, sessionToken]);
 
   useEffect(() => {
     return () => {
@@ -414,9 +455,34 @@ export function useVidehCall(
     stopScreenShare: async () => {},
     leave: async () => {
       setProximityScreenOff(false);
+      setError(null);
       await stopInCallSession();
+      for (const timer of pollTimersRef.current.values()) clearInterval(timer);
+      pollTimersRef.current.clear();
+      const channels = [...pcsRef.current.keys()];
       localStreamRef.current?.getTracks?.().forEach((track: any) => track.stop());
-      for (const pc of pcsRef.current.values()) pc?.close?.();
+      localStreamRef.current = null;
+      for (const pc of pcsRef.current.values()) {
+        try {
+          pc?.close?.();
+        } catch {
+          /* ignore */
+        }
+      }
+      pcsRef.current.clear();
+      rolesRef.current.clear();
+      candidateCursorsRef.current.clear();
+      remotePeersRef.current.clear();
+      setJoined(false);
+      setRemoteCount(0);
+      setRemotePeers([]);
+      setRemoteStreamUrl(undefined);
+      setConnectionPhase("connecting");
+      await Promise.all(
+        channels.map((channel) =>
+          webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken, { method: "DELETE" }).catch(() => {}),
+        ),
+      );
     },
   };
 }
