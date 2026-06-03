@@ -2678,9 +2678,9 @@ export default function ChatScreen() {
 
   const inputBarBottomPad = keyboardVisible
     ? Platform.OS === "ios"
-      ? Math.max(insets.bottom, 8)
-      : 8
-    : Math.max(insets.bottom, Platform.OS === "web" ? 34 : 10);
+      ? Math.max(insets.bottom, 6)
+      : 6
+    : Math.max(insets.bottom, Platform.OS === "web" ? 34 : 8);
 
   const composerFooter = (
     <>
@@ -4067,16 +4067,16 @@ const styles = StyleSheet.create({
   groupLockBannerText: { flex: 1, fontSize: 13, fontFamily: "Inter_500Medium", lineHeight: 18 },
   inputBar: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 8,
-    paddingTop: 8,
+    alignItems: "flex-end",
+    paddingHorizontal: 6,
+    paddingTop: 6,
     gap: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   inputBarMain: {
     flex: 1,
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-end",
     gap: 2,
     minHeight: 44,
   },
@@ -4091,14 +4091,16 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 22,
     paddingHorizontal: 14,
-    paddingTop: Platform.OS === "ios" ? 11 : 10,
-    paddingBottom: Platform.OS === "ios" ? 11 : 10,
+    paddingVertical: Platform.OS === "ios" ? 10 : 8,
     fontSize: 15,
+    lineHeight: 20,
     fontFamily: "Inter_400Regular",
     minHeight: 44,
     maxHeight: 120,
     borderWidth: StyleSheet.hairlineWidth,
-    ...(Platform.OS === "android" ? { textAlignVertical: "center" as const } : {}),
+    ...(Platform.OS === "android"
+      ? { textAlignVertical: "center" as const, includeFontPadding: false }
+      : {}),
   },
   sendBtn: {
     width: 44,
