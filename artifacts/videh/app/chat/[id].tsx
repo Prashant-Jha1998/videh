@@ -9,7 +9,7 @@ import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { useGenericKeyboardHandler } from "react-native-keyboard-controller";
+import { KeyboardStickyView, useGenericKeyboardHandler } from "react-native-keyboard-controller";
 import { useChatKeyboard } from "@/hooks/useChatKeyboard";
 import { runOnJS } from "react-native-reanimated";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1482,7 +1482,7 @@ export default function ChatScreen() {
     [schedulePinToBottom],
   );
 
-  const { keyboardVisible } = useChatKeyboard();
+  const { keyboardVisible, keyboardHeight } = useChatKeyboard();
 
   useEffect(() => {
     if (searching || messages.length === 0) return;
@@ -1506,10 +1506,14 @@ export default function ChatScreen() {
    * WhatsApp native: composer sits below the list (not over it); window resize / KAV lift the column.
    * Web: composer is a sibling under the list inside KAV — only a small list tail gap is needed.
    */
-  const listBottomPadding = useMemo(() => 12, []);
+  const listBottomPadding = useMemo(() => Math.max(12, composerHeight + 6), [composerHeight]);
   const jumpFabBottom = useMemo(
-    () => Math.max(12, composerHeight + 12 + (keyboardVisible && Platform.OS === "ios" ? 4 : 0)),
-    [composerHeight, keyboardVisible],
+    () =>
+      Math.max(
+        12,
+        composerHeight + 12 + (Platform.OS === "android" ? keyboardHeight : keyboardVisible ? 4 : 0),
+      ),
+    [composerHeight, keyboardHeight, keyboardVisible],
   );
 
   useEffect(() => {
@@ -3080,8 +3084,7 @@ export default function ChatScreen() {
       )}
 
       <View style={styles.chatBody}>
-        {(() => {
-          const chatMessageList = (
+        <View style={styles.messageListWrap}>
             <FlatList
               style={styles.messageList}
               ref={listRef}
@@ -3207,38 +3210,6 @@ export default function ChatScreen() {
                 ) : null
               }
             />
-          );
-          const composerBlock = (
-            <View
-              onLayout={(e) => {
-                const h = Math.ceil(e.nativeEvent.layout.height);
-                if (h > 0 && h !== composerHeight) setComposerHeight(h);
-              }}
-            >
-              {composerFooter}
-            </View>
-          );
-
-          /** WhatsApp-style: list + composer; Android lifts via keyboard height inset (works in EAS APK). */
-          const chatColumn = (
-            <>
-              {chatMessageList}
-              {composerBlock}
-            </>
-          );
-          if (Platform.OS === "ios") {
-            return (
-              <KeyboardAvoidingView
-                style={styles.messageListAvoid}
-                behavior="padding"
-                keyboardVerticalOffset={topPad}
-              >
-                {chatColumn}
-              </KeyboardAvoidingView>
-            );
-          }
-          return <View style={styles.messageListAvoid}>{chatColumn}</View>;
-        })()}
 
         {showJumpToLatest ? (
           <TouchableOpacity
@@ -3260,6 +3231,31 @@ export default function ChatScreen() {
             ) : null}
           </TouchableOpacity>
         ) : null}
+        </View>
+
+        {Platform.OS === "web" ? (
+          <KeyboardAvoidingView style={styles.composerAvoid} behavior="padding" keyboardVerticalOffset={topPad}>
+            <View
+              onLayout={(e) => {
+                const h = Math.ceil(e.nativeEvent.layout.height);
+                if (h > 0 && h !== composerHeight) setComposerHeight(h);
+              }}
+            >
+              {composerFooter}
+            </View>
+          </KeyboardAvoidingView>
+        ) : (
+          <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
+            <View
+              onLayout={(e) => {
+                const h = Math.ceil(e.nativeEvent.layout.height);
+                if (h > 0 && h !== composerHeight) setComposerHeight(h);
+              }}
+            >
+              {composerFooter}
+            </View>
+          </KeyboardStickyView>
+        )}
       </View>
 
 
@@ -3681,7 +3677,9 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   chatBody: { flex: 1 },
+  messageListWrap: { flex: 1, position: "relative" },
   messageListAvoid: { flex: 1 },
+  composerAvoid: { flexGrow: 0 },
   messageList: { flex: 1 },
   messageListContent: { paddingHorizontal: 10, paddingTop: 8 },
   scrollToBottomFab: {

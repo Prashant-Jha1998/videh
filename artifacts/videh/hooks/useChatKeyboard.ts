@@ -31,11 +31,7 @@ export function useChatKeyboard() {
     };
   }, []);
 
-  // Android: RN Keyboard events are reliable in release APK; controller needs extra native config.
-  const keyboardHeight =
-    Platform.OS === "android"
-      ? fallbackHeight || controllerHeight
-      : controllerHeight || fallbackHeight;
+  const keyboardHeight = Math.max(controllerHeight, fallbackHeight);
   const keyboardVisible = controllerVisible || keyboardHeight > 0;
 
   return { keyboardVisible, keyboardHeight };
