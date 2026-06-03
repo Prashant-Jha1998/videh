@@ -116,10 +116,6 @@ server {
         try_files \$uri =404;
     }
 
-    location = /index.html {
-        return 301 /;
-    }
-
     location / {
         ${try_files}
     }
