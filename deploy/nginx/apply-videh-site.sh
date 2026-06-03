@@ -107,6 +107,7 @@ server {
     }
 
     location = /sitemap.xml {
+        types { }
         default_type application/xml;
         try_files \$uri =404;
     }
