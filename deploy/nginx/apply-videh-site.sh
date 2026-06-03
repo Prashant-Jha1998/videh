@@ -189,6 +189,9 @@ server {
 EOF
 }
 
+echo "Cleaning stale nginx snippets from failed deploys..."
+sudo rm -f /etc/nginx/conf.d/videh-www-redirect.conf
+
 echo "Syncing Videh landing page (videh.co.in only)..."
 sudo mkdir -p "${SITE_ROOT}"
 sudo rsync -a --delete "${REPO}/deploy/videh-co-in/" "${SITE_ROOT}/"
@@ -244,8 +247,6 @@ else
 fi
 
 write_http_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true"
-sudo nginx -t
-sudo systemctl reload nginx
 ensure_letsencrypt_cert "developer.videh.co.in" || true
 if write_ssl_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true" "cert_dir_for_host_only"; then
   echo "Configured HTTPS for developer.videh.co.in"

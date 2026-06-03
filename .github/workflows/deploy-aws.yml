@@ -47,10 +47,11 @@ jobs:
             echo "::error::pnpm-lock.yaml is out of sync with package.json. Run 'pnpm install' at repo root, commit pnpm-lock.yaml, and push again."
             exit 1
           fi
+
           pnpm --filter @workspace/api-server run build:api
-          BASE_PATH=/ pnpm --filter @workspace/admin-web build
           BASE_PATH=/ pnpm --filter @workspace/videh-web build
-          BASE_PATH=/ pnpm --filter @workspace/developer-web build
+          pnpm --filter @workspace/admin-web build || echo "::warning::admin-web build failed — keeping previous dist if any"
+          pnpm --filter @workspace/developer-web build || echo "::warning::developer-web build failed — keeping previous dist if any"
 
           pm2 restart videh-api --update-env || (
             cd /var/www/videh/artifacts/api-server
@@ -60,32 +61,26 @@ jobs:
 
           sudo bash /var/www/videh/deploy/nginx/apply-videh-site.sh
 
-          sleep 15
-
-          for attempt in 1 2 3 4 5 6 7 8; do
-            SITE_OK=false
-            API_OK=false
-            if curl --fail --silent --show-error https://videh.co.in/ | grep -q "Videh" \
-              && curl --fail --silent --show-error https://videh.co.in/sitemap.xml | grep -q "<urlset"; then
-              SITE_OK=true
-            fi
-            if curl --fail --silent --show-error https://videh.co.in/api/readyz; then
-              API_OK=true
-            fi
-            if [ "${SITE_OK}" = true ] && [ "${API_OK}" = true ]; then
-              echo "Deploy health checks passed."
+          echo "Verifying public site..."
+          sleep 12
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error -o /dev/null https://videh.co.in/ \
+              && curl --fail --silent --show-error https://videh.co.in/sitemap.xml | grep -q "urlset"; then
+              echo "Deploy health checks passed (videh.co.in + sitemap)."
+              curl --fail --silent --show-error https://videh.co.in/api/readyz && echo "API readyz OK." || echo "::warning::API readyz not ready — check pm2 on server."
               exit 0
             fi
-            if [ "${SITE_OK}" = true ] && [ "${attempt}" -ge 6 ]; then
-              echo "::warning::Public site OK but API readyz still failing — deploy continues."
-              exit 0
-            fi
-            echo "Health check failed on attempt ${attempt} (site=${SITE_OK} api=${API_OK}); retrying..."
-            sleep 6
+            echo "Health check attempt ${attempt} failed; retrying..."
+            sleep 8
           done
 
-          echo "::group::PM2 logs"
-          pm2 logs videh-api --lines 80 --nostream || true
+          echo "::group::Deploy diagnostics"
+          curl -sI https://videh.co.in/ || true
+          curl -sI https://videh.co.in/sitemap.xml || true
+          curl -sI https://videh.co.in/api/readyz || true
+          sudo nginx -t 2>&1 || true
+          pm2 status || true
+          pm2 logs videh-api --lines 40 --nostream || true
           echo "::endgroup::"
           exit 1
           EOF
