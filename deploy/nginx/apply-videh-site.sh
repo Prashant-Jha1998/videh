@@ -52,11 +52,17 @@ write_ssl_server() {
   local document_root="$3"
   local spa_fallback="${4:-false}"
   local cert_resolver="${5:-cert_dir_for}"
+  local primary_host="${server_name%% *}"
   local cert_dir
-  cert_dir="$("${cert_resolver}" "${server_name}")"
+  cert_dir="$("${cert_resolver}" "${primary_host}")"
 
   if [ -z "${cert_dir}" ]; then
     return 1
+  fi
+
+  local ssl_dhparam_line=""
+  if [ -f /etc/letsencrypt/ssl-dhparams.pem ]; then
+    ssl_dhparam_line="    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;"
   fi
 
   local try_files='try_files $uri $uri/ =404;'
@@ -73,7 +79,7 @@ server {
     ssl_certificate ${cert_dir}/fullchain.pem;
     ssl_certificate_key ${cert_dir}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+${ssl_dhparam_line}
 
     root ${document_root};
     index index.html;
@@ -137,23 +143,14 @@ EOF
   return 0
 }
 
-append_www_to_apex_redirect() {
+write_www_redirect_conf() {
   local cert_dir="$1"
-  sudo rm -f /etc/nginx/conf.d/videh-www-redirect.conf
+  local conf_path="/etc/nginx/conf.d/videh-www-redirect.conf"
   if [ -z "${cert_dir}" ]; then
-    sudo tee -a "${MAIN_CONF}" >/dev/null <<'EOF'
-
-server {
-    listen 80;
-    listen [::]:80;
-    server_name www.videh.co.in;
-    return 301 https://videh.co.in$request_uri;
-}
-EOF
+    sudo rm -f "${conf_path}"
     return 0
   fi
-  sudo tee -a "${MAIN_CONF}" >/dev/null <<EOF
-
+  sudo tee "${conf_path}" >/dev/null <<EOF
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
@@ -273,7 +270,7 @@ if [ -n "${MAIN_CERT}" ]; then
 else
   write_http_server "${MAIN_CONF}" "videh.co.in" "${SITE_ROOT}" "false"
 fi
-append_www_to_apex_redirect "${MAIN_CERT}"
+write_www_redirect_conf "${MAIN_CERT}"
 echo "Configured www.videh.co.in → videh.co.in redirect"
 
 ADMIN_ROOT="/var/www/videh/artifacts/admin-web/dist/public"
@@ -308,6 +305,10 @@ else
 fi
 
 echo "Testing nginx config..."
-sudo nginx -t
+if ! sudo nginx -t 2>&1; then
+  echo "::error::nginx -t failed; removing www redirect snippet and retrying"
+  sudo rm -f /etc/nginx/conf.d/videh-www-redirect.conf
+  sudo nginx -t 2>&1
+fi
 sudo systemctl reload nginx
 echo "Nginx routing applied."
