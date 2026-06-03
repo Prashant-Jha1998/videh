@@ -9,7 +9,11 @@ import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { KeyboardStickyView, useGenericKeyboardHandler } from "react-native-keyboard-controller";
+import {
+  KeyboardAvoidingView as ChatKeyboardAvoidingView,
+  KeyboardStickyView,
+  useGenericKeyboardHandler,
+} from "react-native-keyboard-controller";
 import { useChatKeyboard } from "@/hooks/useChatKeyboard";
 import { runOnJS } from "react-native-reanimated";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1474,6 +1478,10 @@ export default function ChatScreen() {
   /** WhatsApp: pin once when keyboard finishes opening — not on every frame while it animates. */
   useGenericKeyboardHandler(
     {
+      onStart: () => {
+        "worklet";
+        runOnJS(schedulePinToBottom)();
+      },
       onEnd: () => {
         "worklet";
         runOnJS(schedulePinToBottom)();
@@ -1503,10 +1511,10 @@ export default function ChatScreen() {
   }, [messages.length, searching, scrollToLatest, schedulePinToBottom]);
 
   /**
-   * WhatsApp native: composer sits below the list (not over it); window resize / KAV lift the column.
-   * Web: composer is a sibling under the list inside KAV — only a small list tail gap is needed.
+   * WhatsApp: tail gap = composer height so last bubble sits above the input bar.
+   * Native also shrinks the list via keyboard-controller KeyboardAvoidingView when the keyboard opens.
    */
-  const listBottomPadding = useMemo(() => Math.max(12, composerHeight + 6), [composerHeight]);
+  const listBottomPadding = useMemo(() => Math.max(12, composerHeight + 8), [composerHeight]);
   const jumpFabBottom = useMemo(
     () =>
       Math.max(
@@ -2899,6 +2907,168 @@ export default function ChatScreen() {
     </>
   );
 
+  const chatComposerBlock = (
+    <View
+      onLayout={(e) => {
+        const h = Math.ceil(e.nativeEvent.layout.height);
+        if (h > 0 && h !== composerHeight) setComposerHeight(h);
+      }}
+    >
+      {composerFooter}
+    </View>
+  );
+
+  const chatMessageList = (
+    <>
+      <FlatList
+        style={styles.messageList}
+        ref={listRef}
+        data={listRows}
+        ListHeaderComponent={
+          !searching && loadingOlder ? (
+            <View style={styles.olderLoader}>
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+          ) : null
+        }
+        ListFooterComponent={
+          !searching && remoteTypingNames.length > 0 ? (
+            <TypingIndicator
+              bubbleColor={colors.chatBubbleReceived}
+              dotColor={colors.mutedForeground}
+              textColor={colors.mutedForeground}
+              label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
+            />
+          ) : null
+        }
+        keyExtractor={(row) => {
+          if (row.rowType === "date") return row.id;
+          const m = row.message;
+          return m.id.startsWith("tmp_") ? `${m.id}-${m.timestamp}` : m.id;
+        }}
+        renderItem={renderChatListRow}
+        contentContainerStyle={[
+          styles.messageListContent,
+          {
+            paddingBottom: listBottomPadding,
+            flexGrow: 1,
+            justifyContent: searching ? "flex-start" : "flex-end",
+          },
+        ]}
+        extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}`}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews={Platform.OS === "android"}
+        maintainVisibleContentPosition={
+          searching ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
+        }
+        initialNumToRender={18}
+        maxToRenderPerBatch={12}
+        windowSize={9}
+        updateCellsBatchingPeriod={50}
+        onScrollBeginDrag={() => {
+          scrollLockRef.current = true;
+          userDraggingRef.current = true;
+        }}
+        onScrollEndDrag={(e) => {
+          scrollLockRef.current = false;
+          userDraggingRef.current = false;
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+          syncScrollAwayFromBottom(
+            contentOffset.y,
+            contentSize.height,
+            layoutMeasurement.height,
+          );
+        }}
+        onMomentumScrollEnd={(e) => {
+          userDraggingRef.current = false;
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+          syncScrollAwayFromBottom(
+            contentOffset.y,
+            contentSize.height,
+            layoutMeasurement.height,
+          );
+        }}
+        onScroll={(e) => {
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+          if (!searching) {
+            syncScrollAwayFromBottom(
+              contentOffset.y,
+              contentSize.height,
+              layoutMeasurement.height,
+            );
+            if (
+              contentOffset.y < 140
+              && hasMoreOlderRef.current
+              && Date.now() - lastOlderLoadAtRef.current > 700
+            ) {
+              lastOlderLoadAtRef.current = Date.now();
+              void tryLoadOlderMessages();
+            }
+          }
+        }}
+        scrollEventThrottle={16}
+        onContentSizeChange={() => {
+          if (searching || userDraggingRef.current || scrollLockRef.current) return;
+          if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
+          pendingScrollToEndRef.current = true;
+          scrollToLatest(false);
+        }}
+        onLayout={() => {
+          if (!pendingScrollToEndRef.current) return;
+          if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current) return;
+          scrollToLatest(false);
+        }}
+        onScrollToIndexFailed={(info) => {
+          listRef.current?.scrollToOffset({
+            offset: Math.max(0, info.averageItemLength * info.index),
+            animated: true,
+          });
+          setTimeout(() => {
+            listRef.current?.scrollToIndex({
+              index: info.index,
+              animated: true,
+              viewPosition: 0.5,
+            });
+          }, 120);
+        }}
+        ListEmptyComponent={
+          initializing ? (
+            <View style={styles.initWrap}>
+              <Text style={[styles.initText, { color: colors.mutedForeground }]}>Starting chat...</Text>
+            </View>
+          ) : searching ? (
+            <View style={styles.initWrap}>
+              <Text style={[styles.initText, { color: colors.mutedForeground }]}>No messages found</Text>
+            </View>
+          ) : null
+        }
+      />
+
+      {showJumpToLatest ? (
+        <TouchableOpacity
+          style={[
+            styles.scrollToBottomFab,
+            { bottom: jumpFabBottom, backgroundColor: colors.card },
+          ]}
+          onPress={() => pinChatToBottom(true)}
+          activeOpacity={0.88}
+          accessibilityLabel="Scroll to latest messages"
+        >
+          <Ionicons name="chevron-down" size={22} color={colors.primary} />
+          {unreadBelowCount > 0 ? (
+            <View style={[styles.unreadFabBadge, { backgroundColor: colors.primary }]}>
+              <Text style={styles.unreadFabBadgeText}>
+                {unreadBelowCount > 99 ? "99+" : String(unreadBelowCount)}
+              </Text>
+            </View>
+          ) : null}
+        </TouchableOpacity>
+      ) : null}
+    </>
+  );
+
   return (
     <View
       style={[
@@ -3084,177 +3254,18 @@ export default function ChatScreen() {
       )}
 
       <View style={styles.chatBody}>
-        <View style={styles.messageListWrap}>
-            <FlatList
-              style={styles.messageList}
-              ref={listRef}
-              data={listRows}
-              ListHeaderComponent={
-                !searching && loadingOlder ? (
-                  <View style={styles.olderLoader}>
-                    <ActivityIndicator size="small" color={colors.primary} />
-                  </View>
-                ) : null
-              }
-              ListFooterComponent={
-                !searching && remoteTypingNames.length > 0 ? (
-                  <TypingIndicator
-                    bubbleColor={colors.chatBubbleReceived}
-                    dotColor={colors.mutedForeground}
-                    textColor={colors.mutedForeground}
-                    label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
-                  />
-                ) : null
-              }
-              keyExtractor={(row) => {
-                if (row.rowType === "date") return row.id;
-                const m = row.message;
-                return m.id.startsWith("tmp_") ? `${m.id}-${m.timestamp}` : m.id;
-              }}
-              renderItem={renderChatListRow}
-              contentContainerStyle={[
-                styles.messageListContent,
-                {
-                  paddingBottom: listBottomPadding,
-                  flexGrow: 1,
-                  justifyContent: searching ? "flex-start" : "flex-end",
-                },
-              ]}
-              extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}`}
-              keyboardDismissMode="on-drag"
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              removeClippedSubviews={Platform.OS === "android"}
-              maintainVisibleContentPosition={
-                searching ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
-              }
-              initialNumToRender={18}
-              maxToRenderPerBatch={12}
-              windowSize={9}
-              updateCellsBatchingPeriod={50}
-              onScrollBeginDrag={() => {
-                scrollLockRef.current = true;
-                userDraggingRef.current = true;
-              }}
-              onScrollEndDrag={(e) => {
-                scrollLockRef.current = false;
-                userDraggingRef.current = false;
-                const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-                syncScrollAwayFromBottom(
-                  contentOffset.y,
-                  contentSize.height,
-                  layoutMeasurement.height,
-                );
-              }}
-              onMomentumScrollEnd={(e) => {
-                userDraggingRef.current = false;
-                const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-                syncScrollAwayFromBottom(
-                  contentOffset.y,
-                  contentSize.height,
-                  layoutMeasurement.height,
-                );
-              }}
-              onScroll={(e) => {
-                const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-                if (!searching) {
-                  syncScrollAwayFromBottom(
-                    contentOffset.y,
-                    contentSize.height,
-                    layoutMeasurement.height,
-                  );
-                  if (
-                    contentOffset.y < 140
-                    && hasMoreOlderRef.current
-                    && Date.now() - lastOlderLoadAtRef.current > 700
-                  ) {
-                    lastOlderLoadAtRef.current = Date.now();
-                    void tryLoadOlderMessages();
-                  }
-                }
-              }}
-              scrollEventThrottle={16}
-              onContentSizeChange={() => {
-                if (searching || userDraggingRef.current || scrollLockRef.current) return;
-                if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
-                pendingScrollToEndRef.current = true;
-                scrollToLatest(false);
-              }}
-              onLayout={() => {
-                if (!pendingScrollToEndRef.current) return;
-                if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current) return;
-                scrollToLatest(false);
-              }}
-              onScrollToIndexFailed={(info) => {
-                listRef.current?.scrollToOffset({
-                  offset: Math.max(0, info.averageItemLength * info.index),
-                  animated: true,
-                });
-                setTimeout(() => {
-                  listRef.current?.scrollToIndex({
-                    index: info.index,
-                    animated: true,
-                    viewPosition: 0.5,
-                  });
-                }, 120);
-              }}
-              ListEmptyComponent={
-                initializing ? (
-                  <View style={styles.initWrap}>
-                    <Text style={[styles.initText, { color: colors.mutedForeground }]}>Starting chat...</Text>
-                  </View>
-                ) : searching ? (
-                  <View style={styles.initWrap}>
-                    <Text style={[styles.initText, { color: colors.mutedForeground }]}>No messages found</Text>
-                  </View>
-                ) : null
-              }
-            />
-
-        {showJumpToLatest ? (
-          <TouchableOpacity
-            style={[
-              styles.scrollToBottomFab,
-              { bottom: jumpFabBottom, backgroundColor: colors.card },
-            ]}
-            onPress={() => pinChatToBottom(true)}
-            activeOpacity={0.88}
-            accessibilityLabel="Scroll to latest messages"
-          >
-            <Ionicons name="chevron-down" size={22} color={colors.primary} />
-            {unreadBelowCount > 0 ? (
-              <View style={[styles.unreadFabBadge, { backgroundColor: colors.primary }]}>
-                <Text style={styles.unreadFabBadgeText}>
-                  {unreadBelowCount > 99 ? "99+" : String(unreadBelowCount)}
-                </Text>
-              </View>
-            ) : null}
-          </TouchableOpacity>
-        ) : null}
-        </View>
-
         {Platform.OS === "web" ? (
-          <KeyboardAvoidingView style={styles.composerAvoid} behavior="padding" keyboardVerticalOffset={topPad}>
-            <View
-              onLayout={(e) => {
-                const h = Math.ceil(e.nativeEvent.layout.height);
-                if (h > 0 && h !== composerHeight) setComposerHeight(h);
-              }}
-            >
-              {composerFooter}
-            </View>
-          </KeyboardAvoidingView>
+          <>
+            <View style={styles.messageListWrap}>{chatMessageList}</View>
+            <KeyboardAvoidingView style={styles.composerAvoid} behavior="padding" keyboardVerticalOffset={topPad}>
+              {chatComposerBlock}
+            </KeyboardAvoidingView>
+          </>
         ) : (
-          <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
-            <View
-              onLayout={(e) => {
-                const h = Math.ceil(e.nativeEvent.layout.height);
-                if (h > 0 && h !== composerHeight) setComposerHeight(h);
-              }}
-            >
-              {composerFooter}
-            </View>
-          </KeyboardStickyView>
+          <ChatKeyboardAvoidingView style={styles.chatKeyboardAvoid} behavior="padding">
+            <View style={styles.messageListWrap}>{chatMessageList}</View>
+            <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>{chatComposerBlock}</KeyboardStickyView>
+          </ChatKeyboardAvoidingView>
         )}
       </View>
 
@@ -3676,8 +3687,9 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  chatBody: { flex: 1 },
-  messageListWrap: { flex: 1, position: "relative" },
+  chatBody: { flex: 1, minHeight: 0 },
+  chatKeyboardAvoid: { flex: 1, minHeight: 0 },
+  messageListWrap: { flex: 1, minHeight: 0, position: "relative" },
   messageListAvoid: { flex: 1 },
   composerAvoid: { flexGrow: 0 },
   messageList: { flex: 1 },
