@@ -108,6 +108,8 @@ server {
 
     location = /sitemap.xml {
         default_type application/xml;
+        charset utf-8;
+        add_header Cache-Control "public, max-age=3600" always;
         try_files \$uri =404;
     }
 
@@ -135,11 +137,12 @@ EOF
   return 0
 }
 
-write_www_redirect() {
+append_www_to_apex_redirect() {
   local cert_dir="$1"
-  local conf_path="/etc/nginx/conf.d/videh-www-redirect.conf"
+  sudo rm -f /etc/nginx/conf.d/videh-www-redirect.conf
   if [ -z "${cert_dir}" ]; then
-    sudo tee "${conf_path}" >/dev/null <<'EOF'
+    sudo tee -a "${MAIN_CONF}" >/dev/null <<'EOF'
+
 server {
     listen 80;
     listen [::]:80;
@@ -149,7 +152,8 @@ server {
 EOF
     return 0
   fi
-  sudo tee "${conf_path}" >/dev/null <<EOF
+  sudo tee -a "${MAIN_CONF}" >/dev/null <<EOF
+
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
@@ -157,7 +161,6 @@ server {
     ssl_certificate ${cert_dir}/fullchain.pem;
     ssl_certificate_key ${cert_dir}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
     return 301 https://videh.co.in\$request_uri;
 }
 
@@ -219,6 +222,8 @@ server {
 
     location = /sitemap.xml {
         default_type application/xml;
+        charset utf-8;
+        add_header Cache-Control "public, max-age=3600" always;
         try_files \$uri =404;
     }
 
@@ -268,7 +273,7 @@ if [ -n "${MAIN_CERT}" ]; then
 else
   write_http_server "${MAIN_CONF}" "videh.co.in" "${SITE_ROOT}" "false"
 fi
-write_www_redirect "${MAIN_CERT}"
+append_www_to_apex_redirect "${MAIN_CERT}"
 echo "Configured www.videh.co.in → videh.co.in redirect"
 
 ADMIN_ROOT="/var/www/videh/artifacts/admin-web/dist/public"
@@ -295,8 +300,6 @@ else
 fi
 
 write_http_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true"
-sudo nginx -t
-sudo systemctl reload nginx
 ensure_letsencrypt_cert "developer.videh.co.in" || true
 if write_ssl_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true" "cert_dir_for_host_only"; then
   echo "Configured HTTPS for developer.videh.co.in"
