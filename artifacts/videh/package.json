@@ -4,12 +4,18 @@
   "private": true,
   "main": "index.js",
   "scripts": {
-    "dev": "EXPO_PACKAGER_PROXY_URL=https://$REPLIT_EXPO_DEV_DOMAIN EXPO_PUBLIC_DOMAIN=$REPLIT_DEV_DOMAIN EXPO_PUBLIC_REPL_ID=$REPL_ID REACT_NATIVE_PACKAGER_HOSTNAME=$REPLIT_DEV_DOMAIN pnpm exec expo start --localhost --port $PORT",
+    "dev": "EXPO_PACKAGER_PROXY_URL=https://$REPLIT_EXPO_DEV_DOMAIN EXPO_PUBLIC_DOMAIN=$REPLIT_DEV_DOMAIN EXPO_PUBLIC_REPL_ID=$REPL_ID REACT_NATIVE_PACKAGER_HOSTNAME=$REPLIT_DEV_DOMAIN pnpm exec expo start --dev-client --localhost --port $PORT",
+    "start": "expo start --dev-client",
+    "start:metro": "expo start --dev-client --clear",
     "build": "node scripts/build.js",
     "serve": "node server/serve.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "android": "expo run:android",
-    "ios": "expo run:ios"
+    "ios": "expo run:ios",
+    "prebuild": "expo prebuild",
+    "build:dev-apk": "eas build --profile development --platform android",
+    "build:preview-apk": "eas build --profile preview --platform android",
+    "build:production": "eas build --profile production --platform android"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
@@ -39,6 +45,7 @@
     "expo-camera": "^17.0.10",
     "expo-constants": "~18.0.11",
     "expo-contacts": "^15.0.11",
+    "expo-dev-client": "~6.0.15",
     "expo-document-picker": "^14.0.8",
     "expo-file-system": "^19.0.21",
     "expo-font": "~14.0.10",

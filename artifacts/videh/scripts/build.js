@@ -506,7 +506,7 @@ function updateManifests(manifests, timestamp, baseUrl, assetsByHash) {
 }
 
 async function main() {
-  console.log("Building static Expo Go deployment...");
+  console.log("Building static dev-client bundle deployment...");
 
   setupSignalHandlers();
 

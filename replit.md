@@ -55,9 +55,9 @@ Phone number → OTP verification (Fast2SMS) → Profile setup → Main app
 ### Self-hosted Voice & Video Calls
 - **Signaling server**: `POST /api/webrtc/sessions`, `/offer`, `/answer`, and `/candidates` routes run on the Videh API server.
 - **Web**: Browser WebRTC works through the Videh signaling server and renders local/remote media in the call screen.
-- **Native** (`react-native-webrtc`): Requests mic/camera permissions, joins Videh signaling, and renders media via `RTCView`. Requires a development build (not Expo Go).
-  - Build command: `eas build --profile development`
-- Expo Go shows a clear native-module-required screen.
+- **Native** (`react-native-webrtc`): Requires a **development build** or production APK — **Expo Go is blocked** at startup. See `artifacts/videh/NATIVE_BUILD.md`.
+  - Local: `cd artifacts/videh && pnpm android`
+  - Cloud: `pnpm build:dev-apk` (EAS development profile)
 - **Permissions** added to `app.json`: `RECORD_AUDIO`, `CAMERA`, `BLUETOOTH_CONNECT`, `MODIFY_AUDIO_SETTINGS` (Android) + `NSMicrophoneUsageDescription`, `NSCameraUsageDescription` (iOS) + `UIBackgroundModes: [audio, voip]`
 - **Channel naming**: `videh_{chatId}` for each call
 - **Call screen features**: Live duration timer, mute/speaker/camera toggle, end call, remote video fullscreen, local video PiP (picture-in-picture), encryption badge

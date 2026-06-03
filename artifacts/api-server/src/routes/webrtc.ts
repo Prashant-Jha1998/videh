@@ -41,6 +41,23 @@ const router = Router();
 router.use(requireAuth);
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 const RING_TIMEOUT_MS = 45 * 1000;
+const MAX_CALL_PARTICIPANTS = 32;
+
+function peerIdsFromChannel(channel: string): [number, number] | null {
+  const m = channel.match(/_peer_(\d+)_(\d+)$/);
+  if (!m) return null;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return [a, b];
+}
+
+function acceptedUserIdsForCall(call: CallInvite): number[] {
+  return Object.entries(call.statuses)
+    .filter(([, status]) => status === "accepted")
+    .map(([id]) => Number(id))
+    .filter((id) => Number.isFinite(id));
+}
 const ringExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function clearRingExpiryTimer(callId: string): void {
@@ -510,8 +527,25 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
     chatId: call.chatId,
     userIds: [call.callerId, ...call.participantIds],
     action: body.action === "accept" ? "accepted" : "declined",
-    payload: serializeIncoming(call, userId),
+    payload: {
+      ...serializeIncoming(call, userId),
+      acceptedUserIds: acceptedUserIdsForCall(call),
+      acceptedBy: userId,
+    },
   });
+  if (body.action === "accept") {
+    publishCallSignal({
+      chatId: call.chatId,
+      userIds: [call.callerId, ...call.participantIds],
+      action: "participants_updated",
+      payload: {
+        callId: call.callId,
+        chatId: call.chatId,
+        channel: call.channel,
+        acceptedUserIds: acceptedUserIdsForCall(call),
+      },
+    });
+  }
   if (isCallEnded(call)) {
     await finalizeCall(call);
   } else {
@@ -606,7 +640,14 @@ router.post("/calls/:callId/participants", async (req: Request, res: Response) =
     const busyIds: number[] = [];
     const alreadyOnCall: number[] = [];
 
-    for (const id of allowedIds) {
+    const seatsLeft = MAX_CALL_PARTICIPANTS - (call.participantIds.length + 1);
+    if (seatsLeft <= 0) {
+      res.status(400).json({ success: false, message: `This call is full (max ${MAX_CALL_PARTICIPANTS} people).` });
+      return;
+    }
+    const idsToAdd = allowedIds.slice(0, seatsLeft);
+
+    for (const id of idsToAdd) {
       const existingStatus = call.statuses[id];
       if (call.participantIds.includes(id)) {
         if (existingStatus === "accepted" || existingStatus === "ringing") {
@@ -796,7 +837,27 @@ router.post("/sessions", async (req: Request, res: Response) => {
 
   let session = await getSession(channel);
   let role: Role = "caller";
-  if (!session) {
+  const meshPeers = peerIdsFromChannel(channel);
+  if (meshPeers) {
+    const [lowId, highId] = meshPeers;
+    role = userId === lowId ? "caller" : "callee";
+    if (!session) {
+      session = {
+        channel,
+        type: body.type === "video" ? "video" : "audio",
+        callerId: lowId,
+        calleeId: highId,
+        callerCandidates: [],
+        calleeCandidates: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+    } else {
+      session.callerId = lowId;
+      session.calleeId = highId;
+      session.updatedAt = Date.now();
+    }
+  } else if (!session) {
     session = {
       channel,
       type: body.type === "video" ? "video" : "audio",

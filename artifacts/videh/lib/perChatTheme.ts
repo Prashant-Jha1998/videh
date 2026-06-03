@@ -5,8 +5,12 @@ const PER_CHAT_THEMES_KEY = "videh_per_chat_themes_v1";
 
 export type PerChatThemeOverride = {
   themeId?: string;
+  /** Preset id from CHAT_BUBBLE_PRESETS (preferred for correct light + dark bubbles). */
+  bubblePresetId?: string;
   bubbleSent?: string;
   bubbleReceived?: string;
+  bubbleSentDark?: string;
+  bubbleReceivedDark?: string;
   wallpaperUri?: string | null;
   animatedWallpaper?: AnimatedWallpaperId;
   label?: string;

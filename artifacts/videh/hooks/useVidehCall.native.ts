@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PermissionsAndroid, Platform } from "react-native";
 import { applySpeakerRoute, setProximityScreenOff, startInCallSession, stopInCallSession } from "@/lib/inCallAudio";
 import { buildCallMediaConstraints, getCallMediaSettings } from "@/lib/callMediaSettings";
-import { channelsForCall, loadIceServers, peerIdFromCallChannel } from "@/lib/webrtcIce";
+import { ICE_RESTART_AFTER_MS } from "@/lib/callStability";
+import { connectMeshPeersStaggered } from "@/lib/meshPeerConnect";
+import { channelsForCall, peerIdFromCallChannel } from "@/lib/webrtcIce";
+import { buildRtcConfiguration } from "@/lib/webrtcRtcConfig";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import type { CallUiPhase } from "@/lib/callState";
 import type { RemoteCallPeerStream, VidehCallState } from "./videhCallTypes";
@@ -70,7 +73,21 @@ export function useVidehCall(
     );
   };
 
+  const pruneStalePeers = useCallback(() => {
+    const livePeerIds = new Set<number>();
+    for (const [channel, pc] of pcsRef.current.entries()) {
+      if (pc?.connectionState !== "connected" && pc?.connectionState !== "connecting") continue;
+      const parsed = peerIdFromCallChannel(channel, uid) || remotePeerIds[0];
+      if (parsed) livePeerIds.add(parsed);
+      else if (!channel.includes("_peer_")) livePeerIds.add(SINGLE_PEER_KEY);
+    }
+    for (const key of [...remotePeersRef.current.keys()]) {
+      if (!livePeerIds.has(key)) remotePeersRef.current.delete(key);
+    }
+  }, [uid, remotePeerIds]);
+
   const refreshAggregate = useCallback(() => {
+    pruneStalePeers();
     if (remotePeersRef.current.size === 0) {
       const { MediaStream: NativeMediaStream } = require("react-native-webrtc");
       for (const [channel, pc] of pcsRef.current.entries()) {
@@ -108,14 +125,14 @@ export function useVidehCall(
       setError(null);
       setConnectionPhase("connected");
       if (!isVideo) setProximityScreenOff(true);
-    } else if (failed) {
+    } else if (failed && pcs.length <= 1) {
       setConnectionPhase("failed");
     } else if (reconnecting && pcs.length > 0) {
       setConnectionPhase("reconnecting");
     } else if (pcs.length > 0) {
       setConnectionPhase("connecting");
     }
-  }, [isVideo, uid, remotePeerIds]);
+  }, [isVideo, uid, remotePeerIds, pruneStalePeers]);
 
   const channelsKey = channels.join("|");
 
@@ -129,7 +146,7 @@ export function useVidehCall(
       await webrtcFetch(path, sessionToken, { method: "POST", body: JSON.stringify(body) });
     };
 
-    const connectChannel = async (channel: string, sharedLocalStream: any, iceServers: RTCIceServer[]) => {
+    const connectChannel = async (channel: string, sharedLocalStream: any) => {
       if (pcsRef.current.has(channel)) {
         if (pollTimersRef.current.has(channel)) return;
         pcsRef.current.get(channel)?.close?.();
@@ -151,7 +168,8 @@ export function useVidehCall(
       rolesRef.current.set(channel, role);
       candidateCursorsRef.current.set(channel, 0);
 
-      const pc = new RTCPeerConnection({ iceServers });
+      const rtcConfig = await buildRtcConfiguration(sessionToken, remotePeerIds.length + 1);
+      const pc = new RTCPeerConnection(rtcConfig);
       pcsRef.current.set(channel, pc);
       sharedLocalStream.getTracks().forEach((track: any) => pc.addTrack(track, sharedLocalStream));
 
@@ -181,8 +199,27 @@ export function useVidehCall(
       pc.onaddstream = (event: any) => {
         noteRemoteStream(event.stream);
       };
+      let iceRestartTimer: ReturnType<typeof setTimeout> | null = null;
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed") setError("Call connection failed.");
+        const state = pc.connectionState;
+        if (state === "failed") {
+          if (pcsRef.current.size <= 1) setError("Call connection failed.");
+        }
+        if (state === "disconnected") {
+          if (iceRestartTimer) clearTimeout(iceRestartTimer);
+          iceRestartTimer = setTimeout(() => {
+            iceRestartTimer = null;
+            if (pc.connectionState !== "disconnected") return;
+            try {
+              if (typeof pc.restartIce === "function") pc.restartIce();
+            } catch {
+              /* ignore */
+            }
+          }, ICE_RESTART_AFTER_MS);
+        } else if (iceRestartTimer) {
+          clearTimeout(iceRestartTimer);
+          iceRestartTimer = null;
+        }
         refreshAggregate();
       };
 
@@ -235,7 +272,7 @@ export function useVidehCall(
             const pcNow = pcsRef.current.get(channel);
             const connected = pcNow?.connectionState === "connected";
             if (connected || isBenignSignalingError(msg)) return;
-            setError(msg);
+            if (pcsRef.current.size <= 1) setError(msg);
             const t = pollTimersRef.current.get(channel);
             if (t) {
               clearInterval(t);
@@ -260,7 +297,8 @@ export function useVidehCall(
       applySpeakerRoute(speakerOnRef.current, isVideo);
       const { mediaDevices } = require("react-native-webrtc");
       const lowData = (await getCallMediaSettings()).lowDataMode;
-      const stream = await mediaDevices.getUserMedia(buildCallMediaConstraints(isVideo, lowData));
+      const peerLoad = Math.max(remotePeerIds.length, 1);
+      const stream = await mediaDevices.getUserMedia(buildCallMediaConstraints(isVideo, lowData, peerLoad));
       localStreamRef.current = stream;
       setLocalStreamUrl(typeof stream.toURL === "function" ? stream.toURL() : undefined);
       return stream;
@@ -269,11 +307,10 @@ export function useVidehCall(
     const syncChannels = async () => {
       try {
         localStream = await ensureLocalStream();
-        const iceServers = await loadIceServers(sessionToken);
-        for (const channel of channels) {
+        await connectMeshPeersStaggered(channels, async (channel) => {
           if (stopped) return;
-          await connectChannel(channel, localStream, iceServers);
-        }
+          await connectChannel(channel, localStream);
+        });
         const active = new Set(channels);
         for (const [channel, timer] of pollTimersRef.current.entries()) {
           if (!active.has(channel)) {

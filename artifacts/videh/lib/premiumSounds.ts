@@ -232,6 +232,7 @@ export function notificationSoundFilename(soundId: MessageSoundId): string {
 
 export function notificationCallSoundFilename(soundId: CallSoundId): string | undefined {
   if (soundId === "none") return undefined;
+  if (soundId === "call_default") return "incoming_call";
   return soundId;
 }
 

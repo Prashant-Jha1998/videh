@@ -36,7 +36,7 @@
     },
     "android": {
       "package": "com.videh.app",
-      "softwareKeyboardLayoutMode": "pan",
+      "softwareKeyboardLayoutMode": "resize",
       "versionCode": 34,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/videh_icon_foreground.png",
@@ -82,6 +82,7 @@
       "color": "#00A884"
     },
     "plugins": [
+      "expo-dev-client",
       [
         "expo-build-properties",
         {

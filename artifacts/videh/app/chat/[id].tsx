@@ -80,8 +80,10 @@ import { formatChatBubbleTime } from "@/utils/time";
 import {
   isChatNearBottom,
   isCompactChatText,
+  scrollChatListToLatest,
   shouldWhatsAppAutoPin,
   WHATSAPP_CHAT_NEAR_BOTTOM_PX,
+  WHATSAPP_KEYBOARD_SETTLE_MS,
   WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS,
 } from "@/lib/whatsappChatScroll";
 import { extractUrls, primaryUrlFromText } from "@/lib/chatUrls";
@@ -1365,6 +1367,7 @@ export default function ChatScreen() {
   const pinToBottomTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const scrollCoalesceRef = useRef<number | null>(null);
   const composerPinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keyboardSettlingRef = useRef(false);
   const scrollToLatest = useCallback((animated = false) => {
     if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || scrollLockRef.current || userDraggingRef.current) {
       return;
@@ -1373,7 +1376,7 @@ export default function ChatScreen() {
     scrollCoalesceRef.current = requestAnimationFrame(() => {
       scrollCoalesceRef.current = null;
       if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
-      listRef.current?.scrollToEnd({ animated });
+      scrollChatListToLatest(listRef.current, animated);
     });
   }, [searching]);
   /** WhatsApp: after keyboard/composer layout, scroll to latest more than once. */
@@ -1393,8 +1396,8 @@ export default function ChatScreen() {
       setUnreadBelowCount(0);
       frozenMessageCountRef.current = messages.length;
       pendingScrollToEndRef.current = true;
-      if (animated) scrollToLatest(true);
-      else schedulePinToBottom();
+      scrollToLatest(animated);
+      schedulePinToBottom();
     },
     [messages.length, schedulePinToBottom, scrollToLatest],
   );
@@ -1406,6 +1409,7 @@ export default function ChatScreen() {
         layoutHeight,
         WHATSAPP_CHAT_NEAR_BOTTOM_PX,
       );
+      if (keyboardSettlingRef.current && away) return;
       if (away === userScrolledUpRef.current) return;
       userScrolledUpRef.current = away;
       if (away) {
@@ -1478,7 +1482,7 @@ export default function ChatScreen() {
     [schedulePinToBottom],
   );
 
-  const { keyboardVisible, keyboardHeight } = useChatKeyboard();
+  const { keyboardVisible } = useChatKeyboard();
 
   useEffect(() => {
     if (searching || messages.length === 0) return;
@@ -1490,22 +1494,22 @@ export default function ChatScreen() {
     }
     const count = messages.length;
     if (count > prevMessageCountRef.current && !userScrolledUpRef.current) {
+      pendingScrollToEndRef.current = true;
       const animated = count - prevMessageCountRef.current <= 2;
       scrollToLatest(animated);
-      if (keyboardVisible) schedulePinToBottom();
+      schedulePinToBottom();
     }
     prevMessageCountRef.current = count;
-  }, [messages.length, searching, scrollToLatest, keyboardVisible, schedulePinToBottom]);
+  }, [messages.length, searching, scrollToLatest, schedulePinToBottom]);
 
   /**
    * WhatsApp native: composer sits below the list (not over it); window resize / KAV lift the column.
    * Web: composer is a sibling under the list inside KAV — only a small list tail gap is needed.
    */
   const listBottomPadding = useMemo(() => 12, []);
-  const androidKeyboardLift = Platform.OS === "android" ? keyboardHeight : 0;
   const jumpFabBottom = useMemo(
-    () => Math.max(12, composerHeight + 12 + androidKeyboardLift + (keyboardVisible && Platform.OS === "ios" ? 4 : 0)),
-    [composerHeight, keyboardVisible, androidKeyboardLift],
+    () => Math.max(12, composerHeight + 12 + (keyboardVisible && Platform.OS === "ios" ? 4 : 0)),
+    [composerHeight, keyboardVisible],
   );
 
   useEffect(() => {
@@ -1518,12 +1522,20 @@ export default function ChatScreen() {
   }, []);
 
   useEffect(() => {
-    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
-    if (!keyboardVisible) return;
+    if (!keyboardVisible) {
+      keyboardSettlingRef.current = false;
+      return;
+    }
+    keyboardSettlingRef.current = true;
     if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
     keyboardScrollTimerRef.current = setTimeout(() => schedulePinToBottom(), 60);
+    const settleTimer = setTimeout(() => {
+      keyboardSettlingRef.current = false;
+      if (!userScrolledUpRef.current && !searching) schedulePinToBottom();
+    }, WHATSAPP_KEYBOARD_SETTLE_MS);
     return () => {
       if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
+      clearTimeout(settleTimer);
     };
   }, [keyboardVisible, searching, schedulePinToBottom]);
 
@@ -3160,11 +3172,9 @@ export default function ChatScreen() {
               }}
               scrollEventThrottle={16}
               onContentSizeChange={() => {
-                if (!pendingScrollToEndRef.current) return;
-                if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current || scrollLockRef.current) {
-                  return;
-                }
-                pendingScrollToEndRef.current = false;
+                if (searching || userDraggingRef.current || scrollLockRef.current) return;
+                if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
+                pendingScrollToEndRef.current = true;
                 scrollToLatest(false);
               }}
               onLayout={() => {
@@ -3227,16 +3237,7 @@ export default function ChatScreen() {
               </KeyboardAvoidingView>
             );
           }
-          return (
-            <View
-              style={[
-                styles.messageListAvoid,
-                androidKeyboardLift > 0 ? { paddingBottom: androidKeyboardLift } : null,
-              ]}
-            >
-              {chatColumn}
-            </View>
-          );
+          return <View style={styles.messageListAvoid}>{chatColumn}</View>;
         })()}
 
         {showJumpToLatest ? (

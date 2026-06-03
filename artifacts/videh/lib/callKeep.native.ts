@@ -46,8 +46,8 @@ export async function setupCallKeep(): Promise<boolean> {
       ios: {
         appName: "Videh",
         supportsVideo: true,
-        maximumCallGroups: 2,
-        maximumCallsPerCallGroup: 2,
+        maximumCallGroups: 8,
+        maximumCallsPerCallGroup: 8,
         includesCallsInRecents: true,
       },
       android: {

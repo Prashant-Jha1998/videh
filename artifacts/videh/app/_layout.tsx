@@ -16,6 +16,8 @@ import { CallSessionProvider, useCallSession } from "@/context/CallSessionContex
 import { OngoingCallBanner } from "@/components/OngoingCallBanner";
 import { UiPreferencesProvider } from "@/context/UiPreferencesContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { NativeBuildRequiredScreen } from "@/components/NativeBuildRequiredScreen";
+import { isExpoGo } from "@/lib/appRuntime";
 import { AssistantOverlay } from "@/components/AssistantOverlay";
 import { getApiUrl } from "@/lib/api";
 import { onCallSignal } from "@/lib/callEvents";
@@ -45,6 +47,7 @@ import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
 import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
 import {
   claimIncomingCallRing,
+  getRingingCallId,
   presentIncomingCallUi,
   startIncomingCallExperience,
   stopIncomingCallExperience,
@@ -230,8 +233,13 @@ function RootLayoutNav() {
     });
 
     presentIncomingCallUi(next);
-    setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
     pendingIncomingRef.current = callPayload;
+    const appActive = AppState.currentState === "active";
+    if (Platform.OS !== "web" && appActive) {
+      presentIncomingCall(callPayload);
+    } else {
+      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
+    }
 
     void startIncomingCallExperience(callPayload);
     if (Platform.OS !== "web") {
@@ -245,6 +253,7 @@ function RootLayoutNav() {
     activeCallSession?.ringing,
     chats,
     scheduleIncomingAutoEnd,
+    presentIncomingCall,
     user?.dbId,
     user?.sessionToken,
   ]);
@@ -375,7 +384,23 @@ function RootLayoutNav() {
         if (cancelled) return;
         const next = data.calls?.[0] ?? null;
         if (!next) {
-          dismissIncomingCallUi();
+          const activeId = getRingingCallId() ?? offeredCallIdRef.current ?? activeCallIdRef.current;
+          if (!activeId) {
+            dismissIncomingCallUi();
+            return;
+          }
+          try {
+            const statusRes = await fetch(
+              `${getApiUrl()}/api/webrtc/calls/${activeId}/status?userId=${user.dbId}`,
+              { headers: webrtcAuthHeaders(user.sessionToken) },
+            );
+            const statusData = (await statusRes.json()) as { success?: boolean; ended?: boolean };
+            if (!statusData.success || statusData.ended) {
+              dismissIncomingCallUi(activeId, true);
+            }
+          } catch {
+            /* keep ringing UI if status check fails */
+          }
           return;
         }
         const pollCallId = String(next.callId ?? "");
@@ -439,13 +464,17 @@ function RootLayoutNav() {
       const pending = pendingIncomingRef.current;
       if (pending && canPresentIncomingCallUi()) {
         pendingIncomingRef.current = null;
-        setIncomingCall(pending);
+        if (Platform.OS !== "web") {
+          presentIncomingCall(pending);
+        } else {
+          setIncomingCall(pending);
+        }
         void startIncomingCallExperience(pending);
         scheduleIncomingAutoEnd(pending.callId);
       }
     });
     return () => sub.remove();
-  }, [scheduleIncomingAutoEnd]);
+  }, [scheduleIncomingAutoEnd, presentIncomingCall]);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -455,7 +484,7 @@ function RootLayoutNav() {
         const isCall = data?.notificationKind === "incoming_call" || data?.kind === "call";
         return {
           shouldShowAlert: true,
-          shouldPlaySound: !isCall,
+          shouldPlaySound: true,
           shouldShowBanner: true,
           shouldShowList: true,
           shouldSetBadge: true,
@@ -761,6 +790,14 @@ export default function RootLayout() {
   }, []);
 
   if (!fontsReady) return null;
+
+  if (isExpoGo()) {
+    return (
+      <SafeAreaProvider>
+        <NativeBuildRequiredScreen />
+      </SafeAreaProvider>
+    );
+  }
 
   return (
     <SafeAreaProvider>

@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { GROUP_VIDEO_DEGRADE_AT } from "@/lib/callStability";
 
 export const CALL_LOW_DATA_KEY = "videh_call_low_data";
 
@@ -21,8 +22,12 @@ export async function setCallLowDataMode(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(CALL_LOW_DATA_KEY, enabled ? "true" : "false");
 }
 
-/** WebRTC getUserMedia constraints (WhatsApp-style low data for calls). */
-export function buildCallMediaConstraints(isVideo: boolean, lowData: boolean): {
+/** WebRTC getUserMedia constraints — scales down for large conferences. */
+export function buildCallMediaConstraints(
+  isVideo: boolean,
+  lowData: boolean,
+  acceptedPeerCount = 1,
+): {
   audio: boolean | MediaTrackConstraints;
   video: boolean | MediaTrackConstraints;
 } {
@@ -34,7 +39,9 @@ export function buildCallMediaConstraints(isVideo: boolean, lowData: boolean): {
     return { audio, video: false };
   }
 
-  if (lowData) {
+  const conferenceLoad = acceptedPeerCount >= GROUP_VIDEO_DEGRADE_AT;
+
+  if (lowData || conferenceLoad) {
     return {
       audio,
       video: {

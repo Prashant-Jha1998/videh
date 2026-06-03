@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { channelsForCall, loadIceServers } from "@/lib/webrtcIce";
+import { connectMeshPeersStaggered } from "@/lib/meshPeerConnect";
+import { channelsForCall, peerIdFromCallChannel } from "@/lib/webrtcIce";
+import { buildRtcConfiguration } from "@/lib/webrtcRtcConfig";
 import { webrtcFetch } from "@/lib/webrtcApi";
+import type { RemoteCallPeerStream } from "./videhCallTypes";
 import { startScreenShare, stopScreenShare as stopScreenShareTracks } from "@/lib/screenShare";
 import type { VidehCallState } from "./videhCallTypes";
 
@@ -33,6 +36,8 @@ export function useVidehCall(
   const [speakerOn, setSpeakerOn] = useState(true);
   const [remoteCount, setRemoteCount] = useState(0);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
+  const [remotePeers, setRemotePeers] = useState<RemoteCallPeerStream[]>([]);
+  const remotePeersRef = useRef<Map<number, { stream?: MediaStream; hasVideo: boolean }>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
   const localVideoId = `videh-local-${primaryChannel}`;
@@ -42,6 +47,14 @@ export function useVidehCall(
     const connected = [...pcsRef.current.values()].filter((pc) => pc.connectionState === "connected").length;
     setJoined(connected > 0);
     setRemoteCount(connected);
+    const list: RemoteCallPeerStream[] = [...remotePeersRef.current.entries()].map(([peerId, p]) => ({
+      peerId,
+      hasVideo: p.hasVideo,
+      streamUrl: p.stream ? `web-peer-${peerId}` : undefined,
+    }));
+    setRemotePeers(list);
+    const firstVideo = list.find((p) => p.hasVideo);
+    setHasRemoteVideo(Boolean(firstVideo));
   }, []);
 
   useEffect(() => {
@@ -70,7 +83,7 @@ export function useVidehCall(
       }
     };
 
-    const connectChannel = async (channel: string, sharedLocalStream: MediaStream, iceServers: RTCIceServer[]) => {
+    const connectChannel = async (channel: string, sharedLocalStream: MediaStream) => {
       const sessionRes = await webrtcFetch("/sessions", sessionToken, {
         method: "POST",
         body: JSON.stringify({ channel, userId: uid, type: isVideo ? "video" : "audio" }),
@@ -81,7 +94,8 @@ export function useVidehCall(
       rolesRef.current.set(channel, role);
       candidateCursorsRef.current.set(channel, 0);
 
-      const pc = new RTCPeerConnection({ iceServers });
+      const rtcConfig = await buildRtcConfiguration(sessionToken, remotePeerIds.length + 1);
+      const pc = new RTCPeerConnection(rtcConfig);
       pcsRef.current.set(channel, pc);
       sharedLocalStream.getTracks().forEach((track) => pc.addTrack(track, sharedLocalStream));
       pc.onicecandidate = (event) => {
@@ -95,12 +109,15 @@ export function useVidehCall(
       pc.ontrack = (event) => {
         const [stream] = event.streams;
         if (!stream) return;
-        setHasRemoteVideo(stream.getVideoTracks().length > 0);
-        setTimeout(() => attachRemoteVideo(stream), 100);
+        const peerId = peerIdFromCallChannel(channel, uid) || remotePeerIds[0] || 0;
+        remotePeersRef.current.set(peerId, { stream, hasVideo: stream.getVideoTracks().length > 0 });
+        if (remotePeerIds.length <= 1) setTimeout(() => attachRemoteVideo(stream), 100);
         refreshAggregate();
       };
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed") setError("Call connection failed.");
+        if (pc.connectionState === "failed" && pcsRef.current.size <= 1) {
+          setError("Call connection failed.");
+        }
         refreshAggregate();
       };
 
@@ -146,14 +163,13 @@ export function useVidehCall(
           setError("WebRTC is not supported in this browser.");
           return;
         }
-        const iceServers = await loadIceServers(sessionToken);
         const localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
         localStreamRef.current = localStream;
         cameraVideoTrackRef.current = localStream.getVideoTracks()[0] ?? null;
         setTimeout(attachLocalVideo, 100);
-        for (const channel of channels) {
-          await connectChannel(channel, localStream, iceServers);
-        }
+        await connectMeshPeersStaggered(channels, async (channel) => {
+          await connectChannel(channel, localStream);
+        });
       } catch (e: any) {
         setError(e?.message ?? "Failed to start self-hosted call.");
       }
@@ -186,7 +202,7 @@ export function useVidehCall(
     remoteVideoId,
     hasRemoteVideo,
     remoteUid: null,
-    remotePeers: [],
+    remotePeers,
     toggleMute: () => {
       localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = muted; });
       setMuted((m) => !m);

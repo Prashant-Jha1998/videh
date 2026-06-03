@@ -16,7 +16,7 @@ import { ThemedHeader } from "@/components/ThemedHeader";
 import { useColors } from "@/hooks/useColors";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { APP_THEME_OPTIONS } from "@/lib/appThemes";
-import { CHAT_BUBBLE_PRESETS } from "@/lib/chatBubblePresets";
+import { CHAT_BUBBLE_PRESETS, type ChatBubblePreset } from "@/lib/chatBubblePresets";
 import {
   ANIMATED_WALLPAPERS,
   getThemeAppearanceById,
@@ -33,6 +33,7 @@ export default function ChatThemeScreen() {
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const [themeId, setThemeId] = useState(appThemeId);
+  const [bubblePresetId, setBubblePresetId] = useState<string | undefined>();
   const [bubbleSent, setBubbleSent] = useState<string | undefined>();
   const [bubbleReceived, setBubbleReceived] = useState<string | undefined>();
   const [animated, setAnimated] = useState<AnimatedWallpaperId>("none");
@@ -42,22 +43,46 @@ export default function ChatThemeScreen() {
     void getPerChatTheme(chatId).then((o) => {
       if (!o) return;
       if (o.themeId) setThemeId(o.themeId);
+      if (o.bubblePresetId) setBubblePresetId(o.bubblePresetId);
       if (o.bubbleSent) setBubbleSent(o.bubbleSent);
       if (o.bubbleReceived) setBubbleReceived(o.bubbleReceived);
       if (o.animatedWallpaper) setAnimated(o.animatedWallpaper);
+      if (!o.bubblePresetId && o.bubbleSent) {
+        const match = CHAT_BUBBLE_PRESETS.find(
+          (p) =>
+            p.sent.toUpperCase() === o.bubbleSent!.toUpperCase()
+            && (o.bubbleReceived ?? "#FFFFFF").toUpperCase() === p.received.toUpperCase(),
+        );
+        if (match) setBubblePresetId(match.id);
+      }
     });
   }, [chatId]);
 
   const appearance = getThemeAppearanceById(themeId);
 
+  const applyBubblePreset = (p: ChatBubblePreset) => {
+    setBubblePresetId(p.id);
+    setBubbleSent(p.sent);
+    setBubbleReceived(p.received);
+  };
+
   const save = async () => {
-    if (!chatId) return;
+    if (!chatId) {
+      Alert.alert("Open from chat", "Open Chat theme from Chat info for a specific conversation.");
+      return;
+    }
+    const preset = bubblePresetId
+      ? CHAT_BUBBLE_PRESETS.find((p) => p.id === bubblePresetId)
+      : undefined;
     const prev = await getPerChatTheme(chatId);
     await setPerChatTheme(chatId, {
       ...prev,
       themeId,
-      bubbleSent: bubbleSent ?? undefined,
-      bubbleReceived: bubbleReceived ?? undefined,
+      bubblePresetId: preset?.id,
+      bubbleSent: preset?.sent ?? bubbleSent,
+      bubbleReceived: preset?.received ?? bubbleReceived,
+      bubbleSentDark: preset?.sentDark ?? preset?.sent,
+      bubbleReceivedDark: preset?.receivedDark ?? preset?.received,
       animatedWallpaper: animated !== "none" ? animated : undefined,
       label: appearance.name,
     });
@@ -111,10 +136,12 @@ export default function ChatThemeScreen() {
         <Text style={[styles.label, { color: colors.primary }]}>Bubble colors</Text>
         <View style={styles.bubbleGrid}>
           {CHAT_BUBBLE_PRESETS.map((p) => {
-            const active =
-              bubbleSent != null
-              && bubbleSent.toUpperCase() === p.sent.toUpperCase()
-              && (bubbleReceived ?? "#FFFFFF").toUpperCase() === p.received.toUpperCase();
+            const active = bubblePresetId === p.id
+              || (
+                bubbleSent != null
+                && bubbleSent.toUpperCase() === p.sent.toUpperCase()
+                && (bubbleReceived ?? "#FFFFFF").toUpperCase() === p.received.toUpperCase()
+              );
             return (
               <TouchableOpacity
                 key={p.id}
@@ -126,10 +153,7 @@ export default function ChatThemeScreen() {
                     backgroundColor: active ? `${colors.primary}14` : colors.card,
                   },
                 ]}
-                onPress={() => {
-                  setBubbleSent(p.sent);
-                  setBubbleReceived(p.received);
-                }}
+                onPress={() => applyBubblePreset(p)}
               >
                 <View style={{ flexDirection: "row", marginBottom: 4 }}>
                   <View style={[styles.bubbleDot, { backgroundColor: p.sent }]} />

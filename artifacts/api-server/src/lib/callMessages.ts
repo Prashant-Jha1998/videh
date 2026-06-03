@@ -90,7 +90,8 @@ export function publishCallSignal(args: {
     | "cancelled"
     | "hold"
     | "resume"
-    | "media_type";
+    | "media_type"
+    | "participants_updated";
   payload: unknown;
 }): void {
   publishChatEvent({

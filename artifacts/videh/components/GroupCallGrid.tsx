@@ -14,10 +14,17 @@ type Props = {
   placeholderColor?: string;
 };
 
+function tileLayout(count: number): { flexBasis: string; minHeight: number } {
+  if (count <= 1) return { flexBasis: "100%", minHeight: 200 };
+  if (count <= 4) return { flexBasis: "50%", minHeight: 160 };
+  if (count <= 9) return { flexBasis: "33.33%", minHeight: 120 };
+  return { flexBasis: "25%", minHeight: 96 };
+}
+
 export function GroupCallGrid({ peers }: Props) {
   if (peers.length === 0) return null;
 
-  const tileBasis = peers.length <= 1 ? "100%" : "50%";
+  const layout = tileLayout(peers.length);
 
   return (
     <View style={styles.grid}>
@@ -25,7 +32,10 @@ export function GroupCallGrid({ peers }: Props) {
         const initials = p.name.slice(0, 2).toUpperCase();
         const hue = (p.name.charCodeAt(0) || 32) * 37 % 360;
         return (
-          <View key={p.peerId} style={[styles.tile, { flexBasis: tileBasis, maxWidth: tileBasis }]}>
+          <View
+            key={p.peerId}
+            style={[styles.tile, { flexBasis: layout.flexBasis, maxWidth: layout.flexBasis, minHeight: layout.minHeight }]}
+          >
             {p.hasVideo && p.streamUrl ? (
               <VidehRemoteView streamUrl={p.streamUrl} style={styles.video} />
             ) : (

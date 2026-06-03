@@ -11,14 +11,17 @@
  *
  * Parity checklist (see app/chat/[id].tsx):
  * - stackFromEnd: flexGrow + justifyContent flex-end
- * - composer below list on native (not overlay); resize / KAV handle keyboard
+ * - composer below list on native (not overlay); Android resize + iOS KAV handle keyboard
  * - pin after keyboard onEnd (not on every content-size / composer tick)
  * - no auto-pin when user scrolled up (near-bottom threshold)
  * - jump-to-latest FAB when scrolled up (with unread count badge)
  * - older messages pagination at scroll top + maintainVisibleContentPosition
  */
 
-export const WHATSAPP_CHAT_NEAR_BOTTOM_PX = 80;
+/** Slightly generous so keyboard resize does not falsely mark user as "scrolled up". */
+export const WHATSAPP_CHAT_NEAR_BOTTOM_PX = 120;
+
+export const WHATSAPP_KEYBOARD_SETTLE_MS = 420;
 
 /** Distance from the visual bottom of a normal (non-inverted) message list. */
 export function chatDistanceFromBottom(
@@ -38,8 +41,21 @@ export function isChatNearBottom(
   return chatDistanceFromBottom(contentOffsetY, contentHeight, layoutHeight) <= threshold;
 }
 
-/** One immediate + one post-layout pin after keyboard (avoid triple-jump jitter). */
-export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0, 180] as const;
+/** One immediate + follow-up pins after layout/keyboard (avoid triple-jump jitter). */
+export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0, 80, 200, 360] as const;
+
+/** Scroll a normal (non-inverted) chat list to the visual bottom; retries after layout. */
+export function scrollChatListToLatest(
+  list: { scrollToEnd: (opts: { animated: boolean }) => void } | null | undefined,
+  animated = false,
+): void {
+  if (!list) return;
+  list.scrollToEnd({ animated });
+  requestAnimationFrame(() => {
+    list.scrollToEnd({ animated: false });
+    requestAnimationFrame(() => list.scrollToEnd({ animated: false }));
+  });
+}
 
 export function shouldWhatsAppAutoPin(userScrolledUp: boolean, searching: boolean): boolean {
   return !searching && !userScrolledUp;
