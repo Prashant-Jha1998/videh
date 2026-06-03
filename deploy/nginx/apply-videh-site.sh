@@ -116,6 +116,10 @@ server {
         try_files \$uri =404;
     }
 
+    location = /index.html {
+        return 301 /;
+    }
+
     location / {
         ${try_files}
     }
@@ -129,6 +133,41 @@ server {
 }
 EOF
   return 0
+}
+
+write_www_redirect() {
+  local cert_dir="$1"
+  local conf_path="/etc/nginx/conf.d/videh-www-redirect.conf"
+  if [ -z "${cert_dir}" ]; then
+    sudo tee "${conf_path}" >/dev/null <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name www.videh.co.in;
+    return 301 https://videh.co.in$request_uri;
+}
+EOF
+    return 0
+  fi
+  sudo tee "${conf_path}" >/dev/null <<EOF
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name www.videh.co.in;
+    ssl_certificate ${cert_dir}/fullchain.pem;
+    ssl_certificate_key ${cert_dir}/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    return 301 https://videh.co.in\$request_uri;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name www.videh.co.in;
+    return 301 https://videh.co.in\$request_uri;
+}
+EOF
 }
 
 write_http_server() {
@@ -178,6 +217,20 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
+    location = /sitemap.xml {
+        default_type application/xml;
+        try_files \$uri =404;
+    }
+
+    location = /robots.txt {
+        default_type text/plain;
+        try_files \$uri =404;
+    }
+
+    location = /index.html {
+        return 301 /;
+    }
+
     location / {
         ${try_files}
     }
@@ -211,10 +264,12 @@ done
 
 MAIN_CERT="$(cert_dir_for videh.co.in)"
 if [ -n "${MAIN_CERT}" ]; then
-  write_ssl_server "${MAIN_CONF}" "videh.co.in www.videh.co.in" "${SITE_ROOT}" "false"
+  write_ssl_server "${MAIN_CONF}" "videh.co.in" "${SITE_ROOT}" "false"
 else
-  write_http_server "${MAIN_CONF}" "videh.co.in www.videh.co.in" "${SITE_ROOT}" "false"
+  write_http_server "${MAIN_CONF}" "videh.co.in" "${SITE_ROOT}" "false"
 fi
+write_www_redirect "${MAIN_CERT}"
+echo "Configured www.videh.co.in → videh.co.in redirect"
 
 ADMIN_ROOT="/var/www/videh/artifacts/admin-web/dist/public"
 WEB_ROOT="/var/www/videh/artifacts/videh-web/dist/public"
