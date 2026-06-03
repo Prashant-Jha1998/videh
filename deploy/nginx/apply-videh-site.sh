@@ -52,17 +52,11 @@ write_ssl_server() {
   local document_root="$3"
   local spa_fallback="${4:-false}"
   local cert_resolver="${5:-cert_dir_for}"
-  local primary_host="${server_name%% *}"
   local cert_dir
-  cert_dir="$("${cert_resolver}" "${primary_host}")"
+  cert_dir="$("${cert_resolver}" "${server_name}")"
 
   if [ -z "${cert_dir}" ]; then
     return 1
-  fi
-
-  local ssl_dhparam_line=""
-  if [ -f /etc/letsencrypt/ssl-dhparams.pem ]; then
-    ssl_dhparam_line="    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;"
   fi
 
   local try_files='try_files $uri $uri/ =404;'
@@ -79,7 +73,7 @@ server {
     ssl_certificate ${cert_dir}/fullchain.pem;
     ssl_certificate_key ${cert_dir}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
-${ssl_dhparam_line}
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     root ${document_root};
     index index.html;
@@ -114,8 +108,6 @@ ${ssl_dhparam_line}
 
     location = /sitemap.xml {
         default_type application/xml;
-        charset utf-8;
-        add_header Cache-Control "public, max-age=3600" always;
         try_files \$uri =404;
     }
 
@@ -141,33 +133,6 @@ server {
 }
 EOF
   return 0
-}
-
-write_www_redirect_conf() {
-  local cert_dir="$1"
-  local conf_path="/etc/nginx/conf.d/videh-www-redirect.conf"
-  if [ -z "${cert_dir}" ]; then
-    sudo rm -f "${conf_path}"
-    return 0
-  fi
-  sudo tee "${conf_path}" >/dev/null <<EOF
-server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    server_name www.videh.co.in;
-    ssl_certificate ${cert_dir}/fullchain.pem;
-    ssl_certificate_key ${cert_dir}/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    return 301 https://videh.co.in\$request_uri;
-}
-
-server {
-    listen 80;
-    listen [::]:80;
-    server_name www.videh.co.in;
-    return 301 https://videh.co.in\$request_uri;
-}
-EOF
 }
 
 write_http_server() {
@@ -217,22 +182,6 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
-    location = /sitemap.xml {
-        default_type application/xml;
-        charset utf-8;
-        add_header Cache-Control "public, max-age=3600" always;
-        try_files \$uri =404;
-    }
-
-    location = /robots.txt {
-        default_type text/plain;
-        try_files \$uri =404;
-    }
-
-    location = /index.html {
-        return 301 /;
-    }
-
     location / {
         ${try_files}
     }
@@ -266,12 +215,10 @@ done
 
 MAIN_CERT="$(cert_dir_for videh.co.in)"
 if [ -n "${MAIN_CERT}" ]; then
-  write_ssl_server "${MAIN_CONF}" "videh.co.in" "${SITE_ROOT}" "false"
+  write_ssl_server "${MAIN_CONF}" "videh.co.in www.videh.co.in" "${SITE_ROOT}" "false"
 else
-  write_http_server "${MAIN_CONF}" "videh.co.in" "${SITE_ROOT}" "false"
+  write_http_server "${MAIN_CONF}" "videh.co.in www.videh.co.in" "${SITE_ROOT}" "false"
 fi
-write_www_redirect_conf "${MAIN_CERT}"
-echo "Configured www.videh.co.in → videh.co.in redirect"
 
 ADMIN_ROOT="/var/www/videh/artifacts/admin-web/dist/public"
 WEB_ROOT="/var/www/videh/artifacts/videh-web/dist/public"
@@ -297,6 +244,8 @@ else
 fi
 
 write_http_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true"
+sudo nginx -t
+sudo systemctl reload nginx
 ensure_letsencrypt_cert "developer.videh.co.in" || true
 if write_ssl_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true" "cert_dir_for_host_only"; then
   echo "Configured HTTPS for developer.videh.co.in"
@@ -305,10 +254,6 @@ else
 fi
 
 echo "Testing nginx config..."
-if ! sudo nginx -t 2>&1; then
-  echo "::error::nginx -t failed; removing www redirect snippet and retrying"
-  sudo rm -f /etc/nginx/conf.d/videh-www-redirect.conf
-  sudo nginx -t 2>&1
-fi
+sudo nginx -t
 sudo systemctl reload nginx
 echo "Nginx routing applied."
