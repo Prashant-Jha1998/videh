@@ -230,8 +230,10 @@ export function useVidehCall(
       let iceRestartTimer: ReturnType<typeof setTimeout> | null = null;
       pc.onconnectionstatechange = () => {
         const state = pc.connectionState;
-        if (state === "failed") {
-          if (pcsRef.current.size <= 1) setError("Call connection failed.");
+        if (state === "failed" || state === "closed") {
+          if (pcsRef.current.size <= 1) {
+            setError("Could not connect. Check internet or try Wi‑Fi/mobile data.");
+          }
         }
         if (state === "disconnected") {
           if (iceRestartTimer) clearTimeout(iceRestartTimer);

@@ -140,9 +140,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
   const userId = user?.dbId ?? 0;
   const remotePeerIds = useMemo(() => {
-    if (!session?.channel || !userId || !session.engineActive) return [];
+    if (!session?.channel || !userId || acceptedCount < 2) return [];
     return acceptedUserIds.filter((peerId) => peerId !== userId);
-  }, [acceptedUserIds, userId, session?.channel, session?.engineActive]);
+  }, [acceptedUserIds, userId, session?.channel, acceptedCount]);
 
   const onCallUserIds = useMemo(() => {
     const ids = new Set<number>(inviteeUserIds);
@@ -151,7 +151,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     return [...ids];
   }, [inviteeUserIds, callerId, userId]);
 
-  const engineChannel = session?.engineActive ? session.channel : "";
+  /** Start WebRTC only when both sides accepted — avoids solo offer before callee picks up. */
+  const signalingReady =
+    Boolean(session?.channel && session.engineActive && !session.ringing && acceptedCount >= 2);
+  const engineChannel = signalingReady ? session!.channel : "";
   const engineVideo = useMemo(() => {
     if (!session?.isVideo) return false;
     return effectiveCallVideo(true, Math.max(acceptedCount, acceptedUserIds.length, 2));
@@ -161,7 +164,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     engineChannel,
     userId,
     engineVideo,
-    session?.engineActive ? remotePeerIds : [],
+    signalingReady ? remotePeerIds : [],
     user?.sessionToken,
   );
 
@@ -365,7 +368,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         isIncoming,
         ringing: isIncoming && ringing,
         minimized: false,
-        engineActive: isIncoming ? !ringing && Boolean(params.channel) : Boolean(params.channel),
+        engineActive: isIncoming ? !ringing && Boolean(params.channel) : false,
       };
     });
 
@@ -391,7 +394,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
               ...prev,
               channel: data.call!.channel!,
               callId: data.call!.callId ?? prev.callId,
-              engineActive: true,
+              engineActive: false,
               ringing: false,
             };
           });
@@ -431,7 +434,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         isIncoming: true,
         ringing: false,
         minimized: false,
-        engineActive: true,
+        engineActive: false,
       };
       setSession(next);
       pushCallRoute(next);
@@ -444,17 +447,31 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     }).catch(() => {});
     void webrtcFetch(`/calls/${callId}/status?userId=${user.dbId}`, user.sessionToken)
       .then(async (res) => {
-        const data = (await res.json()) as { acceptedUserIds?: number[]; callerId?: number };
+        const data = (await res.json()) as {
+          acceptedUserIds?: number[];
+          callerId?: number;
+          acceptedCount?: number;
+        };
         if (Array.isArray(data.acceptedUserIds) && data.acceptedUserIds.length > 0) {
           setAcceptedUserIds(data.acceptedUserIds);
         } else if (typeof data.callerId === "number") {
           setAcceptedUserIds([user.dbId, data.callerId]);
         }
+        const count = data.acceptedCount ?? Math.max(2, acceptedUserIds.length);
+        setAcceptedCount(count);
+        if (count >= 2) {
+          setSession((prev) =>
+            prev && prev.callId === callId
+              ? { ...prev, ringing: false, engineActive: true, minimized: false }
+              : prev,
+          );
+        }
       })
       .catch(() => {});
+    setAcceptedCount((c) => Math.max(c, 2));
     setSession((prev) =>
       prev && prev.callId === callId
-        ? { ...prev, ringing: false, engineActive: true, minimized: false }
+        ? { ...prev, ringing: false, minimized: false }
         : prev,
     );
   }, [session?.callId, user?.dbId, user?.sessionToken, pushCallRoute]);
@@ -526,7 +543,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [session?.callId, session?.isIncoming, session?.ringing, call.joined, user?.sessionToken, onCallEnded]);
 
   useEffect(() => {
-    if (!session?.callId || !userId || !session.engineActive) return;
+    if (!session?.callId || !userId || session.ringing || session.onHold) return;
     const polledCallId = session.callId;
 
     const applyStatus = async (res: Response) => {
@@ -565,9 +582,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       }
 
       const remoteAccepted = (data.acceptedCount ?? 1) > 1;
-      if (remoteAccepted && !call.joined) {
-        void stopCallAlert();
-        setStatusHint("Connecting…");
+      if (remoteAccepted) {
+        setSession((prev) =>
+          prev && prev.callId === polledCallId ? { ...prev, engineActive: true } : prev,
+        );
+        if (!call.joined) {
+          void stopCallAlert();
+          setStatusHint("Connecting…");
+        }
       }
 
       if (!call.joined && !endedTonePlayed.current) {
@@ -658,9 +680,17 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         return;
       }
       if (action === "accepted" || action === "participants_updated") {
-        const raw = payload as { acceptedUserIds?: number[] };
+        const raw = payload as { acceptedUserIds?: number[]; acceptedCount?: number };
         if (Array.isArray(raw.acceptedUserIds) && raw.acceptedUserIds.length > 0) {
           setAcceptedUserIds(raw.acceptedUserIds);
+        }
+        if (typeof raw.acceptedCount === "number") {
+          setAcceptedCount(raw.acceptedCount);
+        }
+        if (callId && sessionCallIdRef.current === callId && typeof raw.acceptedCount === "number" && raw.acceptedCount >= 2) {
+          setSession((prev) =>
+            prev && prev.callId === callId ? { ...prev, engineActive: true } : prev,
+          );
         }
         return;
       }
@@ -703,11 +733,19 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (call.joined) {
       if (call.remoteCount > 0) return formatDuration(duration);
       if (call.connectionPhase === "reconnecting") return "Reconnecting…";
+      if (acceptedCount >= 2 && call.remoteCount === 0) {
+        return call.connectionPhase === "failed"
+          ? "Could not connect. Check internet and try again."
+          : "Connecting…";
+      }
       if (acceptedCount > 1) return "Connecting participants...";
       return "Waiting for other party...";
     }
     if (call.error) {
       return call.error === "NATIVE_WEBRTC_UNAVAILABLE" ? "Connecting..." : `Error: ${call.error}`;
+    }
+    if (call.connectionPhase === "failed") {
+      return "Could not connect. Check internet and try again.";
     }
     if (statusHint) return statusHint;
     if (session.isIncoming) return session.isVideo ? "Incoming video call" : "Incoming voice call";

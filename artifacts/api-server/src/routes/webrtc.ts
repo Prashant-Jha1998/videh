@@ -521,6 +521,15 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
   }
   if (body.action === "accept" && !call.connectedAt) {
     call.connectedAt = Date.now();
+    const sig = await getSession(call.channel);
+    if (sig) {
+      sig.offer = null;
+      sig.answer = null;
+      sig.callerCandidates = [];
+      sig.calleeCandidates = [];
+      sig.updatedAt = Date.now();
+      await saveSession(sig);
+    }
   }
   call.updatedAt = Date.now();
   publishCallSignal({
