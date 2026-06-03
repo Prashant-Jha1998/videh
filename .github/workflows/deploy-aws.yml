@@ -43,7 +43,10 @@ jobs:
           export PATH="/usr/local/bin:/usr/bin:/bin:$HOME/.local/share/pnpm:$PATH"
           command -v pnpm >/dev/null || (echo "pnpm not found on EC2 — install pnpm on the server" && exit 1)
 
-          pnpm install --frozen-lockfile
+          if ! pnpm install --frozen-lockfile; then
+            echo "::error::pnpm-lock.yaml is out of sync with package.json. Run 'pnpm install' at repo root, commit pnpm-lock.yaml, and push again."
+            exit 1
+          fi
           pnpm --filter @workspace/api-server run build:api
           BASE_PATH=/ pnpm --filter @workspace/admin-web build
           BASE_PATH=/ pnpm --filter @workspace/videh-web build
