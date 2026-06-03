@@ -15,6 +15,7 @@
     "prebuild": "expo prebuild",
     "build:dev-apk": "eas build --profile development --platform android",
     "build:preview-apk": "eas build --profile preview --platform android",
+    "build:apk-release": "eas build --profile apkRelease --platform android",
     "build:production": "eas build --profile production --platform android"
   },
   "devDependencies": {

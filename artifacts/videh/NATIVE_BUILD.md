@@ -28,6 +28,15 @@ pnpm ios
 
 ```bash
 cd Videh-Messenger/artifacts/videh
+eas login   # use Expo account prashantjha122
+pnpm build:apk-release
+```
+
+Builds appear at: https://expo.dev/accounts/prashantjha122/projects/videh/builds
+
+For a dev client APK (Metro required):
+
+```bash
 pnpm build:dev-apk
 ```
 
