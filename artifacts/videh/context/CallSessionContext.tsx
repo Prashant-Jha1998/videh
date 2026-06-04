@@ -159,15 +159,21 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     return [...ids];
   }, [inviteeUserIds, callerId, userId]);
 
-  const engineChannel = session?.engineActive ? session.channel : "";
-  const videhOffererId = callerId ?? (session?.isIncoming ? 0 : userId);
+  /** Videh call initiator — must be set before WebRTC starts (wrong id = no audio). */
+  const callInitiatorId = session?.isIncoming
+    ? (callerId && callerId !== userId ? callerId : 0)
+    : userId;
+  const webrtcReady = Boolean(
+    session?.engineActive && session.channel && callInitiatorId > 0,
+  );
+  const engineChannel = webrtcReady ? session!.channel : "";
   const call = useVidehCall(
     engineChannel,
     userId,
     session?.isVideo ?? false,
-    session?.engineActive ? remotePeerIds : [],
+    webrtcReady ? remotePeerIds : [],
     user?.sessionToken,
-    videhOffererId,
+    callInitiatorId,
   );
 
   const resetCallParticipantState = useCallback(() => {
@@ -420,6 +426,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
             return;
           }
           if (data.call?.callId) sessionCallIdRef.current = data.call.callId;
+          if (user.dbId) setCallerId(user.dbId);
           setSession((prev) => {
             if (!prev || prev.chatId !== chatId) return prev;
             return {
@@ -455,7 +462,16 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
     await stopIncomingCallExperience(callId);
 
-    if (callInfo?.callerId) setCallerId(callInfo.callerId);
+    let resolvedCallerId = callInfo?.callerId;
+    if (!resolvedCallerId) {
+      try {
+        const res = await webrtcFetch(`/calls/${callId}/status?userId=${user.dbId}`, user.sessionToken);
+        const data = (await res.json()) as { callerId?: number; call?: { callerId?: number } };
+        const cid = Number(data.callerId ?? data.call?.callerId);
+        if (Number.isFinite(cid) && cid > 0) resolvedCallerId = cid;
+      } catch { /* ignore */ }
+    }
+    if (resolvedCallerId) setCallerId(resolvedCallerId);
 
     if (callInfo) {
       const next: CallSession = {

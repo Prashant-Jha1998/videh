@@ -49,7 +49,7 @@ export function useVidehCall(
   }, []);
 
   useEffect(() => {
-    if (!primaryChannel || !uid) return;
+    if (!primaryChannel || !uid || videhCallerId <= 0) return;
 
     let stopped = false;
 
@@ -89,7 +89,7 @@ export function useVidehCall(
           channel,
           userId: uid,
           type: isVideo ? "video" : "audio",
-          videhCallerId: videhCallerId || uid,
+          videhCallerId,
         }),
       });
       const sessionData = await sessionRes.json() as { success?: boolean; role?: Role };

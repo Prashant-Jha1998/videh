@@ -547,6 +547,7 @@ function RootLayoutNav() {
         chatId: Number(data.chatId),
         type: String(data.type ?? "audio"),
         callerName: String(data.callerName ?? "Videh user"),
+        callerId: Number(data.callerId) > 0 ? Number(data.callerId) : undefined,
       });
     })();
   }, [isAuthenticated, offerIncomingCall]);

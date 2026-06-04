@@ -452,6 +452,7 @@ router.post("/calls", async (req: Request, res: Response) => {
           chatId: String(chatId),
           type: invite.type,
           channel,
+          callerId: String(callerId),
           callerName: caller.name ?? "Videh user",
           kind: "call",
           notificationKind: "incoming_call",
@@ -864,9 +865,13 @@ router.post("/sessions", async (req: Request, res: Response) => {
   };
   const channel = safeChannel(body.channel);
   const userId = Number(body.userId);
-  const videhCallerId = Number(body.videhCallerId) || 0;
+  const videhCallerId = Number(body.videhCallerId);
   if (!channel || !userId) {
     res.status(400).json({ success: false, message: "channel and userId are required." });
+    return;
+  }
+  if (!Number.isFinite(videhCallerId) || videhCallerId <= 0) {
+    res.status(400).json({ success: false, message: "videhCallerId is required." });
     return;
   }
   if (!assertSameUser(req, res, userId)) return;
@@ -874,7 +879,7 @@ router.post("/sessions", async (req: Request, res: Response) => {
   let session = await getSession(channel);
   let role: Role = "caller";
   if (!session) {
-    const iAmVidehCaller = !videhCallerId || videhCallerId === userId;
+    const iAmVidehCaller = videhCallerId === userId;
     session = {
       channel,
       type: body.type === "video" ? "video" : "audio",
