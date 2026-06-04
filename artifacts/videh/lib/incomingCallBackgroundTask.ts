@@ -23,8 +23,7 @@ TaskManager.defineTask<Notifications.NotificationTaskPayload>(VIDEH_INCOMING_CAL
     return;
   }
 
-  // FCM data-only payload is already shown in the tray by expo-notifications.
-  void presentIncomingCallFromPush(payload, { scheduleLocalNotification: false });
+  void presentIncomingCallFromPush(payload, { scheduleLocalNotification: true });
 });
 
 void Notifications.registerTaskAsync(VIDEH_INCOMING_CALL_BG_TASK).catch(() => {});

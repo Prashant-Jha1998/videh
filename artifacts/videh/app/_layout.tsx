@@ -18,7 +18,8 @@ import { UiPreferencesProvider } from "@/context/UiPreferencesContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AssistantOverlay } from "@/components/AssistantOverlay";
 import { getApiUrl } from "@/lib/api";
-import { onCallSignal } from "@/lib/callEvents";
+import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
+import { fetchIncomingCallDetails } from "@/lib/fetchIncomingCallDetails";
 import { IncomingCallOverlay, type IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { webrtcAuthHeaders, webrtcFetch } from "@/lib/webrtcApi";
 import { useColors } from "@/hooks/useColors";
@@ -43,6 +44,8 @@ import type { CallKeepHandlerPayload } from "@/lib/callKeepBridge";
 import { displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
 import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
 import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
+import { maybePromptDisableBatteryOptimization } from "@/lib/incomingCallBattery";
+import { isIncomingCallPushData, presentIncomingCallFromPush } from "@/lib/incomingCallPush";
 import {
   claimIncomingCallRing,
   getRingingCallId,
@@ -51,7 +54,11 @@ import {
   stopIncomingCallExperience,
 } from "@/lib/incomingCallExperience";
 import { installGlobalErrorHandlers } from "@/lib/globalErrorHandlers";
-import { registerIncomingCallDismissHandler, requestDismissCallSession } from "@/lib/incomingCallUiBridge";
+import {
+  registerIncomingCallDismissHandler,
+  requestDismissCallSession,
+} from "@/lib/incomingCallUiBridge";
+import { rejectIncomingCall } from "@/lib/rejectIncomingCall";
 import { loadCachedSilenceUnknownCallers } from "@/lib/privacySettings";
 import type { Chat } from "@/context/AppContext";
 
@@ -64,15 +71,8 @@ function isKnownCaller(chatId: number, chatList: Chat[]): boolean {
 }
 
 async function declineIncomingCallSilently(callId: string, userId: number, sessionToken?: string | null) {
-  await stopIncomingCallExperience(callId);
-  await fetch(`${getApiUrl()}/api/webrtc/calls/${callId}/respond`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
-    },
-    body: JSON.stringify({ userId, action: "decline" }),
-  }).catch(() => {});
+  await rejectIncomingCall({ callId, userId, sessionToken });
+  await stopIncomingCallExperience(callId, { force: true });
 }
 
 function canPresentIncomingCallUi(): boolean {
@@ -130,6 +130,7 @@ function RootLayoutNav() {
   const pendingIncomingRef = useRef<IncomingCallInfo | null>(null);
   const offeredCallIdRef = useRef<string | null>(null);
   const activeCallIdRef = useRef<string | null>(null);
+  const activeCallEngineActiveRef = useRef(false);
   const dismissedIncomingCallIdsRef = useRef<Set<string>>(new Set());
   const respondToIncomingCallRef = useRef<(action: "accept" | "decline", msg?: string) => void>(() => {});
   const handledLaunchCallNotificationRef = useRef(false);
@@ -162,7 +163,10 @@ function RootLayoutNav() {
     });
   }, [clearIncomingAutoEnd]);
 
-  useEffect(() => registerIncomingCallDismissHandler(dismissIncomingCallUi), [dismissIncomingCallUi]);
+  useEffect(
+    () => registerIncomingCallDismissHandler((callId, permanent) => dismissIncomingCallUi(callId, permanent)),
+    [dismissIncomingCallUi],
+  );
 
   const scheduleIncomingAutoEnd = useCallback((callId: string) => {
     clearIncomingAutoEnd();
@@ -173,11 +177,11 @@ function RootLayoutNav() {
       offeredCallIdRef.current = null;
       pendingIncomingRef.current = null;
       setIncomingCall(null);
-      if (activeCallIdRef.current === callId) {
+      if (activeCallSession?.callId === callId && activeCallSession.engineActive) {
         void endCall();
       }
     }, INCOMING_RING_TIMEOUT_MS);
-  }, [clearIncomingAutoEnd, user?.dbId, user?.sessionToken, endCall]);
+  }, [clearIncomingAutoEnd, user?.dbId, user?.sessionToken, endCall, activeCallSession?.callId, activeCallSession?.engineActive]);
 
   const offerIncomingCall = useCallback(async (raw: {
     callId: string;
@@ -224,15 +228,17 @@ function RootLayoutNav() {
       return;
     }
 
-    displayNativeIncomingCall({
-      callId: next.callId,
-      callerName: next.callerName,
-      isVideo: next.type === "video",
-    });
+    const appActive = AppState.currentState === "active";
+    if (!appActive) {
+      displayNativeIncomingCall({
+        callId: next.callId,
+        callerName: next.callerName,
+        isVideo: next.type === "video",
+      });
+    }
 
     presentIncomingCallUi(next);
     pendingIncomingRef.current = callPayload;
-    const appActive = AppState.currentState === "active";
     if (Platform.OS !== "web" && appActive) {
       presentIncomingCall(callPayload);
     } else {
@@ -240,7 +246,7 @@ function RootLayoutNav() {
     }
 
     void startIncomingCallExperience(callPayload);
-    if (Platform.OS !== "web") {
+    if (Platform.OS !== "web" && !appActive) {
       void showIncomingCallNotification(callPayload);
     }
 
@@ -258,7 +264,10 @@ function RootLayoutNav() {
 
   useEffect(() => {
     activeCallIdRef.current = activeCallSession?.callId ?? null;
-  }, [activeCallSession?.callId]);
+    activeCallEngineActiveRef.current = Boolean(
+      activeCallSession?.engineActive && !activeCallSession?.ringing,
+    );
+  }, [activeCallSession?.callId, activeCallSession?.engineActive, activeCallSession?.ringing]);
 
   // Navigate to chat when notification is tapped
   useEffect(() => {
@@ -295,34 +304,30 @@ function RootLayoutNav() {
         clearIncomingAutoEnd();
         const action = actionId === NOTIFICATION_ACTION_ACCEPT_CALL ? "accept" : "decline";
         if (action === "decline") {
-          void stopIncomingCallExperience(String(data.callId));
+          const callId = String(data.callId);
+          dismissIncomingCallUi(callId, true);
+          void rejectIncomingCall({ callId, userId: user.dbId, sessionToken: user.sessionToken });
+          requestDismissCallSession(callId);
+          return;
         }
         void (async () => {
-          try {
-            await fetch(`${getApiUrl()}/api/webrtc/calls/${data.callId}/respond`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
-              },
-              body: JSON.stringify({ userId: user.dbId, action }),
-            });
-            if (action === "accept") {
-              const call = toIncomingCallInfo({
-                callId: String(data.callId),
-                channel: String(data.channel ?? ""),
-                chatId: Number(data.chatId),
-                type: String(data.type ?? "audio"),
-                callerName: String(data.callerName ?? "Videh user"),
-                participantCount: 2,
-              });
-              dismissIncomingCallUi(call.callId);
-              activeCallIdRef.current = call.callId;
-              await acceptIncoming(call);
-            }
-          } catch {
-            /* ignore */
-          }
+          const callId = String(data.callId);
+          const hydrated =
+            data.channel && Number(data.chatId)
+              ? toIncomingCallInfo({
+                  callId,
+                  channel: String(data.channel),
+                  chatId: Number(data.chatId),
+                  type: String(data.type ?? "audio"),
+                  callerName: String(data.callerName ?? "Videh user"),
+                  participantCount: 2,
+                })
+              : await fetchIncomingCallDetails(callId, user.dbId, user.sessionToken);
+          if (!hydrated) return;
+          clearIncomingAutoEnd();
+          dismissIncomingCallUi(hydrated.callId, false);
+          activeCallIdRef.current = hydrated.callId;
+          await acceptIncoming(hydrated);
         })();
         return;
       }
@@ -371,8 +376,17 @@ function RootLayoutNav() {
   }, [isAuthenticated, isInitialized]);
 
   useEffect(() => {
+    if (!isAuthenticated || Platform.OS !== "android") return;
+    void maybePromptDisableBatteryOptimization();
+  }, [isAuthenticated]);
+
+  useEffect(() => {
     if (!isAuthenticated || !user?.dbId) return;
     let cancelled = false;
+    const pollMs = () => {
+      const state = AppState.currentState;
+      return state === "active" ? 1500 : 800;
+    };
     const poll = async () => {
       try {
         const res = await fetch(`${getApiUrl()}/api/webrtc/calls/incoming/${user.dbId}`, {
@@ -393,7 +407,10 @@ function RootLayoutNav() {
               { headers: webrtcAuthHeaders(user.sessionToken) },
             );
             const statusData = (await statusRes.json()) as { success?: boolean; ended?: boolean };
-            if (!statusData.success || statusData.ended) {
+            if (
+              (!statusData.success || statusData.ended)
+              && !(activeCallIdRef.current === activeId && activeCallEngineActiveRef.current)
+            ) {
               dismissIncomingCallUi(activeId, true);
             }
           } catch {
@@ -415,20 +432,28 @@ function RootLayoutNav() {
       } catch {}
     };
     void poll();
-    const timer = setInterval(poll, 1500);
+    let timer = setInterval(poll, pollMs());
+    const appStateSub = AppState.addEventListener("change", () => {
+      clearInterval(timer);
+      timer = setInterval(poll, pollMs());
+      if (AppState.currentState === "active" || AppState.currentState === "background") {
+        void poll();
+      }
+    });
     const unsubCall = onCallSignal((payload) => {
-      const action = String(payload.action ?? "");
-      const callId = payload.callId ? String(payload.callId) : "";
+      const signal = resolveCallSignal(payload as Record<string, unknown>);
+      const action = signal.action ?? "";
+      const callId = signal.callId ?? "";
       if (action === "ringing" && callId && user.dbId) {
         if (dismissedIncomingCallIdsRef.current.has(callId)) return;
         if (activeCallIdRef.current === callId) return;
         const callInfo: IncomingCallInfo = {
           callId,
-          channel: String(payload.channel ?? ""),
-          chatId: Number(payload.chatId),
-          type: payload.type === "video" ? "video" : "audio",
-          callerName: String(payload.callerName ?? "Videh user"),
-          participantCount: Number(payload.participantCount ?? 2),
+          channel: String(signal.channel ?? ""),
+          chatId: Number(signal.chatId ?? 0),
+          type: signal.type === "video" ? "video" : "audio",
+          callerName: String(signal.callerName ?? "Videh user"),
+          participantCount: Number(signal.participantCount ?? 2),
         };
         void offerIncomingCall(callInfo);
       }
@@ -453,6 +478,7 @@ function RootLayoutNav() {
     return () => {
       cancelled = true;
       clearInterval(timer);
+      appStateSub.remove();
       unsubCall();
       clearIncomingAutoEnd();
       offeredCallIdRef.current = null;
@@ -484,13 +510,16 @@ function RootLayoutNav() {
     Notifications.setNotificationHandler({
       handleNotification: async (notification) => {
         const data = notification.request.content.data as Record<string, unknown> | undefined;
-        const isCall = data?.notificationKind === "incoming_call" || data?.kind === "call";
+        const isCall = isIncomingCallPushData(data);
+        if (isCall && data && AppState.currentState !== "active") {
+          void presentIncomingCallFromPush(data, { scheduleLocalNotification: false });
+        }
         return {
           shouldShowAlert: true,
           shouldPlaySound: true,
           shouldShowBanner: true,
           shouldShowList: true,
-          shouldSetBadge: true,
+          shouldSetBadge: !isCall,
         };
       },
     });
@@ -542,22 +571,22 @@ function RootLayoutNav() {
   const respondToIncomingCall = async (action: "accept" | "decline", declineMessage?: string) => {
     if (!incomingCall || !user?.dbId) return;
     const call = incomingCall;
-    dismissIncomingCallUi(call.callId, action === "decline");
+    if (action === "decline") {
+      dismissIncomingCallUi(call.callId, true);
+      await rejectIncomingCall({
+        callId: call.callId,
+        userId: user.dbId,
+        sessionToken: user.sessionToken,
+        declineMessage,
+      });
+      requestDismissCallSession(call.callId);
+      void loadMessages(String(call.chatId));
+      return;
+    }
+    dismissIncomingCallUi(call.callId, false);
     try {
-      if (action === "accept") {
-        activeCallIdRef.current = call.callId;
-        await acceptIncoming(call);
-      } else {
-        await webrtcFetch(`/calls/${call.callId}/respond`, user.sessionToken, {
-          method: "POST",
-          body: JSON.stringify({
-            userId: user.dbId,
-            action: "decline",
-            ...(declineMessage ? { declineMessage } : {}),
-          }),
-        }).catch(() => {});
-        void loadMessages(String(call.chatId));
-      }
+      activeCallIdRef.current = call.callId;
+      await acceptIncoming(call);
     } catch {
       /* keep UI responsive if ringtone/network fails */
     }
@@ -588,12 +617,14 @@ function RootLayoutNav() {
             respondToIncomingCallRef.current("accept");
             return;
           }
-          await offerIncomingCall({
-            callId,
-            channel: "",
-            chatId: 0,
-            callerName: "Videh user",
-          });
+          const hydrated = user?.dbId
+            ? await fetchIncomingCallDetails(callId, user.dbId, user.sessionToken)
+            : null;
+          if (hydrated) {
+            dismissIncomingCallUi(hydrated.callId, false);
+            activeCallIdRef.current = hydrated.callId;
+            await acceptIncoming(hydrated);
+          }
         })();
       },
       onEnd: ({ callId }: CallKeepHandlerPayload) => {

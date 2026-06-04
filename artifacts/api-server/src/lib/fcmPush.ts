@@ -117,27 +117,20 @@ export async function sendFcmChatPush(
   try {
     const res = await messaging.sendEachForMulticast({
       tokens,
-      ...(options?.isCall
-        ? {}
-        : {
-            notification: { title, body },
-          }),
+      notification: { title, body },
       data: dataPayload,
       android: {
         priority: "high",
         ...(options?.isCall ? { ttl: 45_000 } : {}),
-        ...(options?.isCall
-          ? {}
-          : {
-              notification: {
-                channelId,
-                sound: androidSound,
-                priority: "high" as const,
-                ...(options?.imageUrl ? { imageUrl: options.imageUrl } : {}),
-                visibility: "public" as const,
-                ...(chatTag ? { tag: chatTag } : {}),
-              },
-            }),
+        notification: {
+          channelId,
+          sound: androidSound,
+          priority: "high" as const,
+          visibility: "public" as const,
+          ...(options?.isCall && callId ? { tag: `videh_call_${callId}` } : {}),
+          ...(options?.imageUrl ? { imageUrl: options.imageUrl } : {}),
+          ...(chatTag && !options?.isCall ? { tag: chatTag } : {}),
+        },
       },
       apns: {
         payload: {

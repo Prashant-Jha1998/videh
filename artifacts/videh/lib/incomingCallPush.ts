@@ -2,6 +2,8 @@ import * as Linking from "expo-linking";
 import { Platform } from "react-native";
 import type { IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { setupCallKeep, showCallKeepIncoming } from "@/lib/callKeep";
+import { wakeScreenForIncomingCall } from "@/lib/inCallAudio";
+import { startIncomingCallExperience } from "@/lib/incomingCallExperience";
 import { displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
 import { showIncomingCallNotification } from "@/lib/incomingCallNotification";
 
@@ -37,7 +39,9 @@ export async function presentIncomingCallFromPush(
   if (Platform.OS === "web" || !isIncomingCallPushData(data)) return;
 
   const call = parseIncomingCallFromPushData(data);
+  wakeScreenForIncomingCall();
   await setupCallKeep();
+  await startIncomingCallExperience(call);
   displayNativeIncomingCall({
     callId: call.callId,
     callerName: call.callerName,

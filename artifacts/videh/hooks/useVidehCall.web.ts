@@ -26,6 +26,9 @@ export function useVidehCall(
   const rolesRef = useRef<Map<string, Role>>(new Map());
   const candidateCursorsRef = useRef<Map<string, number>>(new Map());
   const pollTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  const pollBusyRef = useRef<Set<string>>(new Set());
+  const lastOfferRevisionRef = useRef<Map<string, number>>(new Map());
+  const lastAnswerRevisionRef = useRef<Map<string, number>>(new Map());
 
   const [joined, setJoined] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -71,6 +74,14 @@ export function useVidehCall(
     };
 
     const connectChannel = async (channel: string, sharedLocalStream: MediaStream, iceServers: RTCIceServer[]) => {
+      const existing = pcsRef.current.get(channel);
+      if (existing) {
+        const t = pollTimersRef.current.get(channel);
+        if (t) clearInterval(t);
+        pollTimersRef.current.delete(channel);
+        existing.close();
+        pcsRef.current.delete(channel);
+      }
       const sessionRes = await webrtcFetch("/sessions", sessionToken, {
         method: "POST",
         body: JSON.stringify({ channel, userId: uid, type: isVideo ? "video" : "audio" }),
@@ -110,32 +121,54 @@ export function useVidehCall(
         await postJson(`/sessions/${encodeURIComponent(channel)}/offer`, { offer });
       }
 
-      const pollTimer = setInterval(async () => {
-        const pcNow = pcsRef.current.get(channel);
-        if (stopped || !pcNow) return;
-        const activeRole = rolesRef.current.get(channel) ?? "caller";
-        const session = await webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken).then((r) => r.json()) as {
-          session?: { offer?: RTCSessionDescriptionInit | null; answer?: RTCSessionDescriptionInit | null };
-        };
-        if (activeRole === "callee" && session.session?.offer && !pcNow.remoteDescription) {
-          await pcNow.setRemoteDescription(session.session.offer);
-          const answer = await pcNow.createAnswer();
-          await pcNow.setLocalDescription(answer);
-          await postJson(`/sessions/${encodeURIComponent(channel)}/answer`, { answer });
-        }
-        if (activeRole === "caller" && session.session?.answer && !pcNow.remoteDescription) {
-          await pcNow.setRemoteDescription(session.session.answer);
-        }
+      const pollTimer = setInterval(() => {
+        if (pollBusyRef.current.has(channel)) return;
+        pollBusyRef.current.add(channel);
+        void (async () => {
+          try {
+            const pcNow = pcsRef.current.get(channel);
+            if (stopped || !pcNow) return;
+            const activeRole = rolesRef.current.get(channel) ?? "caller";
+            const session = await webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken).then((r) => r.json()) as {
+              session?: {
+                offer?: RTCSessionDescriptionInit | null;
+                answer?: RTCSessionDescriptionInit | null;
+                offerRevision?: number;
+                answerRevision?: number;
+              };
+            };
+            const offerRevision = session.session?.offerRevision ?? 0;
+            const seenOfferRev = lastOfferRevisionRef.current.get(channel) ?? -1;
+            if (activeRole === "callee" && session.session?.offer && offerRevision > seenOfferRev) {
+              lastOfferRevisionRef.current.set(channel, offerRevision);
+              await pcNow.setRemoteDescription(session.session.offer);
+              const answer = await pcNow.createAnswer();
+              await pcNow.setLocalDescription(answer);
+              await postJson(`/sessions/${encodeURIComponent(channel)}/answer`, { answer });
+            }
+            const answerRevision = session.session?.answerRevision ?? 0;
+            const seenAnswerRev = lastAnswerRevisionRef.current.get(channel) ?? -1;
+            if (activeRole === "caller" && session.session?.answer && answerRevision > seenAnswerRev) {
+              lastAnswerRevisionRef.current.set(channel, answerRevision);
+              const sig = pcNow.signalingState;
+              if (sig === "have-local-offer" || sig === "stable") {
+                await pcNow.setRemoteDescription(session.session.answer);
+              }
+            }
 
-        const since = candidateCursorsRef.current.get(channel) ?? 0;
-        const candidateRes = await webrtcFetch(
-          `/sessions/${encodeURIComponent(channel)}/candidates?role=${activeRole}&since=${since}`,
-          sessionToken,
-        ).then((r) => r.json()) as { candidates?: RTCIceCandidateInit[]; next?: number };
-        for (const candidate of candidateRes.candidates ?? []) {
-          await pcNow.addIceCandidate(candidate).catch(() => {});
-        }
-        candidateCursorsRef.current.set(channel, candidateRes.next ?? since);
+            const since = candidateCursorsRef.current.get(channel) ?? 0;
+            const candidateRes = await webrtcFetch(
+              `/sessions/${encodeURIComponent(channel)}/candidates?role=${activeRole}&since=${since}`,
+              sessionToken,
+            ).then((r) => r.json()) as { candidates?: RTCIceCandidateInit[]; next?: number };
+            for (const candidate of candidateRes.candidates ?? []) {
+              await pcNow.addIceCandidate(candidate).catch(() => {});
+            }
+            candidateCursorsRef.current.set(channel, candidateRes.next ?? since);
+          } finally {
+            pollBusyRef.current.delete(channel);
+          }
+        })();
       }, SIGNAL_POLL_MS);
       pollTimersRef.current.set(channel, pollTimer);
     };

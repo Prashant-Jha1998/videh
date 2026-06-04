@@ -9,6 +9,7 @@ const STUN_FALLBACK: IceServerConfig[] = [
   { urls: "stun:stun1.l.google.com:19302" },
 ];
 
+/** STUN-only by default (no TURN). Set TURN_URL only if you run your own relay. */
 export function getIceServers(): IceServerConfig[] {
   const servers: IceServerConfig[] = [...STUN_FALLBACK];
   const turnUrl = process.env["TURN_URL"]?.trim();

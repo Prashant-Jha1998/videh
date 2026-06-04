@@ -11,6 +11,7 @@ export type { VidehCallState } from "./videhCallTypes";
 
 type Role = "caller" | "callee";
 const SIGNAL_POLL_MS = 250;
+const ICE_RESTART_DELAY_MS = 2000;
 
 /** 0 = single shared call channel (no _peer_ suffix on server invite channel). */
 const SINGLE_PEER_KEY = 0;
@@ -43,6 +44,12 @@ export function useVidehCall(
   const rolesRef = useRef<Map<string, Role>>(new Map());
   const candidateCursorsRef = useRef<Map<string, number>>(new Map());
   const pollTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  const iceRestartTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const iceRestartInFlightRef = useRef<Set<string>>(new Set());
+  const lastOfferRevisionRef = useRef<Map<string, number>>(new Map());
+  const lastAnswerRevisionRef = useRef<Map<string, number>>(new Map());
+  const pollBusyRef = useRef<Set<string>>(new Set());
+  const connectGenRef = useRef(0);
   const speakerOnRef = useRef(!isVideo ? false : true);
 
   const [joined, setJoined] = useState(false);
@@ -119,9 +126,44 @@ export function useVidehCall(
 
   const channelsKey = channels.join("|");
 
+  const stopAllSignaling = useCallback(() => {
+    for (const timer of pollTimersRef.current.values()) clearInterval(timer);
+    pollTimersRef.current.clear();
+    pollBusyRef.current.clear();
+    for (const timer of iceRestartTimersRef.current.values()) clearTimeout(timer);
+    iceRestartTimersRef.current.clear();
+    iceRestartInFlightRef.current.clear();
+  }, []);
+
+  const closeAllPeerConnections = useCallback(
+    (deleteSessions: boolean) => {
+      const channelList = [...pcsRef.current.keys()];
+      for (const channel of channelList) {
+        pcsRef.current.get(channel)?.close?.();
+        if (deleteSessions) {
+          webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken, { method: "DELETE" }).catch(() => {});
+        }
+      }
+      pcsRef.current.clear();
+      rolesRef.current.clear();
+      candidateCursorsRef.current.clear();
+      remotePeersRef.current.clear();
+      lastOfferRevisionRef.current.clear();
+      lastAnswerRevisionRef.current.clear();
+      setJoined(false);
+      setRemoteCount(0);
+      setRemotePeers([]);
+      setRemoteStreamUrl(undefined);
+      setHasRemoteVideo(false);
+      setConnectionPhase("connecting");
+    },
+    [sessionToken],
+  );
+
   useEffect(() => {
     if (!primaryChannel || !uid) return;
 
+    const connectGen = ++connectGenRef.current;
     let stopped = false;
     let localStream: any = null;
 
@@ -129,9 +171,57 @@ export function useVidehCall(
       await webrtcFetch(path, sessionToken, { method: "POST", body: JSON.stringify(body) });
     };
 
+    const shouldInitiateIceRestart = (channel: string): boolean => {
+      const peerId = peerIdFromCallChannel(channel, uid) || remotePeerIds[0];
+      if (!peerId || peerId === uid) return true;
+      return uid < peerId;
+    };
+
+    const scheduleIceRestart = (channel: string, pc: any, role: Role) => {
+      if (stopped || iceRestartInFlightRef.current.has(channel)) return;
+      if (iceRestartTimersRef.current.has(channel)) return;
+      const timer = setTimeout(() => {
+        iceRestartTimersRef.current.delete(channel);
+        void (async () => {
+          const pcNow = pcsRef.current.get(channel);
+          if (stopped || !pcNow) return;
+          if (pcNow.connectionState === "connected") return;
+          if (!shouldInitiateIceRestart(channel)) return;
+          iceRestartInFlightRef.current.add(channel);
+          try {
+            const { RTCSessionDescription } = require("react-native-webrtc");
+            if (typeof pcNow.restartIce === "function") {
+              pcNow.restartIce();
+            }
+            const offer = await pcNow.createOffer({ iceRestart: true });
+            await pcNow.setLocalDescription(offer);
+            const res = await webrtcFetch(`/sessions/${encodeURIComponent(channel)}/offer`, sessionToken, {
+              method: "POST",
+              body: JSON.stringify({ offer, iceRestart: true }),
+            });
+            const payload = (await res.json()) as { offerRevision?: number };
+            if (typeof payload.offerRevision === "number") {
+              lastOfferRevisionRef.current.set(channel, payload.offerRevision);
+            }
+            candidateCursorsRef.current.set(channel, 0);
+            if (role === "caller") {
+              lastAnswerRevisionRef.current.delete(channel);
+            }
+          } catch {
+            /* retry on next disconnect */
+          } finally {
+            iceRestartInFlightRef.current.delete(channel);
+          }
+        })();
+      }, ICE_RESTART_DELAY_MS);
+      iceRestartTimersRef.current.set(channel, timer);
+    };
+
     const connectChannel = async (channel: string, sharedLocalStream: any, iceServers: RTCIceServer[]) => {
+      if (connectGen !== connectGenRef.current || stopped) return;
       if (pcsRef.current.has(channel)) {
-        if (pollTimersRef.current.has(channel)) return;
+        const existingTimer = pollTimersRef.current.get(channel);
+        if (existingTimer) return;
         pcsRef.current.get(channel)?.close?.();
         pcsRef.current.delete(channel);
       }
@@ -146,6 +236,7 @@ export function useVidehCall(
         body: JSON.stringify({ channel, userId: uid, type: isVideo ? "video" : "audio" }),
       });
       const sessionData = await sessionRes.json() as { success?: boolean; role?: Role };
+      if (connectGen !== connectGenRef.current || stopped) return;
       if (!sessionData.success || !sessionData.role) throw new Error("Could not start call signaling.");
       const role = sessionData.role;
       rolesRef.current.set(channel, role);
@@ -182,7 +273,24 @@ export function useVidehCall(
         noteRemoteStream(event.stream);
       };
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed") setError("Call connection failed.");
+        const state = pc.connectionState;
+        if (state === "connected") {
+          const t = iceRestartTimersRef.current.get(channel);
+          if (t) {
+            clearTimeout(t);
+            iceRestartTimersRef.current.delete(channel);
+          }
+          setError(null);
+        } else if (state === "disconnected") {
+          scheduleIceRestart(channel, pc, role);
+        } else if (state === "failed") {
+          const t = iceRestartTimersRef.current.get(channel);
+          if (t) {
+            clearTimeout(t);
+            iceRestartTimersRef.current.delete(channel);
+          }
+          scheduleIceRestart(channel, pc, role);
+        }
         refreshAggregate();
       };
 
@@ -192,32 +300,52 @@ export function useVidehCall(
         await postJson(`/sessions/${encodeURIComponent(channel)}/offer`, { offer });
       }
 
+      if (connectGen !== connectGenRef.current || stopped) {
+        pc.close?.();
+        return;
+      }
+
       const pollTimer = setInterval(() => {
+        if (pollBusyRef.current.has(channel)) return;
+        pollBusyRef.current.add(channel);
         void (async () => {
           try {
             const pcNow = pcsRef.current.get(channel);
             if (stopped || !pcNow) return;
             const activeRole = rolesRef.current.get(channel) ?? "caller";
             const session = await webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken).then((r) => r.json()) as {
-              session?: { offer?: RTCSessionDescriptionInit | null; answer?: RTCSessionDescriptionInit | null };
+              session?: {
+                offer?: RTCSessionDescriptionInit | null;
+                answer?: RTCSessionDescriptionInit | null;
+                offerRevision?: number;
+                answerRevision?: number;
+              };
             };
+            const offerRevision = session.session?.offerRevision ?? 0;
+            const seenOfferRev = lastOfferRevisionRef.current.get(channel) ?? -1;
             if (
               activeRole === "callee"
               && session.session?.offer
-              && pcNow.signalingState === "stable"
-              && !pcNow.currentRemoteDescription
+              && offerRevision > seenOfferRev
             ) {
+              lastOfferRevisionRef.current.set(channel, offerRevision);
               await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.offer));
               const answer = await pcNow.createAnswer();
               await pcNow.setLocalDescription(answer);
               await postJson(`/sessions/${encodeURIComponent(channel)}/answer`, { answer });
             }
+            const answerRevision = session.session?.answerRevision ?? 0;
+            const seenAnswerRev = lastAnswerRevisionRef.current.get(channel) ?? -1;
             if (
               activeRole === "caller"
               && session.session?.answer
-              && pcNow.signalingState === "have-local-offer"
+              && answerRevision > seenAnswerRev
             ) {
-              await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.answer));
+              lastAnswerRevisionRef.current.set(channel, answerRevision);
+              const sig = pcNow.signalingState;
+              if (sig === "have-local-offer" || sig === "stable") {
+                await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.answer));
+              }
             }
 
             const since = candidateCursorsRef.current.get(channel) ?? 0;
@@ -241,6 +369,8 @@ export function useVidehCall(
               clearInterval(t);
               pollTimersRef.current.delete(channel);
             }
+          } finally {
+            pollBusyRef.current.delete(channel);
           }
         })();
       }, SIGNAL_POLL_MS);
@@ -269,9 +399,10 @@ export function useVidehCall(
     const syncChannels = async () => {
       try {
         localStream = await ensureLocalStream();
+        if (connectGen !== connectGenRef.current || stopped) return;
         const iceServers = await loadIceServers(sessionToken);
         for (const channel of channels) {
-          if (stopped) return;
+          if (stopped || connectGen !== connectGenRef.current) return;
           await connectChannel(channel, localStream, iceServers);
         }
         const active = new Set(channels);
@@ -299,25 +430,21 @@ export function useVidehCall(
 
     return () => {
       stopped = true;
-      for (const timer of pollTimersRef.current.values()) clearInterval(timer);
-      pollTimersRef.current.clear();
+      stopAllSignaling();
+      closeAllPeerConnections(true);
     };
-  }, [primaryChannel, uid, isVideo, channelsKey, refreshAggregate, sessionToken]);
+  }, [primaryChannel, uid, isVideo, channelsKey, refreshAggregate, sessionToken, remotePeerIds, stopAllSignaling, closeAllPeerConnections]);
 
   useEffect(() => {
     return () => {
       setProximityScreenOff(false);
       void stopInCallSession();
-      for (const timer of pollTimersRef.current.values()) clearInterval(timer);
-      pollTimersRef.current.clear();
+      stopAllSignaling();
+      closeAllPeerConnections(true);
       localStreamRef.current?.getTracks?.().forEach((track: any) => track.stop());
       localStreamRef.current = null;
-      for (const pc of pcsRef.current.values()) pc?.close?.();
-      pcsRef.current.clear();
-      rolesRef.current.clear();
-      candidateCursorsRef.current.clear();
     };
-  }, [primaryChannel, uid]);
+  }, [primaryChannel, uid, stopAllSignaling, closeAllPeerConnections]);
 
   return {
     joined,
@@ -377,9 +504,19 @@ export function useVidehCall(
     stopScreenShare: async () => {},
     leave: async () => {
       setProximityScreenOff(false);
+      stopAllSignaling();
+      closeAllPeerConnections(true);
       await stopInCallSession();
       localStreamRef.current?.getTracks?.().forEach((track: any) => track.stop());
-      for (const pc of pcsRef.current.values()) pc?.close?.();
+      localStreamRef.current = null;
+      setLocalStreamUrl(undefined);
+      setJoined(false);
+      setRemoteCount(0);
+      setRemotePeers([]);
+      setRemoteStreamUrl(undefined);
+      setHasRemoteVideo(false);
+      setConnectionPhase("connecting");
+      setError(null);
     },
   };
 }

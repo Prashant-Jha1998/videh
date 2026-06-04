@@ -16,6 +16,8 @@ type SignalSession = {
   calleeId?: number;
   offer?: unknown;
   answer?: unknown;
+  offerRevision?: number;
+  answerRevision?: number;
   callerCandidates: unknown[];
   calleeCandidates: unknown[];
   createdAt: number;
@@ -41,7 +43,16 @@ const router = Router();
 router.use(requireAuth);
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 const RING_TIMEOUT_MS = 45 * 1000;
+/** Connected calls stay alive while clients poll status; only orphan after long silence. */
+const CONNECTED_CALL_IDLE_MS = 30 * 60 * 1000;
 const ringExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function callIsOrphanStale(call: CallInvite): boolean {
+  if (isCallEnded(call)) return true;
+  const idleMs = Date.now() - call.updatedAt;
+  if (!call.connectedAt) return idleMs > RING_TIMEOUT_MS;
+  return idleMs > CONNECTED_CALL_IDLE_MS;
+}
 
 function clearRingExpiryTimer(callId: string): void {
   const t = ringExpiryTimers.get(callId);
@@ -62,7 +73,10 @@ async function expireRingingCall(callId: string): Promise<void> {
       changed = true;
     }
   }
-  if (!changed) return;
+  if (!changed) {
+    clearRingExpiryTimer(callId);
+    return;
+  }
   call.updatedAt = Date.now();
   if (isCallEnded(call)) await finalizeCall(call);
   else await saveCall(call);
@@ -96,8 +110,13 @@ async function saveCall(call: CallInvite): Promise<void> {
   await stateSetJson(callKey(call.callId), call, SESSION_TTL_MS);
 }
 
+let lastCleanupAt = 0;
+const CLEANUP_INTERVAL_MS = 60_000;
+
 async function cleanupSessions() {
   const now = Date.now();
+  if (now - lastCleanupAt < CLEANUP_INTERVAL_MS) return;
+  lastCleanupAt = now;
   for (const key of await stateKeys("webrtc:session:")) {
     const session = await stateGetJson<SignalSession>(key);
     if (session && now - session.updatedAt > SESSION_TTL_MS) await stateDelete(key);
@@ -106,6 +125,7 @@ async function cleanupSessions() {
     const call = await stateGetJson<CallInvite>(key);
     if (!call) continue;
     if (now - call.updatedAt > SESSION_TTL_MS) {
+      clearRingExpiryTimer(call.callId);
       await stateDelete(key);
       continue;
     }
@@ -156,8 +176,7 @@ async function releaseStaleCallsForUser(userId: number, exceptCallId?: string): 
     if (!isCallParticipant(call, userId)) continue;
     const status = call.statuses[userId];
     if (status !== "accepted" && status !== "ringing") continue;
-    const stale = isCallEnded(call) || Date.now() - call.updatedAt > 45_000;
-    if (!stale) continue;
+    if (!callIsOrphanStale(call)) continue;
     publishCallSignal({
       chatId: call.chatId,
       userIds: [call.callerId, ...call.participantIds],
@@ -180,7 +199,8 @@ function userIsOnLiveCall(calls: CallInvite[], userId: number, exceptCallId?: st
     if (isCallEnded(call)) return false;
 
     const status = call.statuses[userId];
-    if (!status || status === "ringing") return false;
+    if (!status) return false;
+    if (status === "ringing") return call.callerId !== userId;
 
     if (status === "accepted") {
       if (call.connectedAt) return true;
@@ -267,7 +287,7 @@ async function persistCallHistory(call: CallInvite): Promise<boolean> {
     publishCallSignal({
       chatId: call.chatId,
       userIds: [call.callerId, ...call.participantIds],
-      action: result === "answered" ? "ended" : result === "declined" ? "declined" : result === "busy" ? "busy" : "missed",
+      action: result === "answered" ? "call_logged" : result === "declined" ? "declined" : result === "busy" ? "busy" : "missed",
       payload: {
         callId: call.callId,
         chatId: call.chatId,
@@ -369,8 +389,7 @@ router.post("/calls", async (req: Request, res: Response) => {
     for (const stale of liveCalls) {
       if (stale.chatId !== chatId) continue;
       if (stale.callerId !== callerId && !stale.participantIds.includes(callerId)) continue;
-      if (isCallEnded(stale)) await finalizeCall(stale);
-      else if (Date.now() - stale.updatedAt > 45_000) await finalizeCall(stale);
+      if (callIsOrphanStale(stale)) await finalizeCall(stale);
     }
     const refreshedLive = await listActiveCalls();
 
@@ -479,6 +498,10 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
   if (!assertSameUser(req, res, userId)) return;
 
   if (body.action === "accept") {
+    if (call.statuses[userId] !== "ringing") {
+      res.status(409).json({ success: false, message: "Call is no longer ringing." });
+      return;
+    }
     const liveCalls = await listActiveCalls();
     if (userIsOnLiveCall(liveCalls, userId, call.callId)) {
       call.statuses[userId] = "busy";
@@ -537,7 +560,12 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
     chatId: call.chatId,
     userIds: [call.callerId, ...call.participantIds],
     action: body.action === "accept" ? "accepted" : "declined",
-    payload: serializeIncoming(call, userId),
+    payload: {
+      ...serializeIncoming(call, userId),
+      callId: call.callId,
+      channel: call.channel,
+      action: body.action === "accept" ? "accepted" : "declined",
+    },
   });
   if (isCallEnded(call)) {
     await finalizeCall(call);
@@ -565,6 +593,10 @@ router.get("/calls/:callId/status", async (req: Request, res: Response) => {
   const missedCount = Object.values(call.statuses).filter((status) => status === "missed").length;
   const busyCount = Object.values(call.statuses).filter((status) => status === "busy").length;
   const ended = isCallEnded(call);
+  if (!ended && call.connectedAt) {
+    call.updatedAt = Date.now();
+    await saveCall(call);
+  }
   const allInviteesBusy =
     call.participantIds.length > 0
     && call.participantIds.every((id) => call.statuses[id] === "busy");
@@ -664,6 +696,7 @@ router.post("/calls/:callId/participants", async (req: Request, res: Response) =
     }
 
     call.updatedAt = Date.now();
+    if (addedRinging.length > 0) scheduleRingExpiry(call.callId);
     await saveCall(call);
 
     const notifyIds = [...new Set([call.callerId, ...call.participantIds, requesterId])];
@@ -866,6 +899,8 @@ router.get("/sessions/:channel", async (req: Request, res: Response) => {
       type: session.type,
       offer: session.offer ?? null,
       answer: session.answer ?? null,
+      offerRevision: session.offerRevision ?? 0,
+      answerRevision: session.answerRevision ?? 0,
       callerId: session.callerId,
       calleeId: session.calleeId ?? null,
     },
@@ -879,10 +914,18 @@ router.post("/sessions/:channel/offer", async (req: Request, res: Response) => {
     res.status(404).json({ success: false });
     return;
   }
-  session.offer = (req.body as { offer?: unknown }).offer ?? null;
+  const body = req.body as { offer?: unknown; iceRestart?: boolean };
+  if (body.iceRestart) {
+    session.answer = undefined;
+    session.answerRevision = 0;
+    session.callerCandidates = [];
+    session.calleeCandidates = [];
+  }
+  session.offer = body.offer ?? null;
+  session.offerRevision = (session.offerRevision ?? 0) + 1;
   session.updatedAt = Date.now();
   await saveSession(session);
-  res.json({ success: true });
+  res.json({ success: true, offerRevision: session.offerRevision });
 });
 
 router.post("/sessions/:channel/answer", async (req: Request, res: Response) => {
@@ -893,9 +936,10 @@ router.post("/sessions/:channel/answer", async (req: Request, res: Response) => 
     return;
   }
   session.answer = (req.body as { answer?: unknown }).answer ?? null;
+  session.answerRevision = (session.answerRevision ?? 0) + 1;
   session.updatedAt = Date.now();
   await saveSession(session);
-  res.json({ success: true });
+  res.json({ success: true, answerRevision: session.answerRevision });
 });
 
 router.post("/sessions/:channel/candidates", async (req: Request, res: Response) => {

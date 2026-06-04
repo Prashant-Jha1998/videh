@@ -89,10 +89,20 @@ export default function CallScreen() {
   const pulse = useRef(new Animated.Value(1)).current;
   const swipeY = useRef(new Animated.Value(0)).current;
   const acceptedRef = useRef(false);
+  const declineBusyRef = useRef(false);
+
+  const handleDecline = (message?: string) => {
+    if (declineBusyRef.current) return;
+    declineBusyRef.current = true;
+    void declineIncoming(message).finally(() => {
+      declineBusyRef.current = false;
+    });
+  };
 
   useEffect(() => {
     if (ringing) return;
     acceptedRef.current = false;
+    declineBusyRef.current = false;
     swipeY.setValue(0);
   }, [ringing, swipeY]);
 
@@ -220,7 +230,7 @@ export default function CallScreen() {
               <TouchableOpacity
                 key={msg}
                 style={styles.quickChip}
-                onPress={() => void declineIncoming(msg)}
+                onPress={() => handleDecline(msg)}
               >
                 <Text style={styles.quickTxt} numberOfLines={2}>
                   {msg}
@@ -236,7 +246,7 @@ export default function CallScreen() {
             <View style={styles.actionItem}>
               <TouchableOpacity
                 style={styles.declineCircle}
-                onPress={() => void declineIncoming()}
+                onPress={() => handleDecline()}
                 activeOpacity={0.85}
               >
                 <Ionicons name="close" size={28} color="#fff" />

@@ -36,9 +36,20 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
   const pulse = useRef(new Animated.Value(1)).current;
   const swipeY = useRef(new Animated.Value(0)).current;
   const acceptedRef = useRef(false);
+  const busyRef = useRef(false);
+
+  const runDecline = (fn: () => void | Promise<void>) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    void Promise.resolve(fn()).finally(() => {
+      busyRef.current = false;
+    });
+  };
 
   useEffect(() => {
     acceptedRef.current = false;
+    busyRef.current = false;
     swipeY.setValue(0);
   }, [call.callId, swipeY]);
 
@@ -92,7 +103,14 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
       : callTypeLabel;
 
   return (
-    <Modal visible key={call.callId} transparent animationType="fade" statusBarTranslucent>
+    <Modal
+      visible
+      key={call.callId}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={onDecline}
+    >
       <View style={[styles.root, { paddingBottom: Math.max(insets.bottom, 12) + 28 }]}>
         <View style={styles.header}>
           <Animated.View style={[styles.avatarRing, { transform: [{ scale: pulse }] }]}>
@@ -110,10 +128,7 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
               <TouchableOpacity
                 key={msg}
                 style={styles.quickChip}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  onDeclineWithMessage(msg);
-                }}
+                onPress={() => runDecline(() => onDeclineWithMessage(msg))}
               >
                 <Text style={styles.quickTxt} numberOfLines={2}>
                   {msg}
@@ -127,7 +142,11 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
           <Text style={styles.swipeHint}>Swipe up on Accept to answer, or tap Accept</Text>
           <View style={styles.actions}>
             <View style={styles.actionItem}>
-              <TouchableOpacity style={styles.declineCircle} onPress={onDecline} activeOpacity={0.85}>
+              <TouchableOpacity
+                style={styles.declineCircle}
+                onPress={() => runDecline(onDecline)}
+                activeOpacity={0.85}
+              >
                 <Ionicons name="close" size={28} color="#fff" />
               </TouchableOpacity>
               <Text style={styles.actionLbl}>Decline</Text>
