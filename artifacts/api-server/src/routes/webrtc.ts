@@ -147,6 +147,32 @@ async function listActiveCalls(): Promise<CallInvite[]> {
   return calls.filter((c): c is CallInvite => c != null && !isCallEnded(c));
 }
 
+/** Drop in-memory calls that would block new invites (crash / missed hang-up). */
+async function releaseStaleCallsForUser(userId: number, exceptCallId?: string): Promise<void> {
+  if (!userId) return;
+  const live = await listActiveCalls();
+  for (const call of live) {
+    if (exceptCallId && call.callId === exceptCallId) continue;
+    if (!isCallParticipant(call, userId)) continue;
+    const status = call.statuses[userId];
+    if (status !== "accepted" && status !== "ringing") continue;
+    const stale = isCallEnded(call) || Date.now() - call.updatedAt > 45_000;
+    if (!stale) continue;
+    publishCallSignal({
+      chatId: call.chatId,
+      userIds: [call.callerId, ...call.participantIds],
+      action: "ended",
+      payload: {
+        callId: call.callId,
+        chatId: call.chatId,
+        type: call.type,
+        callerId: call.callerId,
+      },
+    });
+    await finalizeCall(call);
+  }
+}
+
 /** User is already in an active call (used for busy detection). */
 function userIsOnLiveCall(calls: CallInvite[], userId: number, exceptCallId?: string): boolean {
   return calls.some((call) => {
@@ -338,12 +364,13 @@ router.post("/calls", async (req: Request, res: Response) => {
       return;
     }
 
+    await releaseStaleCallsForUser(callerId);
     const liveCalls = await listActiveCalls();
     for (const stale of liveCalls) {
       if (stale.chatId !== chatId) continue;
       if (stale.callerId !== callerId && !stale.participantIds.includes(callerId)) continue;
       if (isCallEnded(stale)) await finalizeCall(stale);
-      else if (Date.now() - stale.updatedAt > 90_000) await finalizeCall(stale);
+      else if (Date.now() - stale.updatedAt > 45_000) await finalizeCall(stale);
     }
     const refreshedLive = await listActiveCalls();
 
@@ -752,13 +779,28 @@ router.post("/calls/:callId/media-type", async (req: Request, res: Response) => 
 });
 
 router.post("/calls/:callId/end", async (req: Request, res: Response) => {
-  const call = await getCall(String(req.params.callId));
+  const callId = String(req.params.callId);
+  const call = await getCall(callId);
   const userId = Number((req as any).authUserId);
   if (call && (!userId || !isCallParticipant(call, userId))) {
     res.status(403).json({ success: false, message: "Not a call participant." });
     return;
   }
   if (call) {
+    const wasConnected = Boolean(call.connectedAt);
+    const allUserIds = [call.callerId, ...call.participantIds];
+    publishCallSignal({
+      chatId: call.chatId,
+      userIds: allUserIds,
+      action: wasConnected ? "ended" : "cancelled",
+      payload: {
+        callId: call.callId,
+        chatId: call.chatId,
+        type: call.type,
+        callerId: call.callerId,
+        channel: call.channel,
+      },
+    });
     for (const uid of Object.keys(call.statuses)) {
       const id = Number(uid);
       const cur = call.statuses[id];
@@ -766,19 +808,10 @@ router.post("/calls/:callId/end", async (req: Request, res: Response) => {
       else if (cur === "ringing") call.statuses[id] = "missed";
     }
     call.updatedAt = Date.now();
-    const wasConnected = Boolean(call.connectedAt);
-    publishCallSignal({
-      chatId: call.chatId,
-      userIds: [call.callerId, ...call.participantIds],
-      action: wasConnected ? "ended" : "cancelled",
-      payload: {
-        callId: call.callId,
-        chatId: call.chatId,
-        type: call.type,
-        callerId: call.callerId,
-      },
-    });
     await finalizeCall(call);
+    if (userId) await releaseStaleCallsForUser(userId, callId);
+  } else if (userId) {
+    await releaseStaleCallsForUser(userId);
   }
   res.json({ success: true });
 });

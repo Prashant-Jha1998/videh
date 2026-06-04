@@ -438,6 +438,11 @@ function RootLayoutNav() {
       }
       if (action === "declined" || action === "ended" || action === "missed" || action === "busy" || action === "cancelled") {
         if (callId) {
+          dismissedIncomingCallIdsRef.current.add(callId);
+          offeredCallIdRef.current = null;
+          pendingIncomingRef.current = null;
+          activeCallIdRef.current = null;
+          clearIncomingAutoEnd();
           dismissIncomingCallUi(callId, true);
           void loadMessages(String(payload.chatId ?? ""));
         } else {

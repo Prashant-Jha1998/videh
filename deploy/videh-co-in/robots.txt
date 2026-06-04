@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://videh.co.in/sitemap.xml

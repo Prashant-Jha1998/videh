@@ -194,37 +194,51 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     [clearSession, leaveCallScreen],
   );
 
+  const teardownCallLocally = useCallback(
+    async (endedCallId?: string, opts?: { skipServerEnd?: boolean }) => {
+      const id = endedCallId ?? sessionCallIdRef.current ?? undefined;
+      const shouldLeave = sessionEngineActiveRef.current || sessionRingingRef.current;
+      if (id) dismissedCallIdsRef.current.add(id);
+      requestDismissIncomingCallUi(id);
+      if (endingCallRef.current) return;
+      endingCallRef.current = true;
+      try {
+        await stopCallAlert();
+        setVideoCallPipEnabled(false);
+        if (shouldLeave) await call.leave();
+        if (id) {
+          endCallKeep(id);
+          if (!opts?.skipServerEnd) {
+            await webrtcFetch(`/calls/${id}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+          }
+        }
+        void refreshCallLogs();
+        clearSession();
+        setHeldSession(null);
+        leaveCallScreen();
+      } finally {
+        endingCallRef.current = false;
+      }
+    },
+    [call, user?.sessionToken, clearSession, refreshCallLogs, leaveCallScreen],
+  );
+
   const onCallEnded = useCallback(() => {
-    const endedCallId = sessionCallIdRef.current ?? undefined;
-    const shouldLeave = sessionEngineActiveRef.current || sessionRingingRef.current;
-    if (endedCallId) dismissedCallIdsRef.current.add(endedCallId);
-    requestDismissIncomingCallUi(endedCallId);
-    if (endingCallRef.current) {
-      if (shouldLeave) leaveCallScreen();
-      return;
-    }
-    endingCallRef.current = true;
-    void (async () => {
-      await stopCallAlert();
-      if (shouldLeave) await call.leave();
-      if (endedCallId) endCallKeep(endedCallId);
-      void refreshCallLogs();
-      clearSession();
-      leaveCallScreen();
-    })();
-  }, [clearSession, refreshCallLogs, leaveCallScreen, call]);
+    void teardownCallLocally();
+  }, [teardownCallLocally]);
 
   const handleRemoteCallEnd = useCallback(
     (callId?: string) => {
       const id = callId ?? sessionCallIdRef.current ?? undefined;
-      if (!id || sessionCallIdRef.current !== id || endingCallRef.current) return;
-      if (sessionRingingRef.current) {
+      if (!id) return;
+      if (sessionCallIdRef.current && sessionCallIdRef.current !== id) return;
+      if (sessionCallIdRef.current === id && sessionRingingRef.current) {
         void dismissIncomingRinging(id);
         return;
       }
-      onCallEnded();
+      void teardownCallLocally(id, { skipServerEnd: true });
     },
-    [dismissIncomingRinging, onCallEnded],
+    [dismissIncomingRinging, teardownCallLocally],
   );
 
   const pushCallRoute = useCallback((s: CallSession, replace = false) => {
@@ -245,20 +259,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [router]);
 
   const endCall = useCallback(async () => {
-    await stopCallAlert();
-    setVideoCallPipEnabled(false);
     const endingCallId = session?.callId;
-    if (session?.engineActive) await call.leave();
-    if (endingCallId) {
-      endCallKeep(endingCallId);
-      requestDismissIncomingCallUi(endingCallId);
-      await webrtcFetch(`/calls/${endingCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+    if (!endingCallId) {
+      clearSession();
+      leaveCallScreen();
+      return;
     }
-    void refreshCallLogs();
-    clearSession();
-    setHeldSession(null);
-    leaveCallScreen();
-  }, [session, call, user?.sessionToken, clearSession, refreshCallLogs, leaveCallScreen]);
+    await teardownCallLocally(endingCallId);
+  }, [session?.callId, teardownCallLocally, clearSession, leaveCallScreen]);
 
   const holdActiveCall = useCallback(async () => {
     if (!session?.callId || !user?.dbId) return;
@@ -519,11 +527,12 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           callerId?: number;
           statuses?: Record<string, string>;
         };
-          if (sessionCallIdRef.current !== polledCallId || endingCallRef.current) return;
+          if (sessionCallIdRef.current !== polledCallId) return;
           if (!data.success || res.status === 404) {
             handleRemoteCallEnd(polledCallId);
             return;
           }
+          if (endingCallRef.current) return;
           setAcceptedCount(data.acceptedCount ?? 1);
           setRingingCount(data.ringingCount ?? 0);
           setParticipantCount(data.call?.participantCount ?? participantCount);
@@ -590,7 +599,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           }
         })
         .catch(() => {});
-    }, 2000);
+    }, 1000);
     return () => clearInterval(timer);
   }, [session?.callId, userId, participantCount, call.joined, user?.sessionToken, onCallEnded, handleRemoteCallEnd]);
 
