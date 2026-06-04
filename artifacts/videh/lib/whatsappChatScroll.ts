@@ -11,7 +11,8 @@
  *
  * Parity checklist (see app/chat/[id].tsx):
  * - stackFromEnd: flexGrow + justifyContent flex-end
- * - composer below list; KeyboardAvoidingView shrinks list + KeyboardStickyView docks input (native)
+ * - composer below list; KeyboardAvoidingView shrinks list when keyboard open + KeyboardStickyView docks input
+ * - list paddingBottom = composer only (never add keyboard height to content padding — hides last message)
  * - pin after keyboard onEnd (not on every content-size / composer tick)
  * - no auto-pin when user scrolled up (near-bottom threshold)
  * - jump-to-latest FAB when scrolled up (with unread count badge)

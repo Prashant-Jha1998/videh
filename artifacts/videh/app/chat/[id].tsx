@@ -1511,13 +1511,10 @@ export default function ChatScreen() {
   }, [messages.length, searching, scrollToLatest, schedulePinToBottom]);
 
   /**
-   * WhatsApp: tail gap = composer + keyboard so bubbles stay above the input bar (not hidden behind keyboard).
-   * Android uses adjustNothing + KeyboardStickyView only — do not also shrink via KAV padding (causes floating composer).
+   * WhatsApp: list tail gap = composer height only. Keyboard space is handled by shrinking the list
+   * (KeyboardAvoidingView) + KeyboardStickyView — not extra content padding (that hides the last message).
    */
-  const listBottomPadding = useMemo(() => {
-    const kb = Platform.OS === "android" && keyboardVisible ? keyboardHeight : keyboardVisible ? 4 : 0;
-    return Math.max(12, composerHeight + 8 + kb);
-  }, [composerHeight, keyboardHeight, keyboardVisible]);
+  const listBottomPadding = useMemo(() => Math.max(12, composerHeight + 8), [composerHeight]);
   const jumpFabBottom = useMemo(
     () =>
       Math.max(
@@ -1542,17 +1539,25 @@ export default function ChatScreen() {
       return;
     }
     keyboardSettlingRef.current = true;
+    pendingScrollToEndRef.current = true;
+    if (!searching && !userScrolledUpRef.current) {
+      scrollToLatest(false);
+      schedulePinToBottom();
+    }
     if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
     keyboardScrollTimerRef.current = setTimeout(() => schedulePinToBottom(), 60);
     const settleTimer = setTimeout(() => {
       keyboardSettlingRef.current = false;
-      if (!userScrolledUpRef.current && !searching) schedulePinToBottom();
+      if (!userScrolledUpRef.current && !searching) {
+        pendingScrollToEndRef.current = true;
+        schedulePinToBottom();
+      }
     }, WHATSAPP_KEYBOARD_SETTLE_MS);
     return () => {
       if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
       clearTimeout(settleTimer);
     };
-  }, [keyboardVisible, searching, schedulePinToBottom]);
+  }, [keyboardVisible, searching, schedulePinToBottom, scrollToLatest]);
 
   /** Composer grew (reply / link preview) — debounced pin only if user is already at bottom. */
   useEffect(() => {
@@ -2964,7 +2969,9 @@ export default function ChatScreen() {
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={Platform.OS === "android"}
         maintainVisibleContentPosition={
-          searching ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
+          searching || keyboardVisible
+            ? undefined
+            : { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
         }
         initialNumToRender={18}
         maxToRenderPerBatch={12}
@@ -3266,7 +3273,13 @@ export default function ChatScreen() {
           </>
         ) : Platform.OS === "android" ? (
           <View style={styles.chatKeyboardAvoid}>
-            <View style={styles.messageListWrap}>{chatMessageList}</View>
+            <ChatKeyboardAvoidingView
+              style={styles.messageListWrap}
+              behavior="padding"
+              enabled={keyboardVisible}
+            >
+              {chatMessageList}
+            </ChatKeyboardAvoidingView>
             <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>{chatComposerBlock}</KeyboardStickyView>
           </View>
         ) : (
