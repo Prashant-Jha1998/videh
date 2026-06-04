@@ -184,12 +184,12 @@ export default function CallScreen() {
     ]);
   };
 
-  const displayStatus = joined && remoteCount > 0
-    ? statusText
-    : error
+  const displayStatus = error
     ? error === "NATIVE_WEBRTC_UNAVAILABLE"
       ? "Connecting..."
       : `Error: ${error}`
+    : joined && remoteCount > 0
+    ? statusText
     : statusText
     || (incoming && !joined
       ? phaseLabel("incoming_ringing", isVideo)

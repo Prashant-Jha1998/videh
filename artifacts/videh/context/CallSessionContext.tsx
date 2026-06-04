@@ -226,7 +226,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       const shouldLeave = sessionEngineActiveRef.current || sessionRingingRef.current;
       if (id) dismissedCallIdsRef.current.add(id);
       requestDismissIncomingCallUi(id);
-      if (id && teardownInFlightRef.current.has(id)) return;
+      if (id && teardownInFlightRef.current.has(id)) {
+        if (!opts?.skipServerEnd) {
+          await webrtcFetch(`/calls/${id}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+        }
+        clearSession();
+        leaveCallScreen();
+        return;
+      }
       if (id) teardownInFlightRef.current.add(id);
       endingCallRef.current = true;
       try {
@@ -287,14 +294,16 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [router]);
 
   const endCall = useCallback(async () => {
-    const endingCallId = session?.callId;
+    const endingCallId = session?.callId || sessionCallIdRef.current;
     if (!endingCallId) {
       clearSession();
       leaveCallScreen();
       return;
     }
-    await teardownCallLocally(endingCallId);
-  }, [session?.callId, teardownCallLocally, clearSession, leaveCallScreen]);
+    // Always end on server first so a stuck local teardown cannot leave a ghost "line busy" call.
+    await webrtcFetch(`/calls/${endingCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+    await teardownCallLocally(endingCallId, { skipServerEnd: true });
+  }, [session?.callId, user?.sessionToken, teardownCallLocally, clearSession, leaveCallScreen]);
 
   const holdActiveCall = useCallback(async () => {
     if (!session?.callId || !user?.dbId) return;
@@ -409,6 +418,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
             outgoingCallInitRef.current = null;
             return;
           }
+          if (data.call?.callId) sessionCallIdRef.current = data.call.callId;
           setSession((prev) => {
             if (!prev || prev.chatId !== chatId) return prev;
             return {
@@ -594,6 +604,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           if (remoteAccepted && !call.joined) {
             void stopCallAlert();
             setStatusHint("Connecting…");
+          } else if (call.joined && call.remoteCount > 0) {
+            setStatusHint(null);
           }
 
           if (!call.joined && !endedTonePlayed.current) {
@@ -636,10 +648,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [session?.callId, session?.engineActive, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleRemoteCallEnd]);
 
   useEffect(() => {
-    if (!call.joined) return;
+    if (!call.joined || call.remoteCount < 1) {
+      setDuration(0);
+      return;
+    }
     const t = setInterval(() => setDuration((d) => d + 1), 1000);
     return () => clearInterval(t);
-  }, [call.joined]);
+  }, [call.joined, call.remoteCount]);
 
   useEffect(() => {
     if (!session?.engineActive || session.ringing || !call.joined) {
@@ -704,8 +719,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (call.joined) {
       if (call.remoteCount > 0) return formatDuration(duration);
       if (call.connectionPhase === "reconnecting") return "Reconnecting…";
-      if (acceptedCount > 1) return "Connecting participants...";
-      return "Waiting for other party...";
+      if (statusHint) return statusHint;
+      if (acceptedCount > 1) return "Connecting…";
+      return "Connecting…";
     }
     if (call.error) {
       return call.error === "NATIVE_WEBRTC_UNAVAILABLE" ? "Connecting..." : `Error: ${call.error}`;

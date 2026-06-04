@@ -51,7 +51,15 @@ export function useVidehCall(
   const lastAnswerRevisionRef = useRef<Map<string, number>>(new Map());
   const pollBusyRef = useRef<Set<string>>(new Set());
   const connectGenRef = useRef(0);
+  const mountedRef = useRef(true);
   const speakerOnRef = useRef(!isVideo ? false : true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const [joined, setJoined] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -95,6 +103,7 @@ export function useVidehCall(
     }
     const pcs = [...pcsRef.current.values()];
     const states = pcs.map((pc) => pc?.connectionState as string | undefined);
+    if (!mountedRef.current) return;
     const connected = states.filter((s) => s === "connected").length;
     const failed = states.some((s) => s === "failed" || s === "closed");
     const reconnecting = states.some((s) => s === "disconnected" || s === "connecting");

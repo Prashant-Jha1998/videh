@@ -43,8 +43,8 @@ const router = Router();
 router.use(requireAuth);
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 const RING_TIMEOUT_MS = 45 * 1000;
-/** Connected calls stay alive while clients poll status; only orphan after long silence. */
-const CONNECTED_CALL_IDLE_MS = 30 * 60 * 1000;
+/** Connected calls stay alive while clients poll status; orphan after brief silence (crash / force-quit). */
+const CONNECTED_CALL_IDLE_MS = 2 * 60 * 1000;
 const ringExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function callIsOrphanStale(call: CallInvite): boolean {
@@ -385,6 +385,9 @@ router.post("/calls", async (req: Request, res: Response) => {
     }
 
     await releaseStaleCallsForUser(callerId);
+    for (const participantId of callableParticipantIds) {
+      await releaseStaleCallsForUser(participantId);
+    }
     const liveCalls = await listActiveCalls();
     for (const stale of liveCalls) {
       if (stale.chatId !== chatId) continue;
@@ -502,6 +505,7 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
       res.status(409).json({ success: false, message: "Call is no longer ringing." });
       return;
     }
+    await releaseStaleCallsForUser(userId, call.callId);
     const liveCalls = await listActiveCalls();
     if (userIsOnLiveCall(liveCalls, userId, call.callId)) {
       call.statuses[userId] = "busy";
