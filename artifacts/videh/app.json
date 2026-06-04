@@ -198,6 +198,9 @@
     "extra": {
       "router": {
         "origin": "https://replit.com/"
+      },
+      "eas": {
+        "projectId": "2f8d1dbd-f62f-48de-8c36-4531cb95b771"
       }
     }
   }
