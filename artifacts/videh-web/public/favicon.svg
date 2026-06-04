@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Videh">
+  <rect width="512" height="512" rx="96" fill="#00a884"/>
+  <g fill="none" stroke="#0b141a" stroke-width="36" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M128 128 L256 384 L384 128"/>
+    <path d="M200 200 L256 320 L312 200" opacity="0.35"/>
+  </g>
+</svg>
