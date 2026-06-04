@@ -2848,9 +2848,11 @@ export default function ChatScreen() {
                   onFocus={() => {
                     setEmojiPanelOpen(false);
                     setAssistantChatInputFocused(true);
-                    userScrolledUpRef.current = false;
-                    pendingScrollToEndRef.current = true;
-                    schedulePinToBottom();
+                    if (!userScrolledUpRef.current) {
+                      pendingScrollToEndRef.current = true;
+                      scrollToLatest(false);
+                      schedulePinToBottom();
+                    }
                     if (chatId && inputVal.length > 0) setTyping(chatId);
                   }}
                   onBlur={() => {
@@ -3021,6 +3023,11 @@ export default function ChatScreen() {
         scrollEventThrottle={16}
         onContentSizeChange={() => {
           if (searching || userDraggingRef.current || scrollLockRef.current) return;
+          if (keyboardVisible && !userScrolledUpRef.current) {
+            pendingScrollToEndRef.current = true;
+            scrollToLatest(false);
+            return;
+          }
           if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
           pendingScrollToEndRef.current = true;
           scrollToLatest(false);
@@ -3271,22 +3278,13 @@ export default function ChatScreen() {
               {chatComposerBlock}
             </KeyboardAvoidingView>
           </>
-        ) : Platform.OS === "android" ? (
+        ) : (
           <View style={styles.chatKeyboardAvoid}>
-            <ChatKeyboardAvoidingView
-              style={styles.messageListWrap}
-              behavior="padding"
-              enabled={keyboardVisible}
-            >
+            <ChatKeyboardAvoidingView style={styles.messageListWrap} behavior="padding">
               {chatMessageList}
             </ChatKeyboardAvoidingView>
             <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>{chatComposerBlock}</KeyboardStickyView>
           </View>
-        ) : (
-          <ChatKeyboardAvoidingView style={styles.chatKeyboardAvoid} behavior="padding">
-            <View style={styles.messageListWrap}>{chatMessageList}</View>
-            <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>{chatComposerBlock}</KeyboardStickyView>
-          </ChatKeyboardAvoidingView>
         )}
       </View>
 

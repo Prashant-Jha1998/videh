@@ -43,7 +43,7 @@ export function isChatNearBottom(
 }
 
 /** One immediate + follow-up pins after layout/keyboard (avoid triple-jump jitter). */
-export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0, 80, 200, 360] as const;
+export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0, 80, 200, 360, 520, 720] as const;
 
 /** Scroll a normal (non-inverted) chat list to the visual bottom; retries after layout. */
 export function scrollChatListToLatest(
