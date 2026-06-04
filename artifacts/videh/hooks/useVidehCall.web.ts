@@ -15,6 +15,7 @@ export function useVidehCall(
   isVideo: boolean,
   remotePeerIds: number[] = [],
   sessionToken?: string | null,
+  videhCallerId = 0,
 ): VidehCallState {
   const channels = channelsForCall(baseChannel, uid, remotePeerIds);
   const primaryChannel = channels[0] ?? "";
@@ -84,7 +85,12 @@ export function useVidehCall(
       }
       const sessionRes = await webrtcFetch("/sessions", sessionToken, {
         method: "POST",
-        body: JSON.stringify({ channel, userId: uid, type: isVideo ? "video" : "audio" }),
+        body: JSON.stringify({
+          channel,
+          userId: uid,
+          type: isVideo ? "video" : "audio",
+          videhCallerId: videhCallerId || uid,
+        }),
       });
       const sessionData = await sessionRes.json() as { success?: boolean; role?: Role };
       if (!sessionData.success || !sessionData.role) throw new Error("Could not start call signaling.");
@@ -205,7 +211,7 @@ export function useVidehCall(
         webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken, { method: "DELETE" }).catch(() => {});
       }
     };
-  }, [primaryChannel, uid, isVideo, channels.join("|"), localVideoId, remoteVideoId, refreshAggregate, sessionToken]);
+  }, [primaryChannel, uid, isVideo, channels.join("|"), localVideoId, remoteVideoId, refreshAggregate, sessionToken, videhCallerId]);
 
   return {
     joined,

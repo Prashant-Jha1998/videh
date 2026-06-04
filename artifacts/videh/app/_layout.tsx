@@ -89,8 +89,10 @@ function toIncomingCallInfo(raw: {
   chatId: number;
   type?: string;
   callerName?: string;
+  callerId?: number;
   participantCount?: number;
 }): IncomingCallInfo {
+  const cid = Number(raw.callerId);
   return {
     callId: String(raw.callId),
     channel: String(raw.channel ?? ""),
@@ -98,6 +100,7 @@ function toIncomingCallInfo(raw: {
     type: raw.type === "video" ? "video" : "audio",
     callerName: String(raw.callerName ?? "Videh user"),
     participantCount: Number(raw.participantCount ?? 2),
+    callerId: Number.isFinite(cid) && cid > 0 ? cid : undefined,
   };
 }
 
@@ -189,6 +192,7 @@ function RootLayoutNav() {
     chatId: number;
     type?: string;
     callerName?: string;
+    callerId?: number;
     participantCount?: number;
   }) => {
     const next = toIncomingCallInfo(raw);
@@ -427,6 +431,7 @@ function RootLayoutNav() {
           chatId: next.chatId,
           type: next.type,
           callerName: next.callerName ?? "Videh user",
+          callerId: next.callerId,
           participantCount: next.participantCount,
         });
       } catch {}
@@ -454,6 +459,7 @@ function RootLayoutNav() {
           type: signal.type === "video" ? "video" : "audio",
           callerName: String(signal.callerName ?? "Videh user"),
           participantCount: Number(signal.participantCount ?? 2),
+          callerId: signal.callerId,
         };
         void offerIncomingCall(callInfo);
       }
@@ -466,10 +472,10 @@ function RootLayoutNav() {
           dismissedIncomingCallIdsRef.current.add(callId);
           offeredCallIdRef.current = null;
           pendingIncomingRef.current = null;
-          activeCallIdRef.current = null;
           clearIncomingAutoEnd();
+          requestDismissCallSession(callId);
           dismissIncomingCallUi(callId, true);
-          void loadMessages(String(payload.chatId ?? ""));
+          void loadMessages(String(signal.chatId ?? payload.chatId ?? ""));
         } else {
           dismissIncomingCallUi(undefined, true);
         }

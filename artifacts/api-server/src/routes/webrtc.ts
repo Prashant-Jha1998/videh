@@ -851,9 +851,16 @@ router.post("/calls/:callId/end", async (req: Request, res: Response) => {
 
 router.post("/sessions", async (req: Request, res: Response) => {
   await cleanupSessions();
-  const body = req.body as { channel?: string; userId?: number; type?: "audio" | "video" };
+  const body = req.body as {
+    channel?: string;
+    userId?: number;
+    type?: "audio" | "video";
+    /** Videh call invite caller — fixes offer/answer when callee connects before caller. */
+    videhCallerId?: number;
+  };
   const channel = safeChannel(body.channel);
   const userId = Number(body.userId);
+  const videhCallerId = Number(body.videhCallerId) || 0;
   if (!channel || !userId) {
     res.status(400).json({ success: false, message: "channel and userId are required." });
     return;
@@ -863,15 +870,18 @@ router.post("/sessions", async (req: Request, res: Response) => {
   let session = await getSession(channel);
   let role: Role = "caller";
   if (!session) {
+    const iAmVidehCaller = !videhCallerId || videhCallerId === userId;
     session = {
       channel,
       type: body.type === "video" ? "video" : "audio",
-      callerId: userId,
+      callerId: iAmVidehCaller ? userId : videhCallerId,
+      calleeId: iAmVidehCaller ? undefined : userId,
       callerCandidates: [],
       calleeCandidates: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
+    role = iAmVidehCaller ? "caller" : "callee";
   } else {
     role = session.callerId === userId ? "caller" : "callee";
     if (role === "callee") session.calleeId = userId;

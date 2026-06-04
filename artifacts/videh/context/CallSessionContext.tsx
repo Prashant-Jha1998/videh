@@ -159,12 +159,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [inviteeUserIds, callerId, userId]);
 
   const engineChannel = session?.engineActive ? session.channel : "";
+  const videhOffererId = callerId ?? (session?.isIncoming ? 0 : userId);
   const call = useVidehCall(
     engineChannel,
     userId,
     session?.isVideo ?? false,
     session?.engineActive ? remotePeerIds : [],
     user?.sessionToken,
+    videhOffererId,
   );
 
   const resetCallParticipantState = useCallback(() => {
@@ -230,13 +232,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       try {
         await stopCallAlert();
         setVideoCallPipEnabled(false);
-        if (shouldLeave) await call.leave();
         if (id) {
           endCallKeep(id);
           if (!opts?.skipServerEnd) {
             await webrtcFetch(`/calls/${id}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
           }
         }
+        if (shouldLeave) await call.leave();
         void refreshCallLogs();
         clearSession();
         setHeldSession(null);
@@ -342,6 +344,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const presentIncomingCall = useCallback((callInfo: IncomingCallInfo) => {
     wakeScreenForIncomingCall();
     resetCallParticipantState();
+    if (callInfo.callerId) setCallerId(callInfo.callerId);
     const next: CallSession = {
       chatId: String(callInfo.chatId),
       contactName: callInfo.callerName,
@@ -440,6 +443,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (!callId || !user?.dbId) return;
 
     await stopIncomingCallExperience(callId);
+
+    if (callInfo?.callerId) setCallerId(callInfo.callerId);
 
     if (callInfo) {
       const next: CallSession = {
@@ -543,6 +548,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (!session?.callId || !userId || !session.engineActive || session.ringing) return;
     const polledCallId = session.callId;
     statusPollMissRef.current = 0;
+    const pollMs = call.joined ? 500 : 1000;
+    const missLimit = call.joined ? 1 : 3;
     const timer = setInterval(() => {
       void webrtcFetch(`/calls/${polledCallId}/status?userId=${userId}`, user?.sessionToken)
         .then(async (res) => {
@@ -563,7 +570,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           if (sessionCallIdRef.current !== polledCallId) return;
           if (!data.success || res.status === 404) {
             statusPollMissRef.current += 1;
-            if (statusPollMissRef.current >= 3) {
+            if (statusPollMissRef.current >= missLimit) {
               handleRemoteCallEnd(polledCallId);
             }
             return;
@@ -619,24 +626,12 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           }
 
           if (data.ended) {
-            if (!endedTonePlayed.current && !call.joined) {
-              endedTonePlayed.current = true;
-              const unavailable = (data.missedCount ?? 0) > 0;
-              void (async () => {
-                try {
-                  await stopCallAlert();
-                  if (unavailable) await playCallUnavailableTone();
-                  onCallEnded();
-                } catch { /* ignore */ }
-              })();
-              return;
-            }
             void stopCallAlert();
-            onCallEnded();
+            handleRemoteCallEnd(polledCallId);
           }
         })
         .catch(() => {});
-    }, 1000);
+    }, pollMs);
     return () => clearInterval(timer);
   }, [session?.callId, session?.engineActive, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleRemoteCallEnd]);
 

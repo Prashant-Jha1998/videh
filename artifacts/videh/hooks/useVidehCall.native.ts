@@ -35,6 +35,7 @@ export function useVidehCall(
   isVideo: boolean,
   remotePeerIds: number[] = [],
   sessionToken?: string | null,
+  videhCallerId = 0,
 ): VidehCallState {
   const channels = channelsForCall(baseChannel, uid, remotePeerIds);
   const primaryChannel = channels[0] ?? "";
@@ -233,7 +234,12 @@ export function useVidehCall(
 
       const sessionRes = await webrtcFetch("/sessions", sessionToken, {
         method: "POST",
-        body: JSON.stringify({ channel, userId: uid, type: isVideo ? "video" : "audio" }),
+        body: JSON.stringify({
+          channel,
+          userId: uid,
+          type: isVideo ? "video" : "audio",
+          videhCallerId: videhCallerId || uid,
+        }),
       });
       const sessionData = await sessionRes.json() as { success?: boolean; role?: Role };
       if (connectGen !== connectGenRef.current || stopped) return;
@@ -433,7 +439,7 @@ export function useVidehCall(
       stopAllSignaling();
       closeAllPeerConnections(true);
     };
-  }, [primaryChannel, uid, isVideo, channelsKey, refreshAggregate, sessionToken, remotePeerIds, stopAllSignaling, closeAllPeerConnections]);
+  }, [primaryChannel, uid, isVideo, channelsKey, refreshAggregate, sessionToken, remotePeerIds, videhCallerId, stopAllSignaling, closeAllPeerConnections]);
 
   useEffect(() => {
     return () => {

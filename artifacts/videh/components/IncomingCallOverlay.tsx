@@ -20,6 +20,8 @@ export type IncomingCallInfo = {
   type: "audio" | "video";
   callerName: string;
   participantCount: number;
+  /** Videh invite caller user id — required for correct WebRTC offer/answer roles. */
+  callerId?: number;
 };
 
 type Props = {

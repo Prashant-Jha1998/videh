@@ -23,10 +23,13 @@ export async function fetchIncomingCallDetails(
         chatId?: number;
         type?: string;
         callerName?: string;
+        callerId?: number;
         participantCount?: number;
       };
+      callerId?: number;
     };
     if (!data.success || data.ended || !data.call?.channel) return null;
+    const resolvedCallerId = Number(data.callerId ?? data.call.callerId);
     return {
       callId: String(data.call.callId ?? callId),
       channel: String(data.call.channel),
@@ -34,6 +37,7 @@ export async function fetchIncomingCallDetails(
       type: data.call.type === "video" ? "video" : "audio",
       callerName: String(data.call.callerName ?? "Videh user"),
       participantCount: Number(data.call.participantCount ?? 2),
+      callerId: Number.isFinite(resolvedCallerId) && resolvedCallerId > 0 ? resolvedCallerId : undefined,
     };
   } catch {
     return null;
