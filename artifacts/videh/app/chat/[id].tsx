@@ -1511,10 +1511,13 @@ export default function ChatScreen() {
   }, [messages.length, searching, scrollToLatest, schedulePinToBottom]);
 
   /**
-   * WhatsApp: tail gap = composer height so last bubble sits above the input bar.
-   * Native also shrinks the list via keyboard-controller KeyboardAvoidingView when the keyboard opens.
+   * WhatsApp: tail gap = composer + keyboard so bubbles stay above the input bar (not hidden behind keyboard).
+   * Android uses adjustNothing + KeyboardStickyView only — do not also shrink via KAV padding (causes floating composer).
    */
-  const listBottomPadding = useMemo(() => Math.max(12, composerHeight + 8), [composerHeight]);
+  const listBottomPadding = useMemo(() => {
+    const kb = Platform.OS === "android" && keyboardVisible ? keyboardHeight : keyboardVisible ? 4 : 0;
+    return Math.max(12, composerHeight + 8 + kb);
+  }, [composerHeight, keyboardHeight, keyboardVisible]);
   const jumpFabBottom = useMemo(
     () =>
       Math.max(
@@ -3261,6 +3264,11 @@ export default function ChatScreen() {
               {chatComposerBlock}
             </KeyboardAvoidingView>
           </>
+        ) : Platform.OS === "android" ? (
+          <View style={styles.chatKeyboardAvoid}>
+            <View style={styles.messageListWrap}>{chatMessageList}</View>
+            <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>{chatComposerBlock}</KeyboardStickyView>
+          </View>
         ) : (
           <ChatKeyboardAvoidingView style={styles.chatKeyboardAvoid} behavior="padding">
             <View style={styles.messageListWrap}>{chatMessageList}</View>
