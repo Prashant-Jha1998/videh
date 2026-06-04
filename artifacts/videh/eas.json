@@ -23,12 +23,16 @@
     },
     "apkRelease": {
       "distribution": "internal",
+      "prebuildCommand": "npx expo prebuild --platform android --clean",
       "env": {
         "EXPO_PUBLIC_DOMAIN": "videh.co.in",
         "VIDEOH_SLIM_ANDROID": "1"
       },
       "android": {
         "buildType": "apk"
+      },
+      "cache": {
+        "key": "apk-release-v2"
       }
     },
     "production": {
