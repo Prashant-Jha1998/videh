@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "pan",
-      "versionCode": 34,
+      "versionCode": 35,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/videh_icon_foreground.png",
         "backgroundColor": "#0B141A"
@@ -194,13 +194,10 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "prashantjha122",
+    "owner": "prashantprasun",
     "extra": {
       "router": {
         "origin": "https://replit.com/"
-      },
-      "eas": {
-        "projectId": "40eca748-5bca-41b2-b69c-c0f02f6bbc8d"
       }
     }
   }

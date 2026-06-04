@@ -42,6 +42,7 @@ export default function CallScreen() {
     session,
     initFromRoute,
     joined,
+    mediaReady,
     error,
     muted,
     cameraOff,
@@ -188,7 +189,7 @@ export default function CallScreen() {
     ? error === "NATIVE_WEBRTC_UNAVAILABLE"
       ? "Connecting..."
       : `Error: ${error}`
-    : joined && remoteCount > 0
+    : mediaReady
     ? statusText
     : statusText
     || (incoming && !joined

@@ -11,7 +11,9 @@ export type { VidehCallState } from "./videhCallTypes";
 
 type Role = "caller" | "callee";
 const SIGNAL_POLL_MS = 250;
-const ICE_RESTART_DELAY_MS = 2000;
+const ICE_RESTART_DELAY_MS = 5000;
+const DISCONNECT_GRACE_MS = 4500;
+const CONNECT_STABLE_MS = 1200;
 
 /** 0 = single shared call channel (no _peer_ suffix on server invite channel). */
 const SINGLE_PEER_KEY = 0;
@@ -53,6 +55,10 @@ export function useVidehCall(
   const connectGenRef = useRef(0);
   const mountedRef = useRef(true);
   const speakerOnRef = useRef(!isVideo ? false : true);
+  const mediaReadyLatchRef = useRef(false);
+  const connectedSinceRef = useRef<number | null>(null);
+  const disconnectGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasRemoteMediaRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -62,6 +68,7 @@ export function useVidehCall(
   }, []);
 
   const [joined, setJoined] = useState(false);
+  const [mediaReady, setMediaReady] = useState(false);
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const onHoldRef = useRef(false);
@@ -86,18 +93,33 @@ export function useVidehCall(
     );
   };
 
+  const markRemoteMedia = useCallback(() => {
+    hasRemoteMediaRef.current = true;
+    if (!mediaReadyLatchRef.current) {
+      mediaReadyLatchRef.current = true;
+      setMediaReady(true);
+    }
+  }, []);
+
   const refreshAggregate = useCallback(() => {
+    const { MediaStream: NativeMediaStream } = require("react-native-webrtc");
     if (remotePeersRef.current.size === 0) {
-      const { MediaStream: NativeMediaStream } = require("react-native-webrtc");
       for (const [channel, pc] of pcsRef.current.entries()) {
         if (pc?.connectionState !== "connected") continue;
         for (const receiver of pc.getReceivers?.() ?? []) {
           const track = receiver?.track;
-          if (!track || track.kind !== "video" || track.readyState === "ended") continue;
+          if (!track || track.readyState === "ended") continue;
+          if (track.kind !== "video" && track.kind !== "audio") continue;
           const stream = new NativeMediaStream([track]);
           const url = typeof stream.toURL === "function" ? stream.toURL() : undefined;
           const parsedPeer = peerIdFromCallChannel(channel, uid) || remotePeerIds[0];
-          upsertRemotePeer(remotePeersRef.current, parsedPeer || SINGLE_PEER_KEY, url, true);
+          upsertRemotePeer(
+            remotePeersRef.current,
+            parsedPeer || SINGLE_PEER_KEY,
+            url,
+            track.kind === "video",
+          );
+          if (track.kind === "audio" || track.kind === "video") hasRemoteMediaRef.current = true;
         }
       }
     }
@@ -107,8 +129,47 @@ export function useVidehCall(
     const connected = states.filter((s) => s === "connected").length;
     const failed = states.some((s) => s === "failed" || s === "closed");
     const reconnecting = states.some((s) => s === "disconnected" || s === "connecting");
-    setJoined(connected > 0);
-    setRemoteCount(connected);
+    const hasMedia = hasRemoteMediaRef.current || remotePeersRef.current.size > 0;
+    const now = Date.now();
+
+    if (connected > 0 || hasMedia) {
+      if (disconnectGraceTimerRef.current) {
+        clearTimeout(disconnectGraceTimerRef.current);
+        disconnectGraceTimerRef.current = null;
+      }
+      if (!connectedSinceRef.current) connectedSinceRef.current = now;
+      const stableFor = now - connectedSinceRef.current;
+      const showLive = mediaReadyLatchRef.current || hasMedia || stableFor >= CONNECT_STABLE_MS;
+      if (showLive) {
+        if (hasMedia) markRemoteMedia();
+        else if (!mediaReadyLatchRef.current && stableFor >= CONNECT_STABLE_MS) {
+          mediaReadyLatchRef.current = true;
+          setMediaReady(true);
+        }
+        setJoined(true);
+        setRemoteCount(Math.max(connected, hasMedia ? 1 : 0));
+      } else {
+        setJoined(mediaReadyLatchRef.current);
+        setRemoteCount(mediaReadyLatchRef.current ? 1 : 0);
+      }
+    } else if (mediaReadyLatchRef.current) {
+      connectedSinceRef.current = null;
+      if (!disconnectGraceTimerRef.current) {
+        disconnectGraceTimerRef.current = setTimeout(() => {
+          disconnectGraceTimerRef.current = null;
+          if (!mountedRef.current) return;
+          mediaReadyLatchRef.current = false;
+          hasRemoteMediaRef.current = false;
+          setMediaReady(false);
+          setJoined(false);
+          setRemoteCount(0);
+        }, DISCONNECT_GRACE_MS);
+      }
+    } else {
+      connectedSinceRef.current = null;
+      setJoined(false);
+      setRemoteCount(0);
+    }
     const peerList: RemoteCallPeerStream[] = [...remotePeersRef.current.entries()].map(([peerId, p]) => ({
       peerId,
       streamUrl: p.streamUrl,
@@ -128,11 +189,11 @@ export function useVidehCall(
     } else if (failed) {
       setConnectionPhase("failed");
     } else if (reconnecting && pcs.length > 0) {
-      setConnectionPhase("reconnecting");
+      setConnectionPhase(mediaReadyLatchRef.current ? "reconnecting" : "connecting");
     } else if (pcs.length > 0) {
       setConnectionPhase("connecting");
     }
-  }, [isVideo, uid, remotePeerIds]);
+  }, [isVideo, uid, remotePeerIds, markRemoteMedia]);
 
   const channelsKey = channels.join("|");
 
@@ -160,7 +221,15 @@ export function useVidehCall(
       remotePeersRef.current.clear();
       lastOfferRevisionRef.current.clear();
       lastAnswerRevisionRef.current.clear();
+      if (disconnectGraceTimerRef.current) {
+        clearTimeout(disconnectGraceTimerRef.current);
+        disconnectGraceTimerRef.current = null;
+      }
+      mediaReadyLatchRef.current = false;
+      hasRemoteMediaRef.current = false;
+      connectedSinceRef.current = null;
       setJoined(false);
+      setMediaReady(false);
       setRemoteCount(0);
       setRemotePeers([]);
       setRemoteStreamUrl(undefined);
@@ -271,9 +340,11 @@ export function useVidehCall(
         if (!stream) return;
         const url = typeof stream.toURL === "function" ? stream.toURL() : undefined;
         const hasVid = (stream.getVideoTracks?.().length ?? 0) > 0;
+        const hasAud = (stream.getAudioTracks?.().length ?? 0) > 0;
         const parsedPeer = peerIdFromCallChannel(channel, uid) || remotePeerIds[0];
         const storageKey = parsedPeer || SINGLE_PEER_KEY;
         upsertRemotePeer(remotePeersRef.current, storageKey, url, hasVid);
+        if (hasAud || hasVid) markRemoteMedia();
         refreshAggregate();
       };
       pc.ontrack = (event: any) => {
@@ -463,6 +534,7 @@ export function useVidehCall(
 
   return {
     joined,
+    mediaReady,
     connectionPhase,
     error,
     muted,
@@ -525,7 +597,15 @@ export function useVidehCall(
       localStreamRef.current?.getTracks?.().forEach((track: any) => track.stop());
       localStreamRef.current = null;
       setLocalStreamUrl(undefined);
+      if (disconnectGraceTimerRef.current) {
+        clearTimeout(disconnectGraceTimerRef.current);
+        disconnectGraceTimerRef.current = null;
+      }
+      mediaReadyLatchRef.current = false;
+      hasRemoteMediaRef.current = false;
+      connectedSinceRef.current = null;
       setJoined(false);
+      setMediaReady(false);
       setRemoteCount(0);
       setRemotePeers([]);
       setRemoteStreamUrl(undefined);

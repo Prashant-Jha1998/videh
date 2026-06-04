@@ -64,6 +64,7 @@ type RouteParams = {
 type CallSessionContextValue = {
   session: CallSession | null;
   joined: boolean;
+  mediaReady: boolean;
   connectionPhase: string;
   error: string | null;
   muted: boolean;
@@ -604,7 +605,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           if (remoteAccepted && !call.joined) {
             void stopCallAlert();
             setStatusHint("Connecting…");
-          } else if (call.joined && call.remoteCount > 0) {
+          } else if (call.mediaReady) {
             setStatusHint(null);
           }
 
@@ -648,13 +649,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [session?.callId, session?.engineActive, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleRemoteCallEnd]);
 
   useEffect(() => {
-    if (!call.joined || call.remoteCount < 1) {
+    if (!call.mediaReady) {
       setDuration(0);
       return;
     }
     const t = setInterval(() => setDuration((d) => d + 1), 1000);
     return () => clearInterval(t);
-  }, [call.joined, call.remoteCount]);
+  }, [call.mediaReady]);
 
   useEffect(() => {
     if (!session?.engineActive || session.ringing || !call.joined) {
@@ -716,11 +717,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (session.ringing) {
       return session.isVideo ? "Incoming video call" : "Incoming voice call";
     }
-    if (call.joined) {
-      if (call.remoteCount > 0) return formatDuration(duration);
+    if (call.mediaReady) {
+      if (call.connectionPhase === "reconnecting") return "Reconnecting…";
+      return formatDuration(duration);
+    }
+    if (call.joined || acceptedCount > 1) {
       if (call.connectionPhase === "reconnecting") return "Reconnecting…";
       if (statusHint) return statusHint;
-      if (acceptedCount > 1) return "Connecting…";
       return "Connecting…";
     }
     if (call.error) {
@@ -736,6 +739,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     () => ({
       session,
       joined: call.joined,
+      mediaReady: call.mediaReady,
       connectionPhase: call.connectionPhase,
       error: call.error,
       muted: call.muted,

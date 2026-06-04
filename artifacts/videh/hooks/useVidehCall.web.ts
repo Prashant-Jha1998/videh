@@ -215,6 +215,7 @@ export function useVidehCall(
 
   return {
     joined,
+    mediaReady: joined,
     connectionPhase: joined ? "connected" as const : error ? "failed" as const : "connecting" as const,
     error,
     muted,

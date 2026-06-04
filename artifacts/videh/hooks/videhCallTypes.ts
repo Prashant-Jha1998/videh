@@ -8,6 +8,8 @@ export type RemoteCallPeerStream = {
 
 export interface VidehCallState {
   joined: boolean;
+  /** True once remote media was received; stays true until leave (avoids timer/connecting flicker). */
+  mediaReady: boolean;
   connectionPhase: CallUiPhase;
   error: string | null;
   muted: boolean;
