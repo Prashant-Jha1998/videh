@@ -34,7 +34,6 @@ import {
   startCallKeepOutgoing,
 } from "@/lib/callKeep";
 import { setVideoCallPipEnabled } from "@/lib/callPip";
-import { effectiveCallVideo, statusPollIntervalMs } from "@/lib/callStability";
 import type { RemoteCallPeerStream } from "@/hooks/videhCallTypes";
 
 export type CallSession = {
@@ -152,15 +151,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [inviteeUserIds, callerId, userId]);
 
   const engineChannel = session?.engineActive ? session.channel : "";
-  const engineVideo = useMemo(() => {
-    if (!session?.isVideo) return false;
-    return effectiveCallVideo(true, Math.max(acceptedCount, acceptedUserIds.length, 2));
-  }, [session?.isVideo, acceptedCount, acceptedUserIds.length]);
-
   const call = useVidehCall(
     engineChannel,
     userId,
-    engineVideo,
+    session?.isVideo ?? false,
     session?.engineActive ? remotePeerIds : [],
     user?.sessionToken,
   );
@@ -251,24 +245,19 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [router]);
 
   const endCall = useCallback(async () => {
-    endingCallRef.current = true;
     await stopCallAlert();
     setVideoCallPipEnabled(false);
     const endingCallId = session?.callId;
-    try {
-      if (session?.engineActive || call.error) await call.leave();
-      if (endingCallId) {
-        endCallKeep(endingCallId);
-        requestDismissIncomingCallUi(endingCallId);
-        await webrtcFetch(`/calls/${endingCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
-      }
-    } finally {
-      void refreshCallLogs();
-      clearSession();
-      setHeldSession(null);
-      resetCallNavigationGuard();
-      leaveCallScreen();
+    if (session?.engineActive) await call.leave();
+    if (endingCallId) {
+      endCallKeep(endingCallId);
+      requestDismissIncomingCallUi(endingCallId);
+      await webrtcFetch(`/calls/${endingCallId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
     }
+    void refreshCallLogs();
+    clearSession();
+    setHeldSession(null);
+    leaveCallScreen();
   }, [session, call, user?.sessionToken, clearSession, refreshCallLogs, leaveCallScreen]);
 
   const holdActiveCall = useCallback(async () => {
@@ -398,11 +387,6 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           setParticipantCount(data.call!.participantCount ?? 2);
           setAcceptedCount(data.call!.acceptedCount ?? 1);
           setRingingCount(data.call!.ringingCount ?? 0);
-          if (user?.dbId) setAcceptedUserIds((prev) => {
-            const next = new Set(prev);
-            next.add(user.dbId!);
-            return [...next];
-          });
           if (data.allInviteesBusy) {
             void (async () => {
               if (busyEndHandledRef.current === data.call?.callId) return;
@@ -442,16 +426,6 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       method: "POST",
       body: JSON.stringify({ userId: user.dbId, action: "accept" }),
     }).catch(() => {});
-    void webrtcFetch(`/calls/${callId}/status?userId=${user.dbId}`, user.sessionToken)
-      .then(async (res) => {
-        const data = (await res.json()) as { acceptedUserIds?: number[]; callerId?: number };
-        if (Array.isArray(data.acceptedUserIds) && data.acceptedUserIds.length > 0) {
-          setAcceptedUserIds(data.acceptedUserIds);
-        } else if (typeof data.callerId === "number") {
-          setAcceptedUserIds([user.dbId, data.callerId]);
-        }
-      })
-      .catch(() => {});
     setSession((prev) =>
       prev && prev.callId === callId
         ? { ...prev, ringing: false, engineActive: true, minimized: false }
@@ -526,107 +500,99 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [session?.callId, session?.isIncoming, session?.ringing, call.joined, user?.sessionToken, onCallEnded]);
 
   useEffect(() => {
-    if (!session?.callId || !userId || !session.engineActive) return;
+    if (!session?.callId || !userId) return;
     const polledCallId = session.callId;
-
-    const applyStatus = async (res: Response) => {
-      const data = (await res.json()) as {
-        success?: boolean;
-        acceptedCount?: number;
-        ringingCount?: number;
-        busyCount?: number;
-        declinedCount?: number;
-        missedCount?: number;
-        allInviteesBusy?: boolean;
-        call?: { participantCount?: number };
-        ended?: boolean;
-        acceptedUserIds?: number[];
-        callerId?: number;
-        statuses?: Record<string, string>;
-      };
-      if (sessionCallIdRef.current !== polledCallId || endingCallRef.current) return;
-      if (!data.success || res.status === 404) {
-        handleRemoteCallEnd(polledCallId);
-        return;
-      }
-      setAcceptedCount(data.acceptedCount ?? 1);
-      setRingingCount(data.ringingCount ?? 0);
-      setParticipantCount(data.call?.participantCount ?? participantCount);
-      if (Array.isArray(data.acceptedUserIds) && data.acceptedUserIds.length > 0) {
-        setAcceptedUserIds(data.acceptedUserIds);
-      }
-      if (typeof data.callerId === "number") setCallerId(data.callerId);
-      if (data.statuses && typeof data.statuses === "object") {
-        setInviteeUserIds(
-          Object.keys(data.statuses)
-            .map((k) => Number(k))
-            .filter((id) => Number.isFinite(id)),
-        );
-      }
-
-      const remoteAccepted = (data.acceptedCount ?? 1) > 1;
-      if (remoteAccepted && !call.joined) {
-        void stopCallAlert();
-        setStatusHint("Connecting…");
-      }
-
-      if (!call.joined && !endedTonePlayed.current) {
-        if (data.allInviteesBusy || ((data.busyCount ?? 0) > 0 && (data.ringingCount ?? 0) === 0 && !remoteAccepted)) {
-          if (busyEndHandledRef.current === polledCallId) return;
-          busyEndHandledRef.current = polledCallId;
-          endedTonePlayed.current = true;
-          void (async () => {
-            try {
-              await stopCallAlert();
-              await playCallBusyTone();
-              onCallEnded();
-            } catch { /* ignore */ }
-          })();
-          return;
-        }
-        if ((data.declinedCount ?? 0) > 0 && (data.ringingCount ?? 0) === 0 && !remoteAccepted) {
-          if (busyEndHandledRef.current === polledCallId) return;
-          busyEndHandledRef.current = polledCallId;
-          endedTonePlayed.current = true;
-          void (async () => {
-            try {
-              await stopCallAlert();
-              await playCallUnavailableTone();
-              onCallEnded();
-            } catch { /* ignore */ }
-          })();
-          return;
-        }
-      }
-
-      if (data.ended) {
-        if (!endedTonePlayed.current && !call.joined) {
-          endedTonePlayed.current = true;
-          const unavailable = (data.missedCount ?? 0) > 0;
-          void (async () => {
-            try {
-              await stopCallAlert();
-              if (unavailable) await playCallUnavailableTone();
-              onCallEnded();
-            } catch { /* ignore */ }
-          })();
-          return;
-        }
-        void stopCallAlert();
-        onCallEnded();
-      }
-    };
-
-    const poll = () => {
+    const timer = setInterval(() => {
       void webrtcFetch(`/calls/${polledCallId}/status?userId=${userId}`, user?.sessionToken)
-        .then(applyStatus)
-        .catch(() => {});
-    };
+        .then(async (res) => {
+          const data = (await res.json()) as {
+          success?: boolean;
+          acceptedCount?: number;
+          ringingCount?: number;
+          busyCount?: number;
+          declinedCount?: number;
+          missedCount?: number;
+          allInviteesBusy?: boolean;
+          call?: { participantCount?: number };
+          ended?: boolean;
+          acceptedUserIds?: number[];
+          callerId?: number;
+          statuses?: Record<string, string>;
+        };
+          if (sessionCallIdRef.current !== polledCallId || endingCallRef.current) return;
+          if (!data.success || res.status === 404) {
+            handleRemoteCallEnd(polledCallId);
+            return;
+          }
+          setAcceptedCount(data.acceptedCount ?? 1);
+          setRingingCount(data.ringingCount ?? 0);
+          setParticipantCount(data.call?.participantCount ?? participantCount);
+          if (Array.isArray(data.acceptedUserIds)) setAcceptedUserIds(data.acceptedUserIds);
+          if (typeof data.callerId === "number") setCallerId(data.callerId);
+          if (data.statuses && typeof data.statuses === "object") {
+            setInviteeUserIds(
+              Object.keys(data.statuses)
+                .map((k) => Number(k))
+                .filter((id) => Number.isFinite(id)),
+            );
+          }
 
-    poll();
-    const timer = setInterval(poll, statusPollIntervalMs(participantCount));
+          const remoteAccepted = (data.acceptedCount ?? 1) > 1;
+          if (remoteAccepted && !call.joined) {
+            void stopCallAlert();
+            setStatusHint("Connecting…");
+          }
+
+          if (!call.joined && !endedTonePlayed.current) {
+            if (data.allInviteesBusy || ((data.busyCount ?? 0) > 0 && (data.ringingCount ?? 0) === 0 && !remoteAccepted)) {
+              if (busyEndHandledRef.current === polledCallId) return;
+              busyEndHandledRef.current = polledCallId;
+              endedTonePlayed.current = true;
+              void (async () => {
+                try {
+                  await stopCallAlert();
+                  await playCallBusyTone();
+                  onCallEnded();
+                } catch { /* ignore */ }
+              })();
+              return;
+            }
+            if ((data.declinedCount ?? 0) > 0 && (data.ringingCount ?? 0) === 0 && !remoteAccepted) {
+              if (busyEndHandledRef.current === polledCallId) return;
+              busyEndHandledRef.current = polledCallId;
+              endedTonePlayed.current = true;
+              void (async () => {
+                try {
+                  await stopCallAlert();
+                  await playCallUnavailableTone();
+                  onCallEnded();
+                } catch { /* ignore */ }
+              })();
+              return;
+            }
+          }
+
+          if (data.ended) {
+            if (!endedTonePlayed.current && !call.joined) {
+              endedTonePlayed.current = true;
+              const unavailable = (data.missedCount ?? 0) > 0;
+              void (async () => {
+                try {
+                  await stopCallAlert();
+                  if (unavailable) await playCallUnavailableTone();
+                  onCallEnded();
+                } catch { /* ignore */ }
+              })();
+              return;
+            }
+            void stopCallAlert();
+            onCallEnded();
+          }
+        })
+        .catch(() => {});
+    }, 2000);
     return () => clearInterval(timer);
-  }, [session?.callId, session?.engineActive, userId, participantCount, call.joined, user?.sessionToken, onCallEnded, handleRemoteCallEnd]);
+  }, [session?.callId, userId, participantCount, call.joined, user?.sessionToken, onCallEnded, handleRemoteCallEnd]);
 
   useEffect(() => {
     if (!call.joined) return;
@@ -655,13 +621,6 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         && (action === "ended" || action === "declined" || action === "missed" || action === "busy" || action === "cancelled")
       ) {
         handleRemoteCallEnd(callId);
-        return;
-      }
-      if (action === "accepted" || action === "participants_updated") {
-        const raw = payload as { acceptedUserIds?: number[] };
-        if (Array.isArray(raw.acceptedUserIds) && raw.acceptedUserIds.length > 0) {
-          setAcceptedUserIds(raw.acceptedUserIds);
-        }
         return;
       }
       if (action !== "media_type") return;

@@ -16,8 +16,6 @@ import { CallSessionProvider, useCallSession } from "@/context/CallSessionContex
 import { OngoingCallBanner } from "@/components/OngoingCallBanner";
 import { UiPreferencesProvider } from "@/context/UiPreferencesContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { NativeBuildRequiredScreen } from "@/components/NativeBuildRequiredScreen";
-import { isExpoGo } from "@/lib/appRuntime";
 import { AssistantOverlay } from "@/components/AssistantOverlay";
 import { getApiUrl } from "@/lib/api";
 import { onCallSignal } from "@/lib/callEvents";
@@ -790,14 +788,6 @@ export default function RootLayout() {
   }, []);
 
   if (!fontsReady) return null;
-
-  if (isExpoGo()) {
-    return (
-      <SafeAreaProvider>
-        <NativeBuildRequiredScreen />
-      </SafeAreaProvider>
-    );
-  }
 
   return (
     <SafeAreaProvider>

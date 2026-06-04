@@ -3,15 +3,10 @@ import { useColorScheme } from "react-native";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { getPerChatTheme, type PerChatThemeOverride } from "@/lib/perChatTheme";
 import {
-  bubbleOverrideFromPreset,
-  CHAT_BUBBLE_PRESETS,
-} from "@/lib/chatBubblePresets";
-import {
   getThemeAppearanceById,
   resolveBubbles,
   resolveChatBackground,
   type AnimatedWallpaperId,
-  type BubbleOverride,
   type ThemeAppearance,
 } from "@/lib/themeAppearance";
 
@@ -55,21 +50,15 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
   return useMemo(() => {
     const themeId = perChat?.themeId ?? appThemeId;
     const appearance = getThemeAppearanceById(themeId);
-    const bubbleOverride: BubbleOverride | null = (() => {
-      if (perChat?.bubblePresetId) {
-        const preset = CHAT_BUBBLE_PRESETS.find((p) => p.id === perChat.bubblePresetId);
-        if (preset) return bubbleOverrideFromPreset(preset);
-      }
-      if (perChat?.bubbleSent || perChat?.bubbleReceived) {
-        return {
-          sentLight: perChat.bubbleSent,
-          receivedLight: perChat.bubbleReceived ?? "#FFFFFF",
-          sentDark: perChat.bubbleSentDark ?? perChat.bubbleSent,
-          receivedDark: perChat.bubbleReceivedDark ?? perChat.bubbleReceived ?? "#1F2C34",
-        };
-      }
-      return customBubbleOverride;
-    })();
+    const bubbleOverride = customBubbleOverride
+      ?? (perChat?.bubbleSent || perChat?.bubbleReceived
+        ? {
+            sentLight: perChat.bubbleSent,
+            receivedLight: perChat.bubbleReceived,
+            sentDark: perChat.bubbleSent,
+            receivedDark: perChat.bubbleReceived,
+          }
+        : null);
 
     const { sent, received } = resolveBubbles(appearance, isDark, bubbleOverride);
     const animatedWallpaper =

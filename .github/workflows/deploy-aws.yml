@@ -43,15 +43,11 @@ jobs:
           export PATH="/usr/local/bin:/usr/bin:/bin:$HOME/.local/share/pnpm:$PATH"
           command -v pnpm >/dev/null || (echo "pnpm not found on EC2 — install pnpm on the server" && exit 1)
 
-          if ! pnpm install --frozen-lockfile; then
-            echo "::error::pnpm-lock.yaml is out of sync with package.json. Run 'pnpm install' at repo root, commit pnpm-lock.yaml, and push again."
-            exit 1
-          fi
-
+          pnpm install --frozen-lockfile
           pnpm --filter @workspace/api-server run build:api
+          BASE_PATH=/ pnpm --filter @workspace/admin-web build
           BASE_PATH=/ pnpm --filter @workspace/videh-web build
-          pnpm --filter @workspace/admin-web build || echo "::warning::admin-web build failed — keeping previous dist if any"
-          pnpm --filter @workspace/developer-web build || echo "::warning::developer-web build failed — keeping previous dist if any"
+          BASE_PATH=/ pnpm --filter @workspace/developer-web build
 
           pm2 restart videh-api --update-env || (
             cd /var/www/videh/artifacts/api-server
@@ -61,26 +57,19 @@ jobs:
 
           sudo bash /var/www/videh/deploy/nginx/apply-videh-site.sh
 
-          echo "Verifying public site..."
-          sleep 12
           for attempt in 1 2 3 4 5; do
-            if curl --fail --silent --show-error -o /dev/null https://videh.co.in/ \
-              && curl --fail --silent --show-error https://videh.co.in/sitemap.xml | grep -q "urlset"; then
-              echo "Deploy health checks passed (videh.co.in + sitemap)."
-              curl --fail --silent --show-error https://videh.co.in/api/readyz && echo "API readyz OK." || echo "::warning::API readyz not ready — check pm2 on server."
+            if curl --fail --silent --show-error https://videh.co.in/api/readyz \
+              && curl --fail --silent --show-error https://videh.co.in/ | grep -q "Videh" \
+              && curl --fail --silent --show-error https://developer.videh.co.in/ | grep -q "Videh"; then
+              echo "Deploy health checks passed."
               exit 0
             fi
-            echo "Health check attempt ${attempt} failed; retrying..."
-            sleep 8
+            echo "Health check failed on attempt ${attempt}; retrying..."
+            sleep 5
           done
 
-          echo "::group::Deploy diagnostics"
-          curl -sI https://videh.co.in/ || true
-          curl -sI https://videh.co.in/sitemap.xml || true
-          curl -sI https://videh.co.in/api/readyz || true
-          sudo nginx -t 2>&1 || true
-          pm2 status || true
-          pm2 logs videh-api --lines 40 --nostream || true
+          echo "::group::PM2 logs"
+          pm2 logs videh-api --lines 80 --nostream || true
           echo "::endgroup::"
           exit 1
           EOF

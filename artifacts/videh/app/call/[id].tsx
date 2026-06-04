@@ -297,7 +297,7 @@ export default function CallScreen() {
 
       {isVideo ? (
         <View style={styles.videoContainer}>
-          {participantCount > 2 && gridPeers.length > 0 ? (
+          {participantCount > 2 && gridPeers.length > 1 ? (
             <GroupCallGrid peers={gridPeers} placeholderColor={avatarBg} />
           ) : remoteStreamUrl ? (
             <VidehRemoteView nativeId={remoteVideoId} streamUrl={remoteStreamUrl} style={styles.remoteVideo} />
@@ -327,20 +327,12 @@ export default function CallScreen() {
         </View>
       ) : (
         <View style={styles.center}>
-          {participantCount > 2 && gridPeers.length > 0 ? (
-            <View style={styles.audioConferenceGrid}>
-              <GroupCallGrid peers={gridPeers} placeholderColor={avatarBg} />
+          <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: !joined ? pulse : 1 }] }]}>
+            <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
+              <Text style={styles.avatarText}>{initials}</Text>
             </View>
-          ) : (
-            <>
-              <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: !joined ? pulse : 1 }] }]}>
-                <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
-                  <Text style={styles.avatarText}>{initials}</Text>
-                </View>
-              </Animated.View>
-              <Text style={styles.callerName}>{name}</Text>
-            </>
-          )}
+          </Animated.View>
+          <Text style={styles.callerName}>{name}</Text>
           <Text style={styles.callStatus}>{displayStatus}</Text>
           {joined && (
             <View style={styles.encryptBadge}>
@@ -573,7 +565,6 @@ const styles = StyleSheet.create({
   conferencePill: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,168,132,0.18)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 5, marginTop: 8 },
   conferenceText: { color: "#d9fdd3", fontSize: 12, fontFamily: "Inter_600SemiBold" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
-  audioConferenceGrid: { width: "100%", flex: 1, maxHeight: "72%", marginBottom: 12 },
   videoContainer: { flex: 1, width: "100%", position: "relative" },
   remoteVideo: { flex: 1, width: "100%", backgroundColor: "#111" },
   videoPlaceholder: { alignItems: "center", justifyContent: "center" },

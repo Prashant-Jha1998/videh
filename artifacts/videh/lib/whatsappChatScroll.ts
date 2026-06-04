@@ -11,18 +11,14 @@
  *
  * Parity checklist (see app/chat/[id].tsx):
  * - stackFromEnd: flexGrow + justifyContent flex-end
- * - composer below list; KeyboardAvoidingView shrinks list when keyboard open + KeyboardStickyView docks input
- * - list paddingBottom = composer only (never add keyboard height to content padding — hides last message)
+ * - composer below list on native (not overlay); resize / KAV handle keyboard
  * - pin after keyboard onEnd (not on every content-size / composer tick)
  * - no auto-pin when user scrolled up (near-bottom threshold)
  * - jump-to-latest FAB when scrolled up (with unread count badge)
  * - older messages pagination at scroll top + maintainVisibleContentPosition
  */
 
-/** Slightly generous so keyboard resize does not falsely mark user as "scrolled up". */
-export const WHATSAPP_CHAT_NEAR_BOTTOM_PX = 120;
-
-export const WHATSAPP_KEYBOARD_SETTLE_MS = 420;
+export const WHATSAPP_CHAT_NEAR_BOTTOM_PX = 80;
 
 /** Distance from the visual bottom of a normal (non-inverted) message list. */
 export function chatDistanceFromBottom(
@@ -42,21 +38,8 @@ export function isChatNearBottom(
   return chatDistanceFromBottom(contentOffsetY, contentHeight, layoutHeight) <= threshold;
 }
 
-/** One immediate + follow-up pins after layout/keyboard (avoid triple-jump jitter). */
-export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0, 80, 200, 360, 520, 720] as const;
-
-/** Scroll a normal (non-inverted) chat list to the visual bottom; retries after layout. */
-export function scrollChatListToLatest(
-  list: { scrollToEnd: (opts: { animated: boolean }) => void } | null | undefined,
-  animated = false,
-): void {
-  if (!list) return;
-  list.scrollToEnd({ animated });
-  requestAnimationFrame(() => {
-    list.scrollToEnd({ animated: false });
-    requestAnimationFrame(() => list.scrollToEnd({ animated: false }));
-  });
-}
+/** One immediate + one post-layout pin after keyboard (avoid triple-jump jitter). */
+export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0, 180] as const;
 
 export function shouldWhatsAppAutoPin(userScrolledUp: boolean, searching: boolean): boolean {
   return !searching && !userScrolledUp;
