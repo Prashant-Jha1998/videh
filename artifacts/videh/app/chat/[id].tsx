@@ -215,7 +215,7 @@ function toReplyData(msg: {
   senderId: string;
   senderName?: string;
   isDeleted?: boolean;
-}): NonNullable<ReplyData> {
+}, messageFallback = "Message"): NonNullable<ReplyData> {
   const preview = messageReplyPreviewText({
     type: msg.type,
     text: msg.text,
@@ -224,7 +224,7 @@ function toReplyData(msg: {
   });
   return {
     id: msg.id,
-    text: preview.trim() || "Message",
+    text: preview.trim() || messageFallback,
     senderId: msg.senderId,
     senderName: msg.senderName,
     type: msg.type,
@@ -686,6 +686,8 @@ function ReplyQuoteStrip({
   accentColor,
   previewColor,
   onPress,
+  contactFallback = "Contact",
+  messageFallback = "Message",
 }: {
   senderLabel: string;
   previewText: string;
@@ -693,6 +695,8 @@ function ReplyQuoteStrip({
   accentColor: string;
   previewColor: string;
   onPress: () => void;
+  contactFallback?: string;
+  messageFallback?: string;
 }) {
   return (
     <Pressable
@@ -708,10 +712,10 @@ function ReplyQuoteStrip({
     >
       <View style={styles.replyStripTextCol}>
         <Text style={[styles.replyWho, { color: accentColor }]} numberOfLines={1}>
-          {senderLabel || "Contact"}
+          {senderLabel || contactFallback}
         </Text>
         <Text style={[styles.replyText, { color: previewColor }]} numberOfLines={2}>
-          {previewText?.trim() || "Message"}
+          {previewText?.trim() || messageFallback}
         </Text>
       </View>
     </Pressable>
@@ -1038,7 +1042,8 @@ export default function ChatScreen() {
     };
   }, [baseColors, chatLook]);
   const headerAccent = chatLook.appearance.accent;
-  const { chatFontScale } = useUiPreferences();
+  const { chatFontScale, t } = useUiPreferences();
+  const messageFallback = t("common.message");
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const messagePollInFlightRef = useRef(false);
@@ -1375,13 +1380,12 @@ export default function ChatScreen() {
   const scrollCoalesceRef = useRef<number | null>(null);
   const composerPinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollToLatest = useCallback((animated = false) => {
-    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || scrollLockRef.current || userDraggingRef.current) {
+    if (scrollLockRef.current || userDraggingRef.current) {
       return;
     }
     if (scrollCoalesceRef.current != null) cancelAnimationFrame(scrollCoalesceRef.current);
     scrollCoalesceRef.current = requestAnimationFrame(() => {
       scrollCoalesceRef.current = null;
-      if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
       listRef.current?.scrollToEnd({ animated });
     });
   }, [searching]);
@@ -1548,7 +1552,7 @@ export default function ChatScreen() {
   }, [messages.length, searching, scrollToLatest, keyboardVisible, schedulePinToBottom]);
 
   /** WhatsApp: list above composer; keyboard-controller lifts composer and shrinks list viewport. */
-  const listBottomPadding = useMemo(() => 12, []);
+  const listBottomPadding = useMemo(() => composerHeight + 12, [composerHeight]);
   const listKeyboardShrink = keyboardVisible && keyboardHeight > 0 ? keyboardHeight : 0;
   const jumpFabBottom = useMemo(
     () => Math.max(12, composerHeight + 12 + listKeyboardShrink),
@@ -2084,7 +2088,7 @@ export default function ChatScreen() {
     const isMe = msg.senderId === "me";
 
     const opts: any[] = [
-      { text: "Reply", onPress: () => { setReplyTo(toReplyData(msg)); inputRef.current?.focus(); } },
+      { text: "Reply", onPress: () => { setReplyTo(toReplyData(msg, messageFallback)); inputRef.current?.focus(); } },
       { text: "Copy", onPress: () => { Clipboard.setString(msg.text); } },
       { text: "React", onPress: () => setReactionTarget(msg) },
       ...(msg.type === "image" && msg.mediaUrl && !msg.isViewOnce
@@ -2277,10 +2281,12 @@ export default function ChatScreen() {
                 chatContactName,
                 isGroup: chat?.isGroup,
               })}
-              previewText={item.replyText?.trim() || "Message"}
+              previewText={item.replyText?.trim() || messageFallback}
               isMe={isMe}
               accentColor={quoteAccent}
               previewColor={REPLY_PREVIEW_TEXT_COLOR}
+              contactFallback={t("common.contact")}
+              messageFallback={messageFallback}
               onPress={() => scrollToQuotedMessage(item.replyToId!)}
             />
           )}
@@ -2517,7 +2523,7 @@ export default function ChatScreen() {
           const ok = (!isMe && direction === "left") || (isMe && direction === "right");
           if (!ok) return;
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          setReplyTo(toReplyData(item));
+          setReplyTo(toReplyData(item, messageFallback));
           inputRef.current?.focus();
           swipeable.close();
         }}
@@ -2770,7 +2776,7 @@ export default function ChatScreen() {
                 })}
               </Text>
               <Text style={[styles.replyPreviewText, { color: REPLY_PREVIEW_TEXT_COLOR }]} numberOfLines={2}>
-                {replyTo.text?.trim() || "Message"}
+                {replyTo.text?.trim() || messageFallback}
               </Text>
             </View>
           </Pressable>
@@ -2849,7 +2855,7 @@ export default function ChatScreen() {
                       borderColor: colors.isDark ? colors.border : "rgba(0,0,0,0.06)",
                     },
                   ]}
-                  placeholder={editTarget ? "Edit message..." : "Message"}
+                  placeholder={editTarget ? t("chat.editPlaceholder") : t("chat.placeholder")}
                   placeholderTextColor={colors.mutedForeground}
                   value={inputVal}
                   onChangeText={handleTextChange}
@@ -2974,7 +2980,7 @@ export default function ChatScreen() {
                   onPress={() => {
                     const m = allMessages.find((x) => x.id === selectedIds[0]);
                     if (!m || m.type === "deleted") return;
-                    setReplyTo(toReplyData(m));
+                    setReplyTo(toReplyData(m, messageFallback));
                     clearSelection();
                     inputRef.current?.focus();
                   }}
@@ -3106,7 +3112,7 @@ export default function ChatScreen() {
           <TextInput
             autoFocus
             style={[styles.searchInput, { color: colors.foreground }]}
-            placeholder="Search messages..."
+            placeholder={t("chat.searchMessages")}
             placeholderTextColor={colors.mutedForeground}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -3116,10 +3122,7 @@ export default function ChatScreen() {
 
       <View style={styles.chatBody}>
         <FlatList
-          style={[
-            styles.messageList,
-            listKeyboardShrink > 0 ? { marginBottom: listKeyboardShrink } : null,
-          ]}
+          style={styles.messageList}
           ref={listRef}
           data={listRows}
           ListHeaderComponent={
@@ -3238,11 +3241,11 @@ export default function ChatScreen() {
           ListEmptyComponent={
             initializing ? (
               <View style={styles.initWrap}>
-                <Text style={[styles.initText, { color: colors.mutedForeground }]}>Starting chat...</Text>
+                <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.starting")}</Text>
               </View>
             ) : searching ? (
               <View style={styles.initWrap}>
-                <Text style={[styles.initText, { color: colors.mutedForeground }]}>No messages found</Text>
+                <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.noResults")}</Text>
               </View>
             ) : null
           }
@@ -3635,7 +3638,7 @@ export default function ChatScreen() {
             <TextInput
               value={forwardSearch}
               onChangeText={setForwardSearch}
-              placeholder="Search chats"
+              placeholder={t("chat.searchChats")}
               placeholderTextColor={colors.mutedForeground}
               style={[styles.forwardSearchInput, { color: colors.foreground, borderColor: colors.border }]}
             />

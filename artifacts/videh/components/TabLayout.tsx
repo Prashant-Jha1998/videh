@@ -11,9 +11,9 @@ import { useApp } from "@/context/AppContext";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 
 function NativeTabLayout() {
-  const { t } = useUiPreferences();
+  const { t, locale } = useUiPreferences();
   return (
-    <NativeTabs>
+    <NativeTabs key={locale}>
       <NativeTabs.Trigger name="chats">
         <Icon sf={{ default: "bubble.left.and.bubble.right", selected: "bubble.left.and.bubble.right.fill" }} />
         <Label>{t("tab.chats")}</Label>
@@ -35,7 +35,7 @@ function NativeTabLayout() {
 }
 
 export function ClassicTabLayout() {
-  const { t } = useUiPreferences();
+  const { t, locale } = useUiPreferences();
   const colors = useColors();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
@@ -48,6 +48,7 @@ export function ClassicTabLayout() {
 
   return (
     <Tabs
+      key={locale}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,

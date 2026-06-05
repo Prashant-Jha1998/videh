@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, Chat } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { formatTime } from "@/utils/time";
 import { DropdownMenu } from "@/components/DropdownMenu";
 import { ThemedHeader } from "@/components/ThemedHeader";
@@ -26,6 +27,7 @@ import { getApiUrl } from "@/lib/api";
 import { getContactStatusRingSegments } from "@/lib/statusRingSegments";
 import { StoryRingAvatar } from "@/components/StoryRing";
 import { formatTypingLabel } from "@/lib/typingIndicator";
+import { interpolate } from "@/lib/i18n";
 
 interface BroadcastListRow {
   id: number;
@@ -45,6 +47,7 @@ export default function ChatsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { chats, statuses, pinChat, muteChat, archiveChat, refreshChats, blockUser, markAsRead, markAllAsRead, user } = useApp();
+  const { t } = useUiPreferences();
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"all" | "unread" | "favorites" | "groups">("all");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -138,10 +141,10 @@ export default function ChatsScreen() {
       return;
     }
     if (lockedIds.includes(chat.id)) {
-      Alert.alert("Locked chat", "Unlock this chat to open it.", [
-        { text: "Cancel", style: "cancel" },
+      Alert.alert(t("chats.lockedTitle"), t("chats.lockedBody"), [
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "Unlock and open",
+          text: t("chats.unlockAndOpen"),
           onPress: () => {
             const next = lockedIds.filter((id) => id !== chat.id);
             setLockedIds(next);
@@ -382,10 +385,10 @@ export default function ChatsScreen() {
             <TouchableOpacity onPress={() => setShowArchived(false)} style={styles.archivedBackBtn}>
               <Ionicons name="arrow-back" size={23} color="#fff" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Archived</Text>
+            <Text style={styles.headerTitle}>{t("chats.archived")}</Text>
           </View>
         ) : (
-          <Text style={styles.headerTitle}>Videh</Text>
+          <Text style={styles.headerTitle}>{t("settings.header")}</Text>
         )}
         <View style={styles.headerRight}>
           {isSelectionMode ? (
@@ -445,7 +448,7 @@ export default function ChatsScreen() {
         >
           <View style={styles.archivedRowLeft}>
             <Ionicons name="archive-outline" size={22} color={colors.primary} />
-            <Text style={[styles.archivedRowText, { color: colors.foreground }]}>Archived</Text>
+            <Text style={[styles.archivedRowText, { color: colors.foreground }]}>{t("chats.archived")}</Text>
           </View>
           <Text style={[styles.archivedCount, { color: colors.primary }]}>{archivedChats.length}</Text>
         </TouchableOpacity>
@@ -455,7 +458,7 @@ export default function ChatsScreen() {
         <Ionicons name="search" size={16} color={colors.mutedForeground} />
         <TextInput
           style={[styles.searchInput, { color: colors.foreground }]}
-          placeholder="Search"
+          placeholder={t("chats.search")}
           placeholderTextColor={colors.mutedForeground}
           value={search}
           onChangeText={setSearch}
@@ -470,24 +473,24 @@ export default function ChatsScreen() {
       {/* Filter tabs */}
       {!isSelectionMode ? <View style={styles.filterChips}>
         {([
-          { id: "all", label: "All" },
-          { id: "unread", label: `Unread ${visibleBase.reduce((acc, c) => acc + (getUnreadCount(c) > 0 ? 1 : 0), 0)}` },
-          { id: "favorites", label: "Favorites" },
-          { id: "groups", label: "Groups" },
-        ] as const).map((t) => (
+          { id: "all", label: t("chats.tab.all") },
+          { id: "unread", label: `${t("chats.tab.unread")} ${visibleBase.reduce((acc, c) => acc + (getUnreadCount(c) > 0 ? 1 : 0), 0)}` },
+          { id: "favorites", label: t("chats.tab.favorites") },
+          { id: "groups", label: t("chats.tab.groups") },
+        ] as const).map((chip) => (
           <TouchableOpacity
-            key={t.id}
-            onPress={() => setTab(t.id)}
+            key={chip.id}
+            onPress={() => setTab(chip.id)}
             style={[
               styles.filterChip,
               {
-                backgroundColor: tab === t.id ? colors.primary + "20" : colors.card,
-                borderColor: tab === t.id ? colors.primary + "55" : colors.border,
+                backgroundColor: tab === chip.id ? colors.primary + "20" : colors.card,
+                borderColor: tab === chip.id ? colors.primary + "55" : colors.border,
               },
             ]}
           >
-            <Text style={[styles.filterChipText, { color: tab === t.id ? colors.primary : colors.mutedForeground }]}>
-              {t.label}
+            <Text style={[styles.filterChipText, { color: tab === chip.id ? colors.primary : colors.mutedForeground }]}>
+              {chip.label}
             </Text>
           </TouchableOpacity>
         ))}
@@ -544,18 +547,20 @@ export default function ChatsScreen() {
           search ? (
             <View style={styles.empty}>
               <Ionicons name="search-outline" size={60} color={colors.mutedForeground} />
-              <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No results for "{search}"</Text>
+              <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+                {interpolate(t("chats.noSearchResults"), { query: search })}
+              </Text>
             </View>
           ) : (
             <View style={styles.emptyFull}>
               <View style={[styles.emptyIconCircle, { backgroundColor: colors.primary + "18" }]}>
                 <Ionicons name={showArchived ? "archive-outline" : "chatbubbles-outline"} size={56} color={colors.primary} />
               </View>
-              <Text style={[styles.emptyTitle, { color: colors.foreground }]}>{showArchived ? "No archived chats" : "No chats yet"}</Text>
+              <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
+                {showArchived ? t("chats.noArchived") : t("chats.noChats")}
+              </Text>
               <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
-                {showArchived
-                  ? "Archived chats will appear here."
-                  : "Start a conversation with your contacts.\nYour messages are end-to-end encrypted."}
+                {showArchived ? t("chats.noArchivedHint") : t("chats.emptyHint")}
               </Text>
               {!showArchived ? (
                 <TouchableOpacity
@@ -564,7 +569,7 @@ export default function ChatsScreen() {
                   activeOpacity={0.85}
                 >
                   <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
-                  <Text style={styles.emptyBtnText}>Start a chat</Text>
+                  <Text style={styles.emptyBtnText}>{t("chats.startChat")}</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -693,10 +698,11 @@ function ChatRow({
   unreadCount: number;
 }) {
   const { statuses, typingByChatId } = useApp();
+  const { t } = useUiPreferences();
   const typingNames = typingByChatId[chat.id] ?? [];
   const lastLine = typingNames.length > 0
     ? formatTypingLabel(typingNames, chat.isGroup)
-    : (chat.lastMessage ?? "No messages yet");
+    : (chat.lastMessage ?? t("chats.noMessagesYet"));
   const lastLineIsTyping = typingNames.length > 0;
   const initials = chat.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = chat.name.charCodeAt(0) * 37 % 360;

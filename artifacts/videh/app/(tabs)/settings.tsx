@@ -48,24 +48,24 @@ export default function SettingsScreen() {
   };
 
   const changeAvatar = () => {
-    Alert.alert("Profile Photo", "Choose how to update your profile photo", [
+    Alert.alert(t("settings.profilePhoto"), t("settings.choosePhotoMethod"), [
       {
-        text: "Take Photo", onPress: async () => {
+        text: t("settings.takePhoto"), onPress: async () => {
           const { status } = await ImagePicker.requestCameraPermissionsAsync();
-          if (status !== "granted") { Alert.alert("Permission Denied", "Please allow camera access."); return; }
+          if (status !== "granted") { Alert.alert(t("settings.permissionDenied"), t("settings.permissionCamera")); return; }
           const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.6, base64: true });
           if (!result.canceled && result.assets[0]) handlePickedAsset(result.assets[0]);
         }
       },
       {
-        text: "Choose from Library", onPress: async () => {
+        text: t("settings.chooseLibrary"), onPress: async () => {
           const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (status !== "granted") { Alert.alert("Permission Denied", "Please allow photo library access."); return; }
+          if (status !== "granted") { Alert.alert(t("settings.permissionDenied"), t("settings.permissionPhotos")); return; }
           const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: 0.6, base64: true });
           if (!result.canceled && result.assets[0]) handlePickedAsset(result.assets[0]);
         }
       },
-      { text: "Cancel", style: "cancel" },
+      { text: t("common.cancel"), style: "cancel" },
     ]);
   };
 
@@ -73,7 +73,7 @@ export default function SettingsScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     Alert.alert(
       t("settings.logout"),
-      "Are you sure you want to log out of Videh?",
+      t("settings.logoutConfirm"),
       [
         { text: t("common.cancel"), style: "cancel" },
         {
@@ -98,16 +98,16 @@ export default function SettingsScreen() {
 
   const rows: SettingRow[] = useMemo(
     () => [
-      { icon: "mic-circle-outline", iconBg: "#00A884", label: "Hey Videh", value: "Voice assistant", onPress: () => router.push("/settings/assistant" as Href) },
+      { icon: "mic-circle-outline", iconBg: "#00A884", label: t("settings.heyVideh"), value: t("settings.heyVidehSub"), onPress: () => router.push("/settings/assistant" as Href) },
       { icon: "key-outline", iconBg: "#2196F3", label: t("settings.row.account"), value: t("settings.row.accountSub"), onPress: () => router.push("/settings/account") },
       { icon: "lock-closed-outline", iconBg: "#9C27B0", label: t("settings.row.privacy"), value: t("settings.row.privacySub"), onPress: () => router.push("/settings/privacy") },
-      { icon: "color-palette-outline", iconBg: "#7C3AED", label: "App Theme", value: "20 colors and 30 gradients, free for 1 year", onPress: () => router.push("/settings/theme" as Href) },
-      { icon: "brush-outline", iconBg: "#EC4899", label: "Advanced theme", value: "Bubbles, accent, packs & per-chat", onPress: () => router.push("/settings/advanced-theme" as Href) },
+      { icon: "color-palette-outline", iconBg: "#7C3AED", label: t("settings.appTheme"), value: t("settings.appThemeSub"), onPress: () => router.push("/settings/theme" as Href) },
+      { icon: "brush-outline", iconBg: "#EC4899", label: t("settings.advancedTheme"), value: t("settings.advancedThemeSub"), onPress: () => router.push("/settings/advanced-theme" as Href) },
       { icon: "chatbubble-outline", iconBg: "#00BCD4", label: t("settings.row.chats"), value: t("settings.row.chatsSub"), onPress: () => router.push("/settings/chats") },
       { icon: "radio-outline", iconBg: "#E91E63", label: t("settings.row.broadcasts"), value: t("settings.row.broadcastsSub"), onPress: () => router.push("/broadcasts") },
       { icon: "warning-outline", iconBg: "#E74C3C", label: t("settings.row.sos"), value: t("settings.row.sosSub"), onPress: () => router.push("/settings/sos") },
       { icon: "notifications-outline", iconBg: "#FF5722", label: t("settings.row.notifications"), value: t("settings.row.notificationsSub"), onPress: () => router.push("/settings/notifications") },
-      { icon: "musical-notes-outline", iconBg: "#7C4DFF", label: "Premium sounds", value: "Ringtones, packs & per-chat tones", onPress: () => router.push("/settings/premium-sounds" as Href) },
+      { icon: "musical-notes-outline", iconBg: "#7C4DFF", label: t("settings.premiumSounds"), value: t("settings.premiumSoundsSub"), onPress: () => router.push("/settings/premium-sounds" as Href) },
       { icon: "server-outline", iconBg: "#607D8B", label: t("settings.row.storage"), value: t("settings.row.storageSub"), onPress: () => router.push("/settings/storage") },
       { icon: "accessibility-outline", iconBg: "#795548", label: t("settings.row.accessibility"), value: t("settings.row.accessibilitySub"), onPress: () => router.push("/settings/accessibility") },
       { icon: "language-outline", iconBg: "#009688", label: t("settings.row.language"), value: t("settings.row.languageSub"), onPress: () => router.push("/settings/language") },
@@ -120,8 +120,8 @@ export default function SettingsScreen() {
         value: t("settings.row.updatesSub"),
         onPress: () =>
           Alert.alert(
-            "Videh v1.0.0",
-            "You are on the latest version.\n\nHighlights:\n• Broadcast lists\n• Two-step verification\n• Accessibility settings\n• Multi-language support\n• Document, location, and contact sharing",
+            t("settings.updatesTitle"),
+            t("settings.updatesBody"),
           ),
       },
     ],
@@ -161,7 +161,7 @@ export default function SettingsScreen() {
 
           <TouchableOpacity style={styles.nameRow} onPress={() => router.push("/auth/profile")} activeOpacity={0.7}>
             <Text style={[styles.profileName, { color: colors.foreground }]}>
-              {user?.name || "Set your name"}
+              {user?.name || t("settings.setYourName")}
             </Text>
             <View style={[styles.editBtn, { borderColor: colors.primary }]}>
               <Ionicons name="pencil-outline" size={14} color={colors.primary} />
@@ -170,7 +170,7 @@ export default function SettingsScreen() {
 
           <TouchableOpacity onPress={() => router.push("/auth/profile")} activeOpacity={0.7}>
             <Text style={[styles.profileAbout, { color: colors.mutedForeground }]} numberOfLines={2}>
-              {user?.about || "Hey there! I am using Videh."}
+              {user?.about || t("settings.defaultAbout")}
             </Text>
           </TouchableOpacity>
 

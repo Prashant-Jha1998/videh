@@ -12,9 +12,10 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, type CallLog } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { ThemedHeader } from "@/components/ThemedHeader";
 
-function formatCallTime(ts: number): string {
+function formatCallTime(ts: number, yesterdayLabel: string): string {
   const now = Date.now();
   const diff = now - ts;
   const d = new Date(ts);
@@ -22,7 +23,7 @@ function formatCallTime(ts: number): string {
     const h = d.getHours(), m = d.getMinutes().toString().padStart(2, "0");
     return `${h % 12 || 12}:${m} ${h >= 12 ? "PM" : "AM"}`;
   }
-  if (diff < 2 * 24 * 3600000) return "Yesterday";
+  if (diff < 2 * 24 * 3600000) return yesterdayLabel;
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
 
@@ -31,6 +32,7 @@ export default function CallsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { callLogs } = useApp();
+  const { t } = useUiPreferences();
   const [tab, setTab] = useState<"all" | "missed">("all");
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
@@ -39,7 +41,7 @@ export default function CallsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
-        <Text style={styles.headerTitle}>Calls</Text>
+        <Text style={styles.headerTitle}>{t("calls.title")}</Text>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerBtn}>
             <Ionicons name="search-outline" size={22} color="#fff" />
@@ -51,12 +53,12 @@ export default function CallsScreen() {
       </ThemedHeader>
 
       <View style={[styles.tabs, { borderBottomColor: colors.border }]}>
-        {(["all", "missed"] as const).map((t) => (
-          <TouchableOpacity key={t} style={styles.tabBtn} onPress={() => setTab(t)}>
-            <Text style={[styles.tabText, { color: tab === t ? colors.primary : colors.mutedForeground }]}>
-              {t.charAt(0).toUpperCase() + t.slice(1)}
+        {(["all", "missed"] as const).map((tabId) => (
+          <TouchableOpacity key={tabId} style={styles.tabBtn} onPress={() => setTab(tabId)}>
+            <Text style={[styles.tabText, { color: tab === tabId ? colors.primary : colors.mutedForeground }]}>
+              {tabId === "all" ? t("calls.tab.all") : t("calls.tab.missed")}
             </Text>
-            {tab === t && <View style={[styles.tabLine, { backgroundColor: colors.primary }]} />}
+            {tab === tabId && <View style={[styles.tabLine, { backgroundColor: colors.primary }]} />}
           </TouchableOpacity>
         ))}
       </View>
@@ -88,7 +90,7 @@ export default function CallsScreen() {
                   />
                   <Ionicons name={item.type === "video" ? "videocam-outline" : "call-outline"} size={14} color={colors.mutedForeground} />
                   <Text style={[styles.metaText, { color: colors.mutedForeground }]}>
-                    {formatCallTime(item.timestamp)}{durationStr}
+                    {formatCallTime(item.timestamp, t("common.yesterday"))}{durationStr}
                   </Text>
                 </View>
               </View>
@@ -111,7 +113,7 @@ export default function CallsScreen() {
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="call-outline" size={60} color={colors.mutedForeground} />
-            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No missed calls</Text>
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>{t("calls.noMissed")}</Text>
           </View>
         }
         contentContainerStyle={{ paddingBottom: 100 }}

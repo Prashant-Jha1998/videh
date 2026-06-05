@@ -14,6 +14,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, Status } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { interpolate } from "@/lib/i18n";
 import { formatTime } from "@/utils/time";
 import { ThemedHeader } from "@/components/ThemedHeader";
 import { StoryRingAvatar } from "@/components/StoryRing";
@@ -34,6 +36,7 @@ export default function StatusScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { statuses, user } = useApp();
+  const { t } = useUiPreferences();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
   const [fabOpen, setFabOpen] = useState(false);
 
@@ -98,7 +101,7 @@ export default function StatusScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
-        <Text style={styles.headerTitle}>Status</Text>
+        <Text style={styles.headerTitle}>{t("status.title")}</Text>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerBtn}>
             <Ionicons name="search-outline" size={22} color="#fff" />
@@ -152,11 +155,11 @@ export default function StatusScreen() {
                   </View>
                 )}
                 <View>
-                  <Text style={[styles.myName, { color: colors.foreground }]}>My status</Text>
+                  <Text style={[styles.myName, { color: colors.foreground }]}>{t("status.myStatus")}</Text>
                   <Text style={[styles.myHint, { color: colors.mutedForeground }]}>
                     {myStatuses.length > 0
-                      ? `${myStatuses.length} update${myStatuses.length > 1 ? "s" : ""} · ${formatTime(myStatuses[myStatuses.length - 1].timestamp)}`
-                      : "Disappears after 24 hours"}
+                      ? `${myStatuses.length > 1 ? interpolate(t("status.nUpdates"), { n: String(myStatuses.length) }) : t("status.oneUpdate")} · ${formatTime(myStatuses[myStatuses.length - 1].timestamp)}`
+                      : t("status.disappears24h")}
                   </Text>
                 </View>
               </View>
@@ -171,9 +174,9 @@ export default function StatusScreen() {
             {/* Recent updates */}
             {recentGroups.length > 0 && (
               <>
-                <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>RECENT UPDATES</Text>
+                <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>{t("status.recentUpdates")}</Text>
                 {recentGroups.map((g) => (
-                  <StatusGroupRow key={g.userId} group={g} colors={colors} onPress={() => openGroup(g)} />
+                  <StatusGroupRow key={g.userId} group={g} colors={colors} t={t} onPress={() => openGroup(g)} />
                 ))}
               </>
             )}
@@ -181,9 +184,9 @@ export default function StatusScreen() {
             {/* Viewed updates */}
             {viewedGroups.length > 0 && (
               <>
-                <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>VIEWED UPDATES</Text>
+                <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>{t("status.viewedUpdates")}</Text>
                 {viewedGroups.map((g) => (
-                  <StatusGroupRow key={g.userId} group={g} colors={colors} onPress={() => openGroup(g)} />
+                  <StatusGroupRow key={g.userId} group={g} colors={colors} t={t} onPress={() => openGroup(g)} />
                 ))}
               </>
             )}
@@ -192,9 +195,9 @@ export default function StatusScreen() {
             {statusGroups.length === 0 && (
               <View style={styles.empty}>
                 <Ionicons name="radio-button-on-outline" size={60} color={colors.mutedForeground} />
-                <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No status updates yet</Text>
+                <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>{t("status.empty")}</Text>
                 <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
-                  Status updates from your contacts will appear here
+                  {t("status.emptyHint")}
                 </Text>
               </View>
             )}
@@ -214,7 +217,7 @@ export default function StatusScreen() {
             <View style={[styles.fabMenuIcon, { backgroundColor: "#555" }]}>
               <Ionicons name="image-outline" size={20} color="#fff" />
             </View>
-            <Text style={[styles.fabMenuLabel, { color: colors.foreground }]}>Photo or video</Text>
+            <Text style={[styles.fabMenuLabel, { color: colors.foreground }]}>{t("status.photoOrVideo")}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.fabMenuItem, { backgroundColor: colors.card }]}
@@ -223,7 +226,7 @@ export default function StatusScreen() {
             <View style={[styles.fabMenuIcon, { backgroundColor: colors.primary }]}>
               <Ionicons name="pencil" size={20} color="#fff" />
             </View>
-            <Text style={[styles.fabMenuLabel, { color: colors.foreground }]}>Text</Text>
+            <Text style={[styles.fabMenuLabel, { color: colors.foreground }]}>{t("status.text")}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -238,7 +241,7 @@ export default function StatusScreen() {
   );
 }
 
-function StatusGroupRow({ group, colors, onPress }: { group: StatusGroup; colors: ReturnType<typeof useColors>; onPress: () => void }) {
+function StatusGroupRow({ group, colors, t, onPress }: { group: StatusGroup; colors: ReturnType<typeof useColors>; t: (key: string) => string; onPress: () => void }) {
   const initials = (group.userName ?? "?").split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = (group.userName ?? "A").charCodeAt(0) * 37 % 360;
   const count = group.statuses.length;
@@ -267,12 +270,12 @@ function StatusGroupRow({ group, colors, onPress }: { group: StatusGroup; colors
         <Text style={[styles.statusName, { color: colors.foreground }]}>{group.userName}</Text>
         <Text style={[styles.statusTime, { color: colors.mutedForeground }]}>
           {formatTime(group.latestTime)}
-          {count > 1 ? ` · ${count} updates` : ""}
+          {count > 1 ? ` · ${interpolate(t("status.nUpdates"), { n: String(count) })}` : ""}
         </Text>
         {group.isBoosted && (
           <View style={styles.boostBadge}>
             <Ionicons name="flash" size={11} color="#111B21" />
-            <Text style={styles.boostBadgeText}>Sponsored</Text>
+            <Text style={styles.boostBadgeText}>{t("status.sponsored")}</Text>
           </View>
         )}
       </View>
