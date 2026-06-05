@@ -36,8 +36,8 @@
     },
     "android": {
       "package": "com.videh.app",
-      "softwareKeyboardLayoutMode": "pan",
-      "versionCode": 37,
+      "softwareKeyboardLayoutMode": "resize",
+      "versionCode": 38,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/videh_icon_foreground.png",
         "backgroundColor": "#0B141A"

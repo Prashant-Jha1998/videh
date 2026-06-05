@@ -9,7 +9,7 @@ import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { useGenericKeyboardHandler } from "react-native-keyboard-controller";
+import { KeyboardAvoidingView, useGenericKeyboardHandler } from "react-native-keyboard-controller";
 import { useChatKeyboard } from "@/hooks/useChatKeyboard";
 import { runOnJS } from "react-native-reanimated";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,7 +24,6 @@ import {
   Modal,
   Image as NativeImage,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -1351,6 +1350,8 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList<ChatListRow>>(null);
   const pendingScrollToEndRef = useRef(true);
   const userScrolledUpRef = useRef(false);
+  const keyboardVisibleRef = useRef(false);
+  const keyboardAnimatingRef = useRef(false);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [unreadBelowCount, setUnreadBelowCount] = useState(0);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -1406,6 +1407,15 @@ export default function ChatScreen() {
         layoutHeight,
         WHATSAPP_CHAT_NEAR_BOTTOM_PX,
       );
+      // adjustResize / keyboard animation shrinks the list before scroll catches up — don't treat as "scrolled up".
+      if (
+        away
+        && !userScrolledUpRef.current
+        && (keyboardVisibleRef.current || keyboardAnimatingRef.current)
+      ) {
+        schedulePinToBottom();
+        return;
+      }
       if (away === userScrolledUpRef.current) return;
       userScrolledUpRef.current = away;
       if (away) {
@@ -1417,7 +1427,7 @@ export default function ChatScreen() {
       setUnreadBelowCount(unread);
       setShowJumpToLatest((away && !searching && listRows.length > 6) || unread > 0);
     },
-    [listRows.length, messages.length, searching],
+    [listRows.length, messages.length, searching, schedulePinToBottom],
   );
   const tryLoadOlderMessages = useCallback(async () => {
     if (loadingOlderRef.current || !hasMoreOlderRef.current || searching || !chatId) return;
@@ -1466,21 +1476,38 @@ export default function ChatScreen() {
     return url;
   }, [text, editTarget, selectionActive, dismissedComposerLink]);
 
-  /** WhatsApp: pin while keyboard opens/closes (adjustResize on Android shrinks chat area). */
+  const onKeyboardAnimStart = useCallback(() => {
+    keyboardAnimatingRef.current = true;
+  }, []);
+  const onKeyboardAnimEnd = useCallback(() => {
+    keyboardAnimatingRef.current = false;
+    schedulePinToBottom();
+  }, [schedulePinToBottom]);
+
   /** WhatsApp: pin once when keyboard finishes opening — not on every frame while it animates. */
   useGenericKeyboardHandler(
     {
+      onStart: () => {
+        "worklet";
+        runOnJS(onKeyboardAnimStart)();
+      },
       onEnd: () => {
         "worklet";
-        runOnJS(schedulePinToBottom)();
+        runOnJS(onKeyboardAnimEnd)();
       },
     },
-    [schedulePinToBottom],
+    [onKeyboardAnimStart, onKeyboardAnimEnd],
   );
 
-  const { keyboardVisible, keyboardHeight } = useChatKeyboard();
+  const { keyboardVisible } = useChatKeyboard();
 
   useEffect(() => {
+    keyboardVisibleRef.current = keyboardVisible;
+    if (!keyboardVisible) keyboardAnimatingRef.current = false;
+  }, [keyboardVisible]);
+
+  useEffect(() => {
+    let extraPin: ReturnType<typeof setTimeout> | null = null;
     if (searching || messages.length === 0) return;
     if (pendingScrollToEndRef.current) {
       pendingScrollToEndRef.current = false;
@@ -1491,10 +1518,17 @@ export default function ChatScreen() {
     const count = messages.length;
     if (count > prevMessageCountRef.current && !userScrolledUpRef.current) {
       const animated = count - prevMessageCountRef.current <= 2;
+      pendingScrollToEndRef.current = true;
       scrollToLatest(animated);
-      if (keyboardVisible) schedulePinToBottom();
+      if (keyboardVisible) {
+        schedulePinToBottom();
+        extraPin = setTimeout(() => scrollToLatest(false), 320);
+      }
     }
     prevMessageCountRef.current = count;
+    return () => {
+      if (extraPin) clearTimeout(extraPin);
+    };
   }, [messages.length, searching, scrollToLatest, keyboardVisible, schedulePinToBottom]);
 
   /**
@@ -1502,10 +1536,9 @@ export default function ChatScreen() {
    * Web: composer is a sibling under the list inside KAV — only a small list tail gap is needed.
    */
   const listBottomPadding = useMemo(() => 12, []);
-  const androidKeyboardLift = Platform.OS === "android" ? keyboardHeight : 0;
   const jumpFabBottom = useMemo(
-    () => Math.max(12, composerHeight + 12 + androidKeyboardLift + (keyboardVisible && Platform.OS === "ios" ? 4 : 0)),
-    [composerHeight, keyboardVisible, androidKeyboardLift],
+    () => Math.max(12, composerHeight + 12 + (keyboardVisible && Platform.OS === "ios" ? 4 : 0)),
+    [composerHeight, keyboardVisible],
   );
 
   useEffect(() => {
@@ -3109,7 +3142,7 @@ export default function ChatScreen() {
               keyboardDismissMode="on-drag"
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
-              removeClippedSubviews={Platform.OS === "android"}
+              removeClippedSubviews={false}
               maintainVisibleContentPosition={
                 searching ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
               }
@@ -3209,33 +3242,21 @@ export default function ChatScreen() {
             </View>
           );
 
-          /** WhatsApp-style: list + composer; Android lifts via keyboard height inset (works in EAS APK). */
+          /** WhatsApp-style: list + composer below; Android adjustResize shrinks the column above the keyboard. */
           const chatColumn = (
             <>
               {chatMessageList}
               {composerBlock}
             </>
           );
-          if (Platform.OS === "ios") {
-            return (
-              <KeyboardAvoidingView
-                style={styles.messageListAvoid}
-                behavior="padding"
-                keyboardVerticalOffset={topPad}
-              >
-                {chatColumn}
-              </KeyboardAvoidingView>
-            );
-          }
           return (
-            <View
-              style={[
-                styles.messageListAvoid,
-                androidKeyboardLift > 0 ? { paddingBottom: androidKeyboardLift } : null,
-              ]}
+            <KeyboardAvoidingView
+              style={styles.messageListAvoid}
+              behavior="padding"
+              keyboardVerticalOffset={topPad}
             >
               {chatColumn}
-            </View>
+            </KeyboardAvoidingView>
           );
         })()}
 
