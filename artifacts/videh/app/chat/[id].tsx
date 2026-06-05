@@ -9,7 +9,7 @@ import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { KeyboardStickyView, useGenericKeyboardHandler } from "react-native-keyboard-controller";
+import { KeyboardAvoidingView, useGenericKeyboardHandler } from "react-native-keyboard-controller";
 import { useChatKeyboard } from "@/hooks/useChatKeyboard";
 import { onChatMessageSignal } from "@/lib/chatMessageEvents";
 import { runOnJS } from "react-native-reanimated";
@@ -1523,10 +1523,13 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!keyboardVisible || keyboardHeight <= 0) return;
+    pendingScrollToEndRef.current = true;
+    userScrolledUpRef.current = false;
     const t1 = setTimeout(() => scrollToLatest(false), 50);
     const t2 = setTimeout(() => scrollToLatest(false), 150);
     const t3 = setTimeout(() => scrollToLatest(false), 300);
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+    const t4 = setTimeout(() => scrollToLatest(false), 500);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); };
   }, [keyboardHeight, keyboardVisible, scrollToLatest]);
 
   useEffect(() => {
@@ -1554,12 +1557,11 @@ export default function ChatScreen() {
     };
   }, [messages.length, searching, scrollToLatest, keyboardVisible, schedulePinToBottom]);
 
-  /** WhatsApp: list above composer; keyboard-controller lifts composer and shrinks list viewport. */
-  const listBottomPadding = useMemo(() => composerHeight + 12, [composerHeight]);
-  const listKeyboardShrink = keyboardVisible && keyboardHeight > 0 ? keyboardHeight : 0;
+  /** WhatsApp: messages live in the list viewport; composer sits below (not overlaying). */
+  const listBottomPadding = 12;
   const jumpFabBottom = useMemo(
-    () => Math.max(12, composerHeight + 12 + listKeyboardShrink),
-    [composerHeight, listKeyboardShrink],
+    () => Math.max(12, composerHeight + 16),
+    [composerHeight],
   );
 
   useEffect(() => {
@@ -3123,10 +3125,15 @@ export default function ChatScreen() {
         </View>
       )}
 
-      <View style={styles.chatBody}>
-        <FlatList
-          style={styles.messageList}
-          ref={listRef}
+      <KeyboardAvoidingView
+        style={styles.chatKeyboardAvoid}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === "ios" ? topPad + 52 : 0}
+      >
+        <View style={styles.chatBody}>
+          <FlatList
+            style={styles.messageList}
+            ref={listRef}
           data={listRows}
           ListHeaderComponent={
             !searching && loadingOlder ? (
@@ -3275,7 +3282,6 @@ export default function ChatScreen() {
           </TouchableOpacity>
         ) : null}
 
-        {Platform.OS === "web" ? (
           <View
             onLayout={(e) => {
               const h = Math.ceil(e.nativeEvent.layout.height);
@@ -3284,19 +3290,8 @@ export default function ChatScreen() {
           >
             {composerFooter}
           </View>
-        ) : (
-          <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
-            <View
-              onLayout={(e) => {
-                const h = Math.ceil(e.nativeEvent.layout.height);
-                if (h > 0 && h !== composerHeight) setComposerHeight(h);
-              }}
-            >
-              {composerFooter}
-            </View>
-          </KeyboardStickyView>
-        )}
-      </View>
+        </View>
+      </KeyboardAvoidingView>
 
 
       {/* Attach menu â€” Videh-style bottom sheet (coloured circles + grid) */}
@@ -3716,8 +3711,9 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  chatBody: { flex: 1, flexDirection: "column" },
-  messageList: { flex: 1 },
+  chatKeyboardAvoid: { flex: 1, minHeight: 0 },
+  chatBody: { flex: 1, flexDirection: "column", minHeight: 0 },
+  messageList: { flex: 1, minHeight: 0 },
   messageListContent: { paddingHorizontal: 10, paddingTop: 8 },
   scrollToBottomFab: {
     position: "absolute",
