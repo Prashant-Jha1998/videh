@@ -25,6 +25,13 @@ import { encodeVoiceMessageText, stripWaveformMeta } from "@/lib/voiceWaveform";
 import { messageReplyPreviewText } from "@/lib/messageReplyPreview";
 import { inferChatListPreview, normalizeMessageType } from "@/lib/normalizeMessage";
 import { parseLocationPayload } from "@/lib/locationMessage";
+import {
+  loadChatMessageCache,
+  rememberChatMessagesInStore,
+  schedulePersistChatMessageCache,
+  type CachedChatMessage,
+  type ChatMessageCacheStore,
+} from "@/lib/chatMessageCache";
 
 const BASE_URL = getApiUrl();
 const STATUS_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -321,6 +328,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const liveLocationTickingRef = useRef(false);
   const activeChatIdRef = useRef<string | null>(null);
   const clearedHistoryAtRef = useRef<number>(0);
+  const messageCacheStoreRef = useRef<ChatMessageCacheStore>({});
+  const loadMessagesRef = useRef<(chatId: string) => Promise<void>>(async () => {});
   const formatLastMessagePreview = (lastMsg: {
     is_deleted?: boolean;
     type?: string;
@@ -482,14 +491,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const data = await api(`/chats/user/${dbUserId}`) as { success: boolean; chats: any[] };
       if (!data.success || !data.chats) return;
-      setChats((prev) => {
-        const mapped = mapDbChats(data.chats);
-        // Preserve existing messages — only update metadata
-        return mapped.map((newChat) => {
+      const mapped = mapDbChats(data.chats);
+      setChats((prev) =>
+        mapped.map((newChat) => {
           const old = prev.find((c) => c.id === newChat.id);
-          return old ? { ...newChat, messages: old.messages, isPinned: newChat.isPinned ?? old.isPinned, isMuted: newChat.isMuted ?? old.isMuted, isArchived: newChat.isArchived ?? old.isArchived } : newChat;
-        });
-      });
+          const cached = messageCacheStoreRef.current[String(newChat.id)] as Message[] | undefined;
+          const messages =
+            old?.messages?.length
+              ? old.messages
+              : cached?.length
+                ? (cached as Message[])
+                : [];
+          return {
+            ...newChat,
+            messages,
+            isPinned: newChat.isPinned ?? old?.isPinned,
+            isMuted: newChat.isMuted ?? old?.isMuted,
+            isArchived: newChat.isArchived ?? old?.isArchived,
+          };
+        }),
+      );
+      const prefetchIds = mapped
+        .slice()
+        .sort((a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0))
+        .slice(0, 5)
+        .map((c) => c.id)
+        .filter((id) => !(messageCacheStoreRef.current[id]?.length));
+      if (prefetchIds.length > 0) {
+        setTimeout(() => {
+          for (const id of prefetchIds) void loadMessagesRef.current(id);
+        }, 0);
+      }
     } catch {}
   }, []);
 
@@ -558,6 +590,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setUserState(parsed);
           setIsAuthenticated(true);
           if (parsed.dbId) {
+            messageCacheStoreRef.current = await loadChatMessageCache(parsed.dbId);
             loadChats(parsed.dbId);
             loadCallLogs(parsed.dbId);
             loadStatuses(parsed.dbId);
@@ -657,6 +690,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const now = Date.now();
     clearedHistoryAtRef.current = now;
     await AsyncStorage.setItem("chatHistoryClearedAt", String(now));
+    messageCacheStoreRef.current = {};
+    const uid = userRef.current?.dbId;
+    if (uid) schedulePersistChatMessageCache(uid, {});
     setChats((prev) =>
       prev.map((c) => ({ ...c, messages: [], lastMessage: undefined, unreadCount: 0 })),
     );
@@ -964,8 +1000,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
         }
       }
+      const cacheUserId = userRef.current?.dbId;
+      if (cacheUserId && mergedMessages.length > 0) {
+        messageCacheStoreRef.current = rememberChatMessagesInStore(
+          messageCacheStoreRef.current,
+          chatId,
+          mergedMessages as CachedChatMessage[],
+        );
+        schedulePersistChatMessageCache(cacheUserId, messageCacheStoreRef.current);
+      }
     } catch {}
   }, [patchChatMessage]);
+
+  loadMessagesRef.current = loadMessages;
 
   /** Defer API refresh so the server row exists before we merge (avoids hint flicker). */
   const scheduleLoadMessagesAfterHint = useCallback(

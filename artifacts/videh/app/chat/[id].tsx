@@ -3317,7 +3317,14 @@ export default function ChatScreen() {
               <View style={styles.initWrap}>
                 <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.noResults")}</Text>
               </View>
-            ) : null
+            ) : (
+              <View style={styles.initWrap}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={[styles.initText, { color: colors.mutedForeground, marginTop: 10 }]}>
+                  {t("chat.loadingMessages")}
+                </Text>
+              </View>
+            )
           }
         />
 
