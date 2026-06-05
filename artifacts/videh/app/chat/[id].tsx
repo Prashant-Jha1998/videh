@@ -976,7 +976,7 @@ export default function ChatScreen() {
     setTyping, clearTyping, markAsRead, deleteMessage, deleteForEveryone,
     editMessage, reactToMessage, starMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
-    loadMessages, loadOlderMessages, forwardMessage, updateLocationOnServer,     stopLiveLocationSession, setActiveChatId,
+    loadMessages, loadOlderMessages, forwardMessage, updateLocationOnServer, stopLiveLocationSession, setActiveChatId, applyIncomingMessageHint,
     typingByChatId, reportRemoteTyping, patchChatMessage,
   } = useApp();
 
@@ -1104,12 +1104,13 @@ export default function ChatScreen() {
         messagePollInFlightRef.current = true;
         loadMessages(chatId).finally(() => { messagePollInFlightRef.current = false; });
       };
-      const msgTimer = setInterval(() => pollMessages(false), 400);
+      const msgTimer = setInterval(() => pollMessages(false), 300);
       void pollMessages(true);
       void pollTyping();
       const typingTimer = setInterval(pollTyping, 1500);
       const unsubMsgSignal = onChatMessageSignal((signal) => {
         if (String(signal.chatId) !== String(chatId)) return;
+        applyIncomingMessageHint(signal);
         pendingScrollToEndRef.current = true;
         userScrolledUpRef.current = false;
         pollMessages(true);
@@ -1144,7 +1145,7 @@ export default function ChatScreen() {
         clearInterval(typingTimer);
         if (presenceTimer) clearInterval(presenceTimer);
       };
-    }, [chatId, user?.dbId, user?.sessionToken, setActiveChatId, loadMessages, clearTyping, reportRemoteTyping])
+    }, [chatId, user?.dbId, user?.sessionToken, setActiveChatId, loadMessages, applyIncomingMessageHint, clearTyping, reportRemoteTyping])
   );
 
   const enterSendActive = enterIsSend;
@@ -3124,10 +3125,7 @@ export default function ChatScreen() {
 
       <View style={styles.chatBody}>
         <FlatList
-          style={[
-            styles.messageList,
-            listKeyboardShrink > 0 ? { marginBottom: listKeyboardShrink } : undefined,
-          ]}
+          style={styles.messageList}
           ref={listRef}
           data={listRows}
           ListHeaderComponent={

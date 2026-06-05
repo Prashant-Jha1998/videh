@@ -3,6 +3,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
 import { agentDebugLog } from "@/lib/agentDebugLog";
+import { connectChatEventStream } from "@/lib/connectChatEventStream";
 import { emitChatMessageSignal, onChatMessageSignal, type ChatMessageSignal } from "@/lib/chatMessageEvents";
 import {
   deliverPremiumChatMessageNotification,
@@ -779,7 +780,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     setChats((prev) =>
       prev.map((c) => {
-        if (c.id !== chatId) return c;
+        if (String(c.id) !== chatId) return c;
         const msgs = c.messages ?? [];
         if (messageId && msgs.some((m) => m.id === messageId)) return c;
         if (
@@ -838,7 +839,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       let mergedMessages: Message[] = [];
 
       setChats((prev) => {
-        const prevChat = prev.find((c) => c.id === chatId);
+        const prevChat = prev.find((c) => String(c.id) === String(chatId));
         const prevById = new Map((prevChat?.messages ?? []).map((pm) => [pm.id, pm]));
 
         const msgs: Message[] = rawMessages.map((m: any) => {
@@ -847,11 +848,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
 
         return prev.map((c) => {
-          if (c.id !== chatId) return c;
+          if (String(c.id) !== String(chatId)) return c;
           const prevMsgs = c.messages ?? [];
+          const prevStable = prevMsgs.filter((m) => !m.id.startsWith("hint_"));
           if (
-            prevMsgs.length === msgs.length
-            && prevMsgs.every((m, i) => {
+            prevStable.length === msgs.length
+            && prevStable.every((m, i) => {
               const n = msgs[i];
               return m.id === n.id
                 && m.text === n.text
@@ -1009,28 +1011,70 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       refreshInFlightRef.current.calls = true;
       loadCallLogs(uid).finally(() => { refreshInFlightRef.current.calls = false; });
     };
-    const EventSourceCtor = (globalThis as any).EventSource as undefined | (new (url: string, init?: any) => {
-      addEventListener: (type: string, listener: () => void) => void;
-      close: () => void;
-    });
-    const eventToken = authSessionToken ? `?token=${encodeURIComponent(authSessionToken)}` : "";
-    const eventSource = EventSourceCtor
-      ? new EventSourceCtor(`${BASE_URL}/api/chats/user/${u.dbId}/events${eventToken}`)
-      : null;
-    const onChatEvent = (ev?: { data?: string }) => {
+    const onChatEvent = (eventType: string, raw?: string) => {
+      if (eventType !== "message") {
+        if (eventType === "typing") {
+          try {
+            const parsed = JSON.parse(raw ?? "") as {
+              chatId?: string | number;
+              payload?: { active?: boolean; name?: string; userId?: number };
+            };
+            const cid = parsed.chatId != null ? String(parsed.chatId) : null;
+            const name = parsed.payload?.name?.trim();
+            if (!cid || !name) return;
+            const myId = userRef.current?.dbId;
+            if (myId != null && Number(parsed.payload?.userId) === myId) return;
+            setTypingByChatId((prev) => {
+              const list = [...(prev[cid] ?? [])];
+              if (parsed.payload?.active === false) {
+                const next = list.filter((n) => n !== name);
+                if (next.length === 0) {
+                  const { [cid]: _, ...rest } = prev;
+                  return rest;
+                }
+                return { ...prev, [cid]: next };
+              }
+              if (list.includes(name)) return prev;
+              return { ...prev, [cid]: [...list, name] };
+            });
+          } catch {
+            /* ignore */
+          }
+        } else if (eventType === "call") {
+          runCalls();
+          try {
+            const parsed = JSON.parse(raw ?? "") as { payload?: unknown };
+            const { emitCallSignal } = require("@/lib/callEvents") as typeof import("@/lib/callEvents");
+            emitCallSignal((parsed.payload ?? parsed) as any);
+          } catch {
+            /* ignore */
+          }
+        }
+        return;
+      }
       runChats();
       try {
-        const raw = ev?.data;
         if (!raw) return;
         const parsed = JSON.parse(raw) as {
           chatId?: string | number;
-          payload?: { messageId?: string | number };
+          payload?: {
+            messageId?: string | number;
+            content?: string;
+            senderId?: string | number;
+            senderName?: string;
+          };
         };
         const cid = parsed.chatId != null ? String(parsed.chatId) : null;
         const messageId =
           parsed.payload?.messageId != null ? String(parsed.payload.messageId) : undefined;
+        const body = parsed.payload?.content?.trim();
+        const senderName = parsed.payload?.senderName?.trim();
+        const senderId =
+          parsed.payload?.senderId != null ? String(parsed.payload.senderId) : undefined;
         if (cid) {
-          emitChatMessageSignal({ chatId: cid, messageId });
+          const signal: ChatMessageSignal = { chatId: cid, messageId, body, senderName, senderId };
+          applyIncomingMessageHint(signal);
+          emitChatMessageSignal(signal);
           if (activeChatIdRef.current === cid) {
             void loadMessages(cid);
           }
@@ -1040,6 +1084,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           void deliverPremiumChatMessageNotification({
             chatId: cid,
             messageId,
+            body,
+            senderName,
             reloadChats: uid
               ? async () => {
                   await loadChats(uid);
@@ -1065,66 +1111,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         /* ignore malformed SSE payload */
       }
     };
-    eventSource?.addEventListener("message", onChatEvent as () => void);
-    eventSource?.addEventListener("typing", (ev?: { data?: string }) => {
-      try {
-        const raw = ev?.data;
-        if (!raw) return;
-        const parsed = JSON.parse(raw) as {
-          chatId?: string | number;
-          payload?: { active?: boolean; name?: string; userId?: number };
-        };
-        const cid = parsed.chatId != null ? String(parsed.chatId) : null;
-        const name = parsed.payload?.name?.trim();
-        if (!cid || !name) return;
-        const myId = userRef.current?.dbId;
-        if (myId != null && Number(parsed.payload?.userId) === myId) return;
-        setTypingByChatId((prev) => {
-          const list = [...(prev[cid] ?? [])];
-          if (parsed.payload?.active === false) {
-            const next = list.filter((n) => n !== name);
-            if (next.length === 0) {
-              const { [cid]: _, ...rest } = prev;
-              return rest;
-            }
-            return { ...prev, [cid]: next };
-          }
-          if (list.includes(name)) return prev;
-          return { ...prev, [cid]: [...list, name] };
-        });
-      } catch {
-        /* ignore */
-      }
-    });
-    eventSource?.addEventListener("call", (ev?: { data?: string }) => {
-      runCalls();
-      try {
-        const raw = ev?.data;
-        if (!raw) return;
-        const parsed = JSON.parse(raw) as { payload?: unknown };
-        const { emitCallSignal } = require("@/lib/callEvents") as typeof import("@/lib/callEvents");
-        emitCallSignal((parsed.payload ?? parsed) as any);
-      } catch {
-        /* ignore malformed SSE payload */
-      }
-    });
-    const chatTimer = eventSource ? null : setInterval(runChats, 3000);
-    /** RN has no EventSource — poll open chat messages so live chat stays instant. */
+    const detachStream = connectChatEventStream(u.dbId, authSessionToken, onChatEvent);
+    const chatTimer = setInterval(runChats, 5000);
+    /** Backup poll when SSE reconnects or on flaky networks. */
     const activeChatMsgTimer = setInterval(() => {
       const cid = activeChatIdRef.current;
       if (!cid) return;
       void loadMessages(cid);
-    }, eventSource ? 2000 : 400);
+    }, 800);
     const statusTimer = setInterval(runStatuses, 12000);
     const callTimer = setInterval(runCalls, 30000);
     return () => {
-      if (chatTimer) clearInterval(chatTimer);
+      detachStream();
+      clearInterval(chatTimer);
       clearInterval(activeChatMsgTimer);
-      eventSource?.close();
       clearInterval(statusTimer);
       clearInterval(callTimer);
     };
-  }, [isAuthenticated, loadChats, loadMessages]);
+  }, [isAuthenticated, loadChats, loadMessages, applyIncomingMessageHint]);
 
   useEffect(() => {
     if (!isAuthenticated) return;

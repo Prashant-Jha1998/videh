@@ -820,7 +820,13 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
       type: "message",
       chatId: Array.isArray(chatId) ? chatId[0] ?? "" : chatId,
       userIds: [senderId, ...recipientIds],
-      payload: { messageId: result.rows[0].id },
+      payload: {
+        messageId: result.rows[0].id,
+        content: content ?? "",
+        type: type ?? "text",
+        senderId,
+        senderName,
+      },
     });
 
     res.json({ success: true, message: result.rows[0] });
