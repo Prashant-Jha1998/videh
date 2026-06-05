@@ -11,6 +11,7 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video 
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { KeyboardStickyView, useGenericKeyboardHandler } from "react-native-keyboard-controller";
 import { useChatKeyboard } from "@/hooks/useChatKeyboard";
+import { onChatMessageSignal } from "@/lib/chatMessageEvents";
 import { runOnJS } from "react-native-reanimated";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -1066,7 +1067,7 @@ export default function ChatScreen() {
 
   const remoteTypingNames = chatId ? (typingByChatId[chatId] ?? []) : [];
 
-  // Poll messages every 4s + typing every 1.5s (auth + SSE backup)
+  // Live messages: 1s poll + push/SSE signal + AppContext backup (WhatsApp-style instant)
   useFocusEffect(
     useCallback(() => {
       void loadEnterIsSend().then(setEnterIsSend);
@@ -1074,6 +1075,7 @@ export default function ChatScreen() {
       pendingScrollToEndRef.current = true;
       userScrolledUpRef.current = false;
       setActiveChatId(chatId);
+      void loadMessages(chatId);
       const typingAuthHeaders: Record<string, string> = {};
       if (user?.sessionToken) typingAuthHeaders.Authorization = `Bearer ${user.sessionToken}`;
       const pollTyping = async () => {
@@ -1097,9 +1099,14 @@ export default function ChatScreen() {
         messagePollInFlightRef.current = true;
         loadMessages(chatId).finally(() => { messagePollInFlightRef.current = false; });
       };
-      const msgTimer = setInterval(pollMessages, 4000);
+      const msgTimer = setInterval(pollMessages, 1000);
+      void pollMessages();
       void pollTyping();
       const typingTimer = setInterval(pollTyping, 1500);
+      const unsubMsgSignal = onChatMessageSignal((signal) => {
+        if (signal.chatId !== chatId) return;
+        pollMessages();
+      });
       const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
       const loadPresence = async () => {
         if (!peerId || isGroupChat) {
@@ -1122,6 +1129,7 @@ export default function ChatScreen() {
       const presenceTimer = !isGroupChat && peerId ? setInterval(loadPresence, 5000) : null;
 
       return () => {
+        unsubMsgSignal();
         setActiveChatId(null);
         clearTyping(chatId);
         reportRemoteTyping(chatId, []);

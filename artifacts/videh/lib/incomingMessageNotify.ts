@@ -1,4 +1,5 @@
 import { AppState, Platform } from "react-native";
+import { emitChatMessageSignal } from "./chatMessageEvents";
 import { agentDebugLog } from "./agentDebugLog";
 import { showChatMessageNotification } from "./chatMessageNotification";
 import { playInAppSoundAsset } from "./playInAppSound";
@@ -113,9 +114,15 @@ export async function deliverPremiumChatMessageNotification(
 
   const appActive = AppState.currentState === "active";
   if (appActive && activeChatId === opts.chatId) {
+    emitChatMessageSignal({
+      chatId: opts.chatId,
+      messageId: opts.messageId,
+      body: opts.body,
+      senderName: opts.senderName,
+    });
     agentDebugLog(
       "incomingMessageNotify.ts:deliver",
-      "skipped active chat",
+      "skipped active chat (signal emitted)",
       { chatId: opts.chatId },
       "H1",
       "post-fix",

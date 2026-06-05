@@ -3,6 +3,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
 import { agentDebugLog } from "@/lib/agentDebugLog";
+import { emitChatMessageSignal } from "@/lib/chatMessageEvents";
 import {
   deliverPremiumChatMessageNotification,
   setNotificationActiveChatId,
@@ -967,8 +968,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const cid = parsed.chatId != null ? String(parsed.chatId) : null;
         const messageId =
           parsed.payload?.messageId != null ? String(parsed.payload.messageId) : undefined;
-        if (cid && activeChatIdRef.current === cid) {
-          void loadMessages(cid);
+        if (cid) {
+          emitChatMessageSignal({ chatId: cid, messageId });
+          if (activeChatIdRef.current === cid) {
+            void loadMessages(cid);
+          }
         }
         if (cid) {
           const uid = userRef.current?.dbId;
@@ -1044,10 +1048,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     });
     const chatTimer = eventSource ? null : setInterval(runChats, 7000);
+    /** RN has no EventSource — poll open chat messages so live chat stays instant. */
+    const activeChatMsgTimer = setInterval(() => {
+      const cid = activeChatIdRef.current;
+      if (!cid) return;
+      void loadMessages(cid);
+    }, eventSource ? 4000 : 1000);
     const statusTimer = setInterval(runStatuses, 12000);
     const callTimer = setInterval(runCalls, 30000);
     return () => {
       if (chatTimer) clearInterval(chatTimer);
+      clearInterval(activeChatMsgTimer);
       eventSource?.close();
       clearInterval(statusTimer);
       clearInterval(callTimer);

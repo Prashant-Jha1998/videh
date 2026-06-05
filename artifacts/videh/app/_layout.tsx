@@ -42,6 +42,7 @@ import {
 } from "@/lib/callKeep";
 import type { CallKeepHandlerPayload } from "@/lib/callKeepBridge";
 import { displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
+import { emitChatMessageSignal } from "@/lib/chatMessageEvents";
 import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
 import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
 import { maybePromptDisableBatteryOptimization } from "@/lib/incomingCallBattery";
@@ -557,6 +558,18 @@ function RootLayoutNav() {
     const sub = Notifications.addNotificationReceivedListener((notification) => {
       const data = notification.request.content.data as Record<string, unknown> | undefined;
       if (!data) return;
+      const isChatMessage =
+        data.notificationKind === "chat_message"
+        || data.kind === "message";
+      if (isChatMessage && data.chatId) {
+        const chatId = String(data.chatId);
+        emitChatMessageSignal({
+          chatId,
+          messageId: data.messageId != null ? String(data.messageId) : undefined,
+        });
+        void loadMessages(chatId);
+        return;
+      }
       const isCall = data.kind === "call" || data.notificationKind === "incoming_call";
       if (!isCall || !data.callId) return;
       const info = toIncomingCallInfo({
@@ -573,7 +586,7 @@ function RootLayoutNav() {
       void offerIncomingCall(info);
     });
     return () => sub.remove();
-  }, [isAuthenticated, activeCallSession?.callId, offerIncomingCall]);
+  }, [isAuthenticated, activeCallSession?.callId, offerIncomingCall, loadMessages]);
 
   const respondToIncomingCall = async (action: "accept" | "decline", declineMessage?: string) => {
     if (!incomingCall || !user?.dbId) return;
