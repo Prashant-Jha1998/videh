@@ -59,6 +59,8 @@ export function useVidehCall(
   const connectedSinceRef = useRef<number | null>(null);
   const disconnectGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasRemoteMediaRef = useRef(false);
+  const remotePeerIdsRef = useRef(remotePeerIds);
+  remotePeerIdsRef.current = remotePeerIds;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -112,7 +114,7 @@ export function useVidehCall(
           if (track.kind !== "video" && track.kind !== "audio") continue;
           const stream = new NativeMediaStream([track]);
           const url = typeof stream.toURL === "function" ? stream.toURL() : undefined;
-          const parsedPeer = peerIdFromCallChannel(channel, uid) || remotePeerIds[0];
+          const parsedPeer = peerIdFromCallChannel(channel, uid) || remotePeerIdsRef.current[0];
           upsertRemotePeer(
             remotePeersRef.current,
             parsedPeer || SINGLE_PEER_KEY,
@@ -193,7 +195,7 @@ export function useVidehCall(
     } else if (pcs.length > 0) {
       setConnectionPhase("connecting");
     }
-  }, [isVideo, uid, remotePeerIds, markRemoteMedia]);
+  }, [isVideo, uid, markRemoteMedia]);
 
   const channelsKey = channels.join("|");
 
@@ -251,7 +253,7 @@ export function useVidehCall(
     };
 
     const shouldInitiateIceRestart = (channel: string): boolean => {
-      const peerId = peerIdFromCallChannel(channel, uid) || remotePeerIds[0];
+      const peerId = peerIdFromCallChannel(channel, uid) || remotePeerIdsRef.current[0];
       if (!peerId || peerId === uid) return true;
       return uid < peerId;
     };
@@ -341,7 +343,7 @@ export function useVidehCall(
         const url = typeof stream.toURL === "function" ? stream.toURL() : undefined;
         const hasVid = (stream.getVideoTracks?.().length ?? 0) > 0;
         const hasAud = (stream.getAudioTracks?.().length ?? 0) > 0;
-        const parsedPeer = peerIdFromCallChannel(channel, uid) || remotePeerIds[0];
+        const parsedPeer = peerIdFromCallChannel(channel, uid) || remotePeerIdsRef.current[0];
         const storageKey = parsedPeer || SINGLE_PEER_KEY;
         upsertRemotePeer(remotePeersRef.current, storageKey, url, hasVid);
         if (hasAud || hasVid) markRemoteMedia();
@@ -367,8 +369,6 @@ export function useVidehCall(
             iceRestartTimersRef.current.delete(channel);
           }
           setError(null);
-        } else if (state === "disconnected") {
-          scheduleIceRestart(channel, pc, role);
         } else if (state === "failed") {
           const t = iceRestartTimersRef.current.get(channel);
           if (t) {
@@ -519,7 +519,7 @@ export function useVidehCall(
       stopAllSignaling();
       closeAllPeerConnections(true);
     };
-  }, [primaryChannel, uid, isVideo, channelsKey, refreshAggregate, sessionToken, remotePeerIds, videhCallerId, stopAllSignaling, closeAllPeerConnections]);
+  }, [primaryChannel, uid, isVideo, channelsKey, sessionToken, videhCallerId, stopAllSignaling, closeAllPeerConnections]);
 
   useEffect(() => {
     return () => {

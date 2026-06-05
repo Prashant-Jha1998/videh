@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v7"
+        "key": "apk-release-v8"
       }
     },
     "production": {

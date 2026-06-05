@@ -65,6 +65,8 @@ type CallSessionContextValue = {
   session: CallSession | null;
   joined: boolean;
   mediaReady: boolean;
+  /** Both sides accepted the call invite — stable in-call UI (not WebRTC flap). */
+  callAnswered: boolean;
   connectionPhase: string;
   error: string | null;
   muted: boolean;
@@ -618,11 +620,11 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           }
 
           const remoteAccepted = (data.acceptedCount ?? 1) > 1;
-          if (remoteAccepted && !call.joined) {
+          if (remoteAccepted) {
             void stopCallAlert();
-            setStatusHint("Connecting…");
-          } else if (call.mediaReady) {
             setStatusHint(null);
+          } else if (!call.joined) {
+            setStatusHint("Connecting…");
           }
 
           if (!call.joined && !endedTonePlayed.current) {
@@ -664,14 +666,16 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     return () => clearInterval(timer);
   }, [session?.callId, session?.engineActive, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleRemoteCallEnd]);
 
+  const callAnswered = acceptedCount > 1;
+
   useEffect(() => {
-    if (!call.mediaReady) {
+    if (!callAnswered) {
       setDuration(0);
       return;
     }
     const t = setInterval(() => setDuration((d) => d + 1), 1000);
     return () => clearInterval(t);
-  }, [call.mediaReady]);
+  }, [callAnswered]);
 
   useEffect(() => {
     if (!session?.engineActive || session.ringing || !call.joined) {
@@ -733,12 +737,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (session.ringing) {
       return session.isVideo ? "Incoming video call" : "Incoming voice call";
     }
+    if (callAnswered) {
+      return formatDuration(duration);
+    }
     if (call.mediaReady) {
       if (call.connectionPhase === "reconnecting") return "Reconnecting…";
       return formatDuration(duration);
     }
     if (call.joined || acceptedCount > 1) {
-      if (call.connectionPhase === "reconnecting") return "Reconnecting…";
       if (statusHint) return statusHint;
       return "Connecting…";
     }
@@ -749,13 +755,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (session.isIncoming) return session.isVideo ? "Incoming video call" : "Incoming voice call";
     if (ringingCount > 1) return `Ringing ${ringingCount} people...`;
     return session.isVideo ? "Calling…" : "Ringing…";
-  }, [session, call, duration, statusHint, acceptedCount, ringingCount]);
+  }, [session, call, duration, statusHint, acceptedCount, ringingCount, callAnswered]);
 
   const value = useMemo<CallSessionContextValue>(
     () => ({
       session,
       joined: call.joined,
       mediaReady: call.mediaReady,
+      callAnswered,
       connectionPhase: call.connectionPhase,
       error: call.error,
       muted: call.muted,
