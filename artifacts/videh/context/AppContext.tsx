@@ -3,7 +3,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
 import { agentDebugLog } from "@/lib/agentDebugLog";
-import { emitChatMessageSignal } from "@/lib/chatMessageEvents";
+import { emitChatMessageSignal, onChatMessageSignal, type ChatMessageSignal } from "@/lib/chatMessageEvents";
 import {
   deliverPremiumChatMessageNotification,
   setNotificationActiveChatId,
@@ -259,6 +259,7 @@ interface AppContextType {
   updateAvatar: (base64: string, mimeType?: string) => Promise<void>;
   createDirectChat: (otherUserId: number, otherName: string, otherAvatar?: string) => Promise<string>;
   loadMessages: (chatId: string) => Promise<void>;
+  applyIncomingMessageHint: (signal: ChatMessageSignal) => void;
   loadOlderMessages: (
     chatId: string,
     beforeTimestamp: number,
@@ -741,7 +742,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setActiveChatId = useCallback((chatId: string | null) => {
     activeChatIdRef.current = chatId;
     setNotificationActiveChatId(chatId);
-  }, []);
+    setNotificationRuntimeState({
+      chats: chats.map((c) => ({
+        id: c.id,
+        name: c.name,
+        avatar: c.avatar,
+        lastMessage: c.lastMessage,
+        isGroup: c.isGroup,
+        isMuted: c.isMuted,
+      })),
+      activeChatId: chatId,
+    });
+  }, [chats]);
 
   useEffect(() => {
     setNotificationRuntimeState({
@@ -756,6 +768,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       activeChatId: activeChatIdRef.current,
     });
   }, [chats]);
+
+  /** Show incoming text immediately from push/SSE before the messages API catches up (WhatsApp-style). */
+  const applyIncomingMessageHint = useCallback((signal: ChatMessageSignal) => {
+    const chatId = String(signal.chatId);
+    const u = userRef.current;
+    const messageId = signal.messageId ? String(signal.messageId) : undefined;
+    const text = signal.body?.trim();
+    if (!messageId && !text) return;
+
+    setChats((prev) =>
+      prev.map((c) => {
+        if (c.id !== chatId) return c;
+        const msgs = c.messages ?? [];
+        if (messageId && msgs.some((m) => m.id === messageId)) return c;
+        if (
+          text
+          && msgs.some(
+            (m) => m.senderId !== "me" && m.text === text && Date.now() - m.timestamp < 30_000,
+          )
+        ) {
+          return c;
+        }
+        const senderId =
+          signal.senderId != null
+            ? String(signal.senderId) === String(u?.dbId)
+              ? "me"
+              : String(signal.senderId)
+            : "other";
+        if (senderId === "me") return c;
+
+        const hintMsg: Message = {
+          id: messageId ?? `hint_${Date.now()}`,
+          text: text ?? "",
+          timestamp: Date.now(),
+          senderId,
+          senderName: signal.senderName,
+          type: "text",
+          status: "delivered",
+        };
+        const merged = [...msgs, hintMsg].sort((a, b) => a.timestamp - b.timestamp);
+        const preview = text ? inferChatListPreview("text", text) : c.lastMessage;
+        return { ...c, messages: merged, lastMessage: preview || c.lastMessage };
+      }),
+    );
+  }, []);
 
   const patchChatMessage = useCallback((chatId: string, messageId: string, patch: Partial<Message>) => {
     setChats((prev) =>
@@ -814,6 +871,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 && (s.text === tmp.text || (tmp.type !== "text" && s.type === tmp.type)),
             );
           const pendingLocal = prevMsgs.filter((m) => {
+            if (m.id.startsWith("hint_")) {
+              if (!m.text.trim()) return false;
+              return !msgs.some((s) => s.senderId !== "me" && s.text === m.text);
+            }
             if (!m.id.startsWith("tmp_")) return false;
             if (
               m.type === "document"
@@ -1047,13 +1108,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         /* ignore malformed SSE payload */
       }
     });
-    const chatTimer = eventSource ? null : setInterval(runChats, 7000);
+    const chatTimer = eventSource ? null : setInterval(runChats, 3000);
     /** RN has no EventSource — poll open chat messages so live chat stays instant. */
     const activeChatMsgTimer = setInterval(() => {
       const cid = activeChatIdRef.current;
       if (!cid) return;
       void loadMessages(cid);
-    }, eventSource ? 4000 : 1000);
+    }, eventSource ? 2000 : 400);
     const statusTimer = setInterval(runStatuses, 12000);
     const callTimer = setInterval(runCalls, 30000);
     return () => {
@@ -1064,6 +1125,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       clearInterval(callTimer);
     };
   }, [isAuthenticated, loadChats, loadMessages]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    return onChatMessageSignal((signal) => {
+      applyIncomingMessageHint(signal);
+      const cid = activeChatIdRef.current;
+      if (cid && String(signal.chatId) === cid) {
+        void loadMessages(cid);
+      }
+    });
+  }, [isAuthenticated, applyIncomingMessageHint, loadMessages]);
 
   const sendMessage = useCallback((
     chatId: string,
@@ -2028,7 +2100,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setUser, logout, sendMessage, createGroup, markAsRead, markAllAsRead,
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, forwardMessage, starredMessages, updateAvatar,
-      createDirectChat, loadMessages, loadOlderMessages, refreshChats, clearAllChatHistory,
+      createDirectChat, loadMessages, applyIncomingMessageHint, loadOlderMessages, refreshChats, clearAllChatHistory,
       sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage, sendDocumentMessage,
       sendContactMessage, setTyping, clearTyping,
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,

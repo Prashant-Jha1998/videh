@@ -32,6 +32,10 @@ export function setNotificationActiveChatId(chatId: string | null): void {
   activeChatId = chatId;
 }
 
+export function getNotificationActiveChatId(): string | null {
+  return activeChatId;
+}
+
 function notifyDedupeKey(chatId: string, messageId?: string): string {
   return `${chatId}:${messageId ?? "latest"}`;
 }
@@ -119,6 +123,7 @@ export async function deliverPremiumChatMessageNotification(
       messageId: opts.messageId,
       body: opts.body,
       senderName: opts.senderName,
+      senderId: undefined,
     });
     agentDebugLog(
       "incomingMessageNotify.ts:deliver",

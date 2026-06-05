@@ -43,6 +43,7 @@ import {
 import type { CallKeepHandlerPayload } from "@/lib/callKeepBridge";
 import { displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
 import { emitChatMessageSignal } from "@/lib/chatMessageEvents";
+import { getNotificationActiveChatId } from "@/lib/incomingMessageNotify";
 import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
 import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
 import { maybePromptDisableBatteryOptimization } from "@/lib/incomingCallBattery";
@@ -521,12 +522,29 @@ function RootLayoutNav() {
         if (isCall && data && AppState.currentState !== "active") {
           void presentIncomingCallFromPush(data, { scheduleLocalNotification: false });
         }
+        const isChatMessage =
+          data?.notificationKind === "chat_message"
+          || data?.kind === "message";
+        const inOpenChat =
+          isChatMessage
+          && data?.chatId != null
+          && AppState.currentState === "active"
+          && getNotificationActiveChatId() === String(data.chatId);
+        if (inOpenChat) {
+          emitChatMessageSignal({
+            chatId: String(data.chatId),
+            messageId: data.messageId != null ? String(data.messageId) : undefined,
+            body: notification.request.content.body ?? undefined,
+            senderName: String(data.senderName ?? notification.request.content.title ?? ""),
+            senderId: data.senderId != null ? String(data.senderId) : undefined,
+          });
+        }
         return {
-          shouldShowAlert: true,
-          shouldPlaySound: true,
-          shouldShowBanner: true,
-          shouldShowList: true,
-          shouldSetBadge: !isCall,
+          shouldShowAlert: !inOpenChat,
+          shouldPlaySound: !inOpenChat,
+          shouldShowBanner: !inOpenChat,
+          shouldShowList: !inOpenChat,
+          shouldSetBadge: !isCall && !inOpenChat,
         };
       },
     });
@@ -566,8 +584,14 @@ function RootLayoutNav() {
         emitChatMessageSignal({
           chatId,
           messageId: data.messageId != null ? String(data.messageId) : undefined,
+          body: notification.request.content.body ?? undefined,
+          senderName: String(data.senderName ?? notification.request.content.title ?? ""),
+          senderId: data.senderId != null ? String(data.senderId) : undefined,
         });
         void loadMessages(chatId);
+        if (AppState.currentState === "active" && getNotificationActiveChatId() === chatId) {
+          void dismissChatMessageNotifications(chatId);
+        }
         return;
       }
       const isCall = data.kind === "call" || data.notificationKind === "incoming_call";

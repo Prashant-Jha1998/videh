@@ -1099,18 +1099,20 @@ export default function ChatScreen() {
           typingPollInFlightRef.current = false;
         }
       };
-      const pollMessages = () => {
-        if (messagePollInFlightRef.current) return;
+      const pollMessages = (force = false) => {
+        if (!force && messagePollInFlightRef.current) return;
         messagePollInFlightRef.current = true;
         loadMessages(chatId).finally(() => { messagePollInFlightRef.current = false; });
       };
-      const msgTimer = setInterval(pollMessages, 1000);
-      void pollMessages();
+      const msgTimer = setInterval(() => pollMessages(false), 400);
+      void pollMessages(true);
       void pollTyping();
       const typingTimer = setInterval(pollTyping, 1500);
       const unsubMsgSignal = onChatMessageSignal((signal) => {
-        if (signal.chatId !== chatId) return;
-        pollMessages();
+        if (String(signal.chatId) !== String(chatId)) return;
+        pendingScrollToEndRef.current = true;
+        userScrolledUpRef.current = false;
+        pollMessages(true);
       });
       const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
       const loadPresence = async () => {
@@ -3122,7 +3124,10 @@ export default function ChatScreen() {
 
       <View style={styles.chatBody}>
         <FlatList
-          style={styles.messageList}
+          style={[
+            styles.messageList,
+            listKeyboardShrink > 0 ? { marginBottom: listKeyboardShrink } : undefined,
+          ]}
           ref={listRef}
           data={listRows}
           ListHeaderComponent={
@@ -3156,7 +3161,7 @@ export default function ChatScreen() {
               justifyContent: searching ? "flex-start" : "flex-end",
             },
           ]}
-          extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}`}
+          extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}|${allMessages.length}`}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}

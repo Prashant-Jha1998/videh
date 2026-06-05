@@ -3,6 +3,7 @@ export type ChatMessageSignal = {
   messageId?: string;
   body?: string;
   senderName?: string;
+  senderId?: string;
 };
 
 type ChatMessageListener = (signal: ChatMessageSignal) => void;
