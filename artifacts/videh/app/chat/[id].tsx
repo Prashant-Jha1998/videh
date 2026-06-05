@@ -1507,6 +1507,14 @@ export default function ChatScreen() {
   }, [keyboardVisible]);
 
   useEffect(() => {
+    if (!keyboardVisible || keyboardHeight <= 0) return;
+    const t1 = setTimeout(() => scrollToLatest(false), 50);
+    const t2 = setTimeout(() => scrollToLatest(false), 150);
+    const t3 = setTimeout(() => scrollToLatest(false), 300);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [keyboardHeight, keyboardVisible, scrollToLatest]);
+
+  useEffect(() => {
     let extraPin: ReturnType<typeof setTimeout> | null = null;
     if (searching || messages.length === 0) return;
     if (pendingScrollToEndRef.current) {
@@ -3143,7 +3151,9 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={false}
           maintainVisibleContentPosition={
-            searching ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
+            (searching || keyboardVisible)
+              ? undefined
+              : { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
           }
           initialNumToRender={18}
           maxToRenderPerBatch={12}

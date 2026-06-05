@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v10"
+        "key": "apk-release-v11"
       }
     },
     "production": {
