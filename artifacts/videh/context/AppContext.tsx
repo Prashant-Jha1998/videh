@@ -770,19 +770,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, [chats]);
 
+  const loadMessagesAfterHintTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
   /** Show incoming text immediately from push/SSE before the messages API catches up (WhatsApp-style). */
   const applyIncomingMessageHint = useCallback((signal: ChatMessageSignal) => {
     const chatId = String(signal.chatId);
     const u = userRef.current;
-    const messageId = signal.messageId ? String(signal.messageId) : undefined;
+    const serverMessageId = signal.messageId ? String(signal.messageId) : undefined;
     const text = signal.body?.trim();
-    if (!messageId && !text) return;
+    if (!serverMessageId && !text) return;
 
     setChats((prev) =>
       prev.map((c) => {
         if (String(c.id) !== chatId) return c;
         const msgs = c.messages ?? [];
-        if (messageId && msgs.some((m) => m.id === messageId)) return c;
+        if (
+          serverMessageId
+          && msgs.some((m) => m.id === serverMessageId || m.id === `hint_${serverMessageId}`)
+        ) {
+          return c;
+        }
         if (
           text
           && msgs.some(
@@ -800,7 +807,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (senderId === "me") return c;
 
         const hintMsg: Message = {
-          id: messageId ?? `hint_${Date.now()}`,
+          id: serverMessageId ? `hint_${serverMessageId}` : `hint_t${Date.now()}`,
           text: text ?? "",
           timestamp: Date.now(),
           senderId,
@@ -851,8 +858,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (String(c.id) !== String(chatId)) return c;
           const prevMsgs = c.messages ?? [];
           const prevStable = prevMsgs.filter((m) => !m.id.startsWith("hint_"));
+          const hasPendingHints = prevMsgs.some((m) => m.id.startsWith("hint_"));
           if (
-            prevStable.length === msgs.length
+            !hasPendingHints
+            && prevStable.length === msgs.length
             && prevStable.every((m, i) => {
               const n = msgs[i];
               return m.id === n.id
@@ -874,8 +883,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             );
           const pendingLocal = prevMsgs.filter((m) => {
             if (m.id.startsWith("hint_")) {
-              if (!m.text.trim()) return false;
-              return !msgs.some((s) => s.senderId !== "me" && s.text === m.text);
+              const hintedServerId = m.id.startsWith("hint_t") ? null : m.id.slice(5);
+              if (hintedServerId && msgs.some((s) => s.id === hintedServerId)) return false;
+              if (
+                m.text.trim()
+                && msgs.some(
+                  (s) =>
+                    s.senderId !== "me"
+                    && (s.text === m.text || (hintedServerId != null && s.id === hintedServerId)),
+                )
+              ) {
+                return false;
+              }
+              if (!m.text.trim() && hintedServerId && msgs.some((s) => s.id === hintedServerId)) {
+                return false;
+              }
+              return true;
             }
             if (!m.id.startsWith("tmp_")) return false;
             if (
@@ -943,6 +966,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     } catch {}
   }, [patchChatMessage]);
+
+  /** Defer API refresh so the server row exists before we merge (avoids hint flicker). */
+  const scheduleLoadMessagesAfterHint = useCallback(
+    (chatId: string, delayMs = 450) => {
+      const key = String(chatId);
+      const pending = loadMessagesAfterHintTimersRef.current.get(key);
+      if (pending) clearTimeout(pending);
+      const timer = setTimeout(() => {
+        loadMessagesAfterHintTimersRef.current.delete(key);
+        void loadMessages(chatId);
+      }, delayMs);
+      loadMessagesAfterHintTimersRef.current.set(key, timer);
+    },
+    [loadMessages],
+  );
 
   const loadOlderMessages = useCallback(
     async (chatId: string, beforeTimestamp: number): Promise<{ loaded: number; hasMore: boolean }> => {
@@ -1076,7 +1114,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           applyIncomingMessageHint(signal);
           emitChatMessageSignal(signal);
           if (activeChatIdRef.current === cid) {
-            void loadMessages(cid);
+            scheduleLoadMessagesAfterHint(cid);
           }
         }
         if (cid) {
@@ -1128,7 +1166,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       clearInterval(statusTimer);
       clearInterval(callTimer);
     };
-  }, [isAuthenticated, loadChats, loadMessages, applyIncomingMessageHint]);
+  }, [isAuthenticated, loadChats, loadMessages, applyIncomingMessageHint, scheduleLoadMessagesAfterHint]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -1136,10 +1174,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       applyIncomingMessageHint(signal);
       const cid = activeChatIdRef.current;
       if (cid && String(signal.chatId) === cid) {
-        void loadMessages(cid);
+        scheduleLoadMessagesAfterHint(cid);
       }
     });
-  }, [isAuthenticated, applyIncomingMessageHint, loadMessages]);
+  }, [isAuthenticated, applyIncomingMessageHint, scheduleLoadMessagesAfterHint]);
 
   const sendMessage = useCallback((
     chatId: string,

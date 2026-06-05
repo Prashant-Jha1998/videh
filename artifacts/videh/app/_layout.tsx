@@ -588,7 +588,6 @@ function RootLayoutNav() {
           senderName: String(data.senderName ?? notification.request.content.title ?? ""),
           senderId: data.senderId != null ? String(data.senderId) : undefined,
         });
-        void loadMessages(chatId);
         if (AppState.currentState === "active" && getNotificationActiveChatId() === chatId) {
           void dismissChatMessageNotifications(chatId);
         }

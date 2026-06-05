@@ -981,7 +981,7 @@ export default function ChatScreen() {
     setTyping, clearTyping, markAsRead, deleteMessage, deleteForEveryone,
     editMessage, reactToMessage, starMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
-    loadMessages, loadOlderMessages, forwardMessage, updateLocationOnServer, stopLiveLocationSession, setActiveChatId, applyIncomingMessageHint,
+    loadMessages, loadOlderMessages, forwardMessage, updateLocationOnServer, stopLiveLocationSession, setActiveChatId,
     typingByChatId, reportRemoteTyping, patchChatMessage,
   } = useApp();
 
@@ -1115,10 +1115,9 @@ export default function ChatScreen() {
       const typingTimer = setInterval(pollTyping, 1500);
       const unsubMsgSignal = onChatMessageSignal((signal) => {
         if (String(signal.chatId) !== String(chatId)) return;
-        applyIncomingMessageHint(signal);
         pendingScrollToEndRef.current = true;
         userScrolledUpRef.current = false;
-        pollMessages(true);
+        schedulePinToBottom();
       });
       const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
       const loadPresence = async () => {
@@ -1150,7 +1149,7 @@ export default function ChatScreen() {
         clearInterval(typingTimer);
         if (presenceTimer) clearInterval(presenceTimer);
       };
-    }, [chatId, user?.dbId, user?.sessionToken, setActiveChatId, loadMessages, applyIncomingMessageHint, clearTyping, reportRemoteTyping])
+    }, [chatId, user?.dbId, user?.sessionToken, setActiveChatId, loadMessages, schedulePinToBottom, clearTyping, reportRemoteTyping])
   );
 
   const enterSendActive = enterIsSend;
