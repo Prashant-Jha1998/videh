@@ -9,7 +9,11 @@ import * as Sharing from "expo-sharing";
 import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { KeyboardAvoidingView, useGenericKeyboardHandler } from "react-native-keyboard-controller";
+import {
+  KeyboardAvoidingView,
+  useGenericKeyboardHandler,
+  useResizeMode,
+} from "react-native-keyboard-controller";
 import { useChatKeyboard } from "@/hooks/useChatKeyboard";
 import { onChatMessageSignal } from "@/lib/chatMessageEvents";
 import { runOnJS } from "react-native-reanimated";
@@ -21,6 +25,7 @@ import {
   Clipboard,
   Dimensions,
   FlatList,
+  useWindowDimensions,
   Linking,
   Modal,
   Image as NativeImage,
@@ -1165,6 +1170,8 @@ export default function ChatScreen() {
 
   const listRows = useMemo(() => messagesWithDateRows(messages), [messages]);
   const [composerHeight, setComposerHeight] = useState(56);
+  const [keyboardLiftFallback, setKeyboardLiftFallback] = useState(0);
+  const keyboardHeightRef = useRef(0);
   const chatContactName = name ?? chat?.name ?? "Chat";
 
   const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
@@ -1514,7 +1521,34 @@ export default function ChatScreen() {
     [onKeyboardAnimStart, onKeyboardAnimEnd],
   );
 
+  useResizeMode();
   const { keyboardVisible, keyboardHeight } = useChatKeyboard();
+  const { height: windowHeight } = useWindowDimensions();
+  const windowHeightWhenKeyboardHiddenRef = useRef(windowHeight);
+  const effectiveKeyboardHeight = Math.max(keyboardHeight, keyboardLiftFallback);
+
+  useEffect(() => {
+    keyboardHeightRef.current = keyboardHeight;
+    if (keyboardHeight > 0) setKeyboardLiftFallback(0);
+  }, [keyboardHeight]);
+
+  useEffect(() => {
+    if (!keyboardVisible) {
+      windowHeightWhenKeyboardHiddenRef.current = windowHeight;
+      setKeyboardLiftFallback(0);
+    }
+  }, [keyboardVisible, windowHeight]);
+
+  /** adjustResize shrinks the window; Expo Go adjustPan does not — lift manually. */
+  const windowShrunkForKeyboard =
+    keyboardVisible
+    && effectiveKeyboardHeight > 0
+    && windowHeightWhenKeyboardHiddenRef.current - windowHeight > effectiveKeyboardHeight * 0.3;
+  const keyboardOpen = keyboardVisible || keyboardLiftFallback > 0;
+  const androidKeyboardLift =
+    Platform.OS === "android" && keyboardOpen && effectiveKeyboardHeight > 0 && !windowShrunkForKeyboard
+      ? effectiveKeyboardHeight
+      : 0;
 
   useEffect(() => {
     keyboardVisibleRef.current = keyboardVisible;
@@ -1531,6 +1565,13 @@ export default function ChatScreen() {
     const t4 = setTimeout(() => scrollToLatest(false), 500);
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); };
   }, [keyboardHeight, keyboardVisible, scrollToLatest]);
+
+  useEffect(() => {
+    if (androidKeyboardLift <= 0) return;
+    pendingScrollToEndRef.current = true;
+    userScrolledUpRef.current = false;
+    schedulePinToBottom();
+  }, [androidKeyboardLift, schedulePinToBottom]);
 
   useEffect(() => {
     let extraPin: ReturnType<typeof setTimeout> | null = null;
@@ -1557,11 +1598,11 @@ export default function ChatScreen() {
     };
   }, [messages.length, searching, scrollToLatest, keyboardVisible, schedulePinToBottom]);
 
-  /** WhatsApp: messages live in the list viewport; composer sits below (not overlaying). */
+  /** Composer is a sibling below the list — only a small content gap is needed. */
   const listBottomPadding = 12;
   const jumpFabBottom = useMemo(
-    () => Math.max(12, composerHeight + 16),
-    [composerHeight],
+    () => Math.max(12, composerHeight + androidKeyboardLift + 16),
+    [composerHeight, androidKeyboardLift],
   );
 
   useEffect(() => {
@@ -1592,6 +1633,12 @@ export default function ChatScreen() {
       if (composerPinTimerRef.current) clearTimeout(composerPinTimerRef.current);
     };
   }, [composerHeight, searching, scrollToLatest]);
+
+  useEffect(() => {
+    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
+    pendingScrollToEndRef.current = true;
+    scrollToLatest(false);
+  }, [androidKeyboardLift, composerHeight, searching, scrollToLatest]);
 
   useEffect(() => {
     if (searching) return;
@@ -2878,8 +2925,16 @@ export default function ChatScreen() {
                     pendingScrollToEndRef.current = true;
                     schedulePinToBottom();
                     if (chatId && inputVal.length > 0) setTyping(chatId);
+                    if (Platform.OS === "android") {
+                      setTimeout(() => {
+                        if (keyboardHeightRef.current <= 0) {
+                          setKeyboardLiftFallback(Math.round(Dimensions.get("window").height * 0.38));
+                        }
+                      }, 120);
+                    }
                   }}
                   onBlur={() => {
+                    setKeyboardLiftFallback(0);
                     setAssistantChatInputFocused(false);
                     if (chatId) {
                       clearTyping(chatId);
@@ -2940,6 +2995,11 @@ export default function ChatScreen() {
       />
     </>
   );
+
+  const chatKeyboardShellStyle = [
+    styles.chatKeyboardAvoid,
+    androidKeyboardLift > 0 ? { paddingBottom: androidKeyboardLift } : null,
+  ];
 
   return (
     <View
@@ -3126,8 +3186,9 @@ export default function ChatScreen() {
       )}
 
       <KeyboardAvoidingView
-        style={styles.chatKeyboardAvoid}
+        style={chatKeyboardShellStyle}
         behavior="padding"
+        enabled={Platform.OS === "ios" || androidKeyboardLift === 0}
         keyboardVerticalOffset={Platform.OS === "ios" ? topPad + 52 : 0}
       >
         <View style={styles.chatBody}>
@@ -3172,7 +3233,7 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={false}
           maintainVisibleContentPosition={
-            (searching || keyboardVisible)
+            (searching || keyboardOpen)
               ? undefined
               : { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
           }

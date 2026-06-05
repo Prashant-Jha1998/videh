@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Keyboard, Platform } from "react-native";
+import { Dimensions, Keyboard, Platform } from "react-native";
 import { useKeyboardState } from "react-native-keyboard-controller";
 
 /**
@@ -18,8 +18,16 @@ export function useChatKeyboard() {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
-    const onShow = (e: { endCoordinates?: { height?: number } }) => {
-      setFallbackHeight(e.endCoordinates?.height ?? 0);
+    const onShow = (e: { endCoordinates?: { height?: number; screenY?: number } }) => {
+      const reported = e.endCoordinates?.height ?? 0;
+      if (reported > 0) {
+        setFallbackHeight(reported);
+        return;
+      }
+      const screenY = e.endCoordinates?.screenY;
+      if (screenY != null) {
+        setFallbackHeight(Math.max(0, Dimensions.get("window").height - screenY));
+      }
     };
     const onHide = () => setFallbackHeight(0);
 
@@ -31,11 +39,7 @@ export function useChatKeyboard() {
     };
   }, []);
 
-  // Android: RN Keyboard events are reliable in release APK; controller needs extra native config.
-  const keyboardHeight =
-    Platform.OS === "android"
-      ? fallbackHeight || controllerHeight
-      : controllerHeight || fallbackHeight;
+  const keyboardHeight = Math.max(controllerHeight, fallbackHeight);
   const keyboardVisible = controllerVisible || keyboardHeight > 0;
 
   return { keyboardVisible, keyboardHeight };
