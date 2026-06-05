@@ -1,0 +1,9 @@
+name: Android APK Release
+
+jobs:
+  build_android:
+    name: Build Android APK (apkRelease)
+    type: build
+    params:
+      platform: android
+      profile: apkRelease
