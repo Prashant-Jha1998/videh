@@ -173,6 +173,7 @@ export interface Chat {
   isMuted?: boolean;
   isArchived?: boolean;
   otherUserId?: number;
+  isKhataNotebook?: boolean;
 }
 
 export interface Status {
@@ -287,7 +288,9 @@ interface AppContextType {
     filename: string,
     fileSizeBytes: number,
     mimeType: string,
+    opts?: { caption?: string; pageCount?: number },
   ) => void;
+  cancelDocumentUpload: (chatId: string, messageId: string) => void;
   sendContactMessage: (chatId: string, contact: { name: string; phones: string[]; emails?: string[] }) => void;
   setTyping: (chatId: string) => void;
   clearTyping: (chatId: string) => void;
@@ -383,6 +386,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         isMuted: c.is_muted ?? false,
         isArchived: c.is_archived ?? false,
         otherUserId: otherUser?.id,
+        isKhataNotebook: c.group_description === "videh:khata_notebook",
       };
     });
 
@@ -975,7 +979,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ) {
             const msgId = m.id;
             const mediaUrl = m.mediaUrl;
-            const filename = m.text;
+            const { documentFilenameFromText } = await import("@/lib/documentMessage");
+            const filename = documentFilenameFromText(m.text);
             void (async () => {
               patchChatMessage(chatId, msgId, { downloadProgress: 0 });
               try {
@@ -1248,10 +1253,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       replyQuotedSenderId: replyQuote?.replyQuotedSenderId,
       replyType: replyQuote?.replyType,
     };
+    const chatListPreview = text.length > 120 ? `${text.slice(0, 117).trimEnd()}…` : text;
     setChats((prev) =>
       prev.map((c) =>
         c.id === chatId
-          ? { ...c, messages: [...c.messages, newMsg], lastMessage: text, lastMessageTime: Date.now() }
+          ? { ...c, messages: [...c.messages, newMsg], lastMessage: chatListPreview, lastMessageTime: Date.now() }
           : c
       )
     );
@@ -1524,11 +1530,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     filename: string,
     fileSizeBytes: number,
     mimeType: string,
+    opts?: { caption?: string; pageCount?: number },
   ) => {
     void (async () => {
       const u = userRef.current;
       const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
       const displayName = filename.trim() || "Document";
+      const { encodeDocumentMessagePayload } = await import("@/lib/documentMessage");
+      const content = encodeDocumentMessagePayload({
+        filename: displayName,
+        caption: opts?.caption,
+        pages: opts?.pageCount,
+      });
       let stableLocalUri: string;
       try {
         stableLocalUri = await ensureUploadableFileUri(localUri, displayName);
@@ -1546,9 +1559,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
       };
 
+      const { registerDocumentUpload, clearDocumentUpload } = await import("@/lib/documentUploadAbort");
+      const abort = registerDocumentUpload(tempId);
+
       const newMsg: Message = {
         id: tempId,
-        text: displayName,
+        text: content,
         timestamp: Date.now(),
         senderId: "me",
         type: "document",
@@ -1559,10 +1575,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         uploadProgress: 0,
         uploadFailed: false,
       };
+      const listPreview = opts?.caption?.trim() || displayName;
       setChats((prev) =>
         prev.map((c) =>
           c.id === chatId
-            ? { ...c, messages: [...c.messages, newMsg], lastMessage: displayName, lastMessageTime: Date.now() }
+            ? { ...c, messages: [...c.messages, newMsg], lastMessage: listPreview, lastMessageTime: Date.now() }
             : c,
         ),
       );
@@ -1575,6 +1592,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           mime: mimeType,
           filename: displayName,
           sessionToken: u.sessionToken,
+          signal: abort.signal,
           onProgress: (p) => patchMsg({ uploadProgress: p.percent }),
         });
         patchMsg({
@@ -1589,7 +1607,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             senderId: u.dbId,
-            content: displayName,
+            content,
             type: "document",
             mediaUrl: upload.url,
           }),
@@ -1601,6 +1619,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setChats((prev) =>
             prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
           );
+          clearDocumentUpload(tempId);
           return;
         }
         if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
@@ -1617,9 +1636,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           patchMsg({ uploadProgress: undefined, uploadFailed: false });
         }
       } catch (e) {
-        patchMsg({ uploadProgress: undefined, uploadFailed: true });
-        Alert.alert("Couldn't send document", e instanceof Error ? e.message : "Please try again.");
+        const cancelled = e instanceof Error && e.message.includes("cancelled");
+        if (cancelled) {
+          setChats((prev) =>
+            prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
+          );
+        } else {
+          patchMsg({ uploadProgress: undefined, uploadFailed: true });
+          Alert.alert("Couldn't send document", e instanceof Error ? e.message : "Please try again.");
+        }
+      } finally {
+        clearDocumentUpload(tempId);
       }
+    })();
+  }, []);
+
+  const cancelDocumentUpload = useCallback((chatId: string, messageId: string) => {
+    void (async () => {
+      const { cancelDocumentUpload: abortUpload } = await import("@/lib/documentUploadAbort");
+      abortUpload(messageId);
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== messageId) } : c,
+        ),
+      );
     })();
   }, []);
 
@@ -2190,7 +2230,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, forwardMessage, starredMessages, updateAvatar,
       createDirectChat, loadMessages, applyIncomingMessageHint, loadOlderMessages, refreshChats, clearAllChatHistory,
-      sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage, sendDocumentMessage,
+      sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage, sendDocumentMessage, cancelDocumentUpload,
       sendContactMessage, setTyping, clearTyping,
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, reportUser, setChatDisappear,

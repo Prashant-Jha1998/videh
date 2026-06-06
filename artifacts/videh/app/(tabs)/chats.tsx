@@ -65,7 +65,7 @@ export default function ChatsScreen() {
 
   const selectedChats = chats.filter((c) => selectedIds.includes(c.id));
   const isSelectionMode = selectedIds.length > 0;
-  const visibleBase = chats.filter((c) => !hiddenIds.includes(c.id));
+  const visibleBase = chats.filter((c) => !hiddenIds.includes(c.id) && !c.isKhataNotebook);
   const archivedChats = visibleBase.filter((c) => c.isArchived);
   const visibleChats = showArchived ? archivedChats : visibleBase.filter((c) => !c.isArchived);
   const getUnreadCount = (chat: Chat) => manualUnreadIds.includes(chat.id) ? Math.max(chat.unreadCount, 1) : chat.unreadCount;
@@ -352,6 +352,7 @@ export default function ChatsScreen() {
     { label: "New group", icon: "people-outline", onPress: () => router.push("/new-group") },
     { label: "New broadcast", icon: "radio-outline", onPress: () => router.push("/broadcasts") },
     { label: "Linked devices", icon: "phone-portrait-outline", onPress: () => router.push("/linked-devices") },
+    { label: "Khata", icon: "book-outline", onPress: () => router.push("/settings/khata") },
     { label: "Starred messages", icon: "star-outline", onPress: () => router.push("/starred") },
     { label: "Read all", icon: "checkmark-done-outline", onPress: () => { void markAllAsRead(); setMenuOpen(false); } },
     { label: "Settings", icon: "settings-outline", onPress: () => router.push("/(tabs)/settings") },

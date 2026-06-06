@@ -192,6 +192,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         c.is_group,
         c.group_name,
         c.group_avatar_url,
+        c.group_description,
         c.disappear_after_seconds,
         cm.is_muted,
         cm.is_pinned,

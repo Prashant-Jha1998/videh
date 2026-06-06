@@ -1,6 +1,47 @@
 import type { ComponentProps } from "react";
 import type { Ionicons } from "@expo/vector-icons";
 
+const DOC_PAYLOAD_PREFIX = "\u2063doc:";
+
+export type DocumentMessagePayload = {
+  filename: string;
+  caption?: string;
+  pages?: number;
+};
+
+export function encodeDocumentMessagePayload(payload: DocumentMessagePayload): string {
+  return DOC_PAYLOAD_PREFIX + JSON.stringify(payload);
+}
+
+export function parseDocumentMessagePayload(text: string): DocumentMessagePayload & { legacy: boolean } {
+  if (!text.startsWith(DOC_PAYLOAD_PREFIX)) {
+    return { filename: text || "Document", legacy: true };
+  }
+  try {
+    const raw = JSON.parse(text.slice(DOC_PAYLOAD_PREFIX.length)) as DocumentMessagePayload;
+    return {
+      filename: raw.filename || "Document",
+      caption: raw.caption?.trim() || undefined,
+      pages: typeof raw.pages === "number" && raw.pages > 0 ? raw.pages : undefined,
+      legacy: false,
+    };
+  } catch {
+    return { filename: text || "Document", legacy: true };
+  }
+}
+
+export function documentFilenameFromText(text: string): string {
+  return parseDocumentMessagePayload(text).filename;
+}
+
+export function documentCaptionFromText(text: string): string | undefined {
+  return parseDocumentMessagePayload(text).caption;
+}
+
+export function documentPagesFromText(text: string): number | undefined {
+  return parseDocumentMessagePayload(text).pages;
+}
+
 export function formatFileSize(bytes?: number | null): string {
   if (bytes == null || bytes < 1) return "";
   if (bytes < 1024) return `${bytes} B`;
@@ -51,9 +92,18 @@ export function documentMetaLine(fileSizeBytes?: number | null): string {
   return size ? `${size} · Document · Tap to open` : "Document · Tap to open";
 }
 
-/** WhatsApp Web: `CSV • 3 MB` */
-export function whatsappDocumentMetaLine(filename: string, fileSizeBytes?: number | null): string {
+/** WhatsApp-style: `52 pages • 28 MB • PDF` */
+export function whatsappDocumentMetaLine(
+  filename: string,
+  fileSizeBytes?: number | null,
+  pageCount?: number | null,
+): string {
   const ext = (filename.split(".").pop() ?? "FILE").toUpperCase();
   const size = formatFileSize(fileSizeBytes);
-  return size ? `${ext} • ${size}` : ext;
+  const pages =
+    pageCount != null && pageCount > 0
+      ? `${pageCount} page${pageCount === 1 ? "" : "s"}`
+      : "";
+  const parts = [pages, size, ext].filter(Boolean);
+  return parts.join(" • ");
 }

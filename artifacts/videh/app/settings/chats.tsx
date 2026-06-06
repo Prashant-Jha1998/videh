@@ -190,8 +190,8 @@ export default function ChatsSettingsScreen() {
             colors={colors}
           />
           <TappableRow
-            label="Advanced theme"
-            value="Accent · Bubbles · Packs"
+            label={t("settings.advancedTheme")}
+            value={t("settings.advancedThemeSub")}
             onPress={() => router.push("/settings/advanced-theme" as Href)}
             colors={colors}
           />

@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -131,6 +131,9 @@ export default function ChatMediaComposeScreen() {
       setEditing(false);
     }
   }
+
+  const closeCrop = useCallback(() => setCropOpen(false), []);
+  const closeDraw = useCallback(() => setDrawOpen(false), []);
 
   function onCropPress() {
     if (kind !== "image" || isGif || editing || cropOpen || drawOpen) return;
@@ -275,13 +278,13 @@ export default function ChatMediaComposeScreen() {
       <ManualImageCropModal
         visible={cropOpen}
         imageUri={uri}
-        onCancel={() => setCropOpen(false)}
+        onCancel={closeCrop}
         onDone={(rect) => void onCropDone(rect)}
       />
       <ImageDrawModal
         visible={drawOpen}
         imageUri={uri}
-        onCancel={() => setDrawOpen(false)}
+        onCancel={closeDraw}
         onDone={(drawnUri) => void onDrawDone(drawnUri)}
       />
     </View>

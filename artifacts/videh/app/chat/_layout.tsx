@@ -21,6 +21,7 @@ export default function ChatLayout() {
         <Stack.Screen name="message-info" />
         <Stack.Screen name="media-compose" options={{ presentation: "fullScreenModal" }} />
         <Stack.Screen name="media-compose-batch" options={{ presentation: "fullScreenModal" }} />
+        <Stack.Screen name="document-compose" options={{ presentation: "fullScreenModal" }} />
         <Stack.Screen name="video-viewer" options={{ presentation: "fullScreenModal" }} />
       </Stack>
     </ErrorBoundary>

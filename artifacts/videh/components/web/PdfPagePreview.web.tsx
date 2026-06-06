@@ -9,6 +9,7 @@ type Props = {
   filename: string;
   sessionToken?: string | null;
   height?: number;
+  localUri?: string | null;
 };
 
 /** WhatsApp-style first-page PDF strip above document bubble (web only). */

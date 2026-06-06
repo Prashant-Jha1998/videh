@@ -8,6 +8,8 @@ import { buildKhataReminderMessage, formatKhataReminderDateLabel } from "../lib/
 const router = Router();
 router.use(requireAuth);
 
+const KHATA_NOTEBOOK_MARKER = "videh:khata_notebook";
+
 let khataTablesEnsured = false;
 
 async function ensureKhataTables() {
@@ -253,6 +255,69 @@ router.get("/chat/:chatId/pdf", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "khata pdf error");
     res.status(500).json({ success: false, message: "Could not generate PDF" });
+  }
+});
+
+router.get("/notebooks", async (req: Request, res: Response) => {
+  const userId = getAuthUserId(req);
+  if (!userId) {
+    res.status(401).json({ success: false, message: "Sign in required." });
+    return;
+  }
+  try {
+    await ensureKhataTables();
+    await query("ALTER TABLE chats ADD COLUMN IF NOT EXISTS group_description TEXT");
+    const result = await query(
+      `SELECT c.id, c.group_name AS name, c.created_at
+       FROM chats c
+       JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $1
+       WHERE c.is_group = TRUE AND c.group_description = $2
+       ORDER BY c.id DESC`,
+      [userId, KHATA_NOTEBOOK_MARKER],
+    );
+    res.json({ success: true, notebooks: result.rows });
+  } catch (err) {
+    req.log.error({ err }, "khata notebooks list error");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.post("/notebook", async (req: Request, res: Response) => {
+  const { contactName, createdBy } = req.body as { contactName?: string; createdBy?: number };
+  if (!createdBy || !contactName?.trim()) {
+    res.status(400).json({ success: false, message: "contactName and createdBy are required" });
+    return;
+  }
+  if (!assertSameUser(req, res, createdBy)) return;
+
+  const trimmed = contactName.trim();
+  if (trimmed.length < 2) {
+    res.status(400).json({ success: false, message: "Name must be at least 2 characters" });
+    return;
+  }
+  if (trimmed.length > 80) {
+    res.status(400).json({ success: false, message: "Name is too long" });
+    return;
+  }
+
+  try {
+    await ensureKhataTables();
+    await query("ALTER TABLE chats ADD COLUMN IF NOT EXISTS group_description TEXT");
+    const chat = await query(
+      `INSERT INTO chats (is_group, group_name, group_description, created_by)
+       VALUES (TRUE, $1, $2, $3) RETURNING id`,
+      [trimmed, KHATA_NOTEBOOK_MARKER, createdBy],
+    );
+    const chatId = Number(chat.rows[0].id);
+    await query(
+      `INSERT INTO chat_members (chat_id, user_id, is_admin, is_archived, can_send_messages)
+       VALUES ($1, $2, TRUE, TRUE, TRUE)`,
+      [chatId, createdBy],
+    );
+    res.json({ success: true, chatId, name: trimmed });
+  } catch (err) {
+    req.log.error({ err }, "khata notebook create error");
+    res.status(500).json({ success: false, message: "Could not create khata" });
   }
 });
 

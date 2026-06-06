@@ -21,11 +21,22 @@ import { getImageDimensions } from "@/lib/imageEdit";
 export const DRAW_COLORS = ["#ffffff", "#ffeb3b", "#ff5252", "#4caf50", "#2196f3", "#000000"] as const;
 
 type Stroke = {
+  id: string;
   d: string;
   color: string;
   width: number;
   opacity: number;
 };
+
+function layoutNearlySame(a: LayoutRectangle | null, b: LayoutRectangle): boolean {
+  if (!a) return false;
+  return (
+    Math.abs(a.width - b.width) < 1 &&
+    Math.abs(a.height - b.height) < 1 &&
+    Math.abs(a.x - b.x) < 1 &&
+    Math.abs(a.y - b.y) < 1
+  );
+}
 
 function pointsToD(points: { x: number; y: number }[]): string {
   if (points.length < 1) return "";
@@ -51,13 +62,24 @@ export function ImageDrawModal({ visible, imageUri, onCancel, onDone }: Props) {
   const [color, setColor] = useState<string>(DRAW_COLORS[0]);
   const [highlight, setHighlight] = useState(true);
   const currentPoints = useRef<{ x: number; y: number }[]>([]);
+  const activeStrokeId = useRef<string | null>(null);
+  const strokeSeq = useRef(0);
   const captureRefView = useRef<View>(null);
   const [exporting, setExporting] = useState(false);
+  const onCancelRef = useRef(onCancel);
+  const displayBoundsRef = useRef<ReturnType<typeof computeDisplayBounds> | null>(null);
+  const colorRef = useRef(color);
+  const highlightRef = useRef(highlight);
 
   const displayBounds = useMemo(() => {
     if (!container || !imageSize) return null;
     return computeDisplayBounds(container, imageSize.width, imageSize.height);
   }, [container, imageSize]);
+
+  onCancelRef.current = onCancel;
+  displayBoundsRef.current = displayBounds;
+  colorRef.current = color;
+  highlightRef.current = highlight;
 
   useEffect(() => {
     if (!visible) return;
@@ -65,63 +87,82 @@ export function ImageDrawModal({ visible, imageUri, onCancel, onDone }: Props) {
     setLoading(true);
     setStrokes([]);
     setImageSize(null);
+    setContainer(null);
+    currentPoints.current = [];
+    activeStrokeId.current = null;
     void (async () => {
       try {
         const size = await getImageDimensions(imageUri);
         if (!cancelled) setImageSize(size);
       } catch {
-        if (!cancelled) onCancel();
+        if (!cancelled) onCancelRef.current();
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [visible, imageUri, onCancel]);
+  }, [visible, imageUri]);
 
-  const strokeWidth = highlight ? 16 : 5;
-  const strokeOpacity = highlight ? 0.55 : 1;
+  const drawResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (evt) => {
+        const bounds = displayBoundsRef.current;
+        if (!bounds) return;
+        const isHighlight = highlightRef.current;
+        const strokeColor = colorRef.current;
+        const width = isHighlight ? 16 : 5;
+        const opacity = isHighlight ? 0.55 : 1;
+        const { locationX, locationY } = evt.nativeEvent;
+        const x = locationX - bounds.x;
+        const y = locationY - bounds.y;
+        if (x < 0 || y < 0 || x > bounds.w || y > bounds.h) return;
+        currentPoints.current = [{ x, y }];
+        const d = pointsToD(currentPoints.current);
+        const id = `stroke-${++strokeSeq.current}`;
+        activeStrokeId.current = id;
+        setStrokes((prev) => [...prev, { id, d, color: strokeColor, width, opacity }]);
+      },
+      onPanResponderMove: (evt) => {
+        const bounds = displayBoundsRef.current;
+        const strokeId = activeStrokeId.current;
+        if (!bounds || !strokeId || currentPoints.current.length === 0) return;
+        const isHighlight = highlightRef.current;
+        const strokeColor = colorRef.current;
+        const width = isHighlight ? 16 : 5;
+        const opacity = isHighlight ? 0.55 : 1;
+        const { locationX, locationY } = evt.nativeEvent;
+        const x = Math.max(0, Math.min(bounds.w, locationX - bounds.x));
+        const y = Math.max(0, Math.min(bounds.h, locationY - bounds.y));
+        const pts = currentPoints.current;
+        const last = pts[pts.length - 1];
+        if (Math.hypot(x - last.x, y - last.y) < 2) return;
+        currentPoints.current = [...pts, { x, y }];
+        const d = pointsToD(currentPoints.current);
+        setStrokes((prev) => {
+          const idx = prev.findIndex((s) => s.id === strokeId);
+          if (idx < 0) return prev;
+          const next = [...prev];
+          next[idx] = { id: strokeId, d, color: strokeColor, width, opacity };
+          return next;
+        });
+      },
+      onPanResponderRelease: () => {
+        currentPoints.current = [];
+        activeStrokeId.current = null;
+      },
+      onPanResponderTerminate: () => {
+        currentPoints.current = [];
+        activeStrokeId.current = null;
+      },
+    }),
+  ).current;
 
-  const drawResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (evt) => {
-          if (!displayBounds) return;
-          const { locationX, locationY } = evt.nativeEvent;
-          const x = locationX - displayBounds.x;
-          const y = locationY - displayBounds.y;
-          if (x < 0 || y < 0 || x > displayBounds.w || y > displayBounds.h) return;
-          currentPoints.current = [{ x, y }];
-          const d = pointsToD(currentPoints.current);
-          setStrokes((prev) => [...prev, { d, color, width: strokeWidth, opacity: strokeOpacity }]);
-        },
-        onPanResponderMove: (evt) => {
-          if (!displayBounds || currentPoints.current.length === 0) return;
-          const { locationX, locationY } = evt.nativeEvent;
-          const x = Math.max(0, Math.min(displayBounds.w, locationX - displayBounds.x));
-          const y = Math.max(0, Math.min(displayBounds.h, locationY - displayBounds.y));
-          const pts = currentPoints.current;
-          const last = pts[pts.length - 1];
-          if (Math.hypot(x - last.x, y - last.y) < 2) return;
-          currentPoints.current = [...pts, { x, y }];
-          const d = pointsToD(currentPoints.current);
-          setStrokes((prev) => {
-            if (prev.length === 0) return prev;
-            const next = [...prev];
-            next[next.length - 1] = { d, color, width: strokeWidth, opacity: strokeOpacity };
-            return next;
-          });
-        },
-        onPanResponderRelease: () => {
-          currentPoints.current = [];
-        },
-        onPanResponderTerminate: () => {
-          currentPoints.current = [];
-        },
-      }),
-    [color, displayBounds, strokeOpacity, strokeWidth],
-  );
+  const handleCanvasLayout = useCallback((layout: LayoutRectangle) => {
+    setContainer((prev) => (layoutNearlySame(prev, layout) ? prev : layout));
+  }, []);
 
   const undo = useCallback(() => {
     setStrokes((prev) => prev.slice(0, -1));
@@ -160,7 +201,11 @@ export function ImageDrawModal({ visible, imageUri, onCancel, onDone }: Props) {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.canvas} onLayout={(e) => setContainer(e.nativeEvent.layout)} {...drawResponder.panHandlers}>
+        <View
+          style={styles.canvas}
+          onLayout={(e) => handleCanvasLayout(e.nativeEvent.layout)}
+          {...drawResponder.panHandlers}
+        >
           {loading || !imageSize || !displayBounds ? (
             <ActivityIndicator color="#00a884" size="large" />
           ) : (
@@ -176,11 +221,16 @@ export function ImageDrawModal({ visible, imageUri, onCancel, onDone }: Props) {
                 backgroundColor: "#000",
               }}
             >
-              <Image source={{ uri: imageUri }} style={{ width: displayBounds.w, height: displayBounds.h }} contentFit="fill" />
+              <Image
+                source={{ uri: imageUri }}
+                style={{ width: displayBounds.w, height: displayBounds.h }}
+                contentFit="fill"
+                cachePolicy="memory-disk"
+              />
               <Svg width={displayBounds.w} height={displayBounds.h} style={StyleSheet.absoluteFill}>
-                {strokes.map((s, i) => (
+                {strokes.map((s) => (
                   <Path
-                    key={`${i}-${s.d.slice(0, 12)}`}
+                    key={s.id}
                     d={s.d}
                     stroke={s.color}
                     strokeWidth={s.width}

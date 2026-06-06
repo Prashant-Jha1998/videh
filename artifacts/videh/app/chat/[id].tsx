@@ -55,13 +55,18 @@ import {
   validatePickedMedia,
   validatePickedAssets,
 } from "@/lib/chatMediaPolicy";
+import { validateGalleryAsset } from "@/lib/galleryPicker";
+import { ChatAttachSheet } from "@/components/ChatAttachSheet";
 import { VidehVoiceMic } from "@/components/VidehVoiceMic";
 import { ChatEmojiPanel } from "@/components/ChatEmojiPanel";
 import type { GifMediaItem } from "@/lib/chatGifApi";
 import { uploadRemoteGifOrSticker } from "@/lib/sendChatGifSticker";
+import { ChatMessageText } from "@/components/ChatMessageText";
 import { DocumentMessageBubble } from "@/components/DocumentMessageBubble";
+import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/chatMessageText";
 import { ContactMessageBubble } from "@/components/ContactMessageBubble";
 import { openChatDocument } from "@/lib/openChatDocument";
+import { documentFilenameFromText, parseDocumentMessagePayload } from "@/lib/documentMessage";
 import { dedupeEmails, dedupePhones, parseContactMessage } from "@/lib/contactMessage";
 import type { ContactShareRow } from "@/lib/loadDeviceContactsForShare";
 import { ContactSharePickerModal } from "@/components/ContactSharePickerModal";
@@ -192,23 +197,6 @@ function ChatBubbleTail({ fill, side }: { fill: string; side: "left" | "right" }
   );
 }
 
-/** Videh-style attachment row (coloured circle + label). Order matches common WA layout. */
-const ATTACH_SHEET_ITEMS: {
-  key: string;
-  icon: React.ComponentProps<typeof Ionicons>["name"];
-  label: string;
-  color: string;
-  type: "document" | "camera" | "videocamera" | "gallery" | "audiofile" | "location" | "contact";
-}[] = [
-  { key: "doc", icon: "document-text", label: "Document", color: "#8B5CF6", type: "document" },
-  { key: "cam", icon: "camera", label: "Camera", color: "#E8558D", type: "camera" },
-  { key: "vidcam", icon: "videocam", label: "Record video", color: "#C2185B", type: "videocamera" },
-  { key: "gal", icon: "images", label: "Gallery", color: "#2F80ED", type: "gallery" },
-  { key: "aud", icon: "musical-notes", label: "Audio", color: "#F2A742", type: "audiofile" },
-  { key: "loc", icon: "location", label: "Location", color: "#25D366", type: "location" },
-  { key: "con", icon: "person", label: "Contact", color: "#1296D4", type: "contact" },
-];
-
 type ReplyData = { id: string; text: string; senderId: string; senderName?: string; type?: string } | null;
 
 const REPLY_PREVIEW_TEXT_COLOR = "#667781";
@@ -234,21 +222,6 @@ function toReplyData(msg: {
     senderName: msg.senderName,
     type: msg.type,
   };
-}
-
-// Mention-aware text renderer
-function MentionText({ text, style }: { text: string; style?: any }) {
-  const parts = text.split(/(@\w[\w\s]*)/g);
-  if (parts.length === 1) return <Text style={style}>{text}</Text>;
-  return (
-    <Text style={style}>
-      {parts.map((part, i) =>
-        /^@\w/.test(part)
-          ? <Text key={i} style={{ color: "#00A884", fontFamily: "Inter_600SemiBold" }}>{part}</Text>
-          : part
-      )}
-    </Text>
-  );
 }
 
 // Tick icons
@@ -977,7 +950,7 @@ export default function ChatScreen() {
 
   const {
     chats, user, sendMessage, sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage,
-    sendDocumentMessage, sendContactMessage,
+    sendDocumentMessage, cancelDocumentUpload, sendContactMessage,
     setTyping, clearTyping, markAsRead, deleteMessage, deleteForEveryone,
     editMessage, reactToMessage, starMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
@@ -1319,6 +1292,22 @@ export default function ChatScreen() {
         viewOnce: viewOnce ? "1" : "0",
         ...(picked.kind === "image" && picked.width ? { imgW: String(picked.width) } : {}),
         ...(picked.kind === "image" && picked.height ? { imgH: String(picked.height) } : {}),
+      },
+    } as unknown as Parameters<typeof router.push>[0]);
+  }, [chatId, router]);
+
+  const goToDocumentCompose = useCallback((
+    picked: { uri: string; name: string; size: number; mime: string },
+  ) => {
+    if (!chatId) return;
+    router.push({
+      pathname: "/chat/document-compose",
+      params: {
+        chatId,
+        uri: encodeURIComponent(picked.uri),
+        name: encodeURIComponent(picked.name),
+        size: String(picked.size),
+        mime: encodeURIComponent(picked.mime),
       },
     } as unknown as Parameters<typeof router.push>[0]);
   }, [chatId, router]);
@@ -1905,8 +1894,7 @@ export default function ChatScreen() {
           Alert.alert("File too large", "Maximum allowed file size is 100 MB.");
           return;
         }
-        sendDocumentMessage(chatId, picked.uri, picked.name, picked.size, picked.mime);
-        pinChatToBottom(true);
+        goToDocumentCompose({ uri: picked.uri, name: picked.name, size: picked.size, mime: picked.mime });
         return;
       }
       const result = await DocumentPicker.getDocumentAsync({
@@ -1920,8 +1908,7 @@ export default function ChatScreen() {
       if (fileSizeMB > 100) { Alert.alert("File too large", "Maximum allowed file size is 100 MB."); return; }
       const filename = asset.name ?? `document_${Date.now()}`;
       const mimeType = asset.mimeType ?? guessMimeFromFilename(filename);
-      sendDocumentMessage(chatId, asset.uri, filename, asset.size ?? 0, mimeType);
-      pinChatToBottom(true);
+      goToDocumentCompose({ uri: asset.uri, name: filename, size: asset.size ?? 0, mime: mimeType });
 
     } else if (type === "location") {
       if (!chatId) return;
@@ -2042,8 +2029,16 @@ export default function ChatScreen() {
     if (!chatId || !item.mediaUrl) return;
     if (item.uploadFailed) {
       deleteMessage(chatId, item.id);
-      const mime = guessMimeFromFilename(item.text);
-      sendDocumentMessage(chatId, item.localMediaUri ?? item.mediaUrl, item.text, item.fileSizeBytes ?? 0, mime);
+      const parsed = parseDocumentMessagePayload(item.text);
+      const mime = guessMimeFromFilename(parsed.filename);
+      sendDocumentMessage(
+        chatId,
+        item.localMediaUri ?? item.mediaUrl,
+        parsed.filename,
+        item.fileSizeBytes ?? 0,
+        mime,
+        { caption: parsed.caption, pageCount: parsed.pages },
+      );
       return;
     }
     if (typeof item.uploadProgress === "number" && item.uploadProgress < 100) return;
@@ -2056,7 +2051,7 @@ export default function ChatScreen() {
         }
         const result = await openChatDocument({
           mediaUrl: item.mediaUrl!,
-          filename: item.text,
+          filename: documentFilenameFromText(item.text),
           sessionToken: user?.sessionToken,
           localUri: item.localMediaUri,
           onDownloadProgress: (pct) => {
@@ -2104,6 +2099,12 @@ export default function ChatScreen() {
   }, [user?.sessionToken]);
 
   const [attachVisible, setAttachVisible] = useState(false);
+
+  const handleAttachGalleryPick = useCallback(async (item: Parameters<typeof validateGalleryAsset>[0]) => {
+    setAttachVisible(false);
+    const picked = await validateGalleryAsset(item);
+    if (picked) goToMediaCompose(picked, false);
+  }, [goToMediaCompose]);
 
   useWebKeyboardShortcuts({
     enabled: Platform.OS === "web" && !selectionActive && !attachVisible,
@@ -2262,6 +2263,11 @@ export default function ChatScreen() {
       outputRange: ["rgba(255, 193, 7, 0)", "rgba(255, 193, 7, 0.38)"],
     });
     const quoteAccent = colors.primary;
+    const readMoreLinkColor = isMe
+      ? colors.isDark
+        ? "#53BDEB"
+        : "#027EB5"
+      : colors.primary;
     const selectionRowTint = colors.isDark ? "rgba(0, 168, 132, 0.2)" : "rgba(183, 223, 165, 0.55)";
     const deletedMeLabel = colors.isDark ? "rgba(255,255,255,0.72)" : "rgba(0,0,0,0.52)";
     const deletedMeIcon = colors.isDark ? "rgba(255,255,255,0.58)" : "rgba(0,0,0,0.42)";
@@ -2461,6 +2467,11 @@ export default function ChatScreen() {
               colors={colors}
               sessionToken={user?.sessionToken}
               onPress={() => handleDocumentPress(item)}
+              onCancelUpload={
+                isMe && typeof item.uploadProgress === "number" && item.uploadProgress < 100
+                  ? () => cancelDocumentUpload(chatId!, item.id)
+                  : undefined
+              }
               onSaveAs={Platform.OS === "web" ? () => handleDocumentSaveAs(item) : undefined}
             />
           ) : isLocation ? (
@@ -2482,8 +2493,9 @@ export default function ChatScreen() {
             />
           ) : compactTextBubble ? (
             <View style={styles.textMetaInlineRow}>
-              <MentionText
+              <ChatMessageText
                 text={item.text}
+                linkColor={readMoreLinkColor}
                 style={[
                   styles.msgText,
                   styles.msgTextInline,
@@ -2502,7 +2514,11 @@ export default function ChatScreen() {
             </View>
           ) : (
             <>
-              <MentionText text={item.text} style={[styles.msgText, { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]} />
+              <ChatMessageText
+                text={item.text}
+                linkColor={readMoreLinkColor}
+                style={[styles.msgText, { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}
+              />
               {urls.length > 0 && (
                 <TouchableOpacity onPress={() => Linking.openURL(urls[0])} style={styles.linkPreview}>
                   <Ionicons name="link-outline" size={13} color={colors.primary} />
@@ -2915,7 +2931,7 @@ export default function ChatScreen() {
                   blurOnSubmit={false}
                   returnKeyType={enterSendActive ? "send" : "default"}
                   onSubmitEditing={enterSendActive ? () => handleSend() : undefined}
-                  maxLength={2000}
+                  maxLength={CHAT_MESSAGE_MAX_CHARS}
                   editable={composerEnabled}
                   onFocus={() => {
                     setEmojiPanelOpen(false);
@@ -3396,52 +3412,17 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
-      <Modal visible={attachVisible} transparent animationType="fade" onRequestClose={() => setAttachVisible(false)}>
-        <View style={styles.attachModalRoot}>
-          <Pressable style={styles.attachBackdrop} onPress={() => setAttachVisible(false)} />
-          <View
-            style={[
-              styles.attachSheet,
-              { backgroundColor: colors.isDark ? "#1A2329" : "#F0F2F5", paddingBottom: insets.bottom + 12 },
-            ]}
-          >
-            <View style={[styles.attachHandle, { backgroundColor: colors.isDark ? "#3d4a54" : "#c4ccd4" }]} />
-            <View style={styles.attachWaGrid}>
-              {ATTACH_SHEET_ITEMS.map((item) => (
-                <TouchableOpacity
-                  key={item.key}
-                  style={styles.attachWaCell}
-                  activeOpacity={0.75}
-                  onPress={() => {
-                    setAttachVisible(false);
-                    void sendMediaMessage(item.type);
-                  }}
-                >
-                  <View style={[styles.attachWaCircle, { backgroundColor: item.color }]}>
-                    <Ionicons name={item.icon} size={26} color="#fff" />
-                  </View>
-                  <Text style={[styles.attachWaLabel, { color: colors.isDark ? "#E9EDEF" : "#3B4A54" }]} numberOfLines={1}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TouchableOpacity
-              style={styles.attachViewOnceRow}
-              onPress={() => {
-                setAttachVisible(false);
-                void sendMediaMessage("viewonce");
-              }}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.attachWaCircleSm, { backgroundColor: "#6B7C8A" }]}>
-                <Ionicons name="eye" size={18} color="#fff" />
-              </View>
-              <Text style={[styles.attachViewOnceText, { color: colors.primary }]}>View once photo or video</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <ChatAttachSheet
+        visible={attachVisible}
+        colors={colors}
+        insets={insets}
+        onClose={() => setAttachVisible(false)}
+        onAction={(type) => {
+          setAttachVisible(false);
+          void sendMediaMessage(type);
+        }}
+        onPickAsset={(item) => void handleAttachGalleryPick(item)}
+      />
 
       <ContactSharePickerModal
         visible={contactPickerOpen}
@@ -4241,40 +4222,6 @@ const styles = StyleSheet.create({
   cameraChoiceBtnText: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
   cameraChoiceCancel: { alignItems: "center", paddingVertical: 12, marginTop: 4 },
   cameraChoiceCancelText: { fontSize: 15, fontFamily: "Inter_500Medium" },
-  attachSheet: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 8,
-    paddingHorizontal: 10,
-    elevation: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: -4 },
-  },
-  attachHandle: { width: 40, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: 14 },
-  attachWaGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", paddingHorizontal: 6 },
-  attachWaCell: { width: (W - 52) / 3, alignItems: "center", paddingVertical: 10 },
-  attachWaCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 8,
-  },
-  attachWaLabel: { fontSize: 13, fontFamily: "Inter_500Medium", textAlign: "center", maxWidth: (W - 52) / 3 },
-  attachViewOnceRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginTop: 4,
-    marginBottom: 4,
-  },
-  attachWaCircleSm: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  attachViewOnceText: { fontSize: 14, fontFamily: "Inter_600SemiBold", flex: 1 },
   attachTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", marginBottom: 16, textAlign: "center" },
   reactionPickerWrap: { flex: 1, justifyContent: "flex-end", alignItems: "center" },
   reactionPicker: { alignSelf: "center", flexDirection: "row", gap: 4, borderRadius: 28, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, elevation: 12, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },

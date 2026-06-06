@@ -111,6 +111,16 @@ function adjustCrop(
   return { x, y, w, h };
 }
 
+function layoutNearlySame(a: LayoutRectangle | null, b: LayoutRectangle): boolean {
+  if (!a) return false;
+  return (
+    Math.abs(a.width - b.width) < 1 &&
+    Math.abs(a.height - b.height) < 1 &&
+    Math.abs(a.x - b.x) < 1 &&
+    Math.abs(a.y - b.y) < 1
+  );
+}
+
 function displayCropToPixels(crop: DisplayCrop, bounds: DisplayBounds, imageW: number, imageH: number): CropRect {
   const rect = {
     originX: Math.round((crop.x / bounds.w) * imageW),
@@ -164,7 +174,9 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
   const cropRef = useRef<DisplayCrop | null>(null);
   const startCropRef = useRef<DisplayCrop | null>(null);
   const activeHandleRef = useRef<HandleId>("move");
-  const boundsKeyRef = useRef("");
+  const cropInitializedRef = useRef(false);
+  const onCancelRef = useRef(onCancel);
+  const displayBoundsRef = useRef<DisplayBounds | null>(null);
   cropRef.current = crop;
 
   const displayBounds = useMemo(() => {
@@ -172,60 +184,65 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
     return computeDisplayBounds(container, imageSize.width, imageSize.height);
   }, [container, imageSize]);
 
+  onCancelRef.current = onCancel;
+  displayBoundsRef.current = displayBounds;
+
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
     setLoading(true);
     setCrop(null);
     setImageSize(null);
-    boundsKeyRef.current = "";
+    setContainer(null);
+    cropInitializedRef.current = false;
     void (async () => {
       try {
         const size = await getImageDimensions(imageUri);
         if (!cancelled) setImageSize(size);
       } catch {
-        if (!cancelled) onCancel();
+        if (!cancelled) onCancelRef.current();
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [visible, imageUri, onCancel]);
+  }, [visible, imageUri]);
 
   useEffect(() => {
-    if (!displayBounds) return;
-    const key = `${Math.round(displayBounds.w)}x${Math.round(displayBounds.h)}`;
-    if (boundsKeyRef.current !== key) {
-      boundsKeyRef.current = key;
-      setCrop(fullCrop(displayBounds));
-    }
-  }, [displayBounds]);
+    if (!visible || !displayBounds || cropInitializedRef.current) return;
+    cropInitializedRef.current = true;
+    setCrop(fullCrop(displayBounds));
+  }, [visible, displayBounds]);
 
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: (evt) => {
-          const c = cropRef.current;
-          if (!c || !displayBounds) return;
-          activeHandleRef.current = hitTestHandle(
-            evt.nativeEvent.locationX,
-            evt.nativeEvent.locationY,
-            c,
-            displayBounds,
-          );
-          startCropRef.current = c;
-        },
-        onPanResponderMove: (_, gesture) => {
-          const start = startCropRef.current;
-          if (!start || !displayBounds) return;
-          setCrop(adjustCrop(start, activeHandleRef.current, gesture.dx, gesture.dy, displayBounds));
-        },
-      }),
-    [displayBounds],
-  );
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (evt) => {
+        const c = cropRef.current;
+        const bounds = displayBoundsRef.current;
+        if (!c || !bounds) return;
+        activeHandleRef.current = hitTestHandle(
+          evt.nativeEvent.locationX,
+          evt.nativeEvent.locationY,
+          c,
+          bounds,
+        );
+        startCropRef.current = c;
+      },
+      onPanResponderMove: (_, gesture) => {
+        const start = startCropRef.current;
+        const bounds = displayBoundsRef.current;
+        if (!start || !bounds) return;
+        setCrop(adjustCrop(start, activeHandleRef.current, gesture.dx, gesture.dy, bounds));
+      },
+    }),
+  ).current;
+
+  const handleCanvasLayout = useCallback((layout: LayoutRectangle) => {
+    setContainer((prev) => (layoutNearlySame(prev, layout) ? prev : layout));
+  }, []);
 
   const handleDone = () => {
     if (!crop || !displayBounds || !imageSize) return;
@@ -257,7 +274,7 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
 
         <View
           style={styles.canvas}
-          onLayout={(e) => setContainer(e.nativeEvent.layout)}
+          onLayout={(e) => handleCanvasLayout(e.nativeEvent.layout)}
           {...(!loading && crop && displayBounds ? panResponder.panHandlers : {})}
         >
           {loading || !imageSize || !displayBounds ? (
@@ -278,6 +295,7 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
                   source={{ uri: imageUri }}
                   style={{ width: displayBounds.w, height: displayBounds.h }}
                   contentFit="fill"
+                  cachePolicy="memory-disk"
                 />
               </View>
 

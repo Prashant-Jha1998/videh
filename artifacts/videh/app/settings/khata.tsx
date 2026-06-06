@@ -1,22 +1,139 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, type Href } from "expo-router";
-import React from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  FlatList,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
+  SectionList,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
+import { getApiUrl } from "@/lib/api";
+
+const BASE_URL = getApiUrl();
+
+type KhataNotebook = { id: number; name: string; created_at?: string };
+
+function authHeaders(token?: string | null, extra?: Record<string, string>) {
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra,
+  };
+}
 
 export default function KhataPickChatScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { chats } = useApp();
+  const { chats, user, refreshChats } = useApp();
 
-  const sorted = [...chats].sort((a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0));
+  const [notebooks, setNotebooks] = useState<KhataNotebook[]>([]);
+  const [loadingNotebooks, setLoadingNotebooks] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [contactName, setContactName] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  const videhChats = useMemo(
+    () =>
+      [...chats]
+        .filter((c) => !c.isKhataNotebook)
+        .sort((a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0)),
+    [chats],
+  );
+
+  const loadNotebooks = useCallback(async () => {
+    if (!user?.sessionToken) {
+      setLoadingNotebooks(false);
+      return;
+    }
+    setLoadingNotebooks(true);
+    try {
+      const r = await fetch(`${BASE_URL}/api/khata/notebooks`, {
+        headers: authHeaders(user.sessionToken),
+      });
+      const d = await r.json();
+      if (d.success && Array.isArray(d.notebooks)) {
+        setNotebooks(d.notebooks);
+      }
+    } catch {
+      /* ignore */
+    }
+    setLoadingNotebooks(false);
+  }, [user?.sessionToken]);
+
+  useEffect(() => {
+    void loadNotebooks();
+  }, [loadNotebooks]);
+
+  const openKhata = (chatId: string, name: string, isGroup?: boolean) => {
+    router.push({
+      pathname: "/khata/[chatId]",
+      params: {
+        chatId,
+        name,
+        manual: "1",
+        ...(isGroup ? { isGroup: "1" } : {}),
+      },
+    } as Href);
+  };
+
+  const createNotebook = async () => {
+    const trimmed = contactName.trim();
+    if (trimmed.length < 2) {
+      Alert.alert("Name required", "Enter the person's or shop's name (at least 2 characters).");
+      return;
+    }
+    if (!user?.dbId || !user.sessionToken) return;
+    setCreating(true);
+    try {
+      const r = await fetch(`${BASE_URL}/api/khata/notebook`, {
+        method: "POST",
+        headers: authHeaders(user.sessionToken, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ contactName: trimmed, createdBy: user.dbId }),
+      });
+      const d = await r.json();
+      if (!d.success || !d.chatId) {
+        Alert.alert("Could not create khata", d.message ?? "Please try again.");
+        return;
+      }
+      setShowAdd(false);
+      setContactName("");
+      await refreshChats();
+      await loadNotebooks();
+      openKhata(String(d.chatId), d.name ?? trimmed, true);
+    } catch {
+      Alert.alert("Could not create khata", "Please check your connection and try again.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const sections = useMemo(() => {
+    const out: Array<{ title: string; data: Array<{ kind: "notebook" | "chat"; id: string; name: string; isGroup?: boolean }> }> = [];
+    if (notebooks.length > 0 || loadingNotebooks) {
+      out.push({
+        title: "Not on Videh",
+        data: notebooks.map((n) => ({ kind: "notebook" as const, id: String(n.id), name: n.name })),
+      });
+    }
+    out.push({
+      title: "Videh chats",
+      data: videhChats.map((c) => ({
+        kind: "chat" as const,
+        id: c.id,
+        name: c.name,
+        isGroup: c.isGroup,
+      })),
+    });
+    return out;
+  }, [notebooks, videhChats, loadingNotebooks]);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -24,47 +141,118 @@ export default function KhataPickChatScreen() {
         <Pressable onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
-        <Text style={styles.title}>Khata ledger</Text>
+        <Text style={styles.title}>Khata</Text>
+        <Pressable onPress={() => setShowAdd(true)} hitSlop={10}>
+          <Ionicons name="person-add-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
+
       <Text style={styles.sub}>
-        Choose a chat to track udhar/credit. Pick Videh members or type any name (shop, family, office) — not everyone needs a Videh account.
+        Shop, family, ya koi bhi — Videh par na ho to bhi udhar/credit yahan likh sakte hain.
       </Text>
-      <FlatList
-        data={sorted}
-        keyExtractor={(c) => c.id}
-        contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
+
+      <Pressable style={styles.addCard} onPress={() => setShowAdd(true)}>
+        <View style={styles.addIcon}>
+          <Ionicons name="book-outline" size={22} color="#00A884" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.addTitle}>Naya khata (Videh par nahi)</Text>
+          <Text style={styles.addMeta}>Naam likho — alag ledger ban jayega</Text>
+        </View>
+        <Ionicons name="add-circle" size={26} color="#00A884" />
+      </Pressable>
+
+      <SectionList
+        sections={sections}
+        keyExtractor={(item) => `${item.kind}_${item.id}`}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 24 }}
+        stickySectionHeadersEnabled={false}
+        renderSectionHeader={({ section: { title } }) => (
+          <Text style={styles.sectionTitle}>{title}</Text>
+        )}
+        renderSectionFooter={({ section }) => {
+          if (section.title !== "Not on Videh") return null;
+          if (loadingNotebooks) {
+            return <ActivityIndicator color="#00A884" style={{ marginVertical: 16 }} />;
+          }
+          if (section.data.length === 0) {
+            return (
+              <Text style={styles.sectionEmpty}>
+                Abhi koi alag khata nahi. Upar &quot;Naya khata&quot; dabayein.
+              </Text>
+            );
+          }
+          return null;
+        }}
         renderItem={({ item }) => (
           <Pressable
             style={styles.row}
-            onPress={() =>
-              router.push({
-                pathname: "/khata/[chatId]",
-                params: {
-                  chatId: item.id,
-                  name: item.name,
-                  manual: "1",
-                },
-              } as Href)
-            }
+            onPress={() => openKhata(item.id, item.name, item.isGroup)}
           >
             <View style={styles.rowIcon}>
-              <Ionicons name={item.isGroup ? "people" : "person"} size={20} color="#00A884" />
+              <Ionicons
+                name={item.kind === "notebook" ? "book-outline" : item.isGroup ? "people" : "person"}
+                size={20}
+                color="#00A884"
+              />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.rowName} numberOfLines={1}>{item.name}</Text>
-              {item.isGroup ? (
-                <Text style={styles.rowMeta}>Group · manual entry</Text>
-              ) : (
-                <Text style={styles.rowMeta}>1:1 · choose debtor & creditor</Text>
-              )}
+              <Text style={styles.rowMeta}>
+                {item.kind === "notebook"
+                  ? "Personal ledger · manual entry"
+                  : item.isGroup
+                    ? "Group · manual entry"
+                    : "1:1 · choose debtor & creditor"}
+              </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#667781" />
           </Pressable>
         )}
         ListEmptyComponent={
-          <Text style={styles.empty}>No chats yet. Start a conversation first.</Text>
+          <Text style={styles.empty}>No Videh chats yet. Use &quot;Naya khata&quot; for people not on Videh.</Text>
         }
       />
+
+      <Modal visible={showAdd} transparent animationType="fade" onRequestClose={() => setShowAdd(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.modalBackdrop}
+        >
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowAdd(false)} />
+          <View style={[styles.modalCard, { paddingBottom: insets.bottom + 16 }]}>
+            <Text style={styles.modalTitle}>Naya khata</Text>
+            <Text style={styles.modalSub}>
+              Jis vyakti ya dukaan ka naam likhoge, unka alag khata banega. Videh account zaroori nahi.
+            </Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Naam (jaise: Monty, Kirana shop)"
+              placeholderTextColor="#667781"
+              value={contactName}
+              onChangeText={setContactName}
+              autoFocus
+              maxLength={80}
+            />
+            <View style={styles.modalActions}>
+              <Pressable style={styles.cancelBtn} onPress={() => setShowAdd(false)} disabled={creating}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.saveBtn, creating && { opacity: 0.6 }]}
+                onPress={() => void createNotebook()}
+                disabled={creating}
+              >
+                {creating ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.saveText}>Create</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -74,13 +262,46 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     gap: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     backgroundColor: "#1F2C34",
   },
-  title: { color: "#fff", fontSize: 18, fontWeight: "700" },
-  sub: { color: "#8696A0", fontSize: 14, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
+  title: { color: "#fff", fontSize: 18, fontWeight: "700", flex: 1 },
+  sub: { color: "#8696A0", fontSize: 14, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
+  addCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: "rgba(0,168,132,0.12)",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(0,168,132,0.35)",
+    padding: 14,
+  },
+  addIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,168,132,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addTitle: { color: "#E9EDEF", fontSize: 15, fontWeight: "700" },
+  addMeta: { color: "#8696A0", fontSize: 12, marginTop: 2 },
+  sectionTitle: {
+    color: "#00A884",
+    fontSize: 13,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  sectionEmpty: { color: "#667781", fontSize: 13, marginBottom: 8, fontStyle: "italic" },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -100,5 +321,40 @@ const styles = StyleSheet.create({
   },
   rowName: { color: "#E9EDEF", fontSize: 16, fontWeight: "600" },
   rowMeta: { color: "#8696A0", fontSize: 12, marginTop: 2 },
-  empty: { color: "#8696A0", textAlign: "center", marginTop: 40, fontSize: 15 },
+  empty: { color: "#8696A0", textAlign: "center", marginTop: 40, fontSize: 15, paddingHorizontal: 24 },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "flex-end",
+  },
+  modalCard: {
+    backgroundColor: "#1F2C34",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 20,
+  },
+  modalTitle: { color: "#E9EDEF", fontSize: 18, fontWeight: "700", marginBottom: 6 },
+  modalSub: { color: "#8696A0", fontSize: 14, marginBottom: 14, lineHeight: 20 },
+  input: {
+    backgroundColor: "#111B21",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: "#E9EDEF",
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: "#2A3942",
+  },
+  modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 12, marginTop: 16 },
+  cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
+  cancelText: { color: "#8696A0", fontSize: 16, fontWeight: "600" },
+  saveBtn: {
+    backgroundColor: "#00A884",
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    minWidth: 88,
+    alignItems: "center",
+  },
+  saveText: { color: "#fff", fontSize: 16, fontWeight: "700" },
 });
