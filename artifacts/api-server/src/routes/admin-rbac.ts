@@ -25,6 +25,23 @@ export function requirePermission(permission: AdminPermission) {
   };
 }
 
+/** Pass if admin has any one of the listed permissions (e.g. reels.manage OR moderation.manage). */
+export function requireAnyPermission(...permissions: AdminPermission[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const admin = req.admin as AdminIdentity | undefined;
+    if (!admin) {
+      res.status(401).json({ success: false, message: "Unauthorized" });
+      return;
+    }
+    const ok = permissions.some((p) => roleHasPermission(admin.role, p));
+    if (!ok) {
+      res.status(403).json({ success: false, message: "Insufficient permissions for this action." });
+      return;
+    }
+    next();
+  };
+}
+
 export function registerAdminRbacRoutes(router: Router, requireAdmin: RequireAdmin): void {
   router.get("/admins", requireAdmin, requirePermission("admins.manage"), async (_req, res) => {
     try {

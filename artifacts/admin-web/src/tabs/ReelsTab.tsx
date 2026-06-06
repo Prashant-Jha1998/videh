@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { adminApi, fmtDate } from "../adminApi";
+
+const MIN_PREVIEW_SEC = 5;
+
+function requiredPreviewSeconds(durationSeconds: number): number {
+  const d = Math.max(0, durationSeconds);
+  if (d > 0 && d < MIN_PREVIEW_SEC) return Math.max(2, Math.ceil(d * 0.8));
+  return MIN_PREVIEW_SEC;
+}
 
 type ReelsStats = {
   channels: number;
@@ -69,10 +77,14 @@ type ReelsConfig = {
 type ModerationVideo = {
   id: number;
   title: string;
+  description?: string;
+  duration_seconds?: number;
   status: string;
   moderation_status: string;
   moderation_reason?: string;
   nsfw_score: string;
+  thumbnail_url?: string;
+  video_url?: string;
   channel_handle: string;
   user_id: number;
   created_at: string;
@@ -87,6 +99,14 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
   const [busy, setBusy] = useState(false);
   const [moderationQueue, setModerationQueue] = useState<ModerationVideo[]>([]);
   const [subTab, setSubTab] = useState<"channels" | "rules" | "fraud" | "moderation">("channels");
+  const [previewVideo, setPreviewVideo] = useState<ModerationVideo | null>(null);
+  const [previewReadyIds, setPreviewReadyIds] = useState<Set<number>>(new Set());
+  const [previewProgress, setPreviewProgress] = useState(0);
+  const [previewRequired, setPreviewRequired] = useState(MIN_PREVIEW_SEC);
+  const [previewLogging, setPreviewLogging] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const maxWatchedRef = useRef(0);
+  const previewLoggedRef = useRef(false);
 
   const load = useCallback(async () => {
     onErr(null);
@@ -136,15 +156,87 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
     }
   };
 
-  const approveVideo = async (id: number) => {
-    await adminApi(`/admin/reels/videos/${id}/approve`, { method: "POST" });
-    await load();
+  const openPreview = (v: ModerationVideo) => {
+    maxWatchedRef.current = 0;
+    previewLoggedRef.current = false;
+    setPreviewProgress(0);
+    setPreviewRequired(requiredPreviewSeconds(Number(v.duration_seconds ?? 0)));
+    setPreviewVideo(v);
+  };
+
+  const closePreview = () => {
+    setPreviewVideo(null);
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+    }
+  };
+
+  const markPreviewComplete = async (v: ModerationVideo, watchedSeconds: number) => {
+    if (previewLoggedRef.current) return;
+    previewLoggedRef.current = true;
+    setPreviewLogging(true);
+    try {
+      await adminApi(`/admin/reels/videos/${v.id}/admin-preview`, {
+        method: "POST",
+        body: JSON.stringify({ watchedSeconds }),
+      });
+      setPreviewReadyIds((prev) => new Set(prev).add(v.id));
+    } catch (e) {
+      previewLoggedRef.current = false;
+      onErr(e instanceof Error ? e.message : "Preview log failed");
+    } finally {
+      setPreviewLogging(false);
+    }
+  };
+
+  const onVideoTimeUpdate = () => {
+    const el = videoRef.current;
+    if (!el || !previewVideo) return;
+    maxWatchedRef.current = Math.max(maxWatchedRef.current, el.currentTime);
+    setPreviewProgress(maxWatchedRef.current);
+    if (maxWatchedRef.current >= previewRequired) {
+      void markPreviewComplete(previewVideo, maxWatchedRef.current);
+    }
+  };
+
+  const onVideoEnded = () => {
+    if (!previewVideo) return;
+    const watched = maxWatchedRef.current || videoRef.current?.currentTime || 0;
+    if (watched >= previewRequired) {
+      void markPreviewComplete(previewVideo, watched);
+    }
+  };
+
+  const approveVideo = async (id: number, title: string) => {
+    if (!previewReadyIds.has(id)) {
+      alert("Pehle ▶ Preview se video play karke dekhein, phir approve karein.");
+      return;
+    }
+    if (!window.confirm(`Approve "${title}" and publish publicly?`)) return;
+    try {
+      await adminApi(`/admin/reels/videos/${id}/approve`, { method: "POST" });
+      alert("Video approved — ab sab users dekh sakte hain.");
+      setPreviewReadyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      await load();
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : "Approve failed — pehle preview complete karein");
+    }
   };
 
   const rejectVideo = async (id: number) => {
     const reason = window.prompt("Rejection reason (optional)") ?? "";
-    await adminApi(`/admin/reels/videos/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) });
-    await load();
+    try {
+      await adminApi(`/admin/reels/videos/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) });
+      alert("Video rejected.");
+      await load();
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : "Reject failed");
+    }
   };
 
   const saveConfig = async () => {
@@ -181,7 +273,9 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
         <button type="button" className={subTab === "channels" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("channels")}>Channels</button>
         <button type="button" className={subTab === "rules" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("rules")}>Rules</button>
         <button type="button" className={subTab === "fraud" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("fraud")}>Fraud</button>
-        <button type="button" className={subTab === "moderation" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("moderation")}>NSFW queue</button>
+        <button type="button" className={subTab === "moderation" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("moderation")}>
+          NSFW queue{moderationQueue.length > 0 ? ` (${moderationQueue.length})` : ""}
+        </button>
         <button type="button" className="primary-btn" disabled={busy} onClick={runFraudScan}>Run fraud scan</button>
         <button type="button" className="primary-btn" disabled={busy} onClick={runModerationScan}>Run NSFW scan</button>
       </div>
@@ -264,28 +358,121 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
       ) : null}
 
       {subTab === "moderation" ? (
+        <>
+          <div className="muted" style={{ marginBottom: 12, padding: 12, background: "#f0f7f4", borderRadius: 8, border: "1px solid #c8e6d4" }}>
+            <strong>Manual approval — pehle video dekho, phir approve</strong>
+            <p style={{ margin: "6px 0 0" }}>
+              Har pending video par <strong>▶ Preview</strong> dabao, video play karke kam se kam {MIN_PREVIEW_SEC}s dekho.
+              Uske baad hi <strong>Approve</strong> button active hoga.
+            </p>
+          </div>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
-              <tr><th>Video</th><th>Channel</th><th>Status</th><th>NSFW score</th><th>Reason</th><th>Actions</th></tr>
+              <tr><th>Video</th><th>Channel</th><th>Duration</th><th>Status</th><th>Reason</th><th>Actions</th></tr>
             </thead>
             <tbody>
               {moderationQueue.map((v) => (
                 <tr key={v.id}>
                   <td><strong>{v.title}</strong><div className="muted" style={{ fontSize: 12 }}>#{v.id}</div></td>
                   <td>@{v.channel_handle}</td>
+                  <td>{v.duration_seconds ? `${v.duration_seconds}s` : "—"}</td>
                   <td>{v.moderation_status || v.status}</td>
-                  <td>{Number(v.nsfw_score).toFixed(2)}</td>
                   <td style={{ maxWidth: 200 }}>{v.moderation_reason ?? "—"}</td>
-                  <td>
-                    <button type="button" className="nav-btn" onClick={() => void approveVideo(v.id)}>Approve</button>{" "}
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <button type="button" className="nav-btn" onClick={() => openPreview(v)}>▶ Preview</button>{" "}
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      disabled={!previewReadyIds.has(v.id)}
+                      title={previewReadyIds.has(v.id) ? "Approve & publish" : "Pehle Preview se video dekhein"}
+                      onClick={() => void approveVideo(v.id, v.title)}
+                    >
+                      Approve
+                    </button>{" "}
                     <button type="button" className="nav-btn" onClick={() => void rejectVideo(v.id)}>Reject</button>
+                    {previewReadyIds.has(v.id) ? (
+                      <span style={{ color: "#0a7", fontSize: 11, marginLeft: 6 }}>✓ previewed</span>
+                    ) : null}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {moderationQueue.length === 0 ? (
+            <p className="muted" style={{ padding: 16 }}>Koi pending video nahi — sab approved ya queue khali hai.</p>
+          ) : null}
         </div>
+          {previewVideo ? (
+            <div
+              role="dialog"
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.65)",
+                zIndex: 1000,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 20,
+              }}
+              onClick={closePreview}
+            >
+              <div
+                style={{
+                  background: "#fff",
+                  borderRadius: 12,
+                  maxWidth: 900,
+                  width: "100%",
+                  maxHeight: "90vh",
+                  overflow: "auto",
+                  padding: 20,
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                  <div>
+                    <h3 style={{ margin: 0 }}>{previewVideo.title}</h3>
+                    <p className="muted" style={{ margin: "4px 0 0" }}>@{previewVideo.channel_handle} · #{previewVideo.id}</p>
+                  </div>
+                  <button type="button" className="nav-btn" onClick={closePreview}>✕ Close</button>
+                </div>
+                {previewVideo.video_url ? (
+                  <video
+                    ref={videoRef}
+                    src={previewVideo.video_url}
+                    controls
+                    playsInline
+                    style={{ width: "100%", marginTop: 16, borderRadius: 8, background: "#000", maxHeight: 420 }}
+                    onTimeUpdate={onVideoTimeUpdate}
+                    onEnded={onVideoEnded}
+                    poster={previewVideo.thumbnail_url}
+                  />
+                ) : (
+                  <p style={{ color: "#c00", marginTop: 16 }}>Video URL missing — server se file check karein.</p>
+                )}
+                <p style={{ marginTop: 12, fontSize: 14 }}>
+                  Watch progress: <strong>{previewProgress.toFixed(1)}s</strong> / {previewRequired}s required
+                  {previewReadyIds.has(previewVideo.id) ? " — ✓ Ready to approve" : previewLogging ? " — saving…" : ""}
+                </p>
+                {previewVideo.description ? (
+                  <p className="muted" style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{previewVideo.description}</p>
+                ) : null}
+                <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    disabled={!previewReadyIds.has(previewVideo.id)}
+                    onClick={() => void approveVideo(previewVideo.id, previewVideo.title)}
+                  >
+                    Approve after preview
+                  </button>
+                  <button type="button" className="nav-btn" onClick={() => void rejectVideo(previewVideo.id)}>Reject</button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       {subTab === "fraud" ? (

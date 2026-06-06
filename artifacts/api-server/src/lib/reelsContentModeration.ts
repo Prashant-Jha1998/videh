@@ -145,6 +145,53 @@ async function scanVideoSightengine(
   return { blocked: maxScore >= threshold, score: maxScore, pending: false, raw: data };
 }
 
+/** Admin must watch at least this many seconds (or ~80% of short clips) before approve. */
+export const MIN_ADMIN_PREVIEW_SECONDS = 5;
+
+export function requiredAdminPreviewSeconds(durationSeconds: number): number {
+  const d = Math.max(0, durationSeconds);
+  if (d > 0 && d < MIN_ADMIN_PREVIEW_SECONDS) {
+    return Math.max(2, Math.ceil(d * 0.8));
+  }
+  return MIN_ADMIN_PREVIEW_SECONDS;
+}
+
+export function adminReviewerKey(adminId: number | null, email: string): string {
+  return adminId != null && adminId > 0 ? `id:${adminId}` : `email:${email.toLowerCase()}`;
+}
+
+export async function logAdminVideoPreview(
+  videoId: number,
+  adminKey: string,
+  watchedSeconds: number,
+  requiredSeconds: number,
+): Promise<void> {
+  await logModeration(videoId, "admin_preview", "pass", 0, {
+    adminKey,
+    watchedSeconds,
+    requiredSeconds,
+    completedAt: new Date().toISOString(),
+  });
+}
+
+export async function adminHasCompletedVideoPreview(
+  videoId: number,
+  adminKey: string,
+  minWatchedSeconds: number,
+): Promise<boolean> {
+  await ensureReelsModerationColumns();
+  const r = await query(
+    `SELECT 1 FROM reels_moderation_log
+     WHERE video_id = $1 AND scan_type = 'admin_preview'
+       AND details->>'adminKey' = $2
+       AND COALESCE((details->>'watchedSeconds')::numeric, 0) >= $3
+       AND created_at > NOW() - INTERVAL '4 hours'
+     LIMIT 1`,
+    [videoId, adminKey, minWatchedSeconds],
+  );
+  return r.rows.length > 0;
+}
+
 async function logModeration(
   videoId: number | null,
   scanType: string,

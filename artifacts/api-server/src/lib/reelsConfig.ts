@@ -130,7 +130,7 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
     enabled: true,
     nsfwBlockThreshold: 0.55,
     requireThumbnail: true,
-    blockWithoutVisionApi: true,
+    blockWithoutVisionApi: true, // queue for admin manual approve until Vision API keys are set
     syncVideoScanMaxSeconds: 60,
     summary: [
       "Every video is automatically scanned for nudity and sexual content before it goes public",

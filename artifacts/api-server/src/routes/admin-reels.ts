@@ -4,11 +4,18 @@ import { logAdminAction } from "../lib/adminAudit";
 import { getReelsPlatformConfig, saveReelsPlatformConfig, type ReelsPlatformConfig } from "../lib/reelsConfig";
 import { runChannelFraudRescan } from "../lib/reelsFraud";
 import { evaluateChannelMonetization } from "../lib/reelsMonetization";
-import { applyVideoModerationResult } from "../lib/reelsContentModeration";
+import {
+  adminHasCompletedVideoPreview,
+  adminReviewerKey,
+  applyVideoModerationResult,
+  logAdminVideoPreview,
+  requiredAdminPreviewSeconds,
+} from "../lib/reelsContentModeration";
+import type { AdminIdentity } from "../lib/adminSession";
 import { processPendingReelsModeration } from "../lib/reelsModerationQueue";
 import { notifySubscribersNewVideo } from "../lib/reelsNotifications";
 import { ensureReelsModerationColumns, ensureReelsTables } from "../lib/reelsSchema";
-import { requirePermission, type RequireAdmin } from "./admin-rbac";
+import { requireAnyPermission, requirePermission, type RequireAdmin } from "./admin-rbac";
 
 export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAdmin): void {
   router.get("/reels/config", requireAdmin, requirePermission("reels.read"), async (_req, res) => {
@@ -135,7 +142,7 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
     }
   });
 
-  router.get("/reels/moderation-queue", requireAdmin, requirePermission("reels.read"), async (req, res) => {
+  router.get("/reels/moderation-queue", requireAdmin, requireAnyPermission("reels.read", "moderation.read"), async (req, res) => {
     const limit = Math.min(200, Number(req.query.limit) || 50);
     const status = String(req.query.status ?? "pending").trim();
     try {
@@ -144,8 +151,9 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
       if (status === "rejected") where = "v.moderation_status = 'rejected' OR v.status = 'removed'";
       else if (status === "approved") where = "v.moderation_status = 'approved' AND v.status = 'published'";
       const r = await query(
-        `SELECT v.id, v.title, v.status, v.moderation_status, v.moderation_reason, v.nsfw_score,
-                v.thumbnail_url, v.video_url, v.created_at, c.handle AS channel_handle, c.user_id
+        `SELECT v.id, v.title, v.description, v.duration_seconds, v.status, v.moderation_status,
+                v.moderation_reason, v.nsfw_score, v.thumbnail_url, v.video_url, v.created_at,
+                c.handle AS channel_handle, c.user_id
          FROM reels_videos v
          JOIN reels_channels c ON c.id = v.channel_id
          WHERE ${where}
@@ -159,7 +167,7 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
     }
   });
 
-  router.post("/reels/moderation-scan", requireAdmin, requirePermission("reels.manage"), async (_req, res) => {
+  router.post("/reels/moderation-scan", requireAdmin, requireAnyPermission("reels.manage", "moderation.manage"), async (_req, res) => {
     try {
       const processed = await processPendingReelsModeration(25);
       await logAdminAction({ action: "reels_moderation_scan", entityType: "reels_platform", entityId: 0, metadata: { processed } }, _req);
@@ -169,11 +177,49 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
     }
   });
 
-  router.post("/reels/videos/:videoId/approve", requireAdmin, requirePermission("reels.manage"), async (req, res) => {
+  router.post("/reels/videos/:videoId/admin-preview", requireAdmin, requireAnyPermission("reels.manage", "moderation.manage"), async (req, res) => {
     const videoId = Number(req.params.videoId);
+    const watchedSeconds = Number((req.body as { watchedSeconds?: number }).watchedSeconds) || 0;
+    const admin = req.admin as AdminIdentity;
     try {
       const meta = await query(
-        `SELECT v.title, v.channel_id, c.handle FROM reels_videos v
+        `SELECT duration_seconds FROM reels_videos WHERE id = $1`,
+        [videoId],
+      );
+      if (!meta.rows.length) {
+        res.status(404).json({ success: false, message: "Video not found" });
+        return;
+      }
+      const durationSeconds = Number(meta.rows[0].duration_seconds ?? 0);
+      const required = requiredAdminPreviewSeconds(durationSeconds);
+      if (watchedSeconds < required) {
+        res.status(400).json({
+          success: false,
+          message: `Pehle kam se kam ${required} second video dekhein, phir approve karein.`,
+          requiredSeconds: required,
+        });
+        return;
+      }
+      const adminKey = adminReviewerKey(admin.adminId, admin.email);
+      await logAdminVideoPreview(videoId, adminKey, watchedSeconds, required);
+      await logAdminAction({
+        action: "reels_video_admin_preview",
+        entityType: "reels_video",
+        entityId: videoId,
+        metadata: { watchedSeconds, requiredSeconds: required },
+      }, req);
+      res.json({ success: true, requiredSeconds: required });
+    } catch (err) {
+      res.status(500).json({ success: false, message: "Preview log failed" });
+    }
+  });
+
+  router.post("/reels/videos/:videoId/approve", requireAdmin, requireAnyPermission("reels.manage", "moderation.manage"), async (req, res) => {
+    const videoId = Number(req.params.videoId);
+    const admin = req.admin as AdminIdentity;
+    try {
+      const meta = await query(
+        `SELECT v.title, v.channel_id, v.duration_seconds, c.handle FROM reels_videos v
          JOIN reels_channels c ON c.id = v.channel_id WHERE v.id = $1`,
         [videoId],
       );
@@ -181,7 +227,19 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
         res.status(404).json({ success: false, message: "Video not found" });
         return;
       }
-      await applyVideoModerationResult(videoId, { action: "approve", nsfwScore: 0, details: { manual: true } });
+      const durationSeconds = Number(meta.rows[0].duration_seconds ?? 0);
+      const required = requiredAdminPreviewSeconds(durationSeconds);
+      const adminKey = adminReviewerKey(admin.adminId, admin.email);
+      const previewed = await adminHasCompletedVideoPreview(videoId, adminKey, required);
+      if (!previewed) {
+        res.status(400).json({
+          success: false,
+          message: "Pehle video play karke dekhein (Preview), phir approve karein.",
+          requiredSeconds: required,
+        });
+        return;
+      }
+      await applyVideoModerationResult(videoId, { action: "approve", nsfwScore: 0, details: { manual: true, adminKey } });
       const row = meta.rows[0];
       void notifySubscribersNewVideo(Number(row.channel_id), videoId, String(row.title), String(row.handle));
       await logAdminAction({ action: "reels_video_approve", entityType: "reels_video", entityId: videoId }, req);
@@ -191,7 +249,7 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
     }
   });
 
-  router.post("/reels/videos/:videoId/reject", requireAdmin, requirePermission("reels.manage"), async (req, res) => {
+  router.post("/reels/videos/:videoId/reject", requireAdmin, requireAnyPermission("reels.manage", "moderation.manage"), async (req, res) => {
     const videoId = Number(req.params.videoId);
     const { reason } = req.body as { reason?: string };
     try {
