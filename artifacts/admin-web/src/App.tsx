@@ -5,6 +5,7 @@ import { AnalyticsTab } from "./tabs/AnalyticsTab";
 import { AuditTab } from "./tabs/AuditTab";
 import { AdminsTab } from "./tabs/AdminsTab";
 import { DeveloperApiTab } from "./tabs/DeveloperApiTab";
+import { ReelsTab } from "./tabs/ReelsTab";
 import { User360Modal } from "./components/User360Modal";
 
 type Tab =
@@ -22,7 +23,8 @@ type Tab =
   | "scheduled"
   | "broadcasts"
   | "calls"
-  | "developer-api";
+  | "developer-api"
+  | "reels";
 
 type Stats = {
   users: number;
@@ -512,6 +514,7 @@ export default function App() {
         {nav("trust", "Trust & Safety")}
         {nav("compliance", "Compliance")}
         {nav("developer-api", "Developer API", stats?.pending_developer_templates)}
+        {nav("reels", "Video / Reels")}
         {nav("analytics", "Analytics")}
         {nav("audit", "Audit")}
         {adminRole === "super_admin" ? nav("admins", "Admins") : null}
@@ -631,6 +634,7 @@ export default function App() {
         {tab === "audit" ? <AuditTab onErr={setErr} /> : null}
         {tab === "admins" ? <AdminsTab onErr={setErr} canManage={adminRole === "super_admin"} /> : null}
         {tab === "developer-api" ? <DeveloperApiTab onErr={setErr} onPendingTemplatesChange={loadStats} /> : null}
+        {tab === "reels" ? <ReelsTab onErr={setErr} /> : null}
 
         {tab === "users" && (
           <>

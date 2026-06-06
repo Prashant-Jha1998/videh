@@ -181,6 +181,23 @@ cron.schedule("*/15 * * * *", async () => {
   }
 });
 
+/** Every minute — scan pending reels videos for NSFW before publish */
+cron.schedule("* * * * *", async () => {
+  try {
+    const lockKey = "jobs:reels-moderation:lock";
+    if (!(await stateAcquireLock(lockKey, 55_000))) return;
+    const { processPendingReelsModeration } = await import("./lib/reelsModerationQueue");
+    const processed = await processPendingReelsModeration(15);
+    if (processed > 0) {
+      logger.info({ processed }, "Reels NSFW moderation queue processed");
+    }
+    await stateDelete(lockKey);
+  } catch (err) {
+    await stateDelete("jobs:reels-moderation:lock").catch(() => {});
+    logger.error({ err }, "Reels moderation cron error");
+  }
+});
+
 /** Every hour — hold API accounts with unpaid invoices past due date */
 cron.schedule("0 * * * *", async () => {
   try {

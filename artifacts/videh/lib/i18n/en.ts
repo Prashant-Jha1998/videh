@@ -5,6 +5,7 @@ export const en: Record<string, string> = {
   "tab.status": "Status",
   "tab.calls": "Calls",
   "tab.settings": "Settings",
+  "tab.video": "Video",
   "settings.header": "Videh",
   "settings.sectionTitle": "Settings",
   "settings.row.account": "Account",

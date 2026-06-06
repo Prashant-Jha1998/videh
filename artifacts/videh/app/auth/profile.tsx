@@ -19,6 +19,7 @@ import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollV
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { registerPushTokenWithServer } from "@/lib/pushNotifications";
+import { checkReelsHandle, createReelsChannel, REELS_HANDLE_RE } from "@/lib/reelsApi";
 
 export default function ProfileSetupScreen() {
   const colors = useColors();
@@ -27,13 +28,37 @@ export default function ProfileSetupScreen() {
   const { user, setUser, updateAvatar } = useApp();
 
   const [name, setName] = useState(user?.name ?? "");
+  const [reelsHandle, setReelsHandle] = useState("");
+  const [handleError, setHandleError] = useState<string | null>(null);
+  const [handleOk, setHandleOk] = useState(false);
   const [about, setAbout] = useState(user?.about ?? "Hey there! I am using Videh.");
   const [avatarUri, setAvatarUri] = useState<string | undefined>(user?.avatar);
   const [loading, setLoading] = useState(false);
   const [nameFocused, setNameFocused] = useState(false);
   const [aboutFocused, setAboutFocused] = useState(false);
 
-  const isValid = name.trim().length >= 2;
+  const isValid = name.trim().length >= 2 && REELS_HANDLE_RE.test(reelsHandle.trim()) && handleOk;
+
+  React.useEffect(() => {
+    const h = reelsHandle.trim().replace(/^@/, "");
+    if (!REELS_HANDLE_RE.test(h)) {
+      setHandleOk(false);
+      setHandleError(h.length > 0 ? "Username: 3–30 letters, numbers, underscore." : null);
+      return;
+    }
+    const t = setTimeout(() => {
+      void checkReelsHandle(h, user?.sessionToken).then((res) => {
+        if (!res.success) {
+          setHandleOk(false);
+          setHandleError(res.message ?? "Could not verify username");
+          return;
+        }
+        setHandleOk(Boolean(res.available));
+        setHandleError(res.available ? null : "Username already used");
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [reelsHandle, user?.sessionToken]);
 
   const pickFromLibrary = async () => {
     try {
@@ -111,6 +136,17 @@ export default function ProfileSetupScreen() {
       avatar: user.avatar ?? avatarUri,
     });
     if (user.dbId) {
+      const ch = await createReelsChannel(
+        user.dbId,
+        reelsHandle.trim(),
+        user.avatar ?? avatarUri ?? null,
+        user.sessionToken,
+      );
+      if (!ch.success) {
+        setLoading(false);
+        Alert.alert("Reels username", ch.message ?? "Username already used.");
+        return;
+      }
       try {
         await registerPushTokenWithServer(user.dbId);
       } catch {
@@ -184,6 +220,29 @@ export default function ProfileSetupScreen() {
               blurOnSubmit={false}
             />
             <Text style={[styles.charCount, { color: colors.mutedForeground }]}>{name.length}/25</Text>
+          </View>
+
+          {/* Reels @username */}
+          <View style={[styles.field, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.fieldLabel, { color: colors.primary }]}>Reels @username *</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <Text style={{ color: colors.primary, fontSize: 16, fontFamily: "Inter_600SemiBold" }}>@</Text>
+              <TextInput
+                style={[styles.fieldInput, { flex: 1, color: colors.foreground }]}
+                placeholder="yourchannel"
+                placeholderTextColor={colors.mutedForeground}
+                value={reelsHandle}
+                onChangeText={(t) => setReelsHandle(t.replace(/[^a-zA-Z0-9_]/g, ""))}
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={30}
+              />
+            </View>
+            {handleError ? (
+              <Text style={{ color: "#e53e3e", fontSize: 12, marginTop: 4 }}>{handleError}</Text>
+            ) : handleOk ? (
+              <Text style={{ color: colors.primary, fontSize: 12, marginTop: 4 }}>Username available</Text>
+            ) : null}
           </View>
 
           {/* About Field */}

@@ -14,6 +14,7 @@ import {
 import { adminTotpConfigured, verifyAdminTotpCode, verifyTotpWithSecret } from "../lib/adminTotp";
 import { logger } from "../lib/logger";
 import { registerAdminPlatformRoutes } from "./admin-platform";
+import { registerAdminReelsRoutes } from "./admin-reels";
 import { ensureAdminPlatformTables } from "../lib/adminPlatform";
 import { logAdminAction } from "../lib/adminAudit";
 import { ensureAdminUsersTable, verifyAdminCredentials, touchAdminLogin } from "../lib/adminUsers";
@@ -690,6 +691,7 @@ router.get("/broadcasts", requireAdmin, async (_req, res) => {
 });
 
 registerAdminPlatformRoutes(router, requireAdmin);
+registerAdminReelsRoutes(router, requireAdmin);
 registerAdminRbacRoutes(router, requireAdmin);
 
 export default router;

@@ -1,0 +1,312 @@
+import { useCallback, useEffect, useState } from "react";
+import { adminApi, fmtDate } from "../adminApi";
+
+type ReelsStats = {
+  channels: number;
+  videos: number;
+  subscriptions: number;
+  total_views: string;
+  total_view_hours: string;
+  fraud_events_7d: number;
+};
+
+type ReelsChannel = {
+  id: number;
+  user_id: number;
+  handle: string;
+  owner_name?: string;
+  owner_phone?: string;
+  subscriber_count: number;
+  total_views: string;
+  total_view_hours: string;
+  total_likes: string;
+  total_comments: string;
+  total_shares: string;
+  fraud_score: string;
+  monetization_status: string;
+  monetization_eligible: boolean;
+  video_count: number;
+  created_at: string;
+};
+
+type FraudEvent = {
+  id: number;
+  entity_type: string;
+  entity_id: number;
+  signal_type: string;
+  score_delta: string;
+  created_at: string;
+};
+
+type ReelsConfig = {
+  monetization: {
+    minSubscribers: number;
+    minWatchHours: number;
+    minPublicVideos: number;
+    maxFraudScore: number;
+    revenueSharePercent: number;
+    summary: string[];
+  };
+  playButton: {
+    minWatchSecondsToCountView: number;
+    maxFraudScoreForPlay: number;
+    summary: string[];
+  };
+  fraud: { enabled: boolean };
+  feed: { summary: string[] };
+  notifications: {
+    notifySubscribersOnNewVideo: boolean;
+    subscribersNotifiedFirst: boolean;
+  };
+  contentModeration?: {
+    enabled: boolean;
+    nsfwBlockThreshold: number;
+    requireThumbnail: boolean;
+    summary: string[];
+  };
+};
+
+type ModerationVideo = {
+  id: number;
+  title: string;
+  status: string;
+  moderation_status: string;
+  moderation_reason?: string;
+  nsfw_score: string;
+  channel_handle: string;
+  user_id: number;
+  created_at: string;
+};
+
+export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
+  const [stats, setStats] = useState<ReelsStats | null>(null);
+  const [channels, setChannels] = useState<ReelsChannel[]>([]);
+  const [fraudEvents, setFraudEvents] = useState<FraudEvent[]>([]);
+  const [config, setConfig] = useState<ReelsConfig | null>(null);
+  const [search, setSearch] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [moderationQueue, setModerationQueue] = useState<ModerationVideo[]>([]);
+  const [subTab, setSubTab] = useState<"channels" | "rules" | "fraud" | "moderation">("channels");
+
+  const load = useCallback(async () => {
+    onErr(null);
+    const [st, ch, fe, cfg, mq] = await Promise.all([
+      adminApi<{ success: boolean; stats: ReelsStats }>("/admin/reels/stats"),
+      adminApi<{ success: boolean; channels: ReelsChannel[] }>(
+        `/admin/reels/channels?limit=100${search ? `&q=${encodeURIComponent(search)}` : ""}`,
+      ),
+      adminApi<{ success: boolean; events: FraudEvent[] }>("/admin/reels/fraud-events?limit=50"),
+      adminApi<{ success: boolean; config: ReelsConfig }>("/admin/reels/config"),
+      adminApi<{ success: boolean; videos: ModerationVideo[] }>("/admin/reels/moderation-queue?limit=80"),
+    ]);
+    setStats(st.stats);
+    setChannels(ch.channels ?? []);
+    setFraudEvents(fe.events ?? []);
+    setConfig(cfg.config);
+    setModerationQueue(mq.videos ?? []);
+  }, [search, onErr]);
+
+  useEffect(() => {
+    void load().catch((e) => onErr(e instanceof Error ? e.message : "Load failed"));
+  }, [load, onErr]);
+
+  const runFraudScan = async () => {
+    setBusy(true);
+    try {
+      const r = await adminApi<{ scanned: number }>("/admin/reels/fraud-scan", { method: "POST" });
+      alert(`Fraud scan complete — ${r.scanned} channels reviewed`);
+      await load();
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : "Scan failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runModerationScan = async () => {
+    setBusy(true);
+    try {
+      const r = await adminApi<{ processed: number }>("/admin/reels/moderation-scan", { method: "POST" });
+      alert(`Moderation scan complete — ${r.processed} videos processed`);
+      await load();
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : "Scan failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const approveVideo = async (id: number) => {
+    await adminApi(`/admin/reels/videos/${id}/approve`, { method: "POST" });
+    await load();
+  };
+
+  const rejectVideo = async (id: number) => {
+    const reason = window.prompt("Rejection reason (optional)") ?? "";
+    await adminApi(`/admin/reels/videos/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) });
+    await load();
+  };
+
+  const saveConfig = async () => {
+    if (!config) return;
+    setBusy(true);
+    try {
+      await adminApi("/admin/reels/config", { method: "PUT", body: JSON.stringify(config) });
+      alert("Reels rules saved");
+      await load();
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="tab-panel">
+      <h2>Video / Reels Platform</h2>
+      <p className="muted">YouTube-style channels, monetization rules, fraud detection, and subscriber notifications.</p>
+
+      {stats ? (
+        <div className="stats-grid" style={{ marginBottom: 20 }}>
+          <div className="stat-card"><div className="stat-val">{stats.channels}</div><div className="stat-label">Channels</div></div>
+          <div className="stat-card"><div className="stat-val">{stats.videos}</div><div className="stat-label">Videos</div></div>
+          <div className="stat-card"><div className="stat-val">{stats.subscriptions}</div><div className="stat-label">Subscriptions</div></div>
+          <div className="stat-card"><div className="stat-val">{Number(stats.total_views).toLocaleString()}</div><div className="stat-label">Total views</div></div>
+          <div className="stat-card"><div className="stat-val">{Number(stats.total_view_hours).toFixed(0)}h</div><div className="stat-label">Watch hours</div></div>
+          <div className="stat-card"><div className="stat-val">{stats.fraud_events_7d}</div><div className="stat-label">Fraud signals (7d)</div></div>
+        </div>
+      ) : null}
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        <button type="button" className={subTab === "channels" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("channels")}>Channels</button>
+        <button type="button" className={subTab === "rules" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("rules")}>Rules</button>
+        <button type="button" className={subTab === "fraud" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("fraud")}>Fraud</button>
+        <button type="button" className={subTab === "moderation" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("moderation")}>NSFW queue</button>
+        <button type="button" className="primary-btn" disabled={busy} onClick={runFraudScan}>Run fraud scan</button>
+        <button type="button" className="primary-btn" disabled={busy} onClick={runModerationScan}>Run NSFW scan</button>
+      </div>
+
+      {subTab === "channels" ? (
+        <>
+          <input
+            className="search-input"
+            placeholder="Search handle, user id, name..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && void load()}
+            style={{ marginBottom: 12, width: "100%", maxWidth: 400 }}
+          />
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Channel</th>
+                  <th>User ID</th>
+                  <th>Subs</th>
+                  <th>Views</th>
+                  <th>Watch h</th>
+                  <th>Likes</th>
+                  <th>Comments</th>
+                  <th>Shares</th>
+                  <th>Fraud</th>
+                  <th>Monetization</th>
+                  <th>Videos</th>
+                </tr>
+              </thead>
+              <tbody>
+                {channels.map((c) => (
+                  <tr key={c.id}>
+                    <td>
+                      <strong>@{c.handle}</strong>
+                      <div className="muted" style={{ fontSize: 12 }}>{c.owner_name ?? "—"}</div>
+                    </td>
+                    <td>{c.user_id}</td>
+                    <td>{c.subscriber_count}</td>
+                    <td>{Number(c.total_views).toLocaleString()}</td>
+                    <td>{Number(c.total_view_hours).toFixed(1)}</td>
+                    <td>{Number(c.total_likes).toLocaleString()}</td>
+                    <td>{Number(c.total_comments).toLocaleString()}</td>
+                    <td>{Number(c.total_shares).toLocaleString()}</td>
+                    <td>{Number(c.fraud_score).toFixed(1)}</td>
+                    <td>{c.monetization_status}</td>
+                    <td>{c.video_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
+
+      {subTab === "rules" && config ? (
+        <div style={{ maxWidth: 720 }}>
+          <h3>Monetization (YouTube Partner style)</h3>
+          <label>Min subscribers <input type="number" value={config.monetization.minSubscribers} onChange={(e) => setConfig({ ...config, monetization: { ...config.monetization, minSubscribers: Number(e.target.value) } })} /></label>
+          <label style={{ display: "block", marginTop: 8 }}>Min watch hours <input type="number" value={config.monetization.minWatchHours} onChange={(e) => setConfig({ ...config, monetization: { ...config.monetization, minWatchHours: Number(e.target.value) } })} /></label>
+          <label style={{ display: "block", marginTop: 8 }}>Revenue share % <input type="number" value={config.monetization.revenueSharePercent} onChange={(e) => setConfig({ ...config, monetization: { ...config.monetization, revenueSharePercent: Number(e.target.value) } })} /></label>
+
+          <h3 style={{ marginTop: 24 }}>Play button / view counting</h3>
+          <label>Min seconds to count a view <input type="number" value={config.playButton.minWatchSecondsToCountView} onChange={(e) => setConfig({ ...config, playButton: { ...config.playButton, minWatchSecondsToCountView: Number(e.target.value) } })} /></label>
+          <label style={{ display: "block", marginTop: 8 }}>Max fraud score for play <input type="number" value={config.playButton.maxFraudScoreForPlay} onChange={(e) => setConfig({ ...config, playButton: { ...config.playButton, maxFraudScoreForPlay: Number(e.target.value) } })} /></label>
+
+          <h3 style={{ marginTop: 24 }}>NSFW / content safety</h3>
+          <label><input type="checkbox" checked={config.contentModeration?.enabled ?? true} onChange={(e) => setConfig({ ...config, contentModeration: { ...config.contentModeration!, enabled: e.target.checked, nsfwBlockThreshold: config.contentModeration?.nsfwBlockThreshold ?? 0.55, requireThumbnail: config.contentModeration?.requireThumbnail ?? true, summary: config.contentModeration?.summary ?? [] } })} /> Auto-scan videos before publish</label>
+          <label style={{ display: "block", marginTop: 8 }}>Block threshold (0–1) <input type="number" step="0.05" min="0" max="1" value={config.contentModeration?.nsfwBlockThreshold ?? 0.55} onChange={(e) => setConfig({ ...config, contentModeration: { ...config.contentModeration!, enabled: config.contentModeration?.enabled ?? true, nsfwBlockThreshold: Number(e.target.value), requireThumbnail: config.contentModeration?.requireThumbnail ?? true, summary: config.contentModeration?.summary ?? [] } })} /></label>
+          <p className="muted" style={{ marginTop: 8 }}>Set GOOGLE_VISION_API_KEY and/or SIGHTENGINE_API_USER + SIGHTENGINE_API_SECRET on the API server for AI vision scans.</p>
+
+          <h3 style={{ marginTop: 24 }}>Notifications</h3>
+          <label><input type="checkbox" checked={config.notifications.notifySubscribersOnNewVideo} onChange={(e) => setConfig({ ...config, notifications: { ...config.notifications, notifySubscribersOnNewVideo: e.target.checked } })} /> Notify subscribers on new video</label>
+          <label style={{ display: "block", marginTop: 8 }}><input type="checkbox" checked={config.notifications.subscribersNotifiedFirst} onChange={(e) => setConfig({ ...config, notifications: { ...config.notifications, subscribersNotifiedFirst: e.target.checked } })} /> Subscribers see new videos first in feed</label>
+
+          <button type="button" className="primary-btn" style={{ marginTop: 20 }} disabled={busy} onClick={saveConfig}>Save rules</button>
+          <p className="muted" style={{ marginTop: 12 }}>These rules are shown on creator profiles in the mobile app.</p>
+        </div>
+      ) : null}
+
+      {subTab === "moderation" ? (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr><th>Video</th><th>Channel</th><th>Status</th><th>NSFW score</th><th>Reason</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              {moderationQueue.map((v) => (
+                <tr key={v.id}>
+                  <td><strong>{v.title}</strong><div className="muted" style={{ fontSize: 12 }}>#{v.id}</div></td>
+                  <td>@{v.channel_handle}</td>
+                  <td>{v.moderation_status || v.status}</td>
+                  <td>{Number(v.nsfw_score).toFixed(2)}</td>
+                  <td style={{ maxWidth: 200 }}>{v.moderation_reason ?? "—"}</td>
+                  <td>
+                    <button type="button" className="nav-btn" onClick={() => void approveVideo(v.id)}>Approve</button>{" "}
+                    <button type="button" className="nav-btn" onClick={() => void rejectVideo(v.id)}>Reject</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {subTab === "fraud" ? (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr><th>Time</th><th>Entity</th><th>Signal</th><th>Score +</th></tr>
+            </thead>
+            <tbody>
+              {fraudEvents.map((e) => (
+                <tr key={e.id}>
+                  <td>{fmtDate(e.created_at)}</td>
+                  <td>{e.entity_type} #{e.entity_id}</td>
+                  <td>{e.signal_type}</td>
+                  <td>+{e.score_delta}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </div>
+  );
+}

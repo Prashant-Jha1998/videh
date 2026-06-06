@@ -21,6 +21,7 @@ import developerAuthRouter from "./developer-auth";
 import assistantRouter from "./assistant";
 import gifsRouter from "./gifs";
 import linkPreviewRouter from "./linkPreview";
+import reelsRouter from "./reels";
 
 const router: IRouter = Router();
 
@@ -46,5 +47,6 @@ router.use("/developer-billing", developerBillingRouter);
 router.use("/assistant", assistantRouter);
 router.use(gifsRouter);
 router.use(linkPreviewRouter);
+router.use("/reels", reelsRouter);
 
 export default router;

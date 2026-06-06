@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v19-chat-delete-fix"
+        "key": "apk-release-v20-reels-nsfw"
       }
     },
     "production": {

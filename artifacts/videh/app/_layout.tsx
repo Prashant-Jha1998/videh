@@ -779,6 +779,7 @@ function RootLayoutNav() {
         <Stack.Screen name="settings/qr-code" options={{ headerShown: false }} />
         <Stack.Screen name="settings/last-seen-online" options={{ headerShown: false }} />
         <Stack.Screen name="broadcasts/index" options={{ headerShown: false }} />
+        <Stack.Screen name="reels" options={{ headerShown: false }} />
       </Stack>
       {incomingCall ? (
         <IncomingCallOverlay
