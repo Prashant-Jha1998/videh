@@ -57,6 +57,8 @@ export function isChatScrolledUp(
 /** One immediate pin; keyboard end may schedule a second post-layout pin. */
 export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0] as const;
 export const WHATSAPP_KEYBOARD_PIN_DELAYS_MS = [0, 180] as const;
+/** Pin after opening a chat (media cells resize after first layout). */
+export const OPEN_CHAT_PIN_DELAYS_MS = [0, 60, 180, 400, 800] as const;
 
 export function shouldWhatsAppAutoPin(userScrolledUp: boolean, searching: boolean): boolean {
   return !searching && !userScrolledUp;
