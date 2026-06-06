@@ -65,7 +65,7 @@ export function PdfPagePreview({ mediaUrl, filename, sessionToken, height = 200 
   if (extensionFromFilename(filename) !== "pdf") return null;
 
   return (
-    <View style={[styles.wrap, { height }]}>
+    <View style={[styles.wrap, { height }]} pointerEvents="none">
       {loading && !failed ? (
         <View style={styles.center}>
           <ActivityIndicator color="#8696A0" />

@@ -215,7 +215,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         ) AS last_message,
         m.created_at AS last_created_at
         FROM messages m
-        WHERE m.chat_id = c.id AND ${messageVisibleToUserSql("$1")}
+        WHERE m.chat_id = c.id AND m.type != 'system' AND ${messageVisibleToUserSql("$1")}
         ORDER BY m.created_at DESC
         LIMIT 1
       ) last_msg ON TRUE
@@ -224,6 +224,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         FROM messages m
         WHERE m.chat_id = c.id
           AND m.sender_id != $1::int
+          AND m.type != 'system'
           AND m.created_at > cm.last_read_at
           AND ${messageVisibleToUserSql("$1")}
       ) unread ON TRUE
@@ -1495,14 +1496,81 @@ router.put("/:chatId/description", async (req: Request, res: Response) => {
   }
 });
 
-// Set disappearing messages
+// Set disappearing messages (+ WhatsApp-style system message for all members)
 router.put("/:chatId/disappear", async (req: Request, res: Response) => {
   const { chatId } = req.params;
+  const authUserId = getAuthUserId(req);
+  if (!authUserId) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return;
+  }
   const { seconds } = req.body as { seconds?: number | null };
+  const normalizedSeconds =
+    seconds == null || seconds <= 0 ? null : Math.floor(Number(seconds));
   try {
-    await query("UPDATE chats SET disappear_after_seconds = $1 WHERE id = $2", [seconds ?? null, chatId]);
-    res.json({ success: true });
-  } catch { res.status(500).json({ success: false }); }
+    const member = await query(
+      "SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, authUserId],
+    );
+    if (member.rows.length === 0) {
+      res.status(403).json({ success: false, message: "Not a member of this chat" });
+      return;
+    }
+
+    await query("UPDATE chats SET disappear_after_seconds = $1 WHERE id = $2", [normalizedSeconds, chatId]);
+
+    const systemContent = JSON.stringify({
+      kind: "disappear_timer",
+      seconds: normalizedSeconds,
+    });
+    const msgResult = await query(
+      `INSERT INTO messages (chat_id, sender_id, content, type)
+       VALUES ($1, $2, $3, 'system')
+       RETURNING *`,
+      [chatId, authUserId, systemContent],
+    );
+    const message = msgResult.rows[0];
+    const messageId = Number(message.id);
+
+    const members = await query(
+      "SELECT user_id FROM chat_members WHERE chat_id = $1",
+      [chatId],
+    );
+    const memberIds = members.rows
+      .map((row: { user_id: number }) => Number(row.user_id))
+      .filter(Boolean);
+    const recipientIds = memberIds.filter((id) => id !== authUserId);
+    if (recipientIds.length > 0) {
+      await query(
+        `INSERT INTO message_status (message_id, user_id, status)
+         SELECT $1, unnest($2::int[]), 'delivered'
+         ON CONFLICT (message_id, user_id)
+         DO UPDATE SET status = 'delivered', updated_at = NOW()`,
+        [messageId, recipientIds],
+      );
+    }
+
+    publishChatEvent({
+      type: "message",
+      chatId: Array.isArray(chatId) ? chatId[0] ?? "" : chatId,
+      userIds: memberIds,
+      payload: {
+        messageId,
+        content: systemContent,
+        type: "system",
+        senderId: authUserId,
+      },
+    });
+
+    res.json({
+      success: true,
+      disappearAfterSeconds: normalizedSeconds,
+      message,
+    });
+  } catch (err) {
+    req.log.error({ err }, "set disappear error");
+    res.status(500).json({ success: false });
+  }
 });
 
 // Message info (delivery/read/not-seen status for each recipient)

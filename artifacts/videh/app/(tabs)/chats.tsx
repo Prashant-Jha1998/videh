@@ -28,6 +28,8 @@ import { getContactStatusRingSegments } from "@/lib/statusRingSegments";
 import { StoryRingAvatar } from "@/components/StoryRing";
 import { formatTypingLabel } from "@/lib/typingIndicator";
 import { interpolate } from "@/lib/i18n";
+import { HIDDEN_CHATS_KEY, shouldRestoreDeletedChat } from "@/lib/chatListDelete";
+import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
 
 interface BroadcastListRow {
   id: number;
@@ -36,7 +38,6 @@ interface BroadcastListRow {
 }
 
 const FAVORITES_KEY = "videh_favorite_chat_ids";
-const HIDDEN_CHATS_KEY = "videh_hidden_chat_ids";
 const MANUAL_UNREAD_KEY = "videh_manual_unread_chat_ids";
 const LOCKED_CHATS_KEY = "videh_locked_chat_ids";
 const CHAT_SHORTCUTS_KEY = "videh_chat_shortcut_ids";
@@ -46,7 +47,10 @@ export default function ChatsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { chats, statuses, pinChat, muteChat, archiveChat, refreshChats, blockUser, markAsRead, markAllAsRead, user } = useApp();
+  const {
+    chats, statuses, pinChat, muteChat, archiveChat, refreshChats, blockUser, markAsRead, markAllAsRead, user,
+    deleteChatsFromList, chatDeletedAtMap,
+  } = useApp();
   const { t } = useUiPreferences();
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"all" | "unread" | "favorites" | "groups">("all");
@@ -109,14 +113,16 @@ export default function ChatsScreen() {
     if (selectedIds.length === 0) setSelectionMenuOpen(false);
   }, [selectedIds.length]);
 
-  /** List delete only hides locally — bring chat back when a new message arrives (e.g. company API). */
+  /** WhatsApp-style: deleted chat returns when you or they send a new message. */
   useEffect(() => {
-    const toRestore = chats.filter((c) => hiddenIds.includes(c.id) && c.unreadCount > 0).map((c) => c.id);
+    const toRestore = chats
+      .filter((c) => shouldRestoreDeletedChat(c.id, hiddenIds, chatDeletedAtMap, c.lastMessageTime))
+      .map((c) => c.id);
     if (toRestore.length === 0) return;
     const next = hiddenIds.filter((id) => !toRestore.includes(id));
     setHiddenIds(next);
     AsyncStorage.setItem(HIDDEN_CHATS_KEY, JSON.stringify(next)).catch(() => {});
-  }, [chats, hiddenIds]);
+  }, [chats, hiddenIds, chatDeletedAtMap]);
 
   useFocusEffect(
     useCallback(() => {
@@ -227,20 +233,26 @@ export default function ChatsScreen() {
     clearSelection();
   };
 
+  const hideChatsFromList = (ids: string[]) => {
+    void deleteChatsFromList(ids).then(() => {
+      const next = Array.from(new Set([...hiddenIds, ...ids]));
+      setHiddenIds(next);
+      AsyncStorage.setItem(HIDDEN_CHATS_KEY, JSON.stringify(next)).catch(() => {});
+    });
+  };
+
   const deleteSelectedFromList = () => {
     if (selectedIds.length === 0) return;
     Alert.alert(
-      "Delete chats?",
-      "Selected chats will be hidden from this list. They will reappear when you receive a new message.",
+      "Delete chat?",
+      "Messages in selected chats will be cleared on this phone. Chats will reappear only when you or the contact sends a new message.",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
           style: "destructive",
           onPress: () => {
-            const next = Array.from(new Set([...hiddenIds, ...selectedIds]));
-            setHiddenIds(next);
-            AsyncStorage.setItem(HIDDEN_CHATS_KEY, JSON.stringify(next)).catch(() => {});
+            hideChatsFromList(selectedIds);
             clearSelection();
           },
         },
@@ -293,15 +305,21 @@ export default function ChatsScreen() {
   };
 
   const clearSelectedChats = () => {
-    Alert.alert("Clear chat?", "This hides selected chats from the list until a new message arrives.", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Clear", style: "destructive", onPress: () => {
-        const next = Array.from(new Set([...hiddenIds, ...selectedIds]));
-        setHiddenIds(next);
-        AsyncStorage.setItem(HIDDEN_CHATS_KEY, JSON.stringify(next)).catch(() => {});
-        clearSelection();
-      } },
-    ]);
+    Alert.alert(
+      "Delete chat?",
+      "Messages will be cleared on this phone. The chat will reappear only when you or the contact sends a new message.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            hideChatsFromList(selectedIds);
+            clearSelection();
+          },
+        },
+      ],
+    );
   };
 
   const blockSelectedChats = () => {
@@ -714,6 +732,7 @@ function ChatRow({
   );
 
   const hasAvatar = Boolean(chat.avatar);
+  const disappearingOn = (chat.disappearAfterSeconds ?? 0) > 0;
   const wrapStyle = statusRingSegments
     ? styles.avatarRingTouchable
     : [styles.avatarWrap, hasAvatar ? styles.avatarWrapPhoto : { backgroundColor: avatarBg }];
@@ -725,7 +744,7 @@ function ChatRow({
         onPress={onAvatarPress}
         activeOpacity={0.85}
       >
-        <View style={wrapStyle}>
+        <View style={[wrapStyle, disappearingOn && styles.avatarWithTimer]}>
           {statusRingSegments ? (
             <StoryRingAvatar segments={statusRingSegments}>
               {hasAvatar ? (
@@ -741,6 +760,7 @@ function ChatRow({
           ) : (
             <Text style={styles.avatarText}>{initials}</Text>
           )}
+          {disappearingOn ? <DisappearTimerBadge size={14} /> : null}
         </View>
         {!chat.isGroup && chat.isOnline && (
           <View style={[styles.onlineDot, { backgroundColor: colors.onlineGreen }]} />
@@ -819,6 +839,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 0.5 },
   avatarTapArea: { width: 60, height: 58, marginRight: 10, alignItems: "center", justifyContent: "center", position: "relative", overflow: "visible" },
   avatarWrap: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden" },
+  avatarWithTimer: { overflow: "visible" },
   avatarWrapPhoto: { backgroundColor: "#fff" },
   avatarRingTouchable: {
     width: 56,

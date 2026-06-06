@@ -30,8 +30,21 @@ export function parseDocumentMessagePayload(text: string): DocumentMessagePayloa
   }
 }
 
+export function isDocumentMessagePayload(text: string): boolean {
+  return (text ?? "").trim().startsWith(DOC_PAYLOAD_PREFIX);
+}
+
 export function documentFilenameFromText(text: string): string {
   return parseDocumentMessagePayload(text).filename;
+}
+
+/** Chat list / notification preview for document messages (never show raw JSON). */
+export function documentChatPreview(text: string): string {
+  const parsed = parseDocumentMessagePayload(text);
+  if (parsed.caption?.trim()) return parsed.caption.trim();
+  const name = parsed.filename?.trim();
+  if (name && name !== "Document") return `📄 ${name}`;
+  return "📄 Document";
 }
 
 export function documentCaptionFromText(text: string): string | undefined {

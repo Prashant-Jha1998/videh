@@ -86,6 +86,8 @@ import { isGifUri } from "@/lib/imageEdit";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { formatTypingLabel } from "@/lib/typingIndicator";
 import { TypingIndicator } from "@/components/TypingIndicator";
+import { DisappearSystemMessageBubble } from "@/components/DisappearSystemMessageBubble";
+import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
 import { formatChatBubbleTime } from "@/utils/time";
 import {
   isChatNearBottom,
@@ -1134,6 +1136,7 @@ export default function ChatScreen() {
   const clearSelection = useCallback(() => {
     setSelectedIds([]);
     setBulkDeleteOpen(false);
+    setReactionTarget(null);
   }, []);
 
   const messages = searching && searchQuery.trim()
@@ -2046,7 +2049,8 @@ export default function ChatScreen() {
 
     void (async () => {
       try {
-        if (!item.localMediaUri && item.senderId !== "me") {
+        const hasLocal = Boolean(item.localMediaUri?.trim());
+        if (!hasLocal) {
           patchChatMessage(chatId, item.id, { downloadProgress: 0 });
         }
         const result = await openChatDocument({
@@ -2054,6 +2058,7 @@ export default function ChatScreen() {
           filename: documentFilenameFromText(item.text),
           sessionToken: user?.sessionToken,
           localUri: item.localMediaUri,
+          expectedSizeBytes: item.fileSizeBytes,
           onDownloadProgress: (pct) => {
             patchChatMessage(chatId, item.id, { downloadProgress: pct });
           },
@@ -2142,7 +2147,7 @@ export default function ChatScreen() {
     const opts: any[] = [
       { text: "Reply", onPress: () => { setReplyTo(toReplyData(msg, messageFallback)); inputRef.current?.focus(); } },
       { text: "Copy", onPress: () => { Clipboard.setString(msg.text); } },
-      { text: "React", onPress: () => setReactionTarget(msg) },
+      { text: "React", onPress: () => { setSelectedIds([msg.id]); setReactionTarget(msg); } },
       ...(msg.type === "image" && msg.mediaUrl && !msg.isViewOnce
         ? [{
             text: Platform.OS === "web" ? "Download image" : "Save image",
@@ -2193,7 +2198,25 @@ export default function ChatScreen() {
     }
   }, []);
 
+  const openDisappearSettings = useCallback(() => {
+    if (!chatId) return;
+    router.push({
+      pathname: "/disappearing-messages/[id]",
+      params: { id: chatId },
+    });
+  }, [chatId, router]);
+
   const renderMsg = ({ item }: { item: Message }) => {
+    if (item.type === "system") {
+      return (
+        <DisappearSystemMessageBubble
+          text={item.text}
+          isDark={colors.isDark}
+          onChangeTimer={openDisappearSettings}
+        />
+      );
+    }
+
     const isMe = item.senderId === "me";
     const isDeleted = item.type === "deleted";
     const isViewOnceOpened = (item.type === "image" || item.type === "video") && item.isViewOnce && (item.viewOnceOpened || !item.mediaUrl);
@@ -2286,25 +2309,31 @@ export default function ChatScreen() {
         <Pressable
           onPress={() => {
             if (selectedIds.length > 0 && !isDeleted) {
-              setSelectedIds((prev) =>
-                prev.includes(item.id) ? prev.filter((x) => x !== item.id) : [...prev, item.id],
-              );
-              return;
-            }
-            if (!isDeleted) {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setReactionTarget(item);
+              setSelectedIds((prev) => {
+                const next = prev.includes(item.id)
+                  ? prev.filter((x) => x !== item.id)
+                  : [...prev, item.id];
+                if (next.length !== 1) setReactionTarget(null);
+                return next;
+              });
             }
           }}
           onLongPress={() => {
             if (isDeleted) return;
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             setSelectedIds((prev) => {
-              if (prev.length === 0) return [item.id];
-              return prev.includes(item.id) ? prev.filter((x) => x !== item.id) : [...prev, item.id];
+              if (prev.length === 0) {
+                setReactionTarget(item);
+                return [item.id];
+              }
+              const next = prev.includes(item.id)
+                ? prev.filter((x) => x !== item.id)
+                : [...prev, item.id];
+              setReactionTarget(next.length === 1 ? item : null);
+              return next;
             });
           }}
-          delayLongPress={450}
+          delayLongPress={400}
           style={[styles.msgWrap, isMe ? styles.msgRight : styles.msgLeft]}
         >
         {/* Forwarded label */}
@@ -3124,7 +3153,7 @@ export default function ChatScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.headerAvatarWrap}
+            style={styles.headerAvatarShell}
             activeOpacity={0.8}
             onPress={() => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } })}
           >
@@ -3135,6 +3164,7 @@ export default function ChatScreen() {
                 <Text style={styles.headerAvatarText}>{initials}</Text>
               </View>
             )}
+            {(chat?.disappearAfterSeconds ?? 0) > 0 ? <DisappearTimerBadge size={15} /> : null}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -3559,20 +3589,24 @@ export default function ChatScreen() {
       </Modal>
 
       {/* Reaction picker modal */}
-      <DismissibleModal visible={!!reactionTarget} onClose={() => setReactionTarget(null)} animationType="fade">
+      <DismissibleModal
+        visible={!!reactionTarget && selectedIds.length === 1 && selectedIds[0] === reactionTarget.id}
+        onClose={clearSelection}
+        animationType="fade"
+      >
         <View style={[styles.reactionPickerWrap, { paddingBottom: insets.bottom + 96 }]}>
           <View style={[styles.reactionPicker, { backgroundColor: colors.card }]}>
             {REACTION_EMOJIS.map((e) => (
               <TouchableOpacity key={e} style={styles.reactionPickerBtn} onPress={() => {
                 if (chatId && reactionTarget) { reactToMessage(chatId, reactionTarget.id, e); }
-                setReactionTarget(null);
+                clearSelection();
               }}>
                 <Text style={{ fontSize: 28 }}>{e}</Text>
               </TouchableOpacity>
             ))}
             <TouchableOpacity
               style={[styles.reactionPickerPlus, { backgroundColor: colors.muted }]}
-              onPress={() => setReactionTarget(null)}
+              onPress={clearSelection}
             >
               <Ionicons name="close" size={20} color={colors.mutedForeground} />
             </TouchableOpacity>
@@ -3801,6 +3835,7 @@ const styles = StyleSheet.create({
   selectionHeader: {},
   selectionHeaderActions: { flexWrap: "wrap", justifyContent: "flex-end", flexShrink: 0 },
   backBtn: { padding: 6 },
+  headerAvatarShell: { width: 38, height: 38, position: "relative" },
   headerAvatarWrap: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   headerAvatarImg: { width: 38, height: 38 },
   headerAvatarText: { color: "#fff", fontSize: 14, fontFamily: "Inter_700Bold" },

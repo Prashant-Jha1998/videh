@@ -25,6 +25,8 @@ import {
   View,
 } from "react-native";
 import { DismissibleModal } from "@/components/DismissibleModal";
+import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
+import { disappearTimerLabel } from "@/lib/disappearTimerOptions";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
@@ -133,7 +135,7 @@ export default function ChatInfoScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
-  const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, reportUser, setChatDisappear, createDirectChat } = useApp();
+  const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, reportUser, createDirectChat } = useApp();
   const authedJsonHeaders = useCallback(() => ({
     "Content-Type": "application/json",
     ...(user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
@@ -143,7 +145,7 @@ export default function ChatInfoScreen() {
   const isGroup = chat?.isGroup ?? false;
 
   const [muted, setMuted] = useState(chat?.isMuted ?? false);
-  const [disappearing, setDisappearing] = useState<number | null>(null);
+  const [disappearing, setDisappearing] = useState<number | null>(chat?.disappearAfterSeconds ?? null);
   const [aboutText, setAboutText] = useState<string>("Hey there! I am using Videh.");
   const [groupDesc, setGroupDesc] = useState<string>("");
   const [editingDesc, setEditingDesc] = useState(false);
@@ -162,7 +164,6 @@ export default function ChatInfoScreen() {
   const [selectedMember, setSelectedMember] = useState<GroupMember | null>(null);
   const [profileMember, setProfileMember] = useState<GroupMember | null>(null);
   const [otherContact, setOtherContact] = useState<GroupMember | null>(null);
-  const [disappearPickerOpen, setDisappearPickerOpen] = useState(false);
   const [addPickRows, setAddPickRows] = useState<AddPickRow[]>([]);
   const [addPickLoading, setAddPickLoading] = useState(false);
   const [addPickPermissionDenied, setAddPickPermissionDenied] = useState(false);
@@ -271,6 +272,12 @@ export default function ChatInfoScreen() {
       }
     } catch { }
   }, [id]);
+
+  useEffect(() => {
+    if (chat?.disappearAfterSeconds !== undefined) {
+      setDisappearing(chat.disappearAfterSeconds ?? null);
+    }
+  }, [chat?.disappearAfterSeconds]);
 
   useEffect(() => {
     fetchContactInfo();
@@ -410,24 +417,7 @@ export default function ChatInfoScreen() {
     });
   }, [addPickRows, searchPhone, members]);
 
-  const applyDisappear = (seconds: number | null) => {
-    if (!id) return;
-    if (seconds === null) {
-      setChatDisappear(id, null);
-      setDisappearing(null);
-    } else {
-      setChatDisappear(id, seconds);
-      setDisappearing(seconds);
-    }
-    setDisappearPickerOpen(false);
-  };
-
-  const disappearLabel = disappearing === null
-    ? "Off"
-    : disappearing === 86400 ? "24 hours"
-    : disappearing === 604800 ? "7 days"
-    : disappearing === 7776000 ? "90 days"
-    : "Custom";
+  const disappearLabel = disappearTimerLabel(disappearing);
 
   const groupMessagingLabel =
     groupMessagingPolicy === "everyone"
@@ -691,7 +681,7 @@ export default function ChatInfoScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 60 }} showsVerticalScrollIndicator={false}>
         {/* Profile block */}
         <View style={[styles.profileBlock, { backgroundColor: colors.card }]}>
-          <TouchableOpacity onPress={() => setPhotoVisible(true)} activeOpacity={0.85}>
+          <TouchableOpacity onPress={() => setPhotoVisible(true)} activeOpacity={0.85} style={styles.bigAvatarShell}>
             {chat?.avatar ? (
               <Image source={{ uri: chat.avatar }} style={styles.bigAvatar} contentFit="cover" />
             ) : (
@@ -699,6 +689,7 @@ export default function ChatInfoScreen() {
                 <Text style={styles.bigAvatarText}>{initials}</Text>
               </View>
             )}
+            {(disappearing ?? 0) > 0 ? <DisappearTimerBadge size={22} /> : null}
           </TouchableOpacity>
           <Text style={[styles.contactName, { color: colors.foreground }]}>{name ?? chat?.name}</Text>
           {!isGroup && (
@@ -897,7 +888,12 @@ export default function ChatInfoScreen() {
             label="Disappearing messages"
             value={disappearLabel}
             colors={colors}
-            onPress={() => setDisappearPickerOpen(true)}
+            onPress={() =>
+              router.push({
+                pathname: "/disappearing-messages/[id]",
+                params: { id: id! },
+              })
+            }
           />
           {isGroup && (
             <InfoRow
@@ -1067,31 +1063,6 @@ export default function ChatInfoScreen() {
           ) : null}
         </Pressable>
       </Modal>
-
-      {/* Disappearing messages — modal (tap scrim or back to dismiss) */}
-      <DismissibleModal visible={disappearPickerOpen} onClose={() => setDisappearPickerOpen(false)} animationType="fade">
-        <View style={styles.disappearCenter}>
-          <View style={[styles.disappearCard, { backgroundColor: colors.card }]}>
-            <Text style={[styles.disappearTitle, { color: colors.foreground }]}>Disappearing Messages</Text>
-            <Text style={[styles.disappearSub, { color: colors.mutedForeground }]}>Set a time limit for messages</Text>
-            <TouchableOpacity style={styles.disappearRow} onPress={() => applyDisappear(null)}>
-              <Text style={[styles.disappearRowText, { color: colors.primary }]}>Off</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.disappearRow} onPress={() => applyDisappear(86400)}>
-              <Text style={[styles.disappearRowText, { color: colors.primary }]}>24 hours</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.disappearRow} onPress={() => applyDisappear(604800)}>
-              <Text style={[styles.disappearRowText, { color: colors.primary }]}>7 days</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.disappearRow} onPress={() => applyDisappear(7776000)}>
-              <Text style={[styles.disappearRowText, { color: colors.primary }]}>90 days</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.disappearRow} onPress={() => setDisappearPickerOpen(false)}>
-              <Text style={[styles.disappearCancel, { color: colors.mutedForeground }]}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </DismissibleModal>
 
       {/* Add Member Modal — device contacts + phone search */}
       <DismissibleModal visible={addMemberModal} onClose={closeAddMemberModal} animationType="slide">
@@ -1331,6 +1302,7 @@ const styles = StyleSheet.create({
   headerBtn: { padding: 8 },
 
   profileBlock: { alignItems: "center", paddingVertical: 24, paddingHorizontal: 16, marginBottom: 8 },
+  bigAvatarShell: { position: "relative", alignSelf: "center" },
   bigAvatar: { width: 96, height: 96, borderRadius: 48, alignItems: "center", justifyContent: "center" },
   bigAvatarText: { color: "#fff", fontSize: 36, fontFamily: "Inter_700Bold" },
   cameraOverlay: { position: "absolute", bottom: 0, right: 0, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 12, padding: 4 },
@@ -1393,13 +1365,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 8,
   },
-  disappearCenter: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 28 },
-  disappearCard: { width: "100%", maxWidth: 320, borderRadius: 14, paddingVertical: 8, overflow: "hidden" },
-  disappearTitle: { fontSize: 18, fontFamily: "Inter_700Bold", paddingHorizontal: 18, paddingTop: 14, paddingBottom: 4 },
-  disappearSub: { fontSize: 14, fontFamily: "Inter_400Regular", paddingHorizontal: 18, paddingBottom: 10 },
-  disappearRow: { paddingVertical: 14, paddingHorizontal: 18 },
-  disappearRowText: { fontSize: 17, fontFamily: "Inter_600SemiBold", textAlign: "center" },
-  disappearCancel: { fontSize: 17, fontFamily: "Inter_500Medium", textAlign: "center" },
   photoClose: { padding: 8 },
   photoName: { position: "absolute", top: 60, alignSelf: "center", color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold", zIndex: 10 },
   photoFull: { width: "100%", height: "80%" },

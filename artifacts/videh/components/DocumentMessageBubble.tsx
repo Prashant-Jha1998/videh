@@ -34,14 +34,12 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, o
   const caption = documentCaptionFromText(item.text);
   const pageCount = documentPagesFromText(item.text);
   const visual = getDocumentVisual(filename);
-  const uploading = typeof item.uploadProgress === "number" && item.uploadProgress < 100;
-  const downloading = typeof item.downloadProgress === "number" && item.downloadProgress < 100;
+  const uploadPct = item.uploadProgress;
+  const downloadPct = item.downloadProgress;
+  const uploading = typeof uploadPct === "number" && uploadPct < 100 && !item.uploadFailed;
+  const downloading = typeof downloadPct === "number" && downloadPct < 100;
   const transferring = uploading || downloading;
-  const transferPercent = uploading
-    ? (item.uploadProgress ?? 0)
-    : downloading
-      ? (item.downloadProgress ?? 0)
-      : 0;
+  const transferPercent = uploading ? (uploadPct ?? 0) : downloading ? (downloadPct ?? 0) : 0;
   const failed = item.uploadFailed === true;
   const ready = !!item.localMediaUri && !transferring && !failed;
   const titleColor = isMe ? (colors.isDark ? colors.foreground : "#111B21") : colors.foreground;
@@ -61,8 +59,16 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, o
     ? colors.isDark ? "#53BDEB" : "#027EB5"
     : colors.isDark ? "#53BDEB" : "#027EB5";
 
+  const ringTrack = isMe
+    ? colors.isDark ? "rgba(255,255,255,0.22)" : "rgba(0,0,0,0.12)"
+    : "rgba(0,0,0,0.12)";
+
   return (
-    <View style={styles.waRoot}>
+    <Pressable
+      style={({ pressed }) => [styles.waRoot, pressed && !uploading && styles.waPressed]}
+      onPress={onPress}
+      disabled={uploading}
+    >
       {showPdfPreview ? (
         <PdfPagePreview
           mediaUrl={item.mediaUrl!}
@@ -73,11 +79,7 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, o
         />
       ) : null}
 
-      <Pressable
-        style={({ pressed }) => [styles.waMain, pressed && styles.waPressed]}
-        onPress={onPress}
-        disabled={uploading}
-      >
+      <View style={styles.waMain}>
         {!showPdfPreview ? (
           <View style={[styles.waIconBox, { backgroundColor: isMe ? "rgba(255,255,255,0.95)" : visual.iconBg }]}>
             <Ionicons name={visual.icon} size={28} color={visual.iconColor} />
@@ -94,25 +96,31 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, o
         </View>
 
         {transferring ? (
-          <Pressable
-            onPress={uploading && onCancelUpload ? onCancelUpload : undefined}
-            hitSlop={8}
-            disabled={!uploading || !onCancelUpload}
-          >
-            <MediaProgressRing
-              size={40}
-              strokeWidth={3}
-              progress={transferPercent}
-              progressColor={ringColor}
-              trackColor="rgba(0,0,0,0.08)"
-            >
-              {uploading ? (
+          uploading && onCancelUpload ? (
+            <Pressable onPress={onCancelUpload} hitSlop={8}>
+              <MediaProgressRing
+                size={42}
+                strokeWidth={3}
+                progress={transferPercent}
+                progressColor={ringColor}
+                trackColor={ringTrack}
+              >
                 <Ionicons name="close" size={18} color={titleColor} />
-              ) : (
-                <Text style={[styles.ringPct, { color: titleColor }]}>{transferPercent}</Text>
-              )}
-            </MediaProgressRing>
-          </Pressable>
+              </MediaProgressRing>
+            </Pressable>
+          ) : (
+            <View style={styles.actionIcon} pointerEvents="none">
+              <MediaProgressRing
+                size={42}
+                strokeWidth={3}
+                progress={transferPercent}
+                progressColor={ringColor}
+                trackColor={ringTrack}
+              >
+                <Ionicons name="arrow-down" size={16} color={titleColor} />
+              </MediaProgressRing>
+            </View>
+          )
         ) : (
           <View style={styles.actionIcon}>
             <Ionicons
@@ -122,7 +130,7 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, o
             />
           </View>
         )}
-      </Pressable>
+      </View>
 
       {caption ? (
         <Text style={[styles.caption, { color: titleColor }]}>{caption}</Text>
@@ -135,13 +143,19 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, o
             <Pressable style={({ pressed }) => [styles.waActionBtn, pressed && styles.waPressed]} onPress={onPress}>
               <Text style={[styles.waActionText, { color: actionTint }]}>Open</Text>
             </Pressable>
-            <Pressable style={({ pressed }) => [styles.waActionBtn, pressed && styles.waPressed]} onPress={onSaveAs}>
+            <Pressable
+              style={({ pressed }) => [styles.waActionBtn, pressed && styles.waPressed]}
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                onSaveAs();
+              }}
+            >
               <Text style={[styles.waActionText, { color: actionTint }]}>Save as…</Text>
             </Pressable>
           </View>
         </>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
@@ -180,7 +194,6 @@ const styles = StyleSheet.create({
   waActionBtn: { flex: 1, alignItems: "center", paddingVertical: 2 },
   waActionText: { fontSize: 14, fontFamily: "Inter_500Medium" },
   waPressed: { opacity: 0.72 },
-  ringPct: { fontSize: 10, fontFamily: "Inter_700Bold" },
   actionIcon: { width: 40, alignItems: "center", justifyContent: "center" },
   caption: {
     fontSize: 15,

@@ -67,6 +67,7 @@
     "expo-task-manager": "~14.0.9",
     "expo-video": "^3.0.16",
     "expo-web-browser": "~15.0.10",
+    "qrcode-generator": "^1.4.4",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-native": "0.81.5",

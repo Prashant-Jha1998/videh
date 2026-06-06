@@ -749,6 +749,7 @@ function RootLayoutNav() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="chat" options={{ headerShown: false }} />
         <Stack.Screen name="chat-info/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="disappearing-messages/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="call" options={{ headerShown: false, presentation: "fullScreenModal" }} />
         <Stack.Screen name="join-call" options={{ headerShown: false, presentation: "modal" }} />
         <Stack.Screen name="contacts" options={{ headerShown: false }} />
@@ -775,6 +776,7 @@ function RootLayoutNav() {
         <Stack.Screen name="settings/advanced-theme" options={{ headerShown: false }} />
         <Stack.Screen name="settings/chat-theme" options={{ headerShown: false }} />
         <Stack.Screen name="settings/help" options={{ headerShown: false }} />
+        <Stack.Screen name="settings/qr-code" options={{ headerShown: false }} />
         <Stack.Screen name="settings/last-seen-online" options={{ headerShown: false }} />
         <Stack.Screen name="broadcasts/index" options={{ headerShown: false }} />
       </Stack>

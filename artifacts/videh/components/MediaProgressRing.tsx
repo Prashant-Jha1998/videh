@@ -1,6 +1,6 @@
 import React from "react";
 import { StyleSheet, View } from "react-native";
-import Svg, { Circle } from "react-native-svg";
+import Svg, { Circle, G } from "react-native-svg";
 
 type Props = {
   size?: number;
@@ -36,19 +36,19 @@ export function MediaProgressRing({
           strokeWidth={strokeWidth}
           fill="none"
         />
-        <Circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={progressColor}
-          strokeWidth={strokeWidth}
-          fill="none"
-          strokeDasharray={`${circumference} ${circumference}`}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          rotation={-90}
-          origin={`${size / 2}, ${size / 2}`}
-        />
+        <G rotation="-90" origin={`${size / 2}, ${size / 2}`}>
+          <Circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke={progressColor}
+            strokeWidth={strokeWidth}
+            fill="none"
+            strokeDasharray={`${circumference} ${circumference}`}
+            strokeDashoffset={offset}
+            strokeLinecap="round"
+          />
+        </G>
       </Svg>
       {children ? <View style={styles.center}>{children}</View> : null}
     </View>

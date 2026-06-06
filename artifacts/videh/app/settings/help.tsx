@@ -1,9 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React from "react";
+import React, { useCallback } from "react";
 import {
   Alert,
-  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -13,13 +12,64 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
+import { useApp } from "@/context/AppContext";
+import { getApiUrl } from "@/lib/api";
+import { jsonAuthHeaders } from "@/lib/authHeaders";
+
+const SUPPORT_PHONE = "+919999999999";
+const SUPPORT_DISPLAY = "+91 9999999999";
+const SUPPORT_NAME = "Videh Support";
 
 export default function HelpScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user, chats } = useApp();
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+
+  const openSupportChat = useCallback(async () => {
+    if (!user?.dbId) {
+      Alert.alert("Sign in required", "Please sign in to message support.");
+      return;
+    }
+    try {
+      const res = await fetch(`${getApiUrl()}/api/users/check-phones`, {
+        method: "POST",
+        headers: jsonAuthHeaders(user.sessionToken),
+        body: JSON.stringify({ phones: [SUPPORT_PHONE] }),
+      });
+      const data = (await res.json()) as {
+        registered?: Record<string, { id: number; name?: string; avatarUrl?: string }>;
+      };
+      const reg = data.registered?.[SUPPORT_PHONE];
+      if (!reg?.id) {
+        Alert.alert(
+          "Contact us",
+          `${SUPPORT_DISPLAY} is not registered on Videh yet.\n\nEmail: support@videh.app`,
+        );
+        return;
+      }
+      const supportId = Number(reg.id);
+      const supportName = reg.name?.trim() || SUPPORT_NAME;
+      const chat = chats.find((c) => !c.isGroup && c.otherUserId === supportId);
+      if (chat && !chat.id.startsWith("new_")) {
+        router.push({ pathname: "/chat/[id]", params: { id: chat.id, name: supportName } });
+        return;
+      }
+      router.push({
+        pathname: "/chat/[id]",
+        params: {
+          id: `new_${supportId}`,
+          name: supportName,
+          otherUserId: String(supportId),
+          otherAvatar: reg.avatarUrl ?? "",
+        },
+      });
+    } catch {
+      Alert.alert("Error", "Could not open support chat. Please try again.");
+    }
+  }, [chats, router, user?.dbId, user?.sessionToken]);
 
   const rows = [
     {
@@ -29,8 +79,8 @@ export default function HelpScreen() {
     },
     {
       icon: "chatbubble-outline", iconBg: "#4CAF50", label: "Contact us",
-      hint: "Get in touch with our support team",
-      onPress: () => Alert.alert("Contact Us", "Email us at support@videh.app\nWe respond within 24 hours."),
+      hint: SUPPORT_DISPLAY,
+      onPress: () => { void openSupportChat(); },
     },
     {
       icon: "star-outline", iconBg: "#FF9800", label: "Rate us",

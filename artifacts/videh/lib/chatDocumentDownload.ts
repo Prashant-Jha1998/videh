@@ -86,8 +86,9 @@ export async function downloadChatDocument(opts: {
   filename: string;
   sessionToken?: string | null;
   onProgress?: (percent: number) => void;
+  expectedSizeBytes?: number;
 }): Promise<{ localUri: string; sizeBytes: number }> {
-  const { mediaUrl, filename, sessionToken, onProgress } = opts;
+  const { mediaUrl, filename, sessionToken, onProgress, expectedSizeBytes } = opts;
   const uri = resolvePublicAssetUrl(mediaUrl) ?? mediaUrl;
   const key = documentCacheKey(uri, filename);
   const existing = inFlight.get(key);
@@ -118,10 +119,15 @@ export async function downloadChatDocument(opts: {
       target,
       Object.keys(headers).length ? { headers } : undefined,
       (progress) => {
+        const written = progress.totalBytesWritten;
         const total = progress.totalBytesExpectedToWrite;
-        if (!total || total <= 0) return;
-        const pct = Math.min(100, Math.round((progress.totalBytesWritten / total) * 100));
-        onProgress?.(pct);
+        let pct: number | null = null;
+        if (total && total > 0) {
+          pct = Math.min(100, Math.round((written / total) * 100));
+        } else if (expectedSizeBytes && expectedSizeBytes > 0) {
+          pct = Math.min(99, Math.round((written / expectedSizeBytes) * 100));
+        }
+        if (pct !== null) onProgress?.(pct);
       },
     );
 

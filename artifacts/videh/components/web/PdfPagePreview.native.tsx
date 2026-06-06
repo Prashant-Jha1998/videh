@@ -78,13 +78,13 @@ export function PdfPagePreview({ mediaUrl, filename, sessionToken, height = 220,
   if (!isPdf) return null;
 
   return (
-    <View style={[styles.wrap, { height }]}>
+    <View style={[styles.wrap, { height }]} pointerEvents="none">
       {loading && !failed ? (
-        <View style={styles.center}>
+        <View style={styles.center} pointerEvents="none">
           <ActivityIndicator color="#8696A0" />
         </View>
       ) : null}
-      {failed ? <View style={[styles.fallback, { height }]} /> : null}
+      {failed ? <View style={[styles.fallback, { height }]} pointerEvents="none" /> : null}
       {webSource ? (
         <WebView
           source={webSource}
@@ -96,6 +96,7 @@ export function PdfPagePreview({ mediaUrl, filename, sessionToken, height = 220,
           javaScriptEnabled
           domStorageEnabled
           mixedContentMode="always"
+          pointerEvents="none"
         />
       ) : null}
     </View>

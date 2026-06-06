@@ -88,8 +88,9 @@ export async function openChatDocument(opts: {
   sessionToken?: string | null;
   localUri?: string | null;
   onDownloadProgress?: (percent: number) => void;
+  expectedSizeBytes?: number;
 }): Promise<{ localUri: string; sizeBytes?: number }> {
-  const { mediaUrl, filename, sessionToken, localUri, onDownloadProgress } = opts;
+  const { mediaUrl, filename, sessionToken, localUri, onDownloadProgress, expectedSizeBytes } = opts;
   const mime = mimeForDocument(filename);
   let fileUri: string | undefined;
   let sizeBytes: number | undefined;
@@ -129,6 +130,7 @@ export async function openChatDocument(opts: {
           await assertValidDocumentFile(cached, filename);
           fileUri = cached;
           sizeBytes = hitBytes;
+          onDownloadProgress?.(100);
         } catch {
           await FileSystem.deleteAsync(cached, { idempotent: true }).catch(() => {});
         }
@@ -139,6 +141,7 @@ export async function openChatDocument(opts: {
           filename,
           sessionToken,
           onProgress: onDownloadProgress,
+          expectedSizeBytes,
         });
         fileUri = dl.localUri;
         sizeBytes = dl.sizeBytes;

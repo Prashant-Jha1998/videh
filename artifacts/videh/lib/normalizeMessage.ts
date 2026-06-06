@@ -1,5 +1,6 @@
 import { callMessagePreviewText, parseCallMessageMeta } from "@/lib/callMessage";
 import { contactChatPreview } from "@/lib/contactMessage";
+import { documentChatPreview, isDocumentMessagePayload } from "@/lib/documentMessage";
 import { stripWaveformMeta } from "@/lib/voiceWaveform";
 import type { Message } from "@/context/AppContext";
 
@@ -60,6 +61,7 @@ export function normalizeMessageType(
 ): Message["type"] {
   const declaredType = String(declared ?? "text").toLowerCase();
   if (declaredType === "deleted") return "deleted";
+  if (declaredType === "system") return "system";
 
   const raw = (content ?? "").trim();
 
@@ -68,7 +70,7 @@ export function normalizeMessageType(
   if (declaredType === "call") return "call";
   if (declaredType === "contact" || raw.startsWith(CONTACT_PREFIX)) return "contact";
   if (declaredType === "location" || looksLikeLocationJson(raw)) return "location";
-  if (declaredType === "document") return "document";
+  if (isDocumentMessagePayload(raw) || declaredType === "document") return "document";
   if (declaredType === "image" || declaredType === "video" || declaredType === "audio") {
     return declaredType;
   }
@@ -107,14 +109,17 @@ export function inferChatListPreview(
       return clean || "Voice message";
     }
     case "document":
-      return raw || "Document";
+      return documentChatPreview(raw);
     case "contact":
       return contactChatPreview(raw);
     case "location":
       return "Location";
     case "deleted":
       return "This message was deleted";
+    case "system":
+      return "";
     default:
+      if (isDocumentMessagePayload(raw)) return documentChatPreview(raw);
       return raw.length > 120 ? `${raw.slice(0, 119)}…` : raw || "New message";
   }
 }
