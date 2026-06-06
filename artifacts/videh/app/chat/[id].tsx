@@ -969,6 +969,7 @@ export default function ChatScreen() {
 
   const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
   const [initializing, setInitializing] = useState(rawId?.startsWith("new_") ?? false);
+  const [messagesReady, setMessagesReady] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [peerPresence, setPeerPresence] = useState<PresenceView | null>(null);
 
@@ -1047,9 +1048,13 @@ export default function ChatScreen() {
   }, [rawId]);
 
   useEffect(() => {
-    if (!chatId) return;
+    if (!chatId) {
+      setMessagesReady(false);
+      return;
+    }
+    setMessagesReady(false);
     markAsRead(chatId);
-    loadMessages(chatId);
+    void loadMessages(chatId).finally(() => setMessagesReady(true));
   }, [chatId]);
 
   useEffect(() => {
@@ -3744,11 +3749,17 @@ export default function ChatScreen() {
               <View style={styles.initWrap}>
                 <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.noResults")}</Text>
               </View>
-            ) : (
+            ) : !messagesReady ? (
               <View style={styles.initWrap}>
                 <ActivityIndicator size="small" color={colors.primary} />
                 <Text style={[styles.initText, { color: colors.mutedForeground, marginTop: 10 }]}>
                   {t("chat.loadingMessages")}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.initWrap}>
+                <Text style={[styles.initText, { color: colors.mutedForeground }]}>
+                  {t("chats.noMessagesYet")}
                 </Text>
               </View>
             )

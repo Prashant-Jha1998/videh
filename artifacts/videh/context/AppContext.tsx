@@ -360,14 +360,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const n = v ? Number(v) : 0;
       if (Number.isFinite(n)) clearedHistoryAtRef.current = n;
     });
-    void loadChatDeletedAtMap().then((map) => {
-      chatDeletedAtRef.current = map;
-      setChatDeletedAtMap(map);
-    });
-    void loadHiddenChatIds().then((ids) => {
-      hiddenChatIdsRef.current = ids;
-      setHiddenChatIds(ids);
-    });
+  }, []);
+
+  const reloadChatListDeleteState = useCallback(async (userId: number) => {
+    const [hidden, deletedMap] = await Promise.all([
+      loadHiddenChatIds(userId),
+      loadChatDeletedAtMap(userId),
+    ]);
+    hiddenChatIdsRef.current = hidden;
+    setHiddenChatIds(hidden);
+    chatDeletedAtRef.current = deletedMap;
+    setChatDeletedAtMap(deletedMap);
   }, []);
 
   /** WhatsApp-style: deleted chat reappears when a new message arrives after delete. */
@@ -385,7 +388,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const next = hidden.filter((id) => !toRestore.includes(id));
       hiddenChatIdsRef.current = next;
       setHiddenChatIds(next);
-      await saveHiddenChatIds(next);
+      const uid = userRef.current?.dbId;
+      if (uid) await saveHiddenChatIds(uid, next);
     },
     [],
   );
@@ -688,6 +692,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setIsAuthenticated(true);
           if (parsed.dbId) {
             messageCacheStoreRef.current = await loadChatMessageCache(parsed.dbId);
+            await reloadChatListDeleteState(parsed.dbId);
             loadChats(parsed.dbId);
             loadCallLogs(parsed.dbId);
             loadStatuses(parsed.dbId);
@@ -746,6 +751,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.setItem("videh_user", JSON.stringify(u));
 
     if (u.dbId) {
+      await reloadChatListDeleteState(u.dbId);
       loadChats(u.dbId);
       loadCallLogs(u.dbId);
       loadStatuses(u.dbId);
@@ -771,7 +777,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
       }
     }
-  }, [loadChats, loadStatuses]);
+  }, [loadChats, loadStatuses, reloadChatListDeleteState]);
 
   const refreshChats = useCallback(async () => {
     const u = userRef.current;
@@ -798,10 +804,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     for (const id of chatIds) nextMap[String(id)] = now;
     chatDeletedAtRef.current = nextMap;
     setChatDeletedAtMap(nextMap);
-    await saveChatDeletedAtMap(nextMap);
 
     const uid = userRef.current?.dbId;
     if (uid) {
+      await saveChatDeletedAtMap(uid, nextMap);
       await Promise.all(
         chatIds.map((chatId) =>
           api(`/chats/${chatId}/clear-history`, {
@@ -832,7 +838,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const next = Array.from(new Set([...hiddenChatIdsRef.current, ...chatIds.map(String)]));
       hiddenChatIdsRef.current = next;
       setHiddenChatIds(next);
-      await saveHiddenChatIds(next);
+      const uid = userRef.current?.dbId;
+      if (uid) await saveHiddenChatIds(uid, next);
       await deleteChatsFromList(chatIds);
     },
     [deleteChatsFromList],
@@ -874,6 +881,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     authSessionToken = null;
     setIsAuthenticated(false);
     setChats([]);
+    hiddenChatIdsRef.current = [];
+    setHiddenChatIds([]);
+    chatDeletedAtRef.current = {};
+    setChatDeletedAtMap({});
     await AsyncStorage.removeItem("videh_user");
   }, []);
 
