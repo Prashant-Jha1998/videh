@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { Copy, Forward, MessageSquarePlus, MoreVertical, Search, Star, Trash2, X } from "lucide-react";
+import { ChevronDown, Copy, Forward, MessageSquarePlus, MoreVertical, Search, Star, Trash2, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import "../components/web/webShell.css";
 import { webApi, type WebStatus, type WebUser } from "../lib/webApi";
@@ -26,6 +26,7 @@ import type { WebSection } from "../lib/webDesktop";
 import { highlightMatches } from "../lib/highlightText";
 import { inferListPreview } from "../lib/messagePreview";
 import { formatMessageBody, replyPreviewText } from "../lib/chatMessageDisplay";
+import { isChatNearBottom, isChatScrolledUp, shouldAutoPinToBottom } from "../lib/chatScroll";
 
 const FAV_CHATS_KEY = "videh_web_favorite_chats";
 
@@ -86,9 +87,14 @@ export default function VidehWeb() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const stickToBottomRef = useRef(true);
+  const userScrolledUpRef = useRef(false);
+  const pendingScrollRef = useRef(true);
   const prevMessagesLenRef = useRef(0);
-  const SCROLL_NEAR_BOTTOM_PX = 140;
+  const lastMessageIdRef = useRef<number | null>(null);
+  const frozenMessageCountRef = useRef(0);
+  const scrollCoalesceRef = useRef<number | null>(null);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [unreadBelowCount, setUnreadBelowCount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sidebarMenuBtnRef = useRef<HTMLButtonElement>(null);
@@ -163,21 +169,46 @@ export default function VidehWeb() {
   }, [token]);
 
   const scrollMessagesToBottom = useCallback((smooth = false) => {
-    const el = messagesContainerRef.current;
-    if (!el) return;
-    const top = el.scrollHeight - el.clientHeight;
-    if (smooth) {
-      el.scrollTo({ top, behavior: "smooth" });
-    } else {
-      el.scrollTop = top;
-    }
+    if (scrollCoalesceRef.current != null) cancelAnimationFrame(scrollCoalesceRef.current);
+    scrollCoalesceRef.current = requestAnimationFrame(() => {
+      scrollCoalesceRef.current = requestAnimationFrame(() => {
+        scrollCoalesceRef.current = null;
+        const el = messagesContainerRef.current;
+        if (!el) return;
+        const top = Math.max(0, el.scrollHeight - el.clientHeight);
+        if (smooth) el.scrollTo({ top, behavior: "smooth" });
+        else el.scrollTop = top;
+      });
+    });
   }, []);
+
+  const pinChatToBottom = useCallback(
+    (smooth = false) => {
+      userScrolledUpRef.current = false;
+      pendingScrollRef.current = true;
+      frozenMessageCountRef.current = messages.length;
+      setShowJumpToLatest(false);
+      setUnreadBelowCount(0);
+      scrollMessagesToBottom(smooth);
+    },
+    [messages.length, scrollMessagesToBottom],
+  );
 
   const handleMessagesScroll = useCallback(() => {
     const el = messagesContainerRef.current;
     if (!el) return;
-    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_NEAR_BOTTOM_PX;
-  }, []);
+    const scrolledUp = isChatScrolledUp(el, userScrolledUpRef.current);
+    if (scrolledUp === userScrolledUpRef.current) return;
+    userScrolledUpRef.current = scrolledUp;
+    if (scrolledUp) {
+      frozenMessageCountRef.current = messages.length;
+      setShowJumpToLatest(messages.length > 6);
+    } else {
+      frozenMessageCountRef.current = messages.length;
+      setShowJumpToLatest(false);
+      setUnreadBelowCount(0);
+    }
+  }, [messages.length]);
 
   const sendMessage = useCallback(async () => {
     if (!token || !activeChatId || !msgText.trim()) return;
@@ -186,7 +217,7 @@ export default function VidehWeb() {
     setMsgText("");
     setReplyTo(null);
     setEmojiOpen(false);
-    stickToBottomRef.current = true;
+    pinChatToBottom(false);
     try {
       await webApi.sendMessage(token, activeChatId, {
         content: text,
@@ -196,7 +227,7 @@ export default function VidehWeb() {
       await loadMessages(activeChatId);
       if (token) loadChats(token);
     } catch {}
-  }, [token, activeChatId, msgText, replyTo, loadMessages, loadChats]);
+  }, [token, activeChatId, msgText, replyTo, loadMessages, loadChats, pinChatToBottom]);
 
   const startReplyToMessage = useCallback((msg: Message) => {
     const name = msg.sender_id === user?.id ? "You" : (msg.sender_name || "Contact");
@@ -303,7 +334,7 @@ export default function VidehWeb() {
 
   const sendVoiceMessage = useCallback(async () => {
     if (!token || !activeChatId) return;
-    stickToBottomRef.current = true;
+    pinChatToBottom(false);
     try {
       const result = await voiceRecorder.stop();
       if (!result) return;
@@ -320,7 +351,7 @@ export default function VidehWeb() {
     } finally {
       setUploading(false);
     }
-  }, [token, activeChatId, voiceRecorder, loadMessages, loadChats]);
+  }, [token, activeChatId, voiceRecorder, loadMessages, loadChats, pinChatToBottom]);
 
   const startVoiceRecording = useCallback(async () => {
     try {
@@ -333,7 +364,7 @@ export default function VidehWeb() {
 
   const handleAttachments = useCallback(async (files: FileList | File[]) => {
     if (!token || !activeChatId) return;
-    stickToBottomRef.current = true;
+    pinChatToBottom(false);
     setUploading(true);
     try {
       const list = Array.from(files).slice(0, 30);
@@ -368,7 +399,7 @@ export default function VidehWeb() {
     } finally {
       setUploading(false);
     }
-  }, [token, activeChatId, loadMessages, loadChats]);
+  }, [token, activeChatId, loadMessages, loadChats, pinChatToBottom]);
 
   const toggleMute = useCallback(async () => {
     if (!token || !activeChatId) return;
@@ -472,8 +503,14 @@ export default function VidehWeb() {
 
   useEffect(() => {
     if (activeChatId) {
-      stickToBottomRef.current = true;
+      userScrolledUpRef.current = false;
+      pendingScrollRef.current = true;
       prevMessagesLenRef.current = 0;
+      lastMessageIdRef.current = null;
+      frozenMessageCountRef.current = 0;
+      setShowJumpToLatest(false);
+      setUnreadBelowCount(0);
+      setMessages([]);
       loadMessages(activeChatId);
     }
     setChatSearchOpen(false);
@@ -481,21 +518,58 @@ export default function VidehWeb() {
     setChatMenuOpen(false);
     setEmojiOpen(false);
     setReplyTo(null);
-  }, [activeChatId]);
+  }, [activeChatId, loadMessages]);
 
   useClickOutside(emojiWrapRef, () => setEmojiOpen(false), emojiOpen);
 
   useEffect(() => {
-    const len = messages.length;
-    const prevLen = prevMessagesLenRef.current;
-    prevMessagesLenRef.current = len;
-    if (!stickToBottomRef.current) return;
-    if (len > prevLen || prevLen === 0) {
-      requestAnimationFrame(() => {
-        scrollMessagesToBottom(len > prevLen && prevLen > 0);
-      });
+    if (!userScrolledUpRef.current) {
+      frozenMessageCountRef.current = messages.length;
+      setUnreadBelowCount(0);
+      return;
     }
-  }, [messages, scrollMessagesToBottom]);
+    const unread = Math.max(0, messages.length - frozenMessageCountRef.current);
+    setUnreadBelowCount(unread);
+    if (unread > 0) setShowJumpToLatest(true);
+  }, [messages.length]);
+
+  useEffect(() => {
+    if (chatSearchOpen) return;
+
+    const lastMsg = messages[messages.length - 1];
+    const lastId = lastMsg?.id ?? null;
+    const prevLen = prevMessagesLenRef.current;
+    const prevLastId = lastMessageIdRef.current;
+    const len = messages.length;
+
+    prevMessagesLenRef.current = len;
+    lastMessageIdRef.current = lastId;
+
+    if (pendingScrollRef.current) {
+      pendingScrollRef.current = false;
+      scrollMessagesToBottom(false);
+      return;
+    }
+
+    if (!shouldAutoPinToBottom(userScrolledUpRef.current, chatSearchOpen)) return;
+
+    const hasNewTail = len > prevLen || (lastId != null && lastId !== prevLastId);
+    if (hasNewTail || prevLen === 0) {
+      const smooth = len - prevLen > 0 && len - prevLen <= 2 && prevLen > 0;
+      scrollMessagesToBottom(smooth);
+    }
+  }, [messages, chatSearchOpen, scrollMessagesToBottom]);
+
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      if (userScrolledUpRef.current || chatSearchOpen) return;
+      if (isChatNearBottom(el)) scrollMessagesToBottom(false);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [activeChatId, chatSearchOpen, scrollMessagesToBottom]);
 
   // Refresh messages periodically when chat is open
   useEffect(() => {
@@ -1106,6 +1180,7 @@ export default function VidehWeb() {
             </div>
           )}
 
+          <div className="vw-chat__messages-wrap">
           <div className={`vw-chat__messages${selectionMode ? " vw-chat__messages--selecting" : ""}`} ref={messagesContainerRef} onScroll={handleMessagesScroll}>
             {displayMessages.length === 0 && messages.length === 0 && !chatSearchLower && (
               <div style={{ textAlign: "center", color: "#667781", marginTop: 40 }}>
@@ -1139,6 +1214,21 @@ export default function VidehWeb() {
               />
             ))}
             <div ref={msgsEndRef} className="vw-chat__scroll-end" aria-hidden />
+          </div>
+          {showJumpToLatest && !chatSearchOpen ? (
+            <button
+              type="button"
+              className="vw-chat__jump-latest"
+              title="Scroll to latest messages"
+              aria-label="Scroll to latest messages"
+              onClick={() => pinChatToBottom(true)}
+            >
+              <ChevronDown size={22} strokeWidth={2} />
+              {unreadBelowCount > 0 ? (
+                <span className="vw-chat__jump-badge">{unreadBelowCount > 99 ? "99+" : unreadBelowCount}</span>
+              ) : null}
+            </button>
+          ) : null}
           </div>
 
           <div className="vw-chat__footer">

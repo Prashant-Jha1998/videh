@@ -613,6 +613,14 @@
   margin-top: 1px;
 }
 
+.vw-chat__messages-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .vw-chat__messages {
   flex: 1;
   min-height: 0;
@@ -623,6 +631,44 @@
   background-color: var(--vw-chat-bg);
   background-size: cover;
   transition: background 0.35s var(--vw-ease);
+}
+
+.vw-chat__jump-latest {
+  position: absolute;
+  right: 20px;
+  bottom: 16px;
+  z-index: 6;
+  width: 42px;
+  height: 42px;
+  border: none;
+  border-radius: 50%;
+  background: var(--vw-panel, #fff);
+  color: var(--vw-primary, #00a884);
+  box-shadow: 0 2px 8px rgba(11, 20, 26, 0.18);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vw-chat__jump-latest:hover {
+  background: #f0f2f5;
+}
+
+.vw-chat__jump-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--vw-primary, #00a884);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
 }
 
 .vw-chat__scroll-end {
