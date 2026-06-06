@@ -35,7 +35,10 @@ import {
 import {
   chatClearCutoff,
   loadChatDeletedAtMap,
+  loadHiddenChatIds,
   saveChatDeletedAtMap,
+  saveHiddenChatIds,
+  shouldRestoreDeletedChat,
   type ChatDeletedAtMap,
 } from "@/lib/chatListDelete";
 
@@ -285,6 +288,9 @@ interface AppContextType {
   clearAllChatHistory: () => Promise<void>;
   /** WhatsApp-style: hide from list, clear local messages until someone messages again. */
   deleteChatsFromList: (chatIds: string[]) => Promise<void>;
+  /** Hide chats from list (persists until a new message is sent or received). */
+  hideChatsInList: (chatIds: string[]) => Promise<void>;
+  hiddenChatIds: string[];
   chatDeletedAtMap: ChatDeletedAtMap;
   sendImageMessage: (chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean, mediaKind?: "image" | "video") => void;
   sendPreparedMediaMessage: (
@@ -344,6 +350,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const clearedHistoryAtRef = useRef<number>(0);
   const chatDeletedAtRef = useRef<ChatDeletedAtMap>({});
   const [chatDeletedAtMap, setChatDeletedAtMap] = useState<ChatDeletedAtMap>({});
+  const hiddenChatIdsRef = useRef<string[]>([]);
+  const [hiddenChatIds, setHiddenChatIds] = useState<string[]>([]);
   const messageCacheStoreRef = useRef<ChatMessageCacheStore>({});
   const loadMessagesRef = useRef<(chatId: string) => Promise<void>>(async () => {});
 
@@ -356,7 +364,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       chatDeletedAtRef.current = map;
       setChatDeletedAtMap(map);
     });
+    void loadHiddenChatIds().then((ids) => {
+      hiddenChatIdsRef.current = ids;
+      setHiddenChatIds(ids);
+    });
   }, []);
+
+  /** WhatsApp-style: deleted chat reappears when a new message arrives after delete. */
+  const restoreHiddenChatsWithNewActivity = useCallback(
+    async (candidates: { id: string; lastMessageTime?: number }[]) => {
+      const hidden = hiddenChatIdsRef.current;
+      if (!hidden.length || !candidates.length) return;
+      const deletedMap = chatDeletedAtRef.current;
+      const toRestore = hidden.filter((id) => {
+        const chat = candidates.find((c) => c.id === id);
+        if (!chat) return false;
+        return shouldRestoreDeletedChat(id, hidden, deletedMap, chat.lastMessageTime ?? Date.now());
+      });
+      if (!toRestore.length) return;
+      const next = hidden.filter((id) => !toRestore.includes(id));
+      hiddenChatIdsRef.current = next;
+      setHiddenChatIds(next);
+      await saveHiddenChatIds(next);
+    },
+    [],
+  );
 
   const getClearCutoff = (chatId: string) =>
     chatClearCutoff(chatId, clearedHistoryAtRef.current, chatDeletedAtRef.current);
@@ -548,6 +580,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const data = await api(`/chats/user/${dbUserId}`) as { success: boolean; chats: any[] };
       if (!data.success || !data.chats) return;
       const mapped = mapDbChats(data.chats);
+      await restoreHiddenChatsWithNewActivity(
+        mapped.map((c) => ({ id: c.id, lastMessageTime: c.lastMessageTime })),
+      );
       setChats((prev) =>
         mapped.map((newChat) => {
           const old = prev.find((c) => c.id === newChat.id);
@@ -583,7 +618,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }, 0);
       }
     } catch {}
-  }, []);
+  }, [restoreHiddenChatsWithNewActivity]);
 
   const loadCallLogs = useCallback(async (dbUserId: number) => {
     try {
@@ -789,6 +824,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  const hideChatsInList = useCallback(
+    async (chatIds: string[]) => {
+      if (!chatIds.length) return;
+      const next = Array.from(new Set([...hiddenChatIdsRef.current, ...chatIds.map(String)]));
+      hiddenChatIdsRef.current = next;
+      setHiddenChatIds(next);
+      await saveHiddenChatIds(next);
+      await deleteChatsFromList(chatIds);
+    },
+    [deleteChatsFromList],
+  );
+
   const updateAvatar = useCallback(async (base64: string, mimeType = "image/jpeg") => {
     const u = userRef.current;
     if (!u) return;
@@ -835,7 +882,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     // Check if we already have this chat locally
     const existing = chats.find((c) => !c.isGroup && c.otherUserId === otherUserId);
-    if (existing) return existing.id;
+    if (existing) {
+      void restoreHiddenChatsWithNewActivity([
+        { id: existing.id, lastMessageTime: existing.lastMessageTime ?? Date.now() },
+      ]);
+      return existing.id;
+    }
 
     const data = await api("/chats/direct", {
       method: "POST",
@@ -958,7 +1010,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         };
       }),
     );
-  }, []);
+    void restoreHiddenChatsWithNewActivity([{ id: chatId, lastMessageTime: Date.now() }]);
+  }, [restoreHiddenChatsWithNewActivity]);
 
   const patchChatMessage = useCallback((chatId: string, messageId: string, patch: Partial<Message>) => {
     setChats((prev) =>
@@ -1368,13 +1421,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       replyType: replyQuote?.replyType,
     };
     const chatListPreview = text.length > 120 ? `${text.slice(0, 117).trimEnd()}…` : text;
+    const sentAt = Date.now();
     setChats((prev) =>
       prev.map((c) =>
         c.id === chatId
-          ? { ...c, messages: [...c.messages, newMsg], lastMessage: chatListPreview, lastMessageTime: Date.now() }
+          ? { ...c, messages: [...c.messages, newMsg], lastMessage: chatListPreview, lastMessageTime: sentAt }
           : c
       )
     );
+    void restoreHiddenChatsWithNewActivity([{ id: chatId, lastMessageTime: sentAt }]);
 
     if (u?.dbId) {
       void (async () => {
@@ -2370,7 +2425,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, forwardMessage, starredMessages, updateAvatar,
       createDirectChat, loadMessages, applyIncomingMessageHint, loadOlderMessages, refreshChats, clearAllChatHistory,
-      deleteChatsFromList, chatDeletedAtMap,
+      deleteChatsFromList, hideChatsInList, hiddenChatIds, chatDeletedAtMap,
       sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage, sendDocumentMessage, cancelDocumentUpload,
       sendContactMessage, setTyping, clearTyping,
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,

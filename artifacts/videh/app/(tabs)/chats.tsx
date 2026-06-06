@@ -28,7 +28,6 @@ import { getContactStatusRingSegments } from "@/lib/statusRingSegments";
 import { StoryRingAvatar } from "@/components/StoryRing";
 import { formatTypingLabel } from "@/lib/typingIndicator";
 import { interpolate } from "@/lib/i18n";
-import { HIDDEN_CHATS_KEY } from "@/lib/chatListDelete";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
 
 interface BroadcastListRow {
@@ -49,7 +48,7 @@ export default function ChatsScreen() {
   const router = useRouter();
   const {
     chats, statuses, pinChat, muteChat, archiveChat, refreshChats, blockUser, markAsRead, markAllAsRead, user,
-    deleteChatsFromList,
+    hideChatsInList, hiddenChatIds,
   } = useApp();
   const { t } = useUiPreferences();
   const [search, setSearch] = useState("");
@@ -60,7 +59,6 @@ export default function ChatsScreen() {
   const [showArchived, setShowArchived] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
-  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [manualUnreadIds, setManualUnreadIds] = useState<string[]>([]);
   const [lockedIds, setLockedIds] = useState<string[]>([]);
   const [shortcutIds, setShortcutIds] = useState<string[]>([]);
@@ -69,7 +67,7 @@ export default function ChatsScreen() {
 
   const selectedChats = chats.filter((c) => selectedIds.includes(c.id));
   const isSelectionMode = selectedIds.length > 0;
-  const visibleBase = chats.filter((c) => !hiddenIds.includes(c.id) && !c.isKhataNotebook);
+  const visibleBase = chats.filter((c) => !hiddenChatIds.includes(c.id) && !c.isKhataNotebook);
   const archivedChats = visibleBase.filter((c) => c.isArchived);
   const visibleChats = showArchived ? archivedChats : visibleBase.filter((c) => !c.isArchived);
   const getUnreadCount = (chat: Chat) => manualUnreadIds.includes(chat.id) ? Math.max(chat.unreadCount, 1) : chat.unreadCount;
@@ -88,20 +86,17 @@ export default function ChatsScreen() {
   useEffect(() => {
     AsyncStorage.multiGet([
       FAVORITES_KEY,
-      HIDDEN_CHATS_KEY,
       MANUAL_UNREAD_KEY,
       LOCKED_CHATS_KEY,
       CHAT_SHORTCUTS_KEY,
       CUSTOM_LIST_KEY,
     ]).then((rows) => {
       const favRaw = rows.find(([key]) => key === FAVORITES_KEY)?.[1];
-      const hiddenRaw = rows.find(([key]) => key === HIDDEN_CHATS_KEY)?.[1];
       const unreadRaw = rows.find(([key]) => key === MANUAL_UNREAD_KEY)?.[1];
       const lockedRaw = rows.find(([key]) => key === LOCKED_CHATS_KEY)?.[1];
       const shortcutRaw = rows.find(([key]) => key === CHAT_SHORTCUTS_KEY)?.[1];
       const listRaw = rows.find(([key]) => key === CUSTOM_LIST_KEY)?.[1];
       setFavoriteIds(safeJsonArray(favRaw));
-      setHiddenIds(safeJsonArray(hiddenRaw));
       setManualUnreadIds(safeJsonArray(unreadRaw));
       setLockedIds(safeJsonArray(lockedRaw));
       setShortcutIds(safeJsonArray(shortcutRaw));
@@ -222,15 +217,6 @@ export default function ChatsScreen() {
     clearSelection();
   };
 
-  const hideChatsFromList = (ids: string[]) => {
-    setHiddenIds((prev) => {
-      const next = Array.from(new Set([...prev, ...ids]));
-      AsyncStorage.setItem(HIDDEN_CHATS_KEY, JSON.stringify(next)).catch(() => {});
-      return next;
-    });
-    void deleteChatsFromList(ids);
-  };
-
   const deleteSelectedFromList = () => {
     if (selectedIds.length === 0) return;
     Alert.alert(
@@ -242,7 +228,7 @@ export default function ChatsScreen() {
           text: "Delete",
           style: "destructive",
           onPress: () => {
-            hideChatsFromList(selectedIds);
+            void hideChatsInList(selectedIds);
             clearSelection();
           },
         },
@@ -304,7 +290,7 @@ export default function ChatsScreen() {
           text: "Delete",
           style: "destructive",
           onPress: () => {
-            hideChatsFromList(selectedIds);
+            void hideChatsInList(selectedIds);
             clearSelection();
           },
         },
