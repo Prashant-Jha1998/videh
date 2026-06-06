@@ -79,6 +79,10 @@ export default function VidehWeb() {
   const voiceRecorder = useWebVoiceRecorder();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const prevMessagesLenRef = useRef(0);
+  const SCROLL_NEAR_BOTTOM_PX = 140;
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sidebarMenuBtnRef = useRef<HTMLButtonElement>(null);
@@ -152,11 +156,18 @@ export default function VidehWeb() {
     } catch {}
   }, [token]);
 
+  const handleMessagesScroll = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_NEAR_BOTTOM_PX;
+  }, []);
+
   const sendMessage = useCallback(async () => {
     if (!token || !activeChatId || !msgText.trim()) return;
     const text = msgText.trim();
     setMsgText("");
     setEmojiOpen(false);
+    stickToBottomRef.current = true;
     try {
       await webApi.sendMessage(token, activeChatId, { content: text, type: "text" });
       await loadMessages(activeChatId);
@@ -259,6 +270,7 @@ export default function VidehWeb() {
 
   const sendVoiceMessage = useCallback(async () => {
     if (!token || !activeChatId) return;
+    stickToBottomRef.current = true;
     try {
       const result = await voiceRecorder.stop();
       if (!result) return;
@@ -288,6 +300,7 @@ export default function VidehWeb() {
 
   const handleAttachments = useCallback(async (files: FileList | File[]) => {
     if (!token || !activeChatId) return;
+    stickToBottomRef.current = true;
     setUploading(true);
     try {
       const list = Array.from(files).slice(0, 30);
@@ -425,7 +438,11 @@ export default function VidehWeb() {
   }, []);
 
   useEffect(() => {
-    if (activeChatId) loadMessages(activeChatId);
+    if (activeChatId) {
+      stickToBottomRef.current = true;
+      prevMessagesLenRef.current = 0;
+      loadMessages(activeChatId);
+    }
     setChatSearchOpen(false);
     setChatSearchQuery("");
     setChatMenuOpen(false);
@@ -435,7 +452,15 @@ export default function VidehWeb() {
   useClickOutside(emojiWrapRef, () => setEmojiOpen(false), emojiOpen);
 
   useEffect(() => {
-    msgsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const len = messages.length;
+    const prevLen = prevMessagesLenRef.current;
+    prevMessagesLenRef.current = len;
+    if (!stickToBottomRef.current) return;
+    if (len > prevLen || prevLen === 0) {
+      requestAnimationFrame(() => {
+        msgsEndRef.current?.scrollIntoView({ behavior: len > prevLen && prevLen > 0 ? "smooth" : "auto" });
+      });
+    }
   }, [messages]);
 
   // Refresh messages periodically when chat is open
@@ -924,7 +949,7 @@ export default function VidehWeb() {
             </div>
           )}
 
-          <div className="vw-chat__messages">
+          <div className="vw-chat__messages" ref={messagesContainerRef} onScroll={handleMessagesScroll}>
             {displayMessages.length === 0 && messages.length === 0 && !chatSearchLower && (
               <div style={{ textAlign: "center", color: "#667781", marginTop: 40 }}>
                 <p style={{ margin: 0, fontSize: 14 }}>No messages yet. Say hello! 👋</p>

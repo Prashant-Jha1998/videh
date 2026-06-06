@@ -1139,6 +1139,11 @@ export default function ChatScreen() {
     setReactionTarget(null);
   }, []);
 
+  /** Close reaction bar only — keep message selected for delete / forward / etc. */
+  const dismissReactionPicker = useCallback(() => {
+    setReactionTarget(null);
+  }, []);
+
   const messages = searching && searchQuery.trim()
     ? allMessages.filter((m) => m.text.toLowerCase().includes(searchQuery.toLowerCase()))
     : allMessages;
@@ -3591,7 +3596,7 @@ export default function ChatScreen() {
       {/* Reaction picker modal */}
       <DismissibleModal
         visible={!!reactionTarget && selectedIds.length === 1 && selectedIds[0] === reactionTarget.id}
-        onClose={clearSelection}
+        onClose={dismissReactionPicker}
         animationType="fade"
       >
         <View style={[styles.reactionPickerWrap, { paddingBottom: insets.bottom + 96 }]}>
@@ -3606,7 +3611,7 @@ export default function ChatScreen() {
             ))}
             <TouchableOpacity
               style={[styles.reactionPickerPlus, { backgroundColor: colors.muted }]}
-              onPress={clearSelection}
+              onPress={dismissReactionPicker}
             >
               <Ionicons name="close" size={20} color={colors.mutedForeground} />
             </TouchableOpacity>
