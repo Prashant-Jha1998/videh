@@ -378,8 +378,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const deletedMap = chatDeletedAtRef.current;
       const toRestore = hidden.filter((id) => {
         const chat = candidates.find((c) => c.id === id);
-        if (!chat) return false;
-        return shouldRestoreDeletedChat(id, hidden, deletedMap, chat.lastMessageTime ?? Date.now());
+        if (!chat?.lastMessageTime) return false;
+        return shouldRestoreDeletedChat(id, hidden, deletedMap, chat.lastMessageTime);
       });
       if (!toRestore.length) return;
       const next = hidden.filter((id) => !toRestore.includes(id));
@@ -581,7 +581,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!data.success || !data.chats) return;
       const mapped = mapDbChats(data.chats);
       await restoreHiddenChatsWithNewActivity(
-        mapped.map((c) => ({ id: c.id, lastMessageTime: c.lastMessageTime })),
+        mapped
+          .filter((c) => typeof c.lastMessageTime === "number" && c.lastMessageTime > 0)
+          .map((c) => ({ id: c.id, lastMessageTime: c.lastMessageTime })),
       );
       setChats((prev) =>
         mapped.map((newChat) => {
@@ -882,12 +884,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     // Check if we already have this chat locally
     const existing = chats.find((c) => !c.isGroup && c.otherUserId === otherUserId);
-    if (existing) {
-      void restoreHiddenChatsWithNewActivity([
-        { id: existing.id, lastMessageTime: existing.lastMessageTime ?? Date.now() },
-      ]);
-      return existing.id;
-    }
+    if (existing) return existing.id;
 
     const data = await api("/chats/direct", {
       method: "POST",
@@ -1010,7 +1007,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         };
       }),
     );
-    void restoreHiddenChatsWithNewActivity([{ id: chatId, lastMessageTime: Date.now() }]);
+    const activityAt = Date.now();
+    if (activityAt > (chatDeletedAtRef.current[chatId] ?? 0)) {
+      void restoreHiddenChatsWithNewActivity([{ id: chatId, lastMessageTime: activityAt }]);
+    }
   }, [restoreHiddenChatsWithNewActivity]);
 
   const patchChatMessage = useCallback((chatId: string, messageId: string, patch: Partial<Message>) => {
@@ -1429,7 +1429,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           : c
       )
     );
-    void restoreHiddenChatsWithNewActivity([{ id: chatId, lastMessageTime: sentAt }]);
+    if (sentAt > (chatDeletedAtRef.current[chatId] ?? 0)) {
+      void restoreHiddenChatsWithNewActivity([{ id: chatId, lastMessageTime: sentAt }]);
+    }
 
     if (u?.dbId) {
       void (async () => {

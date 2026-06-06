@@ -41,7 +41,7 @@ export function chatClearCutoff(
   return Math.max(globalClearedAt, deletedMap[String(chatId)] ?? 0);
 }
 
-/** WhatsApp-style: chat reappears when a new message is sent or received after delete. */
+/** WhatsApp-style: chat reappears only when a message arrives after delete (not on delete itself). */
 export function shouldRestoreDeletedChat(
   chatId: string,
   hiddenIds: string[],
@@ -51,5 +51,8 @@ export function shouldRestoreDeletedChat(
   if (!hiddenIds.includes(chatId)) return false;
   const deletedAt = deletedMap[chatId] ?? 0;
   if (!deletedAt) return false;
-  return (lastMessageTime ?? 0) > deletedAt;
+  if (lastMessageTime == null || !Number.isFinite(lastMessageTime) || lastMessageTime <= 0) {
+    return false;
+  }
+  return lastMessageTime > deletedAt;
 }
