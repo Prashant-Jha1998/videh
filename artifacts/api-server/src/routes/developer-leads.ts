@@ -21,6 +21,8 @@ import {
 import { getDeveloperApiUsageSnapshot } from "../lib/developerApiUsage";
 import {
   buildInvoicePdf,
+  currentPeriodKey,
+  ensureSequentialBillNumbers,
   getInvoiceForAccount,
   invoiceToPublic,
   listInvoicesForAccount,
@@ -1017,10 +1019,35 @@ router.get("/:id/invoices", async (req, res) => {
     }
     const refCode = String(ctx.lead.reference_code ?? "");
     await syncCurrentMonthInvoice(ctx.accountId, ctx.account, refCode);
-    const rows = await listInvoicesForAccount(ctx.accountId);
+    await ensureSequentialBillNumbers(ctx.accountId, refCode);
+    const invoiceFilter = String(req.query.filter ?? "all").trim();
+    if (invoiceFilter === "current") {
+      const periodKey = currentPeriodKey();
+      const currentRows = await query(
+        `SELECT * FROM developer_invoices WHERE account_id = $1 AND period_key = $2 LIMIT 1`,
+        [ctx.accountId, periodKey],
+      );
+      const rows = currentRows.rows;
+      res.json({
+        success: true,
+        invoices: rows.map((row) => invoiceToPublic(row as Parameters<typeof invoiceToPublic>[0])),
+        pagination: { page: 1, limit: 1, total: rows.length, total_pages: rows.length > 0 ? 1 : 0 },
+        company_name: String(ctx.lead.company_name ?? "Developer"),
+      });
+      return;
+    }
+    const page = Math.max(1, parseInt(String(req.query.page ?? "1"), 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit ?? "10"), 10) || 10));
+    const listed = await listInvoicesForAccount(ctx.accountId, { page, limit });
     res.json({
       success: true,
-      invoices: rows.map(invoiceToPublic),
+      invoices: listed.rows.map(invoiceToPublic),
+      pagination: {
+        page: listed.page,
+        limit: listed.limit,
+        total: listed.total,
+        total_pages: listed.total_pages,
+      },
       company_name: String(ctx.lead.company_name ?? "Developer"),
     });
   } catch (err) {

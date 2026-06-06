@@ -4,6 +4,8 @@ export type ChatMessageSignal = {
   body?: string;
   senderName?: string;
   senderId?: string;
+  messageType?: "text" | "image" | "video" | "audio" | "document";
+  mediaUrl?: string;
 };
 
 type ChatMessageListener = (signal: ChatMessageSignal) => void;

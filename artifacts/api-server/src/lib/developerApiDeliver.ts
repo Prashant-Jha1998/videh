@@ -244,7 +244,17 @@ export async function deliverBusinessMessageToVidehInbox(input: {
     input.businessLogoUrl,
   );
 
+  if (!imageUrl && !textContent.trim()) {
+    return {
+      ok: false,
+      code: "empty_template_content",
+      message:
+        "Template has no deliverable content. Add body text or a valid image header URL, and pass body variables in template.components.",
+    };
+  }
+
   let messageId: number;
+  const messageType = imageUrl ? "image" : "text";
   if (imageUrl) {
     const img = await query(
       `INSERT INTO messages (chat_id, sender_id, content, type, media_url)
@@ -300,7 +310,15 @@ export async function deliverBusinessMessageToVidehInbox(input: {
     type: "message",
     chatId,
     userIds: [senderId, recipient.id],
-    payload: { messageId, businessApi: true },
+    payload: {
+      messageId,
+      content: textContent || (imageUrl ? "📷 Photo" : ""),
+      type: messageType,
+      mediaUrl: imageUrl ?? undefined,
+      senderId,
+      senderName,
+      businessApi: true,
+    },
   });
 
   await query(

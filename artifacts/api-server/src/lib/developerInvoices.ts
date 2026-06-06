@@ -47,7 +47,7 @@ export async function ensureDeveloperInvoicesTable(): Promise<void> {
   tableReady = true;
 }
 
-function currentPeriodKey(): string {
+export function currentPeriodKey(): string {
   const d = new Date();
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
@@ -64,9 +64,42 @@ function periodBounds(periodKey: string): { billDate: string; dueDate: string } 
   return { billDate, dueDate };
 }
 
-function billNumberFor(accountId: number, periodKey: string, referenceCode?: string): string {
-  const ref = (referenceCode ?? "VIDH").replace(/[^A-Z0-9-]/gi, "").slice(0, 12);
-  return `${ref}-INV-${periodKey.replace("-", "")}`;
+function billNumberPrefix(referenceCode?: string): string {
+  const ref = (referenceCode ?? "VIDH").replace(/[^A-Z0-9-]/gi, "").toUpperCase().slice(0, 12);
+  return `${ref}-INV`;
+}
+
+function billNumberForSequence(referenceCode: string | undefined, sequence: number): string {
+  return `${billNumberPrefix(referenceCode)}-${String(sequence).padStart(6, "0")}`;
+}
+
+/** Assign stable sequential bill numbers per account (000001, 000002, …). */
+export async function ensureSequentialBillNumbers(
+  accountId: number,
+  referenceCode?: string,
+): Promise<void> {
+  await ensureDeveloperInvoicesTable();
+  const rows = await query(
+    `SELECT id, bill_number FROM developer_invoices
+     WHERE account_id = $1
+     ORDER BY bill_date ASC, id ASC`,
+    [accountId],
+  );
+  for (let i = 0; i < rows.rows.length; i++) {
+    const row = rows.rows[i] as { id: number; bill_number: string };
+    const expected = billNumberForSequence(referenceCode, i + 1);
+    if (row.bill_number !== expected) {
+      await query(`UPDATE developer_invoices SET bill_number = $1, updated_at = NOW() WHERE id = $2`, [
+        expected,
+        row.id,
+      ]);
+    }
+  }
+}
+
+async function nextBillSequence(accountId: number): Promise<number> {
+  const r = await query(`SELECT COUNT(*)::int AS c FROM developer_invoices WHERE account_id = $1`, [accountId]);
+  return Number(r.rows[0]?.c ?? 0) + 1;
 }
 
 /** Normalize DB DATE / timestamps to YYYY-MM-DD (no timezone in API/UI). */
@@ -116,7 +149,7 @@ export async function syncCurrentMonthInvoice(
   const usageInr = Math.round(usage.api_usage_inr_month);
   const amountInr = planInr + usageInr;
   const { billDate, dueDate } = periodBounds(periodKey);
-  const billNumber = billNumberFor(accountId, periodKey, referenceCode);
+  await ensureSequentialBillNumbers(accountId, referenceCode);
 
   const existing = await query(
     `SELECT * FROM developer_invoices WHERE account_id = $1 AND period_key = $2`,
@@ -126,6 +159,8 @@ export async function syncCurrentMonthInvoice(
   if (row?.status === "paid") {
     return row;
   }
+
+  const billNumber = billNumberForSequence(referenceCode, await nextBillSequence(accountId));
 
   const r = await query(
     `INSERT INTO developer_invoices
@@ -144,14 +179,42 @@ export async function syncCurrentMonthInvoice(
   return r.rows[0] as DeveloperInvoiceRow;
 }
 
-export async function listInvoicesForAccount(accountId: number): Promise<DeveloperInvoiceRow[]> {
+export type InvoiceListPage = {
+  rows: DeveloperInvoiceRow[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+};
+
+export async function listInvoicesForAccount(
+  accountId: number,
+  options?: { page?: number; limit?: number },
+): Promise<InvoiceListPage> {
   await ensureDeveloperInvoicesTable();
+  const page = Math.max(1, Math.floor(Number(options?.page ?? 1)));
+  const limit = Math.min(50, Math.max(1, Math.floor(Number(options?.limit ?? 10))));
+  const offset = (page - 1) * limit;
+
+  const countR = await query(`SELECT COUNT(*)::int AS c FROM developer_invoices WHERE account_id = $1`, [
+    accountId,
+  ]);
+  const total = Number(countR.rows[0]?.c ?? 0);
+  const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+
   const r = await query(
     `SELECT * FROM developer_invoices WHERE account_id = $1
-     ORDER BY CASE WHEN status = 'paid' THEN 1 ELSE 0 END ASC, bill_date DESC, id DESC`,
-    [accountId],
+     ORDER BY CASE WHEN status = 'paid' THEN 1 ELSE 0 END ASC, bill_date DESC, id DESC
+     LIMIT $2 OFFSET $3`,
+    [accountId, limit, offset],
   );
-  return r.rows as DeveloperInvoiceRow[];
+  return {
+    rows: r.rows as DeveloperInvoiceRow[],
+    total,
+    page,
+    limit,
+    total_pages: totalPages,
+  };
 }
 
 export async function getInvoiceForAccount(

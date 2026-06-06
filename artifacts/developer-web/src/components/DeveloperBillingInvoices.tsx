@@ -1,7 +1,7 @@
-import { ArrowLeft, Download, Loader2, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, Loader2, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { devFetch } from "../lib/devFetch";
-import { formatBillDate, formatInrRupees, sortInvoicesForDisplay } from "../lib/billingDisplay";
+import { formatBillDate, formatInrRupees } from "../lib/billingDisplay";
 import { getRazorpayLogoUrl } from "../lib/razorpayCheckout";
 
 declare global {
@@ -20,6 +20,15 @@ export type DeveloperInvoice = {
   period_key: string;
   is_current: boolean;
   paid_at: string | null;
+};
+
+const INVOICES_PER_PAGE = 10;
+
+type InvoicePagination = {
+  page: number;
+  limit: number;
+  total: number;
+  total_pages: number;
 };
 
 type Props = {
@@ -62,38 +71,59 @@ export function DeveloperBillingInvoices({
   const [payingId, setPayingId] = useState<number | null>(null);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [invoices, setInvoices] = useState<DeveloperInvoice[]>([]);
-
-  const qs = reference ? `?reference=${encodeURIComponent(reference)}` : "";
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<InvoicePagination>({
+    page: 1,
+    limit: INVOICES_PER_PAGE,
+    total: 0,
+    total_pages: 0,
+  });
 
   const load = useCallback(async () => {
     if (!leadId) return;
     setBusy(true);
     onError("");
     try {
-      const r = await devFetch(`/api/developer-leads/${leadId}/invoices${qs}`);
+      const params = new URLSearchParams();
+      if (reference) params.set("reference", reference);
+      if (filter === "current") {
+        params.set("filter", "current");
+      } else {
+        params.set("page", String(page));
+        params.set("limit", String(INVOICES_PER_PAGE));
+      }
+      const query = params.toString();
+      const r = await devFetch(`/api/developer-leads/${leadId}/invoices${query ? `?${query}` : ""}`);
       const d = (await r.json()) as {
         success?: boolean;
         invoices?: DeveloperInvoice[];
+        pagination?: InvoicePagination;
         message?: string;
       };
       if (!r.ok || !d.success) throw new Error(d.message ?? "Could not load bills");
       setInvoices(d.invoices ?? []);
+      setPagination(
+        d.pagination ?? {
+          page: 1,
+          limit: INVOICES_PER_PAGE,
+          total: d.invoices?.length ?? 0,
+          total_pages: d.invoices?.length ? 1 : 0,
+        },
+      );
     } catch (e) {
       onError(e instanceof Error ? e.message : "Load failed");
     } finally {
       setBusy(false);
     }
-  }, [leadId, qs, onError]);
+  }, [leadId, reference, filter, page, onError]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filter]);
 
   useEffect(() => {
     void load();
   }, [load]);
-
-  const visible = useMemo(() => {
-    const filtered =
-      filter === "current" ? invoices.filter((i) => i.is_current) : invoices;
-    return sortInvoicesForDisplay(filtered);
-  }, [invoices, filter]);
 
   async function downloadBillPdf(inv: DeveloperInvoice) {
     setDownloadingId(inv.id);
@@ -245,7 +275,7 @@ export function DeveloperBillingInvoices({
         Refresh
       </button>
 
-      {visible.length === 0 && !busy ? (
+      {invoices.length === 0 && !busy ? (
         <p className="text-sm text-[#667781] rounded-xl bg-[#f0f2f5] p-4">
           {filter === "current"
             ? "No bill for this month yet. Usage will appear here once your account is active."
@@ -266,11 +296,15 @@ export function DeveloperBillingInvoices({
               </tr>
             </thead>
             <tbody>
-              {visible.map((inv, index) => {
+              {invoices.map((inv, index) => {
                 const unpaid = inv.status !== "paid";
+                const serialNo =
+                  filter === "all"
+                    ? (pagination.page - 1) * INVOICES_PER_PAGE + index + 1
+                    : index + 1;
                 return (
                   <tr key={inv.id} className="border-t border-gray-100 align-middle">
-                    <td className="px-3 py-3 text-center text-[#667781] font-medium">{index + 1}</td>
+                    <td className="px-3 py-3 text-center text-[#667781] font-medium">{serialNo}</td>
                     <td className="px-3 py-3 font-mono text-xs text-[#00a884] break-all">{inv.bill_number}</td>
                     <td className="px-3 py-3 whitespace-nowrap tabular-nums">{formatBillDate(inv.bill_date)}</td>
                     <td className="px-3 py-3 whitespace-nowrap tabular-nums">{formatBillDate(inv.due_date)}</td>
@@ -316,6 +350,38 @@ export function DeveloperBillingInvoices({
           </table>
         </div>
       )}
+
+      {filter === "all" && pagination.total_pages > 1 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-[#f9fafb] px-4 py-3">
+          <p className="text-xs text-[#667781]">
+            Showing {(pagination.page - 1) * INVOICES_PER_PAGE + 1}–
+            {Math.min(pagination.page * INVOICES_PER_PAGE, pagination.total)} of {pagination.total} invoices
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy || pagination.page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#111b21] hover:bg-[#f0f2f5] disabled:opacity-50"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </button>
+            <span className="text-xs font-semibold text-[#667781] tabular-nums">
+              Page {pagination.page} of {pagination.total_pages}
+            </span>
+            <button
+              type="button"
+              disabled={busy || pagination.page >= pagination.total_pages}
+              onClick={() => setPage((p) => p + 1)}
+              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#111b21] hover:bg-[#f0f2f5] disabled:opacity-50"
+            >
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,6 +1,11 @@
 import { query } from "./db";
 import { getDeveloperApiUsageSnapshot } from "./developerApiUsage";
-import { ensureDeveloperInvoicesTable, formatInvoiceDateOnly, invoiceToPublic } from "./developerInvoices";
+import {
+  ensureDeveloperInvoicesTable,
+  ensureSequentialBillNumbers,
+  formatInvoiceDateOnly,
+  invoiceToPublic,
+} from "./developerInvoices";
 
 export type AdminBillingPaymentRow = {
   id: number;
@@ -130,6 +135,7 @@ export async function getAdminBillingHistoryForAccount(accountId: number): Promi
     payments.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
   }
 
+  await ensureSequentialBillNumbers(accountId, String(row.reference_code ?? ""));
   const invRows = await query(
     `SELECT * FROM developer_invoices WHERE account_id = $1
      ORDER BY CASE WHEN status = 'paid' THEN 1 ELSE 0 END ASC, bill_date DESC`,

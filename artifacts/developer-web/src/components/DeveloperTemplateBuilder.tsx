@@ -17,6 +17,12 @@ import {
   type TemplateDraft,
   draftFromPortalTemplate,
 } from "../lib/videhTemplate";
+import { useHeaderMediaValidation } from "../hooks/useHeaderMediaValidation";
+import {
+  headerMediaBlocksSubmit,
+  headerMediaSpecs,
+  TEMPLATE_HEADER_MEDIA_LABEL,
+} from "../lib/templateHeaderMedia";
 import { TemplateVidehPreview } from "./TemplateVidehPreview";
 
 type Props = {
@@ -53,6 +59,7 @@ export function DeveloperTemplateBuilder({
   const [viewId, setViewId] = useState<number | null>(null);
 
   const variableIndexes = useMemo(() => extractVariableIndexes(draft.bodyText), [draft.bodyText]);
+  const headerMediaValidation = useHeaderMediaValidation(draft.headerFormat, draft.headerMediaUrl);
 
   useEffect(() => {
     setDraft((d) => {
@@ -80,6 +87,15 @@ export function DeveloperTemplateBuilder({
     }
     if (draft.headerFormat === "TEXT" && !draft.headerText.trim()) {
       onError("Enter header text or set header to None.");
+      return;
+    }
+    const mediaError = headerMediaBlocksSubmit(
+      draft.headerFormat,
+      draft.headerMediaUrl,
+      headerMediaValidation,
+    );
+    if (mediaError) {
+      onError(mediaError);
       return;
     }
     setSubmitting(true);
@@ -211,7 +227,13 @@ export function DeveloperTemplateBuilder({
                 <button
                   key={fmt}
                   type="button"
-                  onClick={() => setDraft((d) => ({ ...d, headerFormat: fmt }))}
+                  onClick={() =>
+                    setDraft((d) => ({
+                      ...d,
+                      headerFormat: fmt,
+                      headerMediaUrl: fmt === "IMAGE" || fmt === "VIDEO" ? d.headerMediaUrl : "",
+                    }))
+                  }
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                     draft.headerFormat === fmt
                       ? "bg-[#00a884] text-white border-[#00a884]"
@@ -230,13 +252,39 @@ export function DeveloperTemplateBuilder({
                 className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
               />
             ) : null}
-            {draft.headerFormat === "IMAGE" ? (
-              <input
-                value={draft.headerMediaUrl}
-                onChange={(e) => setDraft((d) => ({ ...d, headerMediaUrl: e.target.value }))}
-                placeholder="Image URL (https://…)"
-                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-              />
+            {draft.headerFormat === "IMAGE" || draft.headerFormat === "VIDEO" ? (
+              <div className="space-y-2">
+                <input
+                  value={draft.headerMediaUrl}
+                  onChange={(e) => setDraft((d) => ({ ...d, headerMediaUrl: e.target.value }))}
+                  placeholder={
+                    draft.headerFormat === "IMAGE" ? "Image URL (https://…)" : "Video URL (https://… .mp4)"
+                  }
+                  className={`w-full rounded-xl border px-3 py-2 text-sm ${
+                    headerMediaValidation.state === "invalid" || headerMediaValidation.state === "error"
+                      ? "border-red-300 bg-red-50/40"
+                      : headerMediaValidation.state === "valid"
+                        ? "border-[#00a884]/50"
+                        : "border-gray-200"
+                  }`}
+                />
+                <p className="text-[11px] text-[#667781]">
+                  Required size: <strong>{TEMPLATE_HEADER_MEDIA_LABEL}</strong> (
+                  {headerMediaSpecs(draft.headerFormat).width}×{headerMediaSpecs(draft.headerFormat).height} pixels).
+                  {draft.headerFormat === "IMAGE" ? " Use JPG or PNG." : " Use MP4."}
+                </p>
+                {headerMediaValidation.state === "loading" ? (
+                  <p className="text-[11px] text-[#667781]">Checking media dimensions…</p>
+                ) : null}
+                {headerMediaValidation.state === "valid" ? (
+                  <p className="text-[11px] text-[#00a884] font-medium">
+                    Dimensions OK — {headerMediaValidation.width}×{headerMediaValidation.height} px
+                  </p>
+                ) : null}
+                {headerMediaValidation.state === "invalid" || headerMediaValidation.state === "error" ? (
+                  <p className="text-[11px] text-red-600 font-medium">{headerMediaValidation.message}</p>
+                ) : null}
+              </div>
             ) : null}
           </div>
 
@@ -380,7 +428,19 @@ export function DeveloperTemplateBuilder({
             <Eye className="h-4 w-4 text-[#00a884]" />
             Live preview
           </p>
-          <TemplateVidehPreview draft={previewDraft} businessName={businessName} />
+          {previewDraft.headerFormat === "IMAGE" || previewDraft.headerFormat === "VIDEO" ? (
+            <p className="text-[11px] text-[#667781] leading-relaxed rounded-xl bg-[#e7f9f3] border border-[#00a884]/20 px-3 py-2">
+              <strong className="text-[#111b21]">Header {previewDraft.headerFormat.toLowerCase()}:</strong> must be{" "}
+              <strong className="text-[#00a884]">{TEMPLATE_HEADER_MEDIA_LABEL}</strong> (
+              {headerMediaSpecs(previewDraft.headerFormat).width}×{headerMediaSpecs(previewDraft.headerFormat).height}{" "}
+              pixels). Wrong size will show an error and block submit.
+            </p>
+          ) : null}
+          <TemplateVidehPreview
+            draft={previewDraft}
+            businessName={businessName}
+            headerMediaValidation={viewing ? undefined : headerMediaValidation}
+          />
           <p className="text-[11px] text-[#667781] text-center">
             Category: <strong>{previewDraft.category}</strong> · Language: <strong>{previewDraft.language}</strong>
           </p>

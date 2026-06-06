@@ -905,7 +905,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const u = userRef.current;
     const serverMessageId = signal.messageId ? String(signal.messageId) : undefined;
     const text = signal.body?.trim();
-    if (!serverMessageId && !text) return;
+    const mediaUrl = signal.mediaUrl?.trim();
+    const hintType = signal.messageType ?? (mediaUrl ? "image" : "text");
+    if (!serverMessageId && !text && !mediaUrl) return;
+    if (serverMessageId && !text && !mediaUrl) return;
 
     setChats((prev) =>
       prev.map((c) => {
@@ -935,11 +938,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         const hintMsg: Message = {
           id: serverMessageId ? `hint_${serverMessageId}` : `hint_t${Date.now()}`,
-          text: text ?? "",
+          text: text ?? (hintType === "image" ? "📷 Photo" : hintType === "video" ? "Video" : ""),
           timestamp: Date.now(),
           senderId,
           senderName: signal.senderName,
-          type: "text",
+          type: hintType,
+          mediaUrl: mediaUrl || undefined,
           status: "delivered",
         };
         const merged = [...msgs, hintMsg].sort((a, b) => a.timestamp - b.timestamp);
@@ -1244,6 +1248,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           payload?: {
             messageId?: string | number;
             content?: string;
+            type?: string;
+            mediaUrl?: string;
             senderId?: string | number;
             senderName?: string;
           };
@@ -1255,8 +1261,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const senderName = parsed.payload?.senderName?.trim();
         const senderId =
           parsed.payload?.senderId != null ? String(parsed.payload.senderId) : undefined;
+        const rawType = String(parsed.payload?.type ?? "text").toLowerCase();
+        const messageType =
+          rawType === "image" || rawType === "video" || rawType === "audio" || rawType === "document"
+            ? rawType
+            : "text";
+        const mediaUrl = parsed.payload?.mediaUrl?.trim();
         if (cid) {
-          const signal: ChatMessageSignal = { chatId: cid, messageId, body, senderName, senderId };
+          const signal: ChatMessageSignal = {
+            chatId: cid,
+            messageId,
+            body,
+            senderName,
+            senderId,
+            messageType,
+            mediaUrl,
+          };
           applyIncomingMessageHint(signal);
           emitChatMessageSignal(signal);
           if (activeChatIdRef.current === cid) {
