@@ -25,12 +25,14 @@ export function DropdownMenu({
   anchorRef,
   items,
   preferAbove,
+  variant = "message",
 }: {
   open: boolean;
   onClose: () => void;
   anchorRef: React.RefObject<HTMLElement | null>;
   items: Array<{ label: string; icon?: React.ReactNode; onClick?: () => void; danger?: boolean; divider?: boolean }>;
   preferAbove?: boolean;
+  variant?: "message" | "header";
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left?: number; right?: number; maxHeight: number } | null>(null);
@@ -59,9 +61,10 @@ export function DropdownMenu({
       const top = openAbove
         ? Math.max(margin, anchor.top - Math.min(menuH, maxHeight) - 6)
         : Math.min(anchor.bottom + 6, viewportH - maxHeight - margin);
-      const alignLeft = anchor.left < viewportW * 0.45;
+      const alignLeft = variant !== "header" && anchor.left < viewportW * 0.45;
       if (alignLeft) {
-        setPos({ top, left: Math.max(margin, anchor.left), maxHeight });
+        const left = Math.max(margin, Math.min(anchor.left, viewportW - 200));
+        setPos({ top, left, maxHeight });
       } else {
         setPos({ top, right: Math.max(margin, viewportW - anchor.right), maxHeight });
       }
@@ -69,21 +72,28 @@ export function DropdownMenu({
     updatePosition();
     const raf = requestAnimationFrame(updatePosition);
     return () => cancelAnimationFrame(raf);
-  }, [open, anchorRef, preferAbove, items]);
+  }, [open, anchorRef, preferAbove, items, variant]);
 
   if (!open) return null;
+
+  const menuStyle: React.CSSProperties = {
+    top: pos?.top ?? 60,
+    maxHeight: pos?.maxHeight ?? 320,
+    overflowY: "auto",
+  };
+  if (pos?.left != null) {
+    menuStyle.left = pos.left;
+    menuStyle.right = "auto";
+  } else {
+    menuStyle.right = pos?.right ?? 16;
+    menuStyle.left = "auto";
+  }
 
   return (
     <div
       ref={menuRef}
-      className="vw-dropdown vw-dropdown--message"
-      style={{
-        top: pos?.top ?? 60,
-        left: pos?.left,
-        right: pos?.right ?? 16,
-        maxHeight: pos?.maxHeight ?? 320,
-        overflowY: "auto",
-      }}
+      className={`vw-dropdown${variant === "message" ? " vw-dropdown--message" : " vw-dropdown--header"}`}
+      style={menuStyle}
     >
       {items.map((item, idx) =>
         item.divider ? (

@@ -26,7 +26,7 @@ import type { WebSection } from "../lib/webDesktop";
 import { highlightMatches } from "../lib/highlightText";
 import { inferListPreview } from "../lib/messagePreview";
 import { formatMessageBody, replyPreviewText } from "../lib/chatMessageDisplay";
-import { isChatNearBottom, isChatScrolledUp, shouldAutoPinToBottom } from "../lib/chatScroll";
+import { isChatNearBottom, isChatScrolledUp, OPEN_CHAT_PIN_DELAYS_MS, shouldAutoPinToBottom } from "../lib/chatScroll";
 
 const FAV_CHATS_KEY = "videh_web_favorite_chats";
 
@@ -93,6 +93,8 @@ export default function VidehWeb() {
   const lastMessageIdRef = useRef<number | null>(null);
   const frozenMessageCountRef = useRef(0);
   const scrollCoalesceRef = useRef<number | null>(null);
+  const suppressScrollAwayRef = useRef(false);
+  const openPinTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [unreadBelowCount, setUnreadBelowCount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -170,17 +172,50 @@ export default function VidehWeb() {
 
   const scrollMessagesToBottom = useCallback((smooth = false) => {
     if (scrollCoalesceRef.current != null) cancelAnimationFrame(scrollCoalesceRef.current);
+    suppressScrollAwayRef.current = true;
     scrollCoalesceRef.current = requestAnimationFrame(() => {
       scrollCoalesceRef.current = requestAnimationFrame(() => {
         scrollCoalesceRef.current = null;
         const el = messagesContainerRef.current;
-        if (!el) return;
-        const top = Math.max(0, el.scrollHeight - el.clientHeight);
-        if (smooth) el.scrollTo({ top, behavior: "smooth" });
-        else el.scrollTop = top;
+        if (el) {
+          const top = Math.max(0, el.scrollHeight - el.clientHeight);
+          if (smooth) el.scrollTo({ top, behavior: "smooth" });
+          else el.scrollTop = top;
+        }
+        msgsEndRef.current?.scrollIntoView({ block: "end", behavior: smooth ? "smooth" : "auto" });
+        requestAnimationFrame(() => {
+          suppressScrollAwayRef.current = false;
+        });
       });
     });
   }, []);
+
+  const cancelOpenChatPin = useCallback(() => {
+    for (const t of openPinTimersRef.current) clearTimeout(t);
+    openPinTimersRef.current = [];
+  }, []);
+
+  const scheduleOpenChatPin = useCallback(() => {
+    cancelOpenChatPin();
+    userScrolledUpRef.current = false;
+    setShowJumpToLatest(false);
+    setUnreadBelowCount(0);
+    for (const delay of OPEN_CHAT_PIN_DELAYS_MS) {
+      const t = setTimeout(() => {
+        if (userScrolledUpRef.current) return;
+        scrollMessagesToBottom(false);
+      }, delay);
+      openPinTimersRef.current.push(t);
+    }
+  }, [scrollMessagesToBottom, cancelOpenChatPin]);
+
+  const markUserScrolledUp = useCallback(() => {
+    if (userScrolledUpRef.current) return;
+    cancelOpenChatPin();
+    userScrolledUpRef.current = true;
+    frozenMessageCountRef.current = messages.length;
+    setShowJumpToLatest(messages.length > 6);
+  }, [messages.length, cancelOpenChatPin]);
 
   const pinChatToBottom = useCallback(
     (smooth = false) => {
@@ -195,20 +230,28 @@ export default function VidehWeb() {
   );
 
   const handleMessagesScroll = useCallback(() => {
+    if (suppressScrollAwayRef.current) return;
     const el = messagesContainerRef.current;
     if (!el) return;
     const scrolledUp = isChatScrolledUp(el, userScrolledUpRef.current);
     if (scrolledUp === userScrolledUpRef.current) return;
-    userScrolledUpRef.current = scrolledUp;
     if (scrolledUp) {
-      frozenMessageCountRef.current = messages.length;
-      setShowJumpToLatest(messages.length > 6);
-    } else {
-      frozenMessageCountRef.current = messages.length;
-      setShowJumpToLatest(false);
-      setUnreadBelowCount(0);
+      markUserScrolledUp();
+      return;
     }
-  }, [messages.length]);
+    cancelOpenChatPin();
+    userScrolledUpRef.current = false;
+    frozenMessageCountRef.current = messages.length;
+    setShowJumpToLatest(false);
+    setUnreadBelowCount(0);
+  }, [messages.length, markUserScrolledUp, cancelOpenChatPin]);
+
+  const handleMessagesWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (e.deltaY < -2) markUserScrolledUp();
+    },
+    [markUserScrolledUp],
+  );
 
   const sendMessage = useCallback(async () => {
     if (!token || !activeChatId || !msgText.trim()) return;
@@ -502,6 +545,7 @@ export default function VidehWeb() {
   }, []);
 
   useEffect(() => {
+    cancelOpenChatPin();
     if (activeChatId) {
       userScrolledUpRef.current = false;
       pendingScrollRef.current = true;
@@ -518,7 +562,8 @@ export default function VidehWeb() {
     setChatMenuOpen(false);
     setEmojiOpen(false);
     setReplyTo(null);
-  }, [activeChatId, loadMessages]);
+    return () => cancelOpenChatPin();
+  }, [activeChatId, loadMessages, cancelOpenChatPin]);
 
   useClickOutside(emojiWrapRef, () => setEmojiOpen(false), emojiOpen);
 
@@ -546,8 +591,9 @@ export default function VidehWeb() {
     lastMessageIdRef.current = lastId;
 
     if (pendingScrollRef.current) {
+      if (len === 0) return;
       pendingScrollRef.current = false;
-      scrollMessagesToBottom(false);
+      scheduleOpenChatPin();
       return;
     }
 
@@ -558,13 +604,13 @@ export default function VidehWeb() {
       const smooth = len - prevLen > 0 && len - prevLen <= 2 && prevLen > 0;
       scrollMessagesToBottom(smooth);
     }
-  }, [messages, chatSearchOpen, scrollMessagesToBottom]);
+  }, [messages, chatSearchOpen, scrollMessagesToBottom, scheduleOpenChatPin]);
 
   useEffect(() => {
     const el = messagesContainerRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
-      if (userScrolledUpRef.current || chatSearchOpen) return;
+      if (userScrolledUpRef.current || chatSearchOpen || suppressScrollAwayRef.current) return;
       if (isChatNearBottom(el)) scrollMessagesToBottom(false);
     });
     ro.observe(el);
@@ -993,6 +1039,7 @@ export default function VidehWeb() {
               open={sidebarMenuOpen}
               onClose={() => setSidebarMenuOpen(false)}
               anchorRef={sidebarMenuBtnRef}
+              variant="header"
               items={[
                 { label: "New group", onClick: () => { setGroupSelected([]); setSidebarView("contacts-group"); } },
                 { label: "Starred messages", onClick: () => void openStarred() },
@@ -1147,6 +1194,7 @@ export default function VidehWeb() {
                     open={chatMenuOpen}
                     onClose={() => setChatMenuOpen(false)}
                     anchorRef={chatMenuBtnRef}
+                    variant="header"
                     items={[
                       { label: chatSearchOpen ? "Close search" : "Search messages", onClick: () => setChatSearchOpen((o) => !o) },
                       { label: activeChat.is_muted ? "Unmute notifications" : "Mute notifications", onClick: toggleMute },
@@ -1181,7 +1229,12 @@ export default function VidehWeb() {
           )}
 
           <div className="vw-chat__messages-wrap">
-          <div className={`vw-chat__messages${selectionMode ? " vw-chat__messages--selecting" : ""}`} ref={messagesContainerRef} onScroll={handleMessagesScroll}>
+          <div
+            className={`vw-chat__messages${selectionMode ? " vw-chat__messages--selecting" : ""}`}
+            ref={messagesContainerRef}
+            onScroll={handleMessagesScroll}
+            onWheel={handleMessagesWheel}
+          >
             {displayMessages.length === 0 && messages.length === 0 && !chatSearchLower && (
               <div style={{ textAlign: "center", color: "#667781", marginTop: 40 }}>
                 <p style={{ margin: 0, fontSize: 14 }}>No messages yet. Say hello! 👋</p>

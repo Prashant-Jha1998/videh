@@ -22,3 +22,6 @@ export function isChatScrolledUp(el: HTMLElement, currentlyScrolledUp: boolean):
 export function shouldAutoPinToBottom(userScrolledUp: boolean, searching: boolean): boolean {
   return !searching && !userScrolledUp;
 }
+
+/** Pin attempts after opening a chat (images/PDFs load after first paint). */
+export const OPEN_CHAT_PIN_DELAYS_MS = [0, 60, 180, 400, 800] as const;
