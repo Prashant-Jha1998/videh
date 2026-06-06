@@ -3084,11 +3084,32 @@ export default function ChatScreen() {
   const bulkSelectedMessages = selectedIds
     .map((id) => allMessages.find((m) => m.id === id))
     .filter((m): m is Message => !!m);
+  const bulkDeletableMessages = bulkSelectedMessages.filter((m) => m.type !== "deleted");
+  const bulkMineMessages = bulkDeletableMessages.filter((m) => m.senderId === "me");
+  const bulkOthersMessages = bulkDeletableMessages.filter((m) => m.senderId !== "me");
   const bulkAllMineDeletable =
-    bulkSelectedMessages.length > 0 &&
-    bulkSelectedMessages.every((m) => m.senderId === "me" && m.type !== "deleted");
-  const bulkHasMine = bulkSelectedMessages.some((m) => m.senderId === "me" && m.type !== "deleted");
-  const bulkOthersCount = bulkSelectedMessages.filter((m) => m.senderId !== "me" && m.type !== "deleted").length;
+    bulkDeletableMessages.length > 0 && bulkOthersMessages.length === 0;
+  const bulkHasMine = bulkMineMessages.length > 0;
+  const bulkHasOthers = bulkOthersMessages.length > 0;
+  const bulkOthersCount = bulkOthersMessages.length;
+
+  const handleBulkDeleteForMe = useCallback(() => {
+    if (!chatId) return;
+    for (const m of bulkDeletableMessages) {
+      deleteMessage(chatId, m.id);
+    }
+    setBulkDeleteOpen(false);
+    clearSelection();
+  }, [bulkDeletableMessages, chatId, clearSelection, deleteMessage]);
+
+  const handleBulkDeleteForEveryone = useCallback(() => {
+    if (!chatId) return;
+    for (const m of bulkMineMessages) {
+      deleteForEveryone(chatId, m.id);
+    }
+    setBulkDeleteOpen(false);
+    clearSelection();
+  }, [bulkMineMessages, chatId, clearSelection, deleteForEveryone]);
 
   const inputVal = editTarget ? editText : text;
 
@@ -4024,51 +4045,33 @@ export default function ChatScreen() {
           <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setBulkDeleteOpen(false)} />
           <View style={styles.deleteCard}>
             <Text style={styles.deleteTitle}>Delete {selectedIds.length} messages?</Text>
-            {bulkOthersCount > 0 ? (
+            {bulkHasOthers && !bulkHasMine ? (
               <Text style={[styles.bulkDeleteHint, { color: colors.mutedForeground }]}>
-                Only messages you sent can be removed. {bulkOthersCount} from others will stay in the chat.
+                Removes selected messages from your chat only. Others can still see them.
+              </Text>
+            ) : bulkHasOthers && bulkHasMine ? (
+              <Text style={[styles.bulkDeleteHint, { color: colors.mutedForeground }]}>
+                Your messages can be deleted for everyone or just for you. {bulkOthersCount} from others will only be removed for you.
               </Text>
             ) : (
               <Text style={[styles.bulkDeleteHint, { color: colors.mutedForeground }]}>
                 Removes selected messages you sent from this chat.
               </Text>
             )}
-            {bulkHasMine ? (
-              <>
-                {bulkAllMineDeletable ? (
-                  <TouchableOpacity
-                    style={styles.deleteAction}
-                    onPress={() => {
-                      if (!chatId) return;
-                      for (const m of bulkSelectedMessages) {
-                        if (m.senderId === "me" && m.type !== "deleted") deleteForEveryone(chatId, m.id);
-                      }
-                      clearSelection();
-                    }}
-                  >
-                    <Text style={styles.deleteActionText}>Delete for everyone</Text>
-                  </TouchableOpacity>
-                ) : null}
-                <TouchableOpacity
-                  style={styles.deleteAction}
-                  onPress={() => {
-                    if (!chatId) return;
-                    for (const m of bulkSelectedMessages) {
-                      if (m.senderId === "me" && m.type !== "deleted") deleteMessage(chatId, m.id);
-                    }
-                    clearSelection();
-                  }}
-                >
-                  <Text style={styles.deleteActionText}>
-                    {bulkAllMineDeletable ? "Delete for me" : "Delete my messages only"}
-                  </Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <Text style={[styles.bulkDeleteHint, { color: colors.mutedForeground }]}>
-                No messages you sent are selected.
-              </Text>
-            )}
+            {bulkAllMineDeletable ? (
+              <TouchableOpacity style={styles.deleteAction} onPress={handleBulkDeleteForEveryone}>
+                <Text style={styles.deleteActionText}>Delete for everyone</Text>
+              </TouchableOpacity>
+            ) : bulkHasMine ? (
+              <TouchableOpacity style={styles.deleteAction} onPress={handleBulkDeleteForEveryone}>
+                <Text style={styles.deleteActionText}>Delete my messages for everyone</Text>
+              </TouchableOpacity>
+            ) : null}
+            {bulkDeletableMessages.length > 0 ? (
+              <TouchableOpacity style={styles.deleteAction} onPress={handleBulkDeleteForMe}>
+                <Text style={styles.deleteActionText}>Delete for me</Text>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity style={styles.deleteAction} onPress={() => setBulkDeleteOpen(false)}>
               <Text style={styles.deleteCancelText}>Cancel</Text>
             </TouchableOpacity>
