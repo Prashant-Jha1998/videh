@@ -1,5 +1,6 @@
 import { useAuthenticatedMediaUrl } from "../../lib/authenticatedMedia";
 import { documentFilenameFromContent } from "../../lib/documentMessage";
+import { highlightMatches } from "../../lib/highlightText";
 
 function docBadge(filename: string): { label: string; bg: string; color: string } {
   const ext = (filename.split(".").pop() ?? "file").toLowerCase();
@@ -13,10 +14,12 @@ export function WebDocumentBubble({
   url,
   token,
   content,
+  highlightQuery,
 }: {
   url: string;
   token: string | null;
   content: string;
+  highlightQuery?: string;
 }) {
   const filename = documentFilenameFromContent(content);
   const { blobUrl, loading, failed } = useAuthenticatedMediaUrl(url, token);
@@ -133,7 +136,9 @@ export function WebDocumentBubble({
               whiteSpace: "nowrap",
             }}
           >
-            {filename || "Document"}
+            {highlightQuery?.trim()
+              ? highlightMatches(filename || "Document", highlightQuery)
+              : filename || "Document"}
           </div>
           <div style={{ fontSize: 12, color: failed ? "#ea0038" : "#667781", marginTop: 2 }}>
             {failed ? "Could not load file" : loading ? "Loading…" : "Tap to open"}

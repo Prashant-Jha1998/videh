@@ -70,7 +70,7 @@ export function Avatar({
           position: "absolute",
           inset: 0,
           borderRadius: "50%",
-          border: `2.5px solid ${ring === "unviewed" ? WA_GREEN : "#8696a0"}`,
+          border: `2.5px solid ${ring === "unviewed" ? "var(--vw-primary, #00a884)" : "#8696a0"}`,
         }}
       />
       <div style={{ position: "absolute", top: 2, left: 2 }}>{core}</div>

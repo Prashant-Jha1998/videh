@@ -23,6 +23,7 @@ import { Avatar, initials, hue } from "../components/web/webUiShared";
 import type { CallLogEntry, ChatMember } from "../lib/webApi";
 import type { WebSection } from "../lib/webDesktop";
 import { isDocumentMessage } from "../lib/documentMessage";
+import { highlightMatches } from "../lib/highlightText";
 import { inferListPreview } from "../lib/messagePreview";
 
 const FAV_CHATS_KEY = "videh_web_favorite_chats";
@@ -417,8 +418,21 @@ export default function VidehWeb() {
 
   const getChatName = (c: ChatEntry) => c.is_group ? (c.group_name ?? "Group") : (c.other_members?.[0]?.name ?? "Unknown");
   const getChatAvatar = (c: ChatEntry) => c.is_group ? undefined : c.other_members?.[0]?.avatar_url;
+  const searchLower = search.trim().toLowerCase();
+
   const filteredChats = chats.filter((c) => {
-    if (!getChatName(c).toLowerCase().includes(search.toLowerCase())) return false;
+    if (searchLower) {
+      const name = getChatName(c).toLowerCase();
+      const preview = c.last_message
+        ? inferListPreview(
+            c.last_message.type,
+            c.last_message.content,
+            c.last_message.is_deleted,
+            c.last_message.media_url,
+          ).toLowerCase()
+        : "";
+      if (!name.includes(searchLower) && !preview.includes(searchLower)) return false;
+    }
     const archived = Boolean(c.is_archived);
     if (mainSection === "archived") return archived;
     if (archived) return false;
@@ -440,9 +454,16 @@ export default function VidehWeb() {
     ? statusFeed.filter((s) => s.user_id === statusViewerUserId)
     : [];
   const activeChat = chats.find((c) => c.id === activeChatId);
-  const displayMessages = chatSearchQuery.trim()
-    ? messages.filter((m) => !m.is_deleted && m.content.toLowerCase().includes(chatSearchQuery.toLowerCase()))
+  const chatSearchLower = chatSearchQuery.trim().toLowerCase();
+  const displayMessages = chatSearchLower
+    ? messages.filter((m) => {
+        if (m.is_deleted) return false;
+        const content = m.content?.toLowerCase() ?? "";
+        const sender = m.sender_name?.toLowerCase() ?? "";
+        return content.includes(chatSearchLower) || sender.includes(chatSearchLower);
+      })
     : messages;
+  const chatSearchMatchCount = chatSearchLower ? displayMessages.length : 0;
 
   // ─── QR LANDING ───────────────────────────────────────────────────────────
   if (status !== "linked") {
@@ -601,7 +622,15 @@ export default function VidehWeb() {
           busy={groupBusy}
         />
       ) : mainSection === "status" ? (
-        <WebStatusPanel statuses={statusFeed} selfId={user!.id} selfName={user!.name} selfAvatar={user?.avatarUrl} onSelectUser={openStatusViewer} />
+        <WebStatusPanel
+          token={token!}
+          statuses={statusFeed}
+          selfId={user!.id}
+          selfName={user!.name}
+          selfAvatar={user?.avatarUrl}
+          onSelectUser={openStatusViewer}
+          onRefresh={() => token && loadStatuses(token)}
+        />
       ) : mainSection === "starred" ? (
         <WebStarredPanel messages={starredMessages} onClose={() => setMainSection("chats")} onOpenChat={openChatById} />
       ) : mainSection === "calls" ? (
@@ -730,7 +759,7 @@ export default function VidehWeb() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
                     <span className="vw-chat-row__name">
-                      {chatName}
+                      {searchLower ? highlightMatches(chatName, search) : chatName}
                       {isFav ? <span style={{ marginLeft: 4, color: "#f5b800" }}>★</span> : null}
                     </span>
                     <span className={`vw-chat-row__time${chat.unread_count > 0 ? " vw-chat-row__time--unread" : ""}`}>
@@ -738,7 +767,9 @@ export default function VidehWeb() {
                     </span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <p className="vw-chat-row__preview">{lastMsgText}</p>
+                    <p className="vw-chat-row__preview">
+                      {searchLower ? highlightMatches(lastMsgText, search) : lastMsgText}
+                    </p>
                     {chat.unread_count > 0 ? (
                       <span className="vw-badge-count">{chat.unread_count}</span>
                     ) : null}
@@ -814,21 +845,32 @@ export default function VidehWeb() {
           </header>
 
           {chatSearchOpen && (
-            <div style={{ padding: "8px 16px", backgroundColor: "#f0f2f5", borderBottom: "1px solid #e9edef" }}>
+            <div className="vw-chat-search-bar">
               <input
                 value={chatSearchQuery}
                 onChange={(e) => setChatSearchQuery(e.target.value)}
                 placeholder="Search in this chat"
                 autoFocus
-                style={{ width: "100%", padding: "8px 12px", border: "none", borderRadius: 8, fontSize: 14, outline: "none" }}
               />
+              {chatSearchLower ? (
+                <div className="vw-chat-search-meta">
+                  {chatSearchMatchCount > 0
+                    ? `${chatSearchMatchCount} message${chatSearchMatchCount === 1 ? "" : "s"} found`
+                    : "No messages found"}
+                </div>
+              ) : null}
             </div>
           )}
 
           <div className="vw-chat__messages">
-            {displayMessages.length === 0 && messages.length === 0 && (
+            {displayMessages.length === 0 && messages.length === 0 && !chatSearchLower && (
               <div style={{ textAlign: "center", color: "#667781", marginTop: 40 }}>
                 <p style={{ margin: 0, fontSize: 14 }}>No messages yet. Say hello! 👋</p>
+              </div>
+            )}
+            {displayMessages.length === 0 && chatSearchLower && messages.length > 0 && (
+              <div style={{ textAlign: "center", color: "#667781", marginTop: 40 }}>
+                <p style={{ margin: 0, fontSize: 14 }}>No messages match &ldquo;{chatSearchQuery}&rdquo;</p>
               </div>
             )}
             {displayMessages.map((msg) => {
@@ -841,14 +883,16 @@ export default function VidehWeb() {
                 <div key={msg.id} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", marginBottom: 4 }}>
                   <div style={{
                     maxWidth: "70%",
-                    backgroundColor: isMe ? "#d9fdd3" : "white",
+                    backgroundColor: isMe ? "var(--vw-bubble-sent, #d9fdd3)" : "var(--vw-bubble-received, white)",
                     borderRadius: isMe ? "8px 8px 2px 8px" : "8px 8px 8px 2px",
                     padding: "7px 12px",
                     boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
                     opacity: isDeleted ? 0.6 : 1,
                   }}>
                     {!isMe && !activeChat.is_group && msg.sender_name && (
-                      <div style={{ fontSize: 12, fontWeight: 600, color: `hsl(${hue(msg.sender_name)},60%,40%)`, marginBottom: 2 }}>{msg.sender_name}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: `hsl(${hue(msg.sender_name)},60%,40%)`, marginBottom: 2 }}>
+                        {chatSearchLower ? highlightMatches(msg.sender_name, chatSearchQuery) : msg.sender_name}
+                      </div>
                     )}
                     {!isDeleted && msg.type === "image" && msg.media_url ? (
                       <WebChatImage url={msg.media_url} token={token} />
@@ -857,7 +901,12 @@ export default function VidehWeb() {
                       <WebChatVideo url={msg.media_url} token={token} />
                     ) : null}
                     {!isDeleted && isDocumentMessage(msg) ? (
-                      <WebDocumentBubble url={msg.media_url!} token={token} content={msg.content || "Document"} />
+                      <WebDocumentBubble
+                        url={msg.media_url!}
+                        token={token}
+                        content={msg.content || "Document"}
+                        highlightQuery={chatSearchLower ? chatSearchQuery : undefined}
+                      />
                     ) : null}
                     {callMeta ? (
                       <WebCallMessageBubble content={msg.content} isMe={isMe} />
@@ -865,9 +914,17 @@ export default function VidehWeb() {
                     <p style={{ margin: 0, fontSize: 14.5, color: "#111b21", lineHeight: 1.4, fontStyle: isDeleted ? "italic" : "normal" }}>
                       {isDeleted
                         ? "🚫 This message was deleted"
-                        : ((msg.type === "image" || msg.type === "video" || isDocumentMessage(msg)) && msg.media_url
-                          ? (isDocumentMessage(msg) ? "" : msg.content !== "Attachment" && msg.content !== "🎥 Video" && msg.content !== "📷 Photo" ? msg.content : "")
-                          : msg.content)}
+                        : (() => {
+                            const raw =
+                              (msg.type === "image" || msg.type === "video" || isDocumentMessage(msg)) && msg.media_url
+                                ? (isDocumentMessage(msg)
+                                  ? msg.content || "Document"
+                                  : msg.content !== "Attachment" && msg.content !== "🎥 Video" && msg.content !== "📷 Photo"
+                                    ? msg.content
+                                    : "")
+                                : msg.content;
+                            return chatSearchLower && raw ? highlightMatches(raw, chatSearchQuery) : raw;
+                          })()}
                     </p>
                     )}
                     <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 4, marginTop: 3 }}>
@@ -970,8 +1027,24 @@ export default function VidehWeb() {
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={(e) => e.stopPropagation()}>
             {viewingStatuses[0].type === "image" && viewingStatuses[0].media_url ? (
               <img src={viewingStatuses[0].media_url} alt="" style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: 8 }} />
+            ) : viewingStatuses[0].type === "video" && viewingStatuses[0].media_url ? (
+              <video src={viewingStatuses[0].media_url} controls style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: 8 }} />
             ) : (
-              <p style={{ color: "white", fontSize: 22, textAlign: "center" }}>{viewingStatuses[0].content}</p>
+              <div
+                style={{
+                  backgroundColor: viewingStatuses[0].background_color ?? "#00A884",
+                  padding: 48,
+                  borderRadius: 12,
+                  maxWidth: 480,
+                  width: "100%",
+                  minHeight: 280,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <p style={{ color: "white", fontSize: 22, textAlign: "center", margin: 0 }}>{viewingStatuses[0].content}</p>
+              </div>
             )}
           </div>
         </div>

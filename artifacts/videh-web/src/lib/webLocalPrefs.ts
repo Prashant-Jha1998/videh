@@ -37,6 +37,9 @@ export function saveBool(name: string, value: boolean) {
 export const WEB_PREFS = {
   appThemeId: "app_theme_id",
   appThemeTrialStart: "app_theme_trial_start",
+  bubbleOverride: "bubble_override",
+  animatedWallpaper: "animated_wallpaper",
+  appIconStyle: "app_icon_style",
   chatTheme: "chat_theme",
   chatFont: "chat_font",
   chatWallpaper: "chat_wallpaper",

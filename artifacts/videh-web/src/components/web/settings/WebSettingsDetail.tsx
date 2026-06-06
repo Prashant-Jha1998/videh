@@ -1,13 +1,13 @@
 import { QRCodeSVG } from "qrcode.react";
 import { useCallback, useEffect, useState } from "react";
 import {
-  APP_THEME_OPTIONS,
-  applyWebTheme,
   daysLeftInThemeTrial,
-  getAppThemeById,
   GRADIENT_APP_THEMES,
   SOLID_APP_THEMES,
+  type AppThemeOption,
 } from "../../../lib/webAppThemes";
+import { applyWebThemeFromPrefs } from "../../../lib/webTheme";
+import { WebAdvancedThemeSection } from "./WebAdvancedThemeSection";
 import { loadBool, loadString, saveBool, saveString, WEB_PREFS } from "../../../lib/webLocalPrefs";
 import type { SettingsSectionId, VisibilityLabel, WebPrivacySettings } from "../../../lib/webSettingsTypes";
 import {
@@ -135,7 +135,7 @@ export function WebSettingsDetail({
     return <AccountSection title={title} token={token} user={user} currentToken={currentToken} onLogout={onLogout} />;
   if (section === "privacy") return <PrivacySection title={title} token={token} />;
   if (section === "theme") return <ThemeSection title={title} />;
-  if (section === "advanced-theme") return <AdvancedThemeSection title={title} />;
+  if (section === "advanced-theme") return <WebAdvancedThemeSection title={title} />;
   if (section === "chats") return <ChatsSection title={title} />;
   if (section === "broadcasts") return <BroadcastsSection title={title} />;
   if (section === "sos") return <SosSection title={title} token={token} />;
@@ -505,14 +505,14 @@ function ThemeSection({ title }: { title: string }) {
     if (!trialStart) saveString(WEB_PREFS.appThemeTrialStart, new Date().toISOString());
     setThemeId(id);
     saveString(WEB_PREFS.appThemeId, id);
-    applyWebTheme(getAppThemeById(id));
+    applyWebThemeFromPrefs();
   };
 
   useEffect(() => {
-    applyWebTheme(getAppThemeById(themeId));
+    applyWebThemeFromPrefs();
   }, [themeId]);
 
-  const renderGrid = (themes: typeof APP_THEME_OPTIONS, sectionLabel: string) => (
+  const renderGrid = (themes: AppThemeOption[], sectionLabel: string) => (
     <SettingsSection label={sectionLabel}>
       <SettingsThemeGrid themes={themes} selectedId={themeId} onSelect={selectTheme} />
     </SettingsSection>
@@ -527,27 +527,6 @@ function ThemeSection({ title }: { title: string }) {
       )}
       {renderGrid(SOLID_APP_THEMES, "Solid themes")}
       {renderGrid(GRADIENT_APP_THEMES, "Gradient themes")}
-    </SettingsDetailShell>
-  );
-}
-
-function AdvancedThemeSection({ title }: { title: string }) {
-  const [bubbleStyle, setBubbleStyle] = useState(() => loadString("bubble_style", "Default"));
-  const [wallpaper, setWallpaper] = useState(() => loadString("adv_wallpaper", "Default"));
-  const BUBBLES = ["Default", "Rounded", "Square", "Gradient", "Neon"];
-
-  return (
-    <SettingsDetailShell title={title}>
-      <SettingsInfoBox>Advanced theme options sync with your phone when you use the same account.</SettingsInfoBox>
-      <SettingsSection label="Chat bubbles">
-        <SettingsSelect label="Bubble style" value={bubbleStyle} options={BUBBLES} onChange={(v) => { setBubbleStyle(v); saveString("bubble_style", v); }} />
-      </SettingsSection>
-      <SettingsSection label="Wallpapers">
-        <SettingsSelect label="Chat wallpaper" value={wallpaper} options={WALLPAPERS} onChange={(v) => { setWallpaper(v); saveString("adv_wallpaper", v); }} />
-      </SettingsSection>
-      <SettingsSection label="App icon">
-        <SettingsRow label="App icon style" value="Change from the Videh mobile app" />
-      </SettingsSection>
     </SettingsDetailShell>
   );
 }

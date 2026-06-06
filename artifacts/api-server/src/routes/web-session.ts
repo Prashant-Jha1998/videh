@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { query } from "../lib/db";
+import { enforceModerationForActivity } from "../lib/moderation";
 import { publicMediaUrl } from "../lib/mediaStorage";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
 import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
@@ -29,7 +30,11 @@ const currentFilePath = fileURLToPath(import.meta.url);
 const routesDir = path.dirname(currentFilePath);
 const apiServerDir = path.resolve(routesDir, "../..");
 const chatUploadsDir = path.join(apiServerDir, "uploads", "chats");
+const statusUploadsDir = path.join(apiServerDir, "uploads", "statuses");
 fs.mkdirSync(chatUploadsDir, { recursive: true });
+fs.mkdirSync(statusUploadsDir, { recursive: true });
+
+const MAX_VIDEO_STORY_DURATION_MS = 60000;
 
 type LinkedSession = {
   userId: number;
@@ -102,6 +107,40 @@ const chatMediaUpload = multer({
   }),
   limits: { fileSize: 150 * 1024 * 1024 },
 });
+
+const statusMediaUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, statusUploadsDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || "") || mediaExtension(file.mimetype);
+      const safeExt = ext.replace(/[^.\w]/g, "") || ".bin";
+      cb(null, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${safeExt}`);
+    },
+  }),
+  limits: { fileSize: 150 * 1024 * 1024 },
+});
+
+let statusMediaTableEnsured = false;
+async function ensureStatusMediaTable(): Promise<void> {
+  if (statusMediaTableEnsured) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS status_media_files (
+      filename TEXT PRIMARY KEY,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  statusMediaTableEnsured = true;
+}
+
+let statusEditorColumnsEnsured = false;
+async function ensureStatusEditorColumns(): Promise<void> {
+  if (statusEditorColumnsEnsured) return;
+  await query("ALTER TABLE statuses ADD COLUMN IF NOT EXISTS editor_data JSONB");
+  statusEditorColumnsEnsured = true;
+}
 
 let chatMediaTableEnsured = false;
 async function ensureChatMediaTable(): Promise<void> {
@@ -904,6 +943,97 @@ router.post("/:token/statuses/:statusId/view", async (req: Request, res: Respons
   } catch (err) {
     req.log.error({ err }, "web status view");
     res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:token/statuses/media", statusMediaUpload.single("file"), async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const file = req.file;
+  if (!file) {
+    res.status(400).json({ success: false, message: "Media file is required." });
+    return;
+  }
+  try {
+    await ensureStatusMediaTable();
+    const data = await fs.promises.readFile(file.path);
+    const mimeType = mimeFromFilename(file.filename, file.mimetype);
+    await query(
+      `INSERT INTO status_media_files (filename, mime_type, size_bytes, data)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (filename)
+       DO UPDATE SET mime_type = EXCLUDED.mime_type, size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data`,
+      [file.filename, mimeType, file.size, data],
+    );
+    await fs.promises.unlink(file.path).catch(() => {});
+    const relPath = `/api/statuses/media/${encodeURIComponent(file.filename)}`;
+    res.json({
+      success: true,
+      url: publicMediaUrl(req, relPath),
+      mimeType,
+      size: file.size,
+    });
+  } catch (err) {
+    req.log.error({ err }, "web status media upload");
+    if (file.path) await fs.promises.unlink(file.path).catch(() => {});
+    res.status(500).json({ success: false, message: "Could not save story media." });
+  }
+});
+
+router.post("/:token/statuses", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const { content, type, backgroundColor, mediaUrl, videoDurationMs } = req.body as {
+    content?: string;
+    type?: string;
+    backgroundColor?: string;
+    mediaUrl?: string;
+    videoDurationMs?: number | null;
+  };
+  if (!content?.trim()) {
+    res.status(400).json({ success: false, message: "Status content is required." });
+    return;
+  }
+  if (type === "video") {
+    const durationMs = Number(videoDurationMs);
+    if (!Number.isFinite(durationMs) || durationMs <= 0) {
+      res.status(400).json({ success: false, message: "Video duration is required for video stories." });
+      return;
+    }
+    if (durationMs > MAX_VIDEO_STORY_DURATION_MS) {
+      res.status(400).json({ success: false, message: "Video story can be up to 1 minute only." });
+      return;
+    }
+  }
+  try {
+    await ensureStatusEditorColumns();
+    const activityType = type === "video" ? "video_share" : "story_status";
+    const mod = await enforceModerationForActivity(session.userId, activityType, {
+      content,
+      mediaUrl: mediaUrl ?? null,
+      type: type ?? "text",
+    });
+    if (!mod.allowed) {
+      res.status(403).json({
+        success: false,
+        code: mod.code,
+        message: mod.message,
+        suspendedUntil: mod.suspendedUntil ?? null,
+        alert: mod.alert,
+        strikeCount: mod.strikeCount,
+      });
+      return;
+    }
+    const result = await query(
+      `INSERT INTO statuses (user_id, content, type, background_color, media_url, expires_at)
+       VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '24 hours')
+       RETURNING id, user_id, content, type, background_color, media_url, expires_at, created_at`,
+      [session.userId, content.trim(), type ?? "text", backgroundColor ?? "#00A884", mediaUrl ?? null],
+    );
+    res.json({ success: true, status: result.rows[0] });
+  } catch (err) {
+    req.log.error({ err }, "web status create");
+    res.status(500).json({ success: false, message: "Could not post status." });
   }
 });
 

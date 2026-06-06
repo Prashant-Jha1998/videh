@@ -191,6 +191,29 @@ export const webApi = {
     request<{ success: true; statuses: WebStatus[] }>(`/web-session/${token}/statuses`),
   viewStatus: (token: string, statusId: number) =>
     request<{ success: true }>(`/web-session/${token}/statuses/${statusId}/view`, { method: "POST" }),
+  uploadStatusMedia: async (token: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ success: true; url: string; mimeType: string; size: number }>(
+      `/web-session/${token}/statuses/media`,
+      { method: "POST", body: form },
+    );
+  },
+  createStatus: (
+    token: string,
+    payload: {
+      content: string;
+      type?: string;
+      backgroundColor?: string;
+      mediaUrl?: string;
+      videoDurationMs?: number;
+    },
+  ) =>
+    request<{ success: true; status: WebStatus }>(`/web-session/${token}/statuses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
   starredMessages: (token: string) =>
     request<{ success: true; messages: StarredMessage[] }>(`/web-session/${token}/starred`),
   callLogs: (token: string) =>
