@@ -29,6 +29,7 @@ export function WebVoiceMessageBubble({
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(Math.max(1, parseVoiceDurationSec(content)));
   const [position, setPosition] = useState(0);
+  const [playError, setPlayError] = useState(false);
 
   const bars = useMemo(() => {
     const recorded = parseVoiceWaveform(content, VOICE_WAVE_BAR_COUNT);
@@ -36,10 +37,10 @@ export function WebVoiceMessageBubble({
   }, [content, id, url]);
 
   const stop = useCallback(() => {
-    const a = audioRef.current;
-    if (a) {
-      a.pause();
-      a.currentTime = 0;
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
     }
     setPlaying(false);
     setPosition(0);
@@ -49,9 +50,8 @@ export function WebVoiceMessageBubble({
   useEffect(() => subscribeVoicePlayback(id, stop), [id, stop]);
 
   useEffect(() => {
-    if (!blobUrl) return;
-    const audio = new Audio(blobUrl);
-    audioRef.current = audio;
+    const audio = audioRef.current;
+    if (!audio || !blobUrl) return;
 
     const onTime = () => setPosition(audio.currentTime);
     const onMeta = () => {
@@ -67,6 +67,7 @@ export function WebVoiceMessageBubble({
     audio.addEventListener("loadedmetadata", onMeta);
     audio.addEventListener("durationchange", onMeta);
     audio.addEventListener("ended", onEnd);
+    audio.load();
 
     return () => {
       audio.pause();
@@ -74,13 +75,13 @@ export function WebVoiceMessageBubble({
       audio.removeEventListener("loadedmetadata", onMeta);
       audio.removeEventListener("durationchange", onMeta);
       audio.removeEventListener("ended", onEnd);
-      audioRef.current = null;
     };
   }, [blobUrl, id]);
 
   const toggle = async () => {
     const audio = audioRef.current;
-    if (!audio || failed) return;
+    if (!audio || failed || !blobUrl) return;
+    setPlayError(false);
     if (playing) {
       audio.pause();
       setPlaying(false);
@@ -89,10 +90,12 @@ export function WebVoiceMessageBubble({
     }
     claimVoicePlayback(id);
     try {
+      audio.currentTime = position > 0 && position < duration ? position : 0;
       await audio.play();
       setPlaying(true);
     } catch {
       setPlaying(false);
+      setPlayError(true);
       releaseVoicePlayback(id);
     }
   };
@@ -109,6 +112,7 @@ export function WebVoiceMessageBubble({
 
   return (
     <div className={`vw-voice${isMe ? " vw-voice--sent" : ""}`}>
+      <audio ref={audioRef} src={blobUrl} preload="metadata" playsInline />
       <button type="button" className="vw-voice__play" onClick={() => void toggle()} aria-label={playing ? "Pause" : "Play"}>
         {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" style={{ marginLeft: 2 }} />}
       </button>
@@ -131,6 +135,7 @@ export function WebVoiceMessageBubble({
         <div className="vw-voice__meta">
           <Mic size={12} />
           <span>{playing ? formatVoiceDuration(position) : formatVoiceDuration(duration)}</span>
+          {playError ? <span className="vw-voice__err">Tap to retry</span> : null}
         </div>
       </div>
     </div>

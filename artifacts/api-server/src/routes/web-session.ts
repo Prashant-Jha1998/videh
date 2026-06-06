@@ -83,6 +83,9 @@ function mediaExtension(mime: string): string {
   if (mime === "audio/mpeg") return ".mp3";
   if (mime === "audio/mp4") return ".m4a";
   if (mime === "audio/aac") return ".aac";
+  if (mime === "audio/webm") return ".webm";
+  if (mime === "audio/ogg") return ".ogg";
+  if (mime === "audio/wav" || mime === "audio/x-wav") return ".wav";
   return mime.startsWith("image/") ? ".jpg" : ".bin";
 }
 
@@ -101,6 +104,9 @@ function mimeFromFilename(filename: string, fallback: string): string {
   if (ext === ".mp3") return "audio/mpeg";
   if (ext === ".m4a") return "audio/mp4";
   if (ext === ".aac") return "audio/aac";
+  if (ext === ".webm") return "audio/webm";
+  if (ext === ".ogg" || ext === ".oga") return "audio/ogg";
+  if (ext === ".wav") return "audio/wav";
   return fallback || "application/octet-stream";
 }
 
@@ -682,6 +688,97 @@ router.post("/:token/chats/:chatId/messages/:messageId/star", async (req: Reques
   } catch (err) {
     req.log.error({ err }, "web star message error");
     res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:token/chats/:chatId/messages/:messageId/forward", async (req: Request, res: Response) => {
+  const sourceChatId = routeParam(req.params.chatId);
+  const messageId = routeParam(req.params.messageId);
+  const { targetChatId } = req.body as { targetChatId?: number | string };
+  if (!targetChatId) {
+    res.status(400).json({ success: false, message: "targetChatId is required." });
+    return;
+  }
+  if (String(targetChatId) === String(sourceChatId)) {
+    res.status(400).json({ success: false, message: "Choose a different chat to forward to." });
+    return;
+  }
+  try {
+    const session = await requireLinkedSession(req, res);
+    if (!session) return;
+    if (!(await requireChatMember(session.userId, sourceChatId, res))) return;
+
+    const sourcePerm = await canSendToChat(sourceChatId, session.userId);
+    const targetPerm = await canSendToChat(targetChatId, session.userId);
+    if (!sourcePerm.ok) {
+      res.status(403).json({ success: false, message: sourcePerm.message });
+      return;
+    }
+    if (!targetPerm.ok) {
+      res.status(403).json({ success: false, message: targetPerm.message });
+      return;
+    }
+
+    const src = await query(
+      `SELECT id, content, type, media_url, is_deleted, is_view_once, forward_count
+       FROM messages WHERE id = $1 AND chat_id = $2`,
+      [messageId, sourceChatId],
+    );
+    const original = src.rows[0];
+    if (!original) {
+      res.status(404).json({ success: false, message: "Message not found." });
+      return;
+    }
+    if (original.is_deleted) {
+      res.status(400).json({ success: false, message: "Deleted messages cannot be forwarded." });
+      return;
+    }
+    if (original.is_view_once) {
+      res.status(400).json({ success: false, message: "View-once messages cannot be forwarded." });
+      return;
+    }
+
+    const mod = await enforceModerationForActivity(session.userId, "chat_message", {
+      content: String(original.content ?? ""),
+      mediaUrl: original.media_url ?? null,
+      type: String(original.type ?? "text"),
+    });
+    if (!mod.allowed) {
+      res.status(403).json({ success: false, message: mod.message });
+      return;
+    }
+
+    const newForwardCount = Number(original.forward_count ?? 0) + 1;
+    const result = await query(
+      `INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once)
+       VALUES ($1, $2, $3, $4, NULL, $5, TRUE, $6, FALSE)
+       RETURNING *`,
+      [
+        targetChatId,
+        session.userId,
+        String(original.content ?? ""),
+        String(original.type ?? "text"),
+        original.media_url ?? null,
+        newForwardCount,
+      ],
+    );
+
+    const recipients = (await getChatMemberIds(targetChatId)).filter((id) => id !== session.userId);
+    if (recipients.length > 0) {
+      await query(
+        `INSERT INTO message_status (message_id, user_id, status)
+         SELECT $1, unnest($2::int[]), 'delivered'
+         ON CONFLICT (message_id, user_id)
+         DO UPDATE SET status = 'delivered', updated_at = NOW()`,
+        [result.rows[0].id, recipients],
+      );
+    }
+
+    publishForChat("message", targetChatId, await getChatMemberIds(targetChatId), { messageId: result.rows[0].id });
+    res.json({ success: true, message: result.rows[0] });
+  } catch (err) {
+    req.log.error({ err }, "web forward message error");
+    res.status(500).json({ success: false, message: "Could not forward message." });
   }
 });
 

@@ -7,7 +7,6 @@ import { DropdownMenu, EmojiPicker, useClickOutside } from "../components/web/We
 import { WebNavRail } from "../components/web/WebNavRail";
 import { WebContactPicker, type ContactPickerMode } from "../components/web/WebContactPicker";
 import { WebContactInfo } from "../components/web/WebContactInfo";
-import { WebChatImage, WebChatVideo } from "../components/web/WebChatMedia";
 import { WebStatusPanel } from "../components/web/WebStatusPanel";
 import { WebStatusDetailPane } from "../components/web/WebStatusDetailPane";
 import { WebStarredPanel } from "../components/web/WebStarredPanel";
@@ -17,17 +16,12 @@ import { WebCallsListPane } from "../components/web/WebCallsListPane";
 import { WebSettingsPane } from "../components/web/WebSettingsPane";
 import { WebSettingsDetail } from "../components/web/settings/WebSettingsDetail";
 import type { SettingsSectionId } from "../lib/webSettingsTypes";
-import { WebDocumentBubble } from "../components/web/WebDocumentBubble";
-import { WebCallMessageBubble } from "../components/web/WebCallMessageBubble";
-import { WebVoiceMessageBubble } from "../components/web/WebVoiceMessageBubble";
-import { formatMessageBody, isSystemStyleMessage } from "../lib/chatMessageDisplay";
+import { WebChatMessage } from "../components/web/WebChatMessage";
 import { useWebVoiceRecorder } from "../hooks/useWebVoiceRecorder";
 import { encodeVoiceMessageText, formatVoiceDuration } from "../lib/webVoiceWaveform";
-import { parseCallMessageMeta } from "../lib/callMessage";
 import { Avatar, initials, hue } from "../components/web/webUiShared";
-import type { CallLogEntry, ChatMember } from "../lib/webApi";
+import type { CallLogEntry, ChatMember, Message } from "../lib/webApi";
 import type { WebSection } from "../lib/webDesktop";
-import { isDocumentMessage } from "../lib/documentMessage";
 import { highlightMatches } from "../lib/highlightText";
 import { inferListPreview } from "../lib/messagePreview";
 
@@ -47,18 +41,6 @@ interface ChatEntry {
   is_archived?: boolean;
 }
 
-interface Msg {
-  id: number;
-  chat_id: number;
-  sender_id: number;
-  content: string;
-  type: string;
-  media_url?: string;
-  is_deleted: boolean;
-  created_at: string;
-  sender_name?: string;
-}
-
 type SessionStatus = "loading" | "pending" | "scanning" | "linked" | "expired" | "error";
 type SidebarView = "chats" | "status" | "contacts-direct" | "contacts-group" | "group-name" | "starred";
 
@@ -69,7 +51,7 @@ export default function VidehWeb() {
   const [user, setUser] = useState<WebUser | null>(null);
   const [chats, setChats] = useState<ChatEntry[]>([]);
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
-  const [messages, setMessages] = useState<Msg[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [msgText, setMsgText] = useState("");
   const [search, setSearch] = useState("");
   const [mainSection, setMainSection] = useState<WebSection>("chats");
@@ -534,6 +516,9 @@ export default function VidehWeb() {
       })
     : messages;
   const chatSearchMatchCount = chatSearchLower ? displayMessages.length : 0;
+  const forwardTargets = chats
+    .filter((c) => c.id !== activeChatId && !c.is_archived)
+    .map((c) => ({ id: c.id, name: getChatName(c) }));
 
   // ─── QR LANDING ───────────────────────────────────────────────────────────
   if (status !== "linked") {
@@ -950,85 +935,22 @@ export default function VidehWeb() {
                 <p style={{ margin: 0, fontSize: 14 }}>No messages match &ldquo;{chatSearchQuery}&rdquo;</p>
               </div>
             )}
-            {displayMessages.map((msg) => {
-              const isMe = msg.sender_id === user?.id;
-              const isDeleted = msg.is_deleted;
-              const isAudio = !isDeleted && !!msg.media_url && (
-                msg.type === "audio"
-                || msg.content.includes("Voice message")
-                || msg.content.includes("|w:")
-              );
-              const isSystem = !isDeleted && isSystemStyleMessage(msg.type, msg.content);
-              const callMeta = !isDeleted && !isAudio && !isSystem && (msg.type === "call" || parseCallMessageMeta(msg.content))
-                ? parseCallMessageMeta(msg.content)
-                : null;
-              const hasImage = !isDeleted && msg.type === "image" && !!msg.media_url;
-              const hasVideo = !isDeleted && msg.type === "video" && !!msg.media_url;
-              const hasDocument = !isDeleted && isDocumentMessage(msg);
-              const isMediaBubble = hasImage || hasVideo || isAudio || hasDocument;
-              const bodyText = formatMessageBody(msg);
-              const showBodyText = Boolean(bodyText && !callMeta && !isAudio && !hasImage && !hasVideo && !hasDocument);
-
-              if (isSystem) {
-                return (
-                  <div key={msg.id} className="vw-system-msg">
-                    <span>{formatMessageBody(msg)}</span>
-                  </div>
-                );
-              }
-
-              const bubbleClass = [
-                "vw-msg-bubble",
-                isMe ? "vw-msg-bubble--sent" : "vw-msg-bubble--recv",
-                isMediaBubble ? "vw-msg-bubble--media" : "",
-                isAudio ? "vw-msg-bubble--audio" : "",
-                isDeleted ? "vw-msg-bubble--deleted" : "",
-              ].filter(Boolean).join(" ");
-
-              return (
-                <div key={msg.id} className={`vw-msg-row${isMe ? " vw-msg-row--sent" : " vw-msg-row--recv"}`}>
-                  <div className={bubbleClass}>
-                    {!isMe && !activeChat.is_group && msg.sender_name && (
-                      <div className="vw-msg-bubble__sender" style={{ color: `hsl(${hue(msg.sender_name)},60%,40%)` }}>
-                        {chatSearchLower ? highlightMatches(msg.sender_name, chatSearchQuery) : msg.sender_name}
-                      </div>
-                    )}
-                    {hasImage ? <WebChatImage url={msg.media_url!} token={token} /> : null}
-                    {hasVideo ? <WebChatVideo url={msg.media_url!} token={token} /> : null}
-                    {isAudio ? (
-                      <WebVoiceMessageBubble
-                        url={msg.media_url!}
-                        token={token}
-                        messageId={msg.id}
-                        content={msg.content}
-                        isMe={isMe}
-                      />
-                    ) : null}
-                    {hasDocument ? (
-                      <WebDocumentBubble
-                        url={msg.media_url!}
-                        token={token}
-                        content={msg.content || "Document"}
-                        highlightQuery={chatSearchLower ? chatSearchQuery : undefined}
-                      />
-                    ) : null}
-                    {callMeta ? (
-                      <WebCallMessageBubble content={msg.content} isMe={isMe} />
-                    ) : showBodyText ? (
-                      <p className="vw-msg-bubble__text">
-                        {chatSearchLower ? highlightMatches(bodyText!, chatSearchQuery) : bodyText}
-                      </p>
-                    ) : null}
-                    <div className={`vw-msg-bubble__meta${(hasImage || hasVideo) && !showBodyText && !callMeta ? " vw-msg-bubble__meta--overlay" : ""}`}>
-                      <span>{formatTime(msg.created_at)}</span>
-                      {isMe && (
-                        <svg viewBox="0 0 16 11" width="16" height="11" fill="#53bdeb" aria-hidden><path d="M11.071.653a.45.45 0 0 0-.641 0L4.5 6.582 1.571 3.653a.45.45 0 0 0-.641.642l3.25 3.25a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/><path d="M15.071.653a.45.45 0 0 0-.641 0L8.5 6.582 7.071 5.153a.45.45 0 0 0-.641.642l1.75 1.75a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/></svg>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {displayMessages.map((msg) => (
+              <WebChatMessage
+                key={msg.id}
+                msg={msg}
+                token={token!}
+                chatId={activeChatId!}
+                selfId={user!.id}
+                isGroup={Boolean(activeChat?.is_group)}
+                chatSearchQuery={chatSearchLower ? chatSearchQuery : undefined}
+                forwardTargets={forwardTargets}
+                onRefresh={() => {
+                  if (activeChatId) void loadMessages(activeChatId);
+                  if (token) void loadChats(token);
+                }}
+              />
+            ))}
             <div ref={msgsEndRef} />
           </div>
 

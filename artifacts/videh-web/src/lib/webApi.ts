@@ -167,6 +167,12 @@ export const webApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ emoji }),
     }),
+  forwardMessage: (token: string, sourceChatId: number, messageId: number, targetChatId: number) =>
+    request<{ success: true; message: Message }>(`/web-session/${token}/chats/${sourceChatId}/messages/${messageId}/forward`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetChatId }),
+    }),
   details: (token: string, chatId: number) => request<{ success: true } & ChatDetails>(`/web-session/${token}/chats/${chatId}/details`),
   mute: (token: string, chatId: number, muted: boolean) =>
     request<{ success: true; isMuted: boolean }>(`/web-session/${token}/chats/${chatId}/mute`, {
