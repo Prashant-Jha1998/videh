@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Flame, PenLine, Trash2, X, Zap } from "lucide-react";
+import { Eye, Flame, PenLine, Trash2 } from "lucide-react";
 import { webApi, type WebStatus } from "../../lib/webApi";
 import { Avatar, initials, hue } from "./webUiShared";
+import { WebStoryBoostModal } from "./WebStoryBoostModal";
 
 function formatWhen(iso: string) {
   const d = new Date(iso);
@@ -30,106 +31,10 @@ function StatusPreview({ status }: { status: WebStatus }) {
   );
 }
 
-function BoostModal({
-  status,
-  onClose,
-}: {
-  status: WebStatus;
-  onClose: () => void;
-}) {
-  const [durationDays, setDurationDays] = useState("3");
-  const [radiusKm, setRadiusKm] = useState("25");
-  const [targetCity, setTargetCity] = useState("");
-  const [targetState, setTargetState] = useState("");
-  const [plan, setPlan] = useState<{ amountInr: number; estimatedReach: number } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      try {
-        const days = Math.min(30, Math.max(1, Number(durationDays) || 3));
-        const radius = Math.min(500, Math.max(5, Number(radiusKm) || 25));
-        const res = await webApi.statusBoostQuote({
-          durationDays: days,
-          radiusKm: radius,
-          targetCity,
-          targetState,
-        });
-        if (!cancelled) setPlan({ amountInr: res.plan.amountInr, estimatedReach: res.plan.estimatedReach });
-      } catch {
-        if (!cancelled) setPlan(null);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    const t = setTimeout(load, 200);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [durationDays, radiusKm, targetCity, targetState]);
-
-  return (
-    <div className="vw-status-compose-overlay" onClick={onClose}>
-      <div className="vw-status-boost-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="vw-status-boost-modal__head">
-          <h3>Boost story</h3>
-          <button type="button" className="vw-status-compose__close" onClick={onClose} aria-label="Close">
-            <X size={20} />
-          </button>
-        </div>
-        <p className="vw-status-boost-modal__hint">
-          Reach more people near your target area. Payment and verification work the same as the Videh mobile app.
-        </p>
-        <div className="vw-status-boost-modal__grid">
-          <label>
-            Duration (days)
-            <input type="number" min={1} max={30} value={durationDays} onChange={(e) => setDurationDays(e.target.value)} />
-          </label>
-          <label>
-            Radius (km)
-            <input type="number" min={5} max={500} value={radiusKm} onChange={(e) => setRadiusKm(e.target.value)} />
-          </label>
-          <label>
-            Target city (optional)
-            <input value={targetCity} onChange={(e) => setTargetCity(e.target.value)} placeholder="e.g. Patna" />
-          </label>
-          <label>
-            Target state (optional)
-            <input value={targetState} onChange={(e) => setTargetState(e.target.value)} placeholder="e.g. Bihar" />
-          </label>
-        </div>
-        {loading ? (
-          <p className="vw-status-boost-modal__price">Calculating…</p>
-        ) : plan ? (
-          <div className="vw-status-boost-modal__summary">
-            <div><strong>₹{plan.amountInr.toLocaleString("en-IN")}</strong> estimated</div>
-            <div>~{plan.estimatedReach.toLocaleString("en-IN")} reach</div>
-          </div>
-        ) : null}
-        <button
-          type="button"
-          className="vw-status-compose__post"
-          onClick={() => {
-            alert(
-              `To complete payment for status #${status.id}, open Videh app → Status → My status → Boost story.\n\nYour plan settings are saved here on web for reference.`,
-            );
-            onClose();
-          }}
-        >
-          <Zap size={16} style={{ marginRight: 6, verticalAlign: "middle" }} />
-          Complete boost in Videh app
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function WebStatusDetailPane({
   token,
   selfName,
+  selfPhone,
   selfAvatar,
   statuses,
   onRefresh,
@@ -137,6 +42,7 @@ export function WebStatusDetailPane({
 }: {
   token: string;
   selfName: string;
+  selfPhone?: string;
   selfAvatar?: string;
   statuses: WebStatus[];
   onRefresh: () => void;
@@ -153,6 +59,7 @@ export function WebStatusDetailPane({
   const [loadingViewers, setLoadingViewers] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [boostOpen, setBoostOpen] = useState(false);
+  const [boostBadge, setBoostBadge] = useState<string | null>(null);
 
   const active = sorted.find((s) => s.id === activeId) ?? sorted[0];
 
@@ -181,6 +88,22 @@ export function WebStatusDetailPane({
   useEffect(() => {
     if (active?.id) void loadViewers(active.id);
   }, [active?.id, loadViewers]);
+
+  useEffect(() => {
+    if (!active?.id) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await webApi.statusBoostInfo(token, active.id);
+        if (!cancelled) setBoostBadge(res.boost?.status ?? null);
+      } catch {
+        if (!cancelled) setBoostBadge(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, active?.id]);
 
   const deleteActive = async () => {
     if (!active || deleting) return;
@@ -260,9 +183,14 @@ export function WebStatusDetailPane({
         </div>
 
         <div className="vw-status-detail__boost-row">
+          {boostBadge === "active" ? (
+            <span className="vw-status-detail__boost-badge vw-status-detail__boost-badge--active">Boost active</span>
+          ) : boostBadge === "pending_verification" ? (
+            <span className="vw-status-detail__boost-badge">Boost pending</span>
+          ) : null}
           <button type="button" className="vw-status-detail__boost-btn" onClick={() => setBoostOpen(true)}>
             <Flame size={16} />
-            Boost story
+            {boostBadge ? "Manage boost" : "Boost story"}
           </button>
         </div>
 
@@ -319,7 +247,19 @@ export function WebStatusDetailPane({
         </section>
       </div>
 
-      {boostOpen ? <BoostModal status={active} onClose={() => setBoostOpen(false)} /> : null}
+      {boostOpen ? (
+        <WebStoryBoostModal
+          token={token}
+          status={active}
+          selfName={selfName}
+          selfPhone={selfPhone}
+          onClose={() => setBoostOpen(false)}
+          onBoosted={() => {
+            setBoostBadge("pending_verification");
+            onRefresh();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

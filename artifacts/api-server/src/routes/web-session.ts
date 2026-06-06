@@ -24,6 +24,14 @@ import {
   getExtendedPrivacy,
   type FieldPrivacy,
 } from "../lib/userPrivacySettings";
+import {
+  calculateBoostPlan,
+  confirmBoostPaymentForStatus,
+  createBoostOrderForStatus,
+  getBoostAnalytics,
+  getLatestBoostForStatus,
+  getRazorpayConfig,
+} from "../lib/statusBoostPayment";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -1102,6 +1110,141 @@ router.delete("/:token/statuses/:statusId", async (req: Request, res: Response) 
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "web status delete");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:token/statuses/:statusId/boost/order", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const statusId = parseInt(routeParam(req.params.statusId), 10);
+  if (isNaN(statusId)) {
+    res.status(400).json({ success: false, message: "Invalid status." });
+    return;
+  }
+  const { durationDays, radiusKm, targetCity, targetState } = req.body as {
+    durationDays?: number;
+    radiusKm?: number;
+    targetCity?: string;
+    targetState?: string;
+  };
+  try {
+    const { plan, order, keyId } = await createBoostOrderForStatus(statusId, session.userId, {
+      durationDays,
+      radiusKm,
+      targetCity,
+      targetState,
+    });
+    if (!getRazorpayConfig().configured) {
+      res.status(503).json({ success: false, message: "Payment gateway is not configured." });
+      return;
+    }
+    res.json({ success: true, keyId, order, plan });
+  } catch (err) {
+    req.log.error({ err }, "web boost order");
+    res.status(500).json({
+      success: false,
+      message: err instanceof Error ? err.message : "Could not create payment order.",
+    });
+  }
+});
+
+router.post("/:token/statuses/:statusId/boost", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const statusId = parseInt(routeParam(req.params.statusId), 10);
+  if (isNaN(statusId)) {
+    res.status(400).json({ success: false, message: "Invalid status." });
+    return;
+  }
+  const {
+    amountInr,
+    durationDays,
+    radiusKm,
+    targetCity,
+    targetState,
+    razorpayOrderId,
+    razorpayPaymentId,
+    razorpaySignature,
+  } = req.body as {
+    amountInr?: number;
+    durationDays?: number;
+    radiusKm?: number;
+    targetCity?: string;
+    targetState?: string;
+    razorpayOrderId?: string;
+    razorpayPaymentId?: string;
+    razorpaySignature?: string;
+  };
+  if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+    res.status(400).json({ success: false, message: "Payment details are required." });
+    return;
+  }
+  try {
+    const { boost, plan } = await confirmBoostPaymentForStatus(statusId, session.userId, {
+      amountInr: Number(amountInr),
+      durationDays: Number(durationDays),
+      radiusKm: Number(radiusKm),
+      targetCity,
+      targetState,
+      razorpayOrderId,
+      razorpayPaymentId,
+      razorpaySignature,
+    });
+    res.json({
+      success: true,
+      boost,
+      plan,
+      message: "Payment received. Boost is pending admin verification and can be approved within 24 hours.",
+    });
+  } catch (err) {
+    req.log.error({ err }, "web boost confirm");
+    res.status(400).json({
+      success: false,
+      message: err instanceof Error ? err.message : "Payment verification failed.",
+    });
+  }
+});
+
+router.get("/:token/statuses/:statusId/boost", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const statusId = parseInt(routeParam(req.params.statusId), 10);
+  if (isNaN(statusId)) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  try {
+    const boost = await getLatestBoostForStatus(statusId, session.userId);
+    res.json({ success: true, boost, plan: boost ? calculateBoostPlan({
+      durationDays: boost.duration_days,
+      radiusKm: boost.target_radius_km,
+      targetCity: boost.target_city,
+      targetState: boost.target_state,
+    }) : null });
+  } catch (err) {
+    req.log.error({ err }, "web boost status");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:token/statuses/:statusId/boost/analytics", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const statusId = parseInt(routeParam(req.params.statusId), 10);
+  if (isNaN(statusId)) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  try {
+    const analytics = await getBoostAnalytics(statusId, session.userId);
+    if (!analytics) {
+      res.status(404).json({ success: false, message: "No boost found for this status." });
+      return;
+    }
+    res.json({ success: true, ...analytics });
+  } catch (err) {
+    req.log.error({ err }, "web boost analytics");
     res.status(500).json({ success: false });
   }
 });

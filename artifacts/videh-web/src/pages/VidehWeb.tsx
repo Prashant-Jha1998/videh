@@ -19,6 +19,10 @@ import { WebSettingsDetail } from "../components/web/settings/WebSettingsDetail"
 import type { SettingsSectionId } from "../lib/webSettingsTypes";
 import { WebDocumentBubble } from "../components/web/WebDocumentBubble";
 import { WebCallMessageBubble } from "../components/web/WebCallMessageBubble";
+import { WebVoiceMessageBubble } from "../components/web/WebVoiceMessageBubble";
+import { formatMessageBody, isSystemStyleMessage } from "../lib/chatMessageDisplay";
+import { useWebVoiceRecorder } from "../hooks/useWebVoiceRecorder";
+import { encodeVoiceMessageText, formatVoiceDuration } from "../lib/webVoiceWaveform";
 import { parseCallMessageMeta } from "../lib/callMessage";
 import { Avatar, initials, hue } from "../components/web/webUiShared";
 import type { CallLogEntry, ChatMember } from "../lib/webApi";
@@ -90,6 +94,7 @@ export default function VidehWeb() {
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [uploading, setUploading] = useState(false);
+  const voiceRecorder = useWebVoiceRecorder();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -270,6 +275,35 @@ export default function VidehWeb() {
     } catch {}
   }, [token, loadChats]);
 
+  const sendVoiceMessage = useCallback(async () => {
+    if (!token || !activeChatId) return;
+    try {
+      const result = await voiceRecorder.stop();
+      if (!result) return;
+      setUploading(true);
+      const ext = result.mimeType.includes("mp4") ? "m4a" : "webm";
+      const file = new File([result.blob], `voice_${Date.now()}.${ext}`, { type: result.mimeType });
+      const { url } = await webApi.uploadMedia(token, file);
+      const content = encodeVoiceMessageText(result.durationSec, result.waveform);
+      await webApi.sendMessage(token, activeChatId, { type: "audio", mediaUrl: url, content });
+      await loadMessages(activeChatId);
+      loadChats(token);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not send voice message");
+    } finally {
+      setUploading(false);
+    }
+  }, [token, activeChatId, voiceRecorder, loadMessages, loadChats]);
+
+  const startVoiceRecording = useCallback(async () => {
+    try {
+      setEmojiOpen(false);
+      await voiceRecorder.start();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not access microphone");
+    }
+  }, [voiceRecorder]);
+
   const handleAttachments = useCallback(async (files: FileList | File[]) => {
     if (!token || !activeChatId) return;
     setUploading(true);
@@ -278,12 +312,25 @@ export default function VidehWeb() {
       for (let i = 0; i < list.length; i++) {
         const file = list[i];
         const { url, mimeType } = await webApi.uploadMedia(token, file);
-        const type = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("video/") ? "video" : "document";
-        const label = file.name || (type === "image" ? "Photo" : type === "video" ? "Video" : "Attachment");
+        let type: string;
+        let content: string;
+        if (mimeType.startsWith("image/")) {
+          type = "image";
+          content = i === list.length - 1 ? (file.name || "Photo") : "📷 Photo";
+        } else if (mimeType.startsWith("video/")) {
+          type = "video";
+          content = file.name || "Video";
+        } else if (mimeType.startsWith("audio/")) {
+          type = "audio";
+          content = encodeVoiceMessageText(0);
+        } else {
+          type = "document";
+          content = file.name || "Attachment";
+        }
         await webApi.sendMessage(token, activeChatId, {
           type,
           mediaUrl: url,
-          content: i === list.length - 1 ? label : (type === "image" ? "📷 Photo" : label),
+          content,
         });
       }
       await loadMessages(activeChatId);
@@ -906,31 +953,58 @@ export default function VidehWeb() {
             {displayMessages.map((msg) => {
               const isMe = msg.sender_id === user?.id;
               const isDeleted = msg.is_deleted;
-              const callMeta = !isDeleted && (msg.type === "call" || parseCallMessageMeta(msg.content))
+              const isAudio = !isDeleted && !!msg.media_url && (
+                msg.type === "audio"
+                || msg.content.includes("Voice message")
+                || msg.content.includes("|w:")
+              );
+              const isSystem = !isDeleted && isSystemStyleMessage(msg.type, msg.content);
+              const callMeta = !isDeleted && !isAudio && !isSystem && (msg.type === "call" || parseCallMessageMeta(msg.content))
                 ? parseCallMessageMeta(msg.content)
                 : null;
+              const hasImage = !isDeleted && msg.type === "image" && !!msg.media_url;
+              const hasVideo = !isDeleted && msg.type === "video" && !!msg.media_url;
+              const hasDocument = !isDeleted && isDocumentMessage(msg);
+              const isMediaBubble = hasImage || hasVideo || isAudio || hasDocument;
+              const bodyText = formatMessageBody(msg);
+              const showBodyText = Boolean(bodyText && !callMeta && !isAudio && !hasImage && !hasVideo && !hasDocument);
+
+              if (isSystem) {
+                return (
+                  <div key={msg.id} className="vw-system-msg">
+                    <span>{formatMessageBody(msg)}</span>
+                  </div>
+                );
+              }
+
+              const bubbleClass = [
+                "vw-msg-bubble",
+                isMe ? "vw-msg-bubble--sent" : "vw-msg-bubble--recv",
+                isMediaBubble ? "vw-msg-bubble--media" : "",
+                isAudio ? "vw-msg-bubble--audio" : "",
+                isDeleted ? "vw-msg-bubble--deleted" : "",
+              ].filter(Boolean).join(" ");
+
               return (
-                <div key={msg.id} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", marginBottom: 4 }}>
-                  <div style={{
-                    maxWidth: "70%",
-                    backgroundColor: isMe ? "var(--vw-bubble-sent, #d9fdd3)" : "var(--vw-bubble-received, white)",
-                    borderRadius: isMe ? "8px 8px 2px 8px" : "8px 8px 8px 2px",
-                    padding: "7px 12px",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-                    opacity: isDeleted ? 0.6 : 1,
-                  }}>
+                <div key={msg.id} className={`vw-msg-row${isMe ? " vw-msg-row--sent" : " vw-msg-row--recv"}`}>
+                  <div className={bubbleClass}>
                     {!isMe && !activeChat.is_group && msg.sender_name && (
-                      <div style={{ fontSize: 12, fontWeight: 600, color: `hsl(${hue(msg.sender_name)},60%,40%)`, marginBottom: 2 }}>
+                      <div className="vw-msg-bubble__sender" style={{ color: `hsl(${hue(msg.sender_name)},60%,40%)` }}>
                         {chatSearchLower ? highlightMatches(msg.sender_name, chatSearchQuery) : msg.sender_name}
                       </div>
                     )}
-                    {!isDeleted && msg.type === "image" && msg.media_url ? (
-                      <WebChatImage url={msg.media_url} token={token} />
+                    {hasImage ? <WebChatImage url={msg.media_url!} token={token} /> : null}
+                    {hasVideo ? <WebChatVideo url={msg.media_url!} token={token} /> : null}
+                    {isAudio ? (
+                      <WebVoiceMessageBubble
+                        url={msg.media_url!}
+                        token={token}
+                        messageId={msg.id}
+                        content={msg.content}
+                        isMe={isMe}
+                      />
                     ) : null}
-                    {!isDeleted && msg.type === "video" && msg.media_url ? (
-                      <WebChatVideo url={msg.media_url} token={token} />
-                    ) : null}
-                    {!isDeleted && isDocumentMessage(msg) ? (
+                    {hasDocument ? (
                       <WebDocumentBubble
                         url={msg.media_url!}
                         token={token}
@@ -940,27 +1014,15 @@ export default function VidehWeb() {
                     ) : null}
                     {callMeta ? (
                       <WebCallMessageBubble content={msg.content} isMe={isMe} />
-                    ) : (
-                    <p style={{ margin: 0, fontSize: 14.5, color: "#111b21", lineHeight: 1.4, fontStyle: isDeleted ? "italic" : "normal" }}>
-                      {isDeleted
-                        ? "🚫 This message was deleted"
-                        : (() => {
-                            const raw =
-                              (msg.type === "image" || msg.type === "video" || isDocumentMessage(msg)) && msg.media_url
-                                ? (isDocumentMessage(msg)
-                                  ? msg.content || "Document"
-                                  : msg.content !== "Attachment" && msg.content !== "🎥 Video" && msg.content !== "📷 Photo"
-                                    ? msg.content
-                                    : "")
-                                : msg.content;
-                            return chatSearchLower && raw ? highlightMatches(raw, chatSearchQuery) : raw;
-                          })()}
-                    </p>
-                    )}
-                    <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 4, marginTop: 3 }}>
-                      <span style={{ fontSize: 11, color: "#667781" }}>{formatTime(msg.created_at)}</span>
+                    ) : showBodyText ? (
+                      <p className="vw-msg-bubble__text">
+                        {chatSearchLower ? highlightMatches(bodyText!, chatSearchQuery) : bodyText}
+                      </p>
+                    ) : null}
+                    <div className={`vw-msg-bubble__meta${(hasImage || hasVideo) && !showBodyText && !callMeta ? " vw-msg-bubble__meta--overlay" : ""}`}>
+                      <span>{formatTime(msg.created_at)}</span>
                       {isMe && (
-                        <svg viewBox="0 0 16 11" width="16" height="11" fill="#53bdeb"><path d="M11.071.653a.45.45 0 0 0-.641 0L4.5 6.582 1.571 3.653a.45.45 0 0 0-.641.642l3.25 3.25a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/><path d="M15.071.653a.45.45 0 0 0-.641 0L8.5 6.582 7.071 5.153a.45.45 0 0 0-.641.642l1.75 1.75a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/></svg>
+                        <svg viewBox="0 0 16 11" width="16" height="11" fill="#53bdeb" aria-hidden><path d="M11.071.653a.45.45 0 0 0-.641 0L4.5 6.582 1.571 3.653a.45.45 0 0 0-.641.642l3.25 3.25a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/><path d="M15.071.653a.45.45 0 0 0-.641 0L8.5 6.582 7.071 5.153a.45.45 0 0 0-.641.642l1.75 1.75a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/></svg>
                       )}
                     </div>
                   </div>
@@ -974,7 +1036,7 @@ export default function VidehWeb() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,video/*,.gif,.pdf,.doc,.docx"
+            accept="image/*,video/*,audio/*,.gif,.pdf,.doc,.docx,.mp3,.m4a,.wav,.aac,.ogg,.webm"
             multiple
             style={{ display: "none" }}
             onChange={(e) => {
@@ -984,6 +1046,30 @@ export default function VidehWeb() {
             }}
           />
           <div className="vw-chat__input-bar">
+            {voiceRecorder.recording ? (
+              <div className="vw-voice-rec">
+                <button type="button" className="vw-voice-rec__cancel" onClick={() => voiceRecorder.cancel()} title="Cancel">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+                <div className="vw-voice-rec__dot" />
+                <span className="vw-voice-rec__time">{formatVoiceDuration(voiceRecorder.durationSec)}</span>
+                <div className="vw-voice-rec__live-wave">
+                  {(voiceRecorder.liveWave.length ? voiceRecorder.liveWave : [0.2, 0.35, 0.5, 0.3]).map((h, i) => (
+                    <span key={i} style={{ height: `${8 + h * 20}px` }} />
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="vw-send-btn"
+                  title="Send voice message"
+                  disabled={uploading || voiceRecorder.durationSec < 0.5}
+                  onClick={() => void sendVoiceMessage()}
+                >
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="white"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
+                </button>
+              </div>
+            ) : (
+            <>
             <div ref={emojiWrapRef} style={{ position: "relative" }}>
               <button
                 type="button"
@@ -1021,20 +1107,35 @@ export default function VidehWeb() {
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
               placeholder="Type a message"
             />
-            <button
-              type="button"
-              className="vw-send-btn"
-              onClick={sendMessage}
-              disabled={!msgText.trim()}
-            >
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="white"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
-            </button>
+            {msgText.trim() ? (
+              <button
+                type="button"
+                className="vw-send-btn"
+                onClick={sendMessage}
+                disabled={!msgText.trim()}
+              >
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="white"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="vw-send-btn"
+                title="Record voice message"
+                disabled={uploading}
+                onClick={() => void startVoiceRecording()}
+              >
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="white"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20h-2c-.55 0-1 .45-1 1s.45 1 1 1h6c.55 0 1-.45 1-1s-.45-1-1-1h-2v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>
+              </button>
+            )}
+            </>
+            )}
           </div>
         </div>
       ) : mainSection === "status" && statusDetailUserId === user?.id && myStatuses.length > 0 && token ? (
         <WebStatusDetailPane
           token={token}
           selfName={user!.name}
+          selfPhone={user?.phone}
           selfAvatar={user?.avatarUrl}
           statuses={myStatuses}
           onRefresh={() => void loadStatuses(token)}

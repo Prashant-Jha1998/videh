@@ -237,6 +237,72 @@ export const webApi = {
       note: string;
     }>(`/statuses/boost/quote?${qs.toString()}`);
   },
+  statusBoostOrder: (
+    token: string,
+    statusId: number,
+    plan: { durationDays: number; radiusKm: number; targetCity?: string; targetState?: string },
+  ) =>
+    request<{
+      success: true;
+      keyId: string;
+      order: { id: string; amount: number; currency: string };
+      plan: { amountInr: number; durationDays: number; radiusKm: number; estimatedReach: number };
+    }>(`/web-session/${token}/statuses/${statusId}/boost/order`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(plan),
+    }),
+  statusBoostConfirm: (
+    token: string,
+    statusId: number,
+    payload: {
+      amountInr: number;
+      durationDays: number;
+      radiusKm: number;
+      targetCity?: string;
+      targetState?: string;
+      razorpayOrderId: string;
+      razorpayPaymentId: string;
+      razorpaySignature: string;
+    },
+  ) =>
+    request<{
+      success: true;
+      boost: Record<string, unknown>;
+      plan: { amountInr: number; durationDays: number; radiusKm: number; estimatedReach: number };
+      message: string;
+    }>(`/web-session/${token}/statuses/${statusId}/boost`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  statusBoostInfo: (token: string, statusId: number) =>
+    request<{
+      success: true;
+      boost: {
+        id: number;
+        status: string;
+        payment_status: string;
+        amount_inr: number;
+        duration_days: number;
+        target_radius_km: number;
+        target_city: string | null;
+        target_state: string | null;
+        estimated_reach: number;
+        verification_note: string | null;
+        created_at: string;
+        starts_at: string | null;
+        ends_at: string;
+      } | null;
+      plan: { amountInr: number; durationDays: number; radiusKm: number; estimatedReach: number } | null;
+    }>(`/web-session/${token}/statuses/${statusId}/boost`),
+  statusBoostAnalytics: (token: string, statusId: number) =>
+    request<{
+      success: true;
+      boost: Record<string, unknown>;
+      boostedViewCount: number;
+      viewers: Array<{ id: number; name: string; viewedAt: string }>;
+    }>(`/web-session/${token}/statuses/${statusId}/boost/analytics`),
   starredMessages: (token: string) =>
     request<{ success: true; messages: StarredMessage[] }>(`/web-session/${token}/starred`),
   callLogs: (token: string) =>

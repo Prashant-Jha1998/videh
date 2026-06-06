@@ -30,7 +30,7 @@ export function WebChatImage({ url, token }: { url: string; token: string | null
       onKeyDown={(e) => {
         if (e.key === "Enter") openBlob(blobUrl);
       }}
-      style={{ maxWidth: "100%", maxHeight: 360, borderRadius: 8, marginBottom: 4, cursor: "pointer" }}
+      className="vw-msg-bubble__image"
     />
   );
 }
@@ -48,7 +48,7 @@ export function WebChatVideo({ url, token }: { url: string; token: string | null
       src={blobUrl}
       controls
       playsInline
-      style={{ maxWidth: "100%", maxHeight: 280, borderRadius: 8, marginBottom: 4, backgroundColor: "#000" }}
+      className="vw-msg-bubble__video"
     />
   );
 }
