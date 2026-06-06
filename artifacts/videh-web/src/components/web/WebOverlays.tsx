@@ -28,7 +28,7 @@ export function DropdownMenu({
   open: boolean;
   onClose: () => void;
   anchorRef: React.RefObject<HTMLElement | null>;
-  items: Array<{ label: string; onClick?: () => void; danger?: boolean; divider?: boolean }>;
+  items: Array<{ label: string; icon?: React.ReactNode; onClick?: () => void; danger?: boolean; divider?: boolean }>;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   useClickOutside(menuRef, onClose, open);
@@ -36,13 +36,13 @@ export function DropdownMenu({
   if (!open) return null;
 
   const rect = anchorRef.current?.getBoundingClientRect();
-  const top = rect ? rect.bottom + 4 : 60;
+  const top = rect ? rect.bottom + 6 : 60;
   const right = rect ? window.innerWidth - rect.right : 16;
 
   return (
     <div
       ref={menuRef}
-      className="vw-dropdown"
+      className="vw-dropdown vw-dropdown--message"
       style={{ top, right }}
     >
       {items.map((item, idx) =>
@@ -58,7 +58,8 @@ export function DropdownMenu({
             onClose();
           }}
         >
-          {item.label}
+          {item.icon ? <span className="vw-dropdown__icon">{item.icon}</span> : null}
+          <span>{item.label}</span>
         </button>
         ),
       )}

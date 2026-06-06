@@ -1,5 +1,14 @@
 import { useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Star } from "lucide-react";
+import {
+  Check,
+  CheckSquare,
+  ChevronDown,
+  Copy,
+  Forward,
+  Smile,
+  Star,
+  Trash2,
+} from "lucide-react";
 import { webApi, type Message, type Reaction } from "../../lib/webApi";
 import { WebChatImage, WebChatVideo } from "./WebChatMedia";
 import { WebDocumentBubble } from "./WebDocumentBubble";
@@ -59,8 +68,10 @@ export function WebChatMessage({
   const isDeleted = msg.is_deleted;
   const chatSearchLower = Boolean(chatSearchQuery?.trim());
   const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const reactionRef = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reactionOpen, setReactionOpen] = useState(false);
   const [forwardOpen, setForwardOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -80,18 +91,29 @@ export function WebChatMessage({
   const bodyText = formatMessageBody(msg);
   const showBodyText = Boolean(bodyText && !callMeta && !isAudio && !hasImage && !hasVideo && !hasDocument);
   const reactionGroups = useMemo(() => groupReactions(msg.reactions, selfId), [msg.reactions, selfId]);
-  const showCheckbox = selectionMode || hovered;
+  const showHoverActions = hovered && !selectionMode && !isDeleted;
 
   const react = async (emoji: string) => {
     if (busy || isDeleted || selectionMode) return;
     setBusy(true);
     try {
       await webApi.reactMessage(token, chatId, msg.id, emoji);
+      setReactionOpen(false);
       onRefresh();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Could not react.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const copyMsg = async () => {
+    const text = bodyText || msg.content || "";
+    if (!text.trim()) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      alert("Could not copy message.");
     }
   };
 
@@ -162,7 +184,6 @@ export function WebChatMessage({
     isVisualMedia || hasDocument ? "vw-msg-bubble--media" : "",
     isAudio ? "vw-msg-bubble--audio" : "",
     isDeleted ? "vw-msg-bubble--deleted" : "",
-    isSelected ? "vw-msg-bubble--selected" : "",
   ].filter(Boolean).join(" ");
 
   return (
@@ -171,32 +192,14 @@ export function WebChatMessage({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => {
         setHovered(false);
-        if (!menuOpen) setMenuOpen(false);
+        if (!menuOpen) {
+          setMenuOpen(false);
+          setReactionOpen(false);
+        }
       }}
     >
-      {!isDeleted && !selectionMode && hovered ? (
-        <div className={`vw-msg-toolbar${isMe ? " vw-msg-toolbar--sent" : " vw-msg-toolbar--recv"}`}>
-          <div className="vw-msg-toolbar__reactions">
-            {QUICK_REACTIONS.map((emoji) => (
-              <button key={emoji} type="button" className="vw-msg-toolbar__emoji" onClick={() => void react(emoji)} title="React">
-                {emoji}
-              </button>
-            ))}
-          </div>
-          <button
-            ref={menuBtnRef}
-            type="button"
-            className="vw-msg-toolbar__menu"
-            onClick={() => setMenuOpen((o) => !o)}
-            aria-label="Message options"
-          >
-            <ChevronDown size={16} />
-          </button>
-        </div>
-      ) : null}
-
-      <div className={`vw-msg-row${isMe ? " vw-msg-row--sent" : " vw-msg-row--recv"}`}>
-        {!isDeleted && showCheckbox ? (
+      <div className="vw-msg-select-row">
+        {selectionMode && !isDeleted ? (
           <button
             type="button"
             className={`vw-msg-check${isSelected ? " vw-msg-check--on" : ""}`}
@@ -206,62 +209,107 @@ export function WebChatMessage({
             {isSelected ? <Check size={14} strokeWidth={3} /> : null}
           </button>
         ) : null}
-        <div className={bubbleClass} onClick={handleRowClick} role={selectionMode ? "button" : undefined}>
-          {msg.is_forwarded ? <div className="vw-msg-bubble__forwarded">Forwarded</div> : null}
-          {!isMe && isGroup && msg.sender_name ? (
-            <div className="vw-msg-bubble__sender" style={{ color: `hsl(${hue(msg.sender_name)},60%,40%)` }}>
-              {chatSearchLower ? highlightMatches(msg.sender_name, chatSearchQuery!) : msg.sender_name}
+
+        <div className={`vw-msg-content${isMe ? " vw-msg-content--sent" : " vw-msg-content--recv"}`}>
+          <div className={`vw-msg-hover-zone${isMe ? " vw-msg-hover-zone--sent" : " vw-msg-hover-zone--recv"}`}>
+            {showHoverActions ? (
+              <div className="vw-msg-side-action" ref={reactionRef}>
+                <button
+                  type="button"
+                  className="vw-msg-emoji-btn"
+                  title="React"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setReactionOpen((o) => !o);
+                    setMenuOpen(false);
+                  }}
+                >
+                  <Smile size={18} strokeWidth={1.75} />
+                </button>
+                {reactionOpen ? (
+                  <div className="vw-msg-reaction-picker">
+                    {QUICK_REACTIONS.map((emoji) => (
+                      <button key={emoji} type="button" className="vw-msg-reaction-picker__emoji" onClick={() => void react(emoji)}>
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className={bubbleClass} onClick={handleRowClick} role={selectionMode ? "button" : undefined}>
+              {msg.is_forwarded ? <div className="vw-msg-bubble__forwarded">Forwarded</div> : null}
+              {!isMe && isGroup && msg.sender_name ? (
+                <div className="vw-msg-bubble__sender" style={{ color: `hsl(${hue(msg.sender_name)},60%,40%)` }}>
+                  {chatSearchLower ? highlightMatches(msg.sender_name, chatSearchQuery!) : msg.sender_name}
+                </div>
+              ) : null}
+              {hasImage ? <WebChatImage url={msg.media_url!} token={token} /> : null}
+              {hasVideo ? <WebChatVideo url={msg.media_url!} token={token} /> : null}
+              {isAudio ? (
+                <WebVoiceMessageBubble
+                  url={msg.media_url!}
+                  token={token}
+                  messageId={msg.id}
+                  content={msg.content}
+                  isMe={isMe}
+                />
+              ) : null}
+              {hasDocument ? (
+                <WebDocumentBubble
+                  url={msg.media_url!}
+                  token={token}
+                  content={msg.content || "Document"}
+                  highlightQuery={chatSearchLower ? chatSearchQuery : undefined}
+                />
+              ) : null}
+              {callMeta ? <WebCallMessageBubble content={msg.content} isMe={isMe} /> : null}
+              {showBodyText ? (
+                <p className="vw-msg-bubble__text">
+                  {chatSearchLower ? highlightMatches(bodyText!, chatSearchQuery!) : bodyText}
+                </p>
+              ) : null}
+              <div className={`vw-msg-bubble__meta${isVisualMedia && !showBodyText && !callMeta ? " vw-msg-bubble__meta--overlay" : ""}`}>
+                <span>{formatTime(msg.created_at)}</span>
+                {!showHoverActions && msg.is_starred ? <Star size={11} fill="#f59e0b" color="#f59e0b" /> : null}
+                {showHoverActions ? (
+                  <button
+                    ref={menuBtnRef}
+                    type="button"
+                    className="vw-msg-bubble__chevron"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpen((o) => !o);
+                      setReactionOpen(false);
+                    }}
+                    aria-label="Message options"
+                  >
+                    <ChevronDown size={15} strokeWidth={2} />
+                  </button>
+                ) : isMe ? (
+                  <svg viewBox="0 0 16 11" width="16" height="11" fill="#53bdeb" aria-hidden><path d="M11.071.653a.45.45 0 0 0-.641 0L4.5 6.582 1.571 3.653a.45.45 0 0 0-.641.642l3.25 3.25a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/><path d="M15.071.653a.45.45 0 0 0-.641 0L8.5 6.582 7.071 5.153a.45.45 0 0 0-.641.642l1.75 1.75a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/></svg>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          {reactionGroups.length > 0 ? (
+            <div className={`vw-msg-reactions${isMe ? " vw-msg-reactions--sent" : " vw-msg-reactions--recv"}`}>
+              {reactionGroups.map(([emoji, info]) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  className={`vw-msg-reactions__chip${info.mine ? " vw-msg-reactions__chip--mine" : ""}`}
+                  onClick={() => void react(emoji)}
+                >
+                  {emoji} {info.count > 1 ? info.count : ""}
+                </button>
+              ))}
             </div>
           ) : null}
-          {hasImage ? <WebChatImage url={msg.media_url!} token={token} /> : null}
-          {hasVideo ? <WebChatVideo url={msg.media_url!} token={token} /> : null}
-          {isAudio ? (
-            <WebVoiceMessageBubble
-              url={msg.media_url!}
-              token={token}
-              messageId={msg.id}
-              content={msg.content}
-              isMe={isMe}
-            />
-          ) : null}
-          {hasDocument ? (
-            <WebDocumentBubble
-              url={msg.media_url!}
-              token={token}
-              content={msg.content || "Document"}
-              highlightQuery={chatSearchLower ? chatSearchQuery : undefined}
-            />
-          ) : null}
-          {callMeta ? <WebCallMessageBubble content={msg.content} isMe={isMe} /> : null}
-          {showBodyText ? (
-            <p className="vw-msg-bubble__text">
-              {chatSearchLower ? highlightMatches(bodyText!, chatSearchQuery!) : bodyText}
-            </p>
-          ) : null}
-          <div className={`vw-msg-bubble__meta${isVisualMedia && !showBodyText && !callMeta ? " vw-msg-bubble__meta--overlay" : ""}`}>
-            <span>{formatTime(msg.created_at)}</span>
-            {msg.is_starred ? <Star size={11} fill="#f59e0b" color="#f59e0b" /> : null}
-            {isMe ? (
-              <svg viewBox="0 0 16 11" width="16" height="11" fill="#53bdeb" aria-hidden><path d="M11.071.653a.45.45 0 0 0-.641 0L4.5 6.582 1.571 3.653a.45.45 0 0 0-.641.642l3.25 3.25a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/><path d="M15.071.653a.45.45 0 0 0-.641 0L8.5 6.582 7.071 5.153a.45.45 0 0 0-.641.642l1.75 1.75a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/></svg>
-            ) : null}
-          </div>
         </div>
       </div>
-
-      {reactionGroups.length > 0 ? (
-        <div className={`vw-msg-reactions${isMe ? " vw-msg-reactions--sent" : " vw-msg-reactions--recv"}`}>
-          {reactionGroups.map(([emoji, info]) => (
-            <button
-              key={emoji}
-              type="button"
-              className={`vw-msg-reactions__chip${info.mine ? " vw-msg-reactions__chip--mine" : ""}`}
-              onClick={() => void react(emoji)}
-            >
-              {emoji} {info.count > 1 ? info.count : ""}
-            </button>
-          ))}
-        </div>
-      ) : null}
 
       {!selectionMode ? (
         <DropdownMenu
@@ -269,12 +317,13 @@ export function WebChatMessage({
           onClose={() => setMenuOpen(false)}
           anchorRef={menuBtnRef}
           items={[
-            { label: "Select", onClick: () => onEnterSelection?.(msg.id) },
-            { label: "React 👍", onClick: () => void react("👍") },
-            { label: "Forward", onClick: () => setForwardOpen(true) },
-            { label: msg.is_starred ? "Unstar" : "Star", onClick: () => void starMsg() },
+            { label: "Copy", icon: <Copy size={18} strokeWidth={1.75} />, onClick: () => void copyMsg() },
+            { label: "Forward", icon: <Forward size={18} strokeWidth={1.75} />, onClick: () => setForwardOpen(true) },
+            { label: msg.is_starred ? "Unstar" : "Star", icon: <Star size={18} strokeWidth={1.75} />, onClick: () => void starMsg() },
+            { divider: true, label: "" },
+            { label: "Select", icon: <CheckSquare size={18} strokeWidth={1.75} />, onClick: () => onEnterSelection?.(msg.id) },
             ...(isMe && !isDeleted
-              ? [{ label: "Delete", danger: true, onClick: () => void deleteMsg() }]
+              ? [{ label: "Delete", icon: <Trash2 size={18} strokeWidth={1.75} />, danger: true, onClick: () => void deleteMsg() }]
               : []),
           ]}
         />

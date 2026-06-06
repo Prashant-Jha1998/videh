@@ -620,69 +620,130 @@
 
 .vw-msg-wrap {
   position: relative;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
-.vw-msg-wrap--sent {
+.vw-msg-select-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+}
+
+.vw-msg-wrap--selected .vw-msg-select-row {
+  background: rgba(17, 27, 33, 0.06);
+}
+
+html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
+.vw-chat--dark .vw-msg-wrap--selected .vw-msg-select-row {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.vw-msg-content {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+}
+
+.vw-msg-content--sent {
   align-items: flex-end;
 }
 
-.vw-msg-wrap--recv {
-  display: flex;
-  flex-direction: column;
+.vw-msg-content--recv {
   align-items: flex-start;
 }
 
-.vw-msg-toolbar {
+.vw-msg-hover-zone {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 2px;
-  z-index: 2;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: min(78%, 440px);
 }
 
-.vw-msg-toolbar--sent {
+.vw-msg-hover-zone--sent {
   flex-direction: row-reverse;
 }
 
-.vw-msg-toolbar__reactions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px 5px;
-  border-radius: 999px;
-  background: var(--vw-surface, #fff);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+.vw-msg-side-action {
+  position: relative;
+  flex-shrink: 0;
+  margin-bottom: 4px;
 }
 
-.vw-msg-toolbar__emoji {
-  border: none;
-  background: none;
-  font-size: 16px;
-  line-height: 1;
-  padding: 2px 4px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.vw-msg-toolbar__emoji:hover {
-  background: rgba(0, 0, 0, 0.06);
-}
-
-.vw-msg-toolbar__menu {
-  width: 28px;
-  height: 28px;
+.vw-msg-emoji-btn {
+  width: 34px;
+  height: 34px;
   border: none;
   border-radius: 50%;
   background: var(--vw-surface, #fff);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
-  color: var(--vw-muted, #667781);
+  color: var(--vw-muted, #54656f);
+  box-shadow: 0 1px 3px rgba(11, 20, 26, 0.14);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  opacity: 0;
+  transform: scale(0.92);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.vw-msg-wrap:hover .vw-msg-emoji-btn,
+.vw-msg-emoji-btn:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.vw-msg-reaction-picker {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: var(--vw-surface, #fff);
+  box-shadow: 0 2px 10px rgba(11, 20, 26, 0.18);
+  z-index: 5;
+}
+
+.vw-msg-hover-zone--sent .vw-msg-reaction-picker {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.vw-msg-reaction-picker__emoji {
+  border: none;
+  background: none;
+  font-size: 18px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.vw-msg-reaction-picker__emoji:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.vw-msg-bubble__chevron {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0 0 0 2px;
+  color: inherit;
+  opacity: 0.75;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.vw-msg-bubble__chevron:hover {
+  opacity: 1;
 }
 
 .vw-msg-bubble__forwarded {
@@ -798,25 +859,24 @@
   cursor: pointer;
 }
 
-.vw-msg-wrap--selected .vw-msg-bubble {
-  outline: 2px solid rgba(0, 168, 132, 0.45);
+.vw-msg-wrap--selecting .vw-msg-hover-zone {
+  max-width: min(72%, 420px);
 }
 
 .vw-msg-check {
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  margin: 8px 10px 0 4px;
+  width: 20px;
+  height: 20px;
+  margin: 0 14px 0 10px;
   border: 2px solid #8696a0;
-  border-radius: 4px;
-  background: var(--vw-surface, #fff);
+  border-radius: 3px;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   color: #fff;
   padding: 0;
-  order: -1;
 }
 
 .vw-msg-check--on {
@@ -824,19 +884,9 @@
   border-color: #00a884;
 }
 
-.vw-msg-row {
-  display: flex;
-  align-items: flex-start;
-  margin-bottom: 0;
-}
-
-.vw-msg-wrap--selecting .vw-msg-row {
-  width: 100%;
-  justify-content: flex-start;
-}
-
-.vw-msg-wrap--selecting .vw-msg-row--sent .vw-msg-bubble {
-  margin-left: auto;
+.vw-chat__messages--selecting {
+  padding-left: 0;
+  padding-right: 4%;
 }
 
 .vw-chat__header--selection {
@@ -1403,20 +1453,42 @@ html[data-wallpaper="festival-lights"] .vw-chat__messages {
 }
 
 .vw-dropdown__item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 22px;
   width: 100%;
   text-align: left;
-  padding: 11px 20px;
+  padding: 13px 24px;
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 0.875rem;
+  font-size: 0.9rem;
   color: var(--vw-text);
   transition: background 0.12s var(--vw-ease);
 }
 
+.vw-dropdown__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  color: var(--vw-muted, #54656f);
+  flex-shrink: 0;
+}
+
+.vw-dropdown--message {
+  min-width: 240px;
+  border-radius: 12px;
+  padding: 8px 0;
+}
+
 .vw-dropdown__item:hover {
   background: #f5f6f6;
+}
+
+html[data-theme="dark"] .vw-dropdown__item:hover,
+.vw-chat--dark .vw-dropdown__item:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .vw-dropdown__item--danger {
