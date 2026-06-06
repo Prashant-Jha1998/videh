@@ -39,7 +39,7 @@ export default function ReelsWatchScreen() {
   const { user } = useApp();
   const [video, setVideo] = useState<ReelsVideo | null>(null);
   const [subscribed, setSubscribed] = useState(false);
-  const [comments, setComments] = useState<{ id: number; content: string; user_name: string; created_at: string }[]>([]);
+  const [comments, setComments] = useState<{ id: number; content: string; displayName: string; createdAt: string }[]>([]);
   const [commentText, setCommentText] = useState("");
   const [loading, setLoading] = useState(true);
   const [playAllowed, setPlayAllowed] = useState(true);
@@ -209,7 +209,7 @@ export default function ReelsWatchScreen() {
           scrollEnabled={false}
           renderItem={({ item }) => (
             <View style={styles.commentItem}>
-              <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold" }}>{item.user_name}</Text>
+              <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold" }}>{item.displayName}</Text>
               <Text style={{ color: colors.foreground }}>{item.content}</Text>
             </View>
           )}

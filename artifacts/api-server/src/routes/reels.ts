@@ -22,6 +22,12 @@ import {
   moderateReelsUpload,
   scanReelsText,
 } from "../lib/reelsContentModeration";
+import {
+  isPhoneLikeQuery,
+  mapPublicReelsChannel,
+  mapPublicReelsComment,
+  redactPhoneNumbersInText,
+} from "../lib/reelsPrivacy";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -73,34 +79,12 @@ function parseHashtags(raw: unknown): string[] {
   return s.split(/[\s,#]+/).map((t) => t.trim().replace(/^#/, "")).filter(Boolean).slice(0, 20);
 }
 
-function mapChannelRow(row: Record<string, unknown>, viewerId?: number) {
-  return {
-    id: row.id,
-    userId: row.user_id,
-    handle: row.handle,
-    avatarUrl: row.avatar_url ?? null,
-    bio: row.bio ?? null,
-    subscriberCount: Number(row.subscriber_count ?? 0),
-    totalViews: Number(row.total_views ?? 0),
-    totalViewHours: Number(row.total_view_hours ?? 0),
-    totalLikes: Number(row.total_likes ?? 0),
-    totalComments: Number(row.total_comments ?? 0),
-    totalShares: Number(row.total_shares ?? 0),
-    fraudScore: Number(row.fraud_score ?? 0),
-    monetizationEligible: Boolean(row.monetization_eligible),
-    monetizationStatus: row.monetization_status ?? "not_eligible",
-    isSubscribed: Boolean(row.is_subscribed),
-    ownerName: row.owner_name ?? null,
-    createdAt: row.created_at,
-  };
-}
-
 function mapVideoRow(row: Record<string, unknown>) {
   return {
     id: row.id,
     channelId: row.channel_id,
-    title: row.title,
-    description: row.description ?? "",
+    title: redactPhoneNumbersInText(String(row.title ?? "")),
+    description: redactPhoneNumbersInText(String(row.description ?? "")),
     hashtags: row.hashtags ?? [],
     videoUrl: row.video_url,
     thumbnailUrl: row.thumbnail_url ?? null,
@@ -178,7 +162,10 @@ router.post("/channel", async (req: Request, res: Response) => {
        VALUES ($1, $2, $3, $4) RETURNING *`,
       [userId, normalized, avatarUrl?.trim() || null, bio?.trim() || null],
     );
-    res.json({ success: true, channel: mapChannelRow(inserted.rows[0] as Record<string, unknown>) });
+    res.json({
+      success: true,
+      channel: mapPublicReelsChannel(inserted.rows[0] as Record<string, unknown>, userId),
+    });
   } catch (err) {
     req.log.error({ err }, "reels create channel");
     res.status(500).json({ success: false, message: "Could not create reels account." });
@@ -195,8 +182,8 @@ router.get("/channel/me", async (req: Request, res: Response) => {
   try {
     await ensureReelsTables();
     const result = await query(
-      `SELECT c.*, u.name AS owner_name
-       FROM reels_channels c JOIN users u ON u.id = c.user_id
+      `SELECT c.*
+       FROM reels_channels c
        WHERE c.user_id = $1`,
       [userId],
     );
@@ -209,7 +196,7 @@ router.get("/channel/me", async (req: Request, res: Response) => {
     const config = await getReelsPlatformConfig();
     res.json({
       success: true,
-      channel: mapChannelRow(channelRow, userId),
+      channel: mapPublicReelsChannel(channelRow, userId),
       monetization,
       rules: publicReelsRules(config),
     });
@@ -229,12 +216,12 @@ router.get("/channel/:handle", async (req: Request, res: Response) => {
   try {
     await ensureReelsTables();
     const ch = await query(
-      `SELECT c.*, u.name AS owner_name,
+      `SELECT c.*,
               EXISTS(
                 SELECT 1 FROM reels_subscriptions s
                 WHERE s.channel_id = c.id AND s.subscriber_user_id = $2
               ) AS is_subscribed
-       FROM reels_channels c JOIN users u ON u.id = c.user_id
+       FROM reels_channels c
        WHERE LOWER(c.handle) = $1`,
       [handle, viewerId || null],
     );
@@ -256,7 +243,7 @@ router.get("/channel/:handle", async (req: Request, res: Response) => {
     const monetization = await evaluateChannelMonetization(Number(channelRow.id));
     res.json({
       success: true,
-      channel: mapChannelRow(channelRow, viewerId),
+      channel: mapPublicReelsChannel(channelRow, viewerId),
       videos: videos.rows.map((r) => mapVideoRow(r as Record<string, unknown>)),
       monetization,
       rules: publicReelsRules(config),
@@ -293,15 +280,19 @@ router.get("/search", async (req: Request, res: Response) => {
     res.json({ success: true, channels: [], videos: [] });
     return;
   }
+  if (isPhoneLikeQuery(q)) {
+    res.json({ success: true, channels: [], videos: [] });
+    return;
+  }
   try {
     await ensureReelsTables();
     const like = `%${q}%`;
     const [channels, videos] = await Promise.all([
       query(
-        `SELECT c.*, u.name AS owner_name,
+        `SELECT c.*,
                 EXISTS(SELECT 1 FROM reels_subscriptions s WHERE s.channel_id = c.id AND s.subscriber_user_id = $2) AS is_subscribed
-         FROM reels_channels c JOIN users u ON u.id = c.user_id
-         WHERE LOWER(c.handle) LIKE $1 OR LOWER(COALESCE(u.name, '')) LIKE $1
+         FROM reels_channels c
+         WHERE LOWER(c.handle) LIKE $1
          ORDER BY c.subscriber_count DESC LIMIT 20`,
         [like, viewerId || null],
       ),
@@ -318,7 +309,7 @@ router.get("/search", async (req: Request, res: Response) => {
     ]);
     res.json({
       success: true,
-      channels: channels.rows.map((r) => mapChannelRow(r as Record<string, unknown>, viewerId)),
+      channels: channels.rows.map((r) => mapPublicReelsChannel(r as Record<string, unknown>, viewerId)),
       videos: videos.rows.map((r) => mapVideoRow(r as Record<string, unknown>)),
     });
   } catch (err) {
@@ -571,12 +562,16 @@ router.get("/videos/:videoId/comments", async (req: Request, res: Response) => {
   try {
     await ensureReelsTables();
     const result = await query(
-      `SELECT c.id, c.content, c.created_at, u.id AS user_id, u.name AS user_name, u.avatar_url
-       FROM reels_video_comments c JOIN users u ON u.id = c.user_id
+      `SELECT c.id, c.content, c.created_at, rc.handle AS channel_handle
+       FROM reels_video_comments c
+       LEFT JOIN reels_channels rc ON rc.user_id = c.user_id
        WHERE c.video_id = $1 ORDER BY c.created_at DESC LIMIT 100`,
       [videoId],
     );
-    res.json({ success: true, comments: result.rows });
+    res.json({
+      success: true,
+      comments: result.rows.map((r) => mapPublicReelsComment(r as Record<string, unknown>)),
+    });
   } catch (err) {
     req.log.error({ err }, "reels comments list");
     res.status(500).json({ success: false, message: "Server error" });

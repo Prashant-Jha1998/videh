@@ -95,9 +95,9 @@ export default function ReelsChannelScreen() {
           </View>
         )}
         <Text style={[styles.handle, { color: colors.foreground }]}>@{channel.handle}</Text>
-        {channel.ownerName ? (
-          <Text style={{ color: colors.mutedForeground }}>{channel.ownerName}</Text>
-        ) : null}
+        <Text style={{ color: colors.mutedForeground, fontSize: 13 }}>
+          Video par sirf @username — mobile number kabhi nahi dikhega
+        </Text>
         <View style={styles.statsRow}>
           <Stat label="Subscribers" value={formatViewCount(channel.subscriberCount)} colors={colors} />
           <Stat label="Views" value={formatViewCount(channel.totalViews)} colors={colors} />
@@ -134,12 +134,15 @@ export default function ReelsChannelScreen() {
             {rules.playButton.rules.slice(0, 2).map((r) => (
               <Text key={`p-${r}`} style={{ color: colors.mutedForeground, fontSize: 12 }}>• {r}</Text>
             ))}
-            {(rules.contentModeration?.rules ?? []).slice(0, 3).map((r) => (
+            {(rules.contentModeration?.rules ?? []).slice(0, 2).map((r) => (
               <Text key={`c-${r}`} style={{ color: colors.mutedForeground, fontSize: 12 }}>• {r}</Text>
+            ))}
+            {(rules.privacy?.rules ?? []).slice(0, 2).map((r) => (
+              <Text key={`p-${r}`} style={{ color: colors.mutedForeground, fontSize: 12 }}>• {r}</Text>
             ))}
           </View>
         ) : null}
-        {user?.dbId && channel.userId !== user.dbId ? (
+        {user?.dbId && !channel.isOwner ? (
           <TouchableOpacity
             style={[styles.subBtn, { backgroundColor: channel.isSubscribed ? colors.muted : colors.primary }]}
             onPress={async () => {

@@ -54,6 +54,12 @@ export type ReelsContentModerationRules = {
   summary: string[];
 };
 
+export type ReelsPrivacyRules = {
+  hidePhoneOnVideoPlatform: boolean;
+  videoIdentityIsHandleOnly: boolean;
+  summary: string[];
+};
+
 export type ReelsPlatformConfig = {
   monetization: ReelsMonetizationRules;
   playButton: ReelsPlayButtonRules;
@@ -61,6 +67,7 @@ export type ReelsPlatformConfig = {
   feed: ReelsFeedRules;
   notifications: ReelsNotificationRules;
   contentModeration: ReelsContentModerationRules;
+  privacy: ReelsPrivacyRules;
 };
 
 export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
@@ -133,6 +140,16 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
       "Repeated policy violations may suspend your channel",
     ],
   },
+  privacy: {
+    hidePhoneOnVideoPlatform: true,
+    videoIdentityIsHandleOnly: true,
+    summary: [
+      "Your mobile number is never shown on Video — only your @username appears",
+      "Video viewers see @handles only, not messenger names or phone numbers",
+      "Phone numbers in comments or descriptions are automatically hidden on Video",
+      "Messenger phone visibility follows your normal Videh privacy settings — separate from Video",
+    ],
+  },
 };
 
 let configEnsured = false;
@@ -161,6 +178,7 @@ function deepMergeConfig(partial: Partial<ReelsPlatformConfig>): ReelsPlatformCo
     feed: { ...base.feed, ...partial.feed },
     notifications: { ...base.notifications, ...partial.notifications },
     contentModeration: { ...base.contentModeration, ...partial.contentModeration },
+    privacy: { ...base.privacy, ...partial.privacy },
   };
 }
 
@@ -194,5 +212,6 @@ export function publicReelsRules(config: ReelsPlatformConfig) {
     playButton: { rules: config.playButton.summary },
     feed: { rules: config.feed.summary },
     contentModeration: { rules: config.contentModeration.summary },
+    privacy: { rules: config.privacy.summary },
   };
 }

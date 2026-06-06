@@ -8,8 +8,9 @@ import { getWebFile } from "./web/webFileRegistry";
 
 export type ReelsChannel = {
   id: number;
-  userId: number;
+  userId?: number;
   handle: string;
+  displayName?: string;
   avatarUrl: string | null;
   bio: string | null;
   subscriberCount: number;
@@ -22,7 +23,7 @@ export type ReelsChannel = {
   monetizationEligible?: boolean;
   monetizationStatus?: string;
   isSubscribed?: boolean;
-  ownerName?: string | null;
+  isOwner?: boolean;
 };
 
 export type ReelsPublicRules = {
@@ -30,6 +31,7 @@ export type ReelsPublicRules = {
   playButton: { rules: string[] };
   feed: { rules: string[] };
   contentModeration?: { rules: string[] };
+  privacy?: { rules: string[] };
 };
 
 export type ReelsMonetizationStatus = {
@@ -231,7 +233,7 @@ export async function reactReelsVideo(
 export async function fetchReelsComments(videoId: number, sessionToken?: string | null) {
   return reelsJson<{
     success: boolean;
-    comments: { id: number; content: string; user_name: string; avatar_url?: string; created_at: string }[];
+    comments: { id: number; content: string; displayName: string; createdAt: string }[];
   }>(`/videos/${videoId}/comments`, { sessionToken });
 }
 
