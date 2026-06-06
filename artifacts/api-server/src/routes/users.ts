@@ -341,10 +341,45 @@ router.get("/:id/block-status", async (req: Request, res: Response) => {
     const r = await query(`
       SELECT
         EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2) AS i_blocked_them,
-        EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id = $2 AND blocked_id = $1) AS they_blocked_me
+        EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id = $2 AND blocked_id = $1) AS they_blocked_me,
+        (
+          SELECT COUNT(DISTINCT c.id)::int
+          FROM chats c
+          JOIN chat_members cm1 ON cm1.chat_id = c.id AND cm1.user_id = $1
+          JOIN chat_members cm2 ON cm2.chat_id = c.id AND cm2.user_id = $2
+          WHERE c.is_group = TRUE
+        ) AS common_group_count
     `, [userId, otherUserId]);
     res.json({ success: true, ...r.rows[0] });
   } catch { res.status(500).json({ success: false }); }
+});
+
+// Business API channel profile (for WhatsApp-style business chat intro)
+router.get("/:id/business-channel", async (req: Request, res: Response) => {
+  const userId = Number(req.params.id);
+  if (!userId) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  try {
+    const { lookupBusinessChannelByUserId } = await import("../lib/businessChannelLookup");
+    const channel = await lookupBusinessChannelByUserId(userId);
+    if (!channel) {
+      res.json({ success: true, isBusiness: false });
+      return;
+    }
+    res.json({
+      success: true,
+      isBusiness: true,
+      displayName: channel.displayName,
+      logoUrl: channel.logoUrl,
+      joinedAt: channel.joinedAt,
+      businessAccountId: channel.businessAccountId,
+      businessCategory: channel.businessCategory,
+    });
+  } catch {
+    res.status(500).json({ success: false });
+  }
 });
 
 // Unblock user

@@ -28,7 +28,7 @@ import { getContactStatusRingSegments } from "@/lib/statusRingSegments";
 import { StoryRingAvatar } from "@/components/StoryRing";
 import { formatTypingLabel } from "@/lib/typingIndicator";
 import { interpolate } from "@/lib/i18n";
-import { HIDDEN_CHATS_KEY, shouldRestoreDeletedChat } from "@/lib/chatListDelete";
+import { HIDDEN_CHATS_KEY } from "@/lib/chatListDelete";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
 
 interface BroadcastListRow {
@@ -49,7 +49,7 @@ export default function ChatsScreen() {
   const router = useRouter();
   const {
     chats, statuses, pinChat, muteChat, archiveChat, refreshChats, blockUser, markAsRead, markAllAsRead, user,
-    deleteChatsFromList, chatDeletedAtMap,
+    deleteChatsFromList,
   } = useApp();
   const { t } = useUiPreferences();
   const [search, setSearch] = useState("");
@@ -112,17 +112,6 @@ export default function ChatsScreen() {
   useEffect(() => {
     if (selectedIds.length === 0) setSelectionMenuOpen(false);
   }, [selectedIds.length]);
-
-  /** WhatsApp-style: deleted chat returns when you or they send a new message. */
-  useEffect(() => {
-    const toRestore = chats
-      .filter((c) => shouldRestoreDeletedChat(c.id, hiddenIds, chatDeletedAtMap, c.lastMessageTime))
-      .map((c) => c.id);
-    if (toRestore.length === 0) return;
-    const next = hiddenIds.filter((id) => !toRestore.includes(id));
-    setHiddenIds(next);
-    AsyncStorage.setItem(HIDDEN_CHATS_KEY, JSON.stringify(next)).catch(() => {});
-  }, [chats, hiddenIds, chatDeletedAtMap]);
 
   useFocusEffect(
     useCallback(() => {
@@ -234,18 +223,19 @@ export default function ChatsScreen() {
   };
 
   const hideChatsFromList = (ids: string[]) => {
-    void deleteChatsFromList(ids).then(() => {
-      const next = Array.from(new Set([...hiddenIds, ...ids]));
-      setHiddenIds(next);
+    setHiddenIds((prev) => {
+      const next = Array.from(new Set([...prev, ...ids]));
       AsyncStorage.setItem(HIDDEN_CHATS_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
     });
+    void deleteChatsFromList(ids);
   };
 
   const deleteSelectedFromList = () => {
     if (selectedIds.length === 0) return;
     Alert.alert(
       "Delete chat?",
-      "Messages in selected chats will be cleared on this phone. Chats will reappear only when you or the contact sends a new message.",
+      "Messages in selected chats will be permanently deleted from your chat list and message history.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -307,7 +297,7 @@ export default function ChatsScreen() {
   const clearSelectedChats = () => {
     Alert.alert(
       "Delete chat?",
-      "Messages will be cleared on this phone. The chat will reappear only when you or the contact sends a new message.",
+      "Messages will be permanently deleted from your chat list and message history.",
       [
         { text: "Cancel", style: "cancel" },
         {

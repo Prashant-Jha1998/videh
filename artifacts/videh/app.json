@@ -194,13 +194,13 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "prashantprasun",
+    "owner": "prashantjha1998",
     "extra": {
       "router": {
         "origin": "https://replit.com/"
       },
       "eas": {
-        "projectId": "2f8d1dbd-f62f-48de-8c36-4531cb95b771"
+        "projectId": "3b724974-b378-405a-806e-c6d62df1c768"
       }
     }
   }

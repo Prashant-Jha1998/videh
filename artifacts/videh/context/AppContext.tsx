@@ -422,7 +422,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const lastMsg = c.last_message;
       return {
         id: String(c.id),
-        name: c.is_group ? (c.group_name ?? "Group") : (otherUser?.name ?? "Unknown"),
+        name: c.is_group
+          ? (c.group_name?.trim() || "Group")
+          : (otherUser?.name?.trim() || otherUser?.phone?.trim() || "Unknown"),
         avatar: resolvePublicAssetUrl(c.is_group ? c.group_avatar_url : otherUser?.avatar_url),
         lastMessage: formatLastMessagePreview(lastMsg),
         lastMessageTime: lastMsg ? new Date(lastMsg.created_at).getTime() : undefined,
@@ -761,10 +763,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setChatDeletedAtMap(nextMap);
     await saveChatDeletedAtMap(nextMap);
 
+    const uid = userRef.current?.dbId;
+    if (uid) {
+      await Promise.all(
+        chatIds.map((chatId) =>
+          api(`/chats/${chatId}/clear-history`, {
+            method: "POST",
+            body: JSON.stringify({ userId: uid }),
+          }).catch(() => {}),
+        ),
+      );
+    }
+
     for (const chatId of chatIds) {
       delete messageCacheStoreRef.current[String(chatId)];
     }
-    const uid = userRef.current?.dbId;
     if (uid) schedulePersistChatMessageCache(uid, messageCacheStoreRef.current);
 
     setChats((prev) =>

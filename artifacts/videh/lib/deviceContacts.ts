@@ -71,3 +71,21 @@ export async function checkPhonesRegistered(
 
   return registered;
 }
+
+/** True when any device contact shares the same normalized digits as `phone`. */
+export async function isPhoneInDeviceContacts(phone: string): Promise<boolean> {
+  const target = normalizePhone(phone).replace(/\D/g, "");
+  if (target.length < 10) return false;
+
+  const { status } = await Contacts.requestPermissionsAsync();
+  if (status !== "granted") return false;
+
+  const data = await loadAllDeviceContacts();
+  for (const c of data) {
+    for (const pn of c.phoneNumbers ?? []) {
+      const norm = normalizePhone(pn.number ?? "").replace(/\D/g, "");
+      if (norm.length >= 10 && norm === target) return true;
+    }
+  }
+  return false;
+}

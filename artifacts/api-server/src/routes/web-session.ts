@@ -410,6 +410,11 @@ router.get("/:token/chats", async (req: Request, res: Response) => {
   try {
     const session = await requireLinkedSession(req, res);
     if (!session) return;
+    const { ensureChatMemberHistoryClearedColumn, messageAfterHistoryClearedSql } = await import(
+      "../lib/chatMemberHistory"
+    );
+    await ensureChatMemberHistoryClearedColumn();
+    const historySql = messageAfterHistoryClearedSql("cm");
     const chatsResult = await query(
       `SELECT
         c.id, c.is_group, c.group_name, c.group_avatar_url,
@@ -421,12 +426,14 @@ router.get("/:token/chats", async (req: Request, res: Response) => {
           )
           FROM messages m
           WHERE m.chat_id = c.id AND m.is_deleted = FALSE AND m.type != 'system'
+            AND ${historySql}
           ORDER BY m.created_at DESC LIMIT 1
         ) AS last_message,
         (
           SELECT COUNT(*)::int FROM messages m
           WHERE m.chat_id = c.id AND m.sender_id != $1::int
             AND m.created_at > cm.last_read_at AND m.is_deleted = FALSE AND m.type != 'system'
+            AND ${historySql}
         ) AS unread_count,
         (
           SELECT json_agg(json_build_object(

@@ -86,7 +86,8 @@ import { isGifUri } from "@/lib/imageEdit";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { formatTypingLabel } from "@/lib/typingIndicator";
 import { TypingIndicator } from "@/components/TypingIndicator";
-import { DisappearSystemMessageBubble } from "@/components/DisappearSystemMessageBubble";
+import { ChatSystemMessageBubble } from "@/components/ChatSystemMessageBubble";
+import { GroupWelcomeCard } from "@/components/GroupWelcomeCard";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
 import { formatChatBubbleTime } from "@/utils/time";
 import {
@@ -105,6 +106,10 @@ import { useWebKeyboardShortcuts } from "@/lib/useWebKeyboardShortcuts";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { DropdownMenu } from "@/components/DropdownMenu";
 import { ThemedHeader } from "@/components/ThemedHeader";
+import { BusinessIntroCard, BusinessSecureBanner, formatBusinessJoinedLabel } from "@/components/BusinessChatIntro";
+import { ManageBusinessMessagesSheet } from "@/components/ManageBusinessMessagesSheet";
+import { ChatEncryptionNotice, UnsavedContactCard } from "@/components/UnsavedContactCard";
+import { dismissGroupWelcome, isGroupWelcomeDismissed } from "@/lib/groupWelcomeDismiss";
 import {
   encodeLocationPayload,
   formatLiveUntil,
@@ -1203,6 +1208,28 @@ export default function ChatScreen() {
 
   const [groupSendPermission, setGroupSendPermission] = useState<{ canSend: boolean; policy: string } | null>(null);
   const [blockState, setBlockState] = useState<{ iBlockedThem: boolean; theyBlockedMe: boolean }>({ iBlockedThem: false, theyBlockedMe: false });
+  const [peerContactPreview, setPeerContactPreview] = useState<{
+    phone: string;
+    profileName: string;
+    isSavedInDevice: boolean;
+    commonGroupCount: number;
+  } | null>(null);
+  const [businessChannelInfo, setBusinessChannelInfo] = useState<{
+    displayName: string;
+    logoUrl?: string;
+    joinedAt?: string | null;
+  } | null>(null);
+  const [manageBusinessOpen, setManageBusinessOpen] = useState(false);
+  const [groupWelcomeDismissed, setGroupWelcomeDismissed] = useState(false);
+  const [groupWelcomePreview, setGroupWelcomePreview] = useState<{
+    addedByPhone: string;
+    addedByName?: string;
+    creatorIsContact: boolean;
+    memberCount: number;
+    contactsInGroupCount: number;
+    createdAtMs: number;
+    createdByUserId: number;
+  } | null>(null);
 
   useEffect(() => {
     setGroupSendPermission(null);
@@ -2242,9 +2269,10 @@ export default function ChatScreen() {
   const renderMsg = ({ item }: { item: Message }) => {
     if (item.type === "system") {
       return (
-        <DisappearSystemMessageBubble
+        <ChatSystemMessageBubble
           text={item.text}
           isDark={colors.isDark}
+          viewerUserId={user?.dbId}
           onChangeTimer={openDisappearSettings}
         />
       );
@@ -2724,6 +2752,232 @@ export default function ChatScreen() {
   }, [chatId, user?.dbId]);
 
   const directContactId = !chat?.isGroup ? chat?.otherUserId : undefined;
+  const showBusinessIntro =
+    !searching
+    && !chat?.isGroup
+    && !!businessChannelInfo
+    && !blockState.iBlockedThem
+    && !blockState.theyBlockedMe;
+  const showUnsavedContactCard =
+    !searching
+    && !chat?.isGroup
+    && !businessChannelInfo
+    && !!peerContactPreview
+    && !peerContactPreview.isSavedInDevice
+    && !blockState.iBlockedThem
+    && !blockState.theyBlockedMe;
+  const showGroupWelcomeCard =
+    !searching
+    && !!chat?.isGroup
+    && !groupWelcomeDismissed
+    && !!groupWelcomePreview
+    && groupWelcomePreview.createdByUserId !== user?.dbId;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!chatId || !chat?.isGroup || !user?.dbId) {
+        setGroupWelcomePreview(null);
+        setGroupWelcomeDismissed(false);
+        return;
+      }
+      let cancelled = false;
+      (async () => {
+        try {
+          const dismissed = await isGroupWelcomeDismissed(chatId);
+          if (cancelled) return;
+          setGroupWelcomeDismissed(dismissed);
+          if (dismissed) {
+            setGroupWelcomePreview(null);
+            return;
+          }
+
+          const [detailsRes, membersRes] = await Promise.all([
+            fetch(`${BASE_URL}/api/chats/${chatId}/details`),
+            fetch(`${BASE_URL}/api/chats/${chatId}/members`),
+          ]);
+          const detailsData = await detailsRes.json();
+          const membersData = await membersRes.json();
+          const createdBy = Number(detailsData.chat?.created_by) || 0;
+          const createdAtRaw = detailsData.chat?.created_at;
+          const createdAtMs = createdAtRaw ? new Date(createdAtRaw).getTime() : Date.now();
+          const members = (membersData.members ?? []) as Array<{ id: number; name?: string; phone?: string }>;
+          if (!createdBy || createdBy === user.dbId || cancelled) {
+            setGroupWelcomePreview(null);
+            return;
+          }
+          const creator = members.find((m) => m.id === createdBy);
+          if (!creator?.phone || cancelled) return;
+
+          const { isPhoneInDeviceContacts } = await import("@/lib/deviceContacts");
+          const creatorIsContact = await isPhoneInDeviceContacts(creator.phone);
+          let contactsInGroupCount = 0;
+          for (const m of members) {
+            if (m.id === user.dbId || !m.phone) continue;
+            if (await isPhoneInDeviceContacts(m.phone)) contactsInGroupCount += 1;
+          }
+          if (cancelled) return;
+
+          setGroupWelcomePreview({
+            addedByPhone: creator.phone,
+            addedByName: creator.name,
+            creatorIsContact,
+            memberCount: members.length,
+            contactsInGroupCount,
+            createdAtMs,
+            createdByUserId: createdBy || creator.id,
+          });
+        } catch {
+          if (!cancelled) setGroupWelcomePreview(null);
+        }
+      })();
+      return () => { cancelled = true; };
+    }, [chatId, chat?.isGroup, user?.dbId]),
+  );
+
+  const handleStayInGroup = useCallback(() => {
+    if (!chatId) return;
+    void dismissGroupWelcome(chatId);
+    setGroupWelcomeDismissed(true);
+    setGroupWelcomePreview(null);
+  }, [chatId]);
+
+  const handleExitGroup = useCallback(() => {
+    if (!chatId || !user?.dbId) return;
+    Alert.alert("Exit group?", `You will no longer receive messages from ${displayName}.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Exit group",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await fetch(`${BASE_URL}/api/chats/${chatId}/members/${user.dbId}`, {
+              method: "DELETE",
+              headers: {
+                "Content-Type": "application/json",
+                ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+              },
+              body: JSON.stringify({ requesterId: user.dbId }),
+            });
+            void dismissGroupWelcome(chatId);
+            router.replace("/(tabs)/chats");
+          } catch {
+            Alert.alert("Error", "Could not leave this group.");
+          }
+        },
+      },
+    ]);
+  }, [chatId, displayName, router, user?.dbId, user?.sessionToken]);
+
+  const handleReportGroup = useCallback(() => {
+    Alert.alert("Report sent", "Thank you. We will review this group.");
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!chatId || chat?.isGroup || !directContactId) {
+        setBusinessChannelInfo(null);
+        return;
+      }
+      let cancelled = false;
+      fetch(`${BASE_URL}/api/users/${directContactId}/business-channel`)
+        .then((r) => r.json())
+        .then((data: {
+          success?: boolean;
+          isBusiness?: boolean;
+          displayName?: string;
+          logoUrl?: string | null;
+          joinedAt?: string | null;
+        }) => {
+          if (cancelled) return;
+          if (data.success && data.isBusiness && data.displayName) {
+            setBusinessChannelInfo({
+              displayName: data.displayName,
+              logoUrl: data.logoUrl ?? undefined,
+              joinedAt: data.joinedAt,
+            });
+          } else {
+            setBusinessChannelInfo(null);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setBusinessChannelInfo(null);
+        });
+      return () => { cancelled = true; };
+    }, [chatId, chat?.isGroup, directContactId]),
+  );
+
+  const handleToggleBusinessMute = useCallback((wantMuted: boolean) => {
+    if (!chatId) return;
+    if (Boolean(chat?.isMuted) !== wantMuted) muteChat(chatId);
+  }, [chat?.isMuted, chatId, muteChat]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!chatId || chat?.isGroup || !user?.dbId || !directContactId) {
+        setPeerContactPreview(null);
+        return;
+      }
+      let cancelled = false;
+      (async () => {
+        try {
+          const [membersRes, statusRes] = await Promise.all([
+            fetch(`${BASE_URL}/api/chats/${chatId}/members`),
+            fetch(`${BASE_URL}/api/users/${user.dbId}/block-status?otherUserId=${directContactId}`),
+          ]);
+          const membersData = await membersRes.json();
+          const statusData = await statusRes.json();
+          const other = (membersData.members as Array<{ id: number; name?: string; phone?: string }> | undefined)
+            ?.find((m) => m.id !== user.dbId);
+          if (!other?.phone || cancelled) return;
+
+          const { isPhoneInDeviceContacts } = await import("@/lib/deviceContacts");
+          const isSavedInDevice = await isPhoneInDeviceContacts(other.phone);
+          if (cancelled) return;
+
+          setPeerContactPreview({
+            phone: other.phone,
+            profileName: other.name ?? displayName,
+            isSavedInDevice,
+            commonGroupCount: Number(statusData.common_group_count ?? 0),
+          });
+        } catch {
+          if (!cancelled) setPeerContactPreview(null);
+        }
+      })();
+      return () => { cancelled = true; };
+    }, [chatId, chat?.isGroup, user?.dbId, directContactId, displayName]),
+  );
+
+  const handleAddUnsavedContact = useCallback(async () => {
+    if (!peerContactPreview) return;
+    if (Platform.OS === "web") {
+      Alert.alert("Add contact", "Save this number from your phone's contact app after copying it.");
+      return;
+    }
+    try {
+      const { status } = await Contacts.requestPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission required", "Allow Contacts access to save this contact.");
+        return;
+      }
+      const profileName = peerContactPreview.profileName.trim() || peerContactPreview.phone;
+      const [firstName, ...rest] = profileName.split(/\s+/).filter(Boolean);
+      await Contacts.addContactAsync({
+        contactType: Contacts.ContactTypes.Person,
+        name: profileName,
+        firstName: firstName || profileName,
+        lastName: rest.join(" ") || undefined,
+        phoneNumbers: [{ number: peerContactPreview.phone, label: "mobile" }],
+      });
+      const { syncDeviceContactsToServer } = await import("@/lib/syncContactsToServer");
+      void syncDeviceContactsToServer(BASE_URL, user?.sessionToken);
+      setPeerContactPreview((prev) => (prev ? { ...prev, isSavedInDevice: true } : null));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert("Saved", `${profileName} was added to your contacts.`);
+    } catch {
+      Alert.alert("Error", "Could not save this contact.");
+    }
+  }, [peerContactPreview, user?.sessionToken]);
 
   const handleMenuBlockToggle = useCallback(() => {
     if (!directContactId) {
@@ -2755,6 +3009,11 @@ export default function ChatScreen() {
       ],
     );
   }, [blockState.iBlockedThem, blockUser, directContactId, displayName, unblockUser]);
+
+  const handleBlockBusiness = useCallback(() => {
+    setManageBusinessOpen(false);
+    handleMenuBlockToggle();
+  }, [handleMenuBlockToggle]);
 
   const handleMenuReport = useCallback((blockAfterReport: boolean) => {
     if (!directContactId || !chatId) {
@@ -3209,7 +3468,14 @@ export default function ChatScreen() {
             activeOpacity={0.7}
             onPress={() => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } })}
           >
-            <Text style={styles.headerName} numberOfLines={1}>{displayName}</Text>
+            <View style={styles.headerNameRow}>
+              <Text style={styles.headerName} numberOfLines={1}>
+                {businessChannelInfo?.displayName ?? displayName}
+              </Text>
+              {businessChannelInfo ? (
+                <Ionicons name="checkmark-circle" size={16} color="#93C5FD" style={{ marginLeft: 4 }} />
+              ) : null}
+            </View>
             <Text style={[styles.headerStatus, remoteTypingNames.length > 0 && { color: "#a7f3d0" }]}>
               {headerStatusText}
             </Text>
@@ -3279,10 +3545,60 @@ export default function ChatScreen() {
             ref={listRef}
           data={listRows}
           ListHeaderComponent={
-            !searching && loadingOlder ? (
-              <View style={styles.olderLoader}>
-                <ActivityIndicator size="small" color={colors.primary} />
-              </View>
+            !searching ? (
+              <>
+                {loadingOlder ? (
+                  <View style={styles.olderLoader}>
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  </View>
+                ) : null}
+                {showBusinessIntro && businessChannelInfo ? (
+                  <>
+                    <BusinessSecureBanner />
+                    <BusinessIntroCard
+                      displayName={businessChannelInfo.displayName}
+                      logoUrl={businessChannelInfo.logoUrl ?? contactAvatar}
+                      joinedLabel={formatBusinessJoinedLabel(businessChannelInfo.joinedAt)}
+                      isDark={colors.isDark}
+                      onManageMessages={() => setManageBusinessOpen(true)}
+                    />
+                  </>
+                ) : null}
+                {showGroupWelcomeCard && groupWelcomePreview ? (
+                  <>
+                    <ChatEncryptionNotice />
+                    <GroupWelcomeCard
+                      addedByPhone={groupWelcomePreview.addedByPhone}
+                      addedByName={groupWelcomePreview.addedByName}
+                      creatorIsContact={groupWelcomePreview.creatorIsContact}
+                      memberCount={groupWelcomePreview.memberCount}
+                      contactsInGroupCount={groupWelcomePreview.contactsInGroupCount}
+                      createdLabel={formatDateChipLabel(groupWelcomePreview.createdAtMs)}
+                      isDark={colors.isDark}
+                      onExitGroup={handleExitGroup}
+                      onStay={handleStayInGroup}
+                      onReport={handleReportGroup}
+                    />
+                  </>
+                ) : null}
+                {showUnsavedContactCard && peerContactPreview ? (
+                  <>
+                    <ChatEncryptionNotice />
+                    <UnsavedContactCard
+                      phone={peerContactPreview.phone}
+                      profileName={peerContactPreview.profileName}
+                      initials={initials}
+                      avatarUrl={contactAvatar}
+                      avatarBg={avatarBg}
+                      commonGroupCount={peerContactPreview.commonGroupCount}
+                      isDark={colors.isDark}
+                      onBlock={handleMenuBlockToggle}
+                      onAdd={() => { void handleAddUnsavedContact(); }}
+                      onReport={() => handleMenuReport(false)}
+                    />
+                  </>
+                ) : null}
+              </>
             ) : null
           }
           ListFooterComponent={
@@ -3309,7 +3625,7 @@ export default function ChatScreen() {
               justifyContent: searching ? "flex-start" : "flex-end",
             },
           ]}
-          extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}|${allMessages.length}`}
+          extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}|${allMessages.length}|${showUnsavedContactCard ? "unsaved" : ""}|${showGroupWelcomeCard ? "groupWelcome" : ""}|${showBusinessIntro ? "business" : ""}`}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -3558,6 +3874,15 @@ export default function ChatScreen() {
           </View>
         ) : null}
       </Modal>
+
+      <ManageBusinessMessagesSheet
+        visible={manageBusinessOpen}
+        businessName={businessChannelInfo?.displayName ?? displayName}
+        isMuted={!!chat?.isMuted}
+        onClose={() => setManageBusinessOpen(false)}
+        onToggleMute={handleToggleBusinessMute}
+        onBlock={handleBlockBusiness}
+      />
 
       {/* View received / sent contact (Save, Call) */}
       <Modal
@@ -3889,7 +4214,8 @@ const styles = StyleSheet.create({
   headerAvatarImg: { width: 38, height: 38 },
   headerAvatarText: { color: "#fff", fontSize: 14, fontFamily: "Inter_700Bold" },
   headerInfo: { flex: 1 },
-  headerName: { color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold" },
+  headerNameRow: { flexDirection: "row", alignItems: "center", maxWidth: "100%" },
+  headerName: { color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold", flexShrink: 1 },
   headerStatus: { color: "rgba(255,255,255,0.75)", fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2, lineHeight: 16 },
   headerActions: { flexDirection: "row" },
   headerBtn: { padding: 6 },

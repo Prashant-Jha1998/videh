@@ -12,6 +12,18 @@ export interface VidehContact {
   avatarUrl?: string;
 }
 
+/** WhatsApp-style spacing for Indian mobile numbers (+91 XXXXX XXXXX). */
+export function formatDisplayPhone(raw: string): string {
+  const norm = normalizePhone(raw);
+  const digits = norm.replace(/\D/g, "");
+  if (digits.startsWith("91") && digits.length === 12) {
+    const local = digits.slice(2);
+    return `+91 ${local.slice(0, 5)} ${local.slice(5)}`;
+  }
+  if (norm.startsWith("+")) return norm;
+  return raw.trim() || norm;
+}
+
 export function normalizePhone(raw: string): string {
   let digits = raw.replace(/\D/g, "");
   if (digits.startsWith("0")) digits = digits.slice(1);

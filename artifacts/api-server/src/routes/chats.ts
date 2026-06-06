@@ -14,6 +14,10 @@ import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
 import { assertSameUser, getAuthUserId, requireAuth } from "../lib/auth";
 import { publicMediaUrl } from "../lib/mediaStorage";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
+import {
+  ensureChatMemberHistoryClearedColumn,
+  messageAfterHistoryClearedSql,
+} from "../lib/chatMemberHistory";
 import { ensureMessageUserHidesTable, hideMessageForUser, messageVisibleToUserSql } from "../lib/messageUserHides";
 import { getPresenceForViewer } from "../lib/presencePrivacy";
 import { canAddUserToGroup, getExtendedPrivacy } from "../lib/userPrivacySettings";
@@ -185,7 +189,9 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
   if (!assertSameUser(req, res, userId)) return;
   try {
     await ensureChatMemberArchiveColumn();
+    await ensureChatMemberHistoryClearedColumn();
     await ensureMessageUserHidesTable();
+    const historySql = messageAfterHistoryClearedSql("cm");
     const result = await query(`
       SELECT
         c.id,
@@ -216,6 +222,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         m.created_at AS last_created_at
         FROM messages m
         WHERE m.chat_id = c.id AND m.type != 'system' AND ${messageVisibleToUserSql("$1")}
+          AND ${historySql}
         ORDER BY m.created_at DESC
         LIMIT 1
       ) last_msg ON TRUE
@@ -227,6 +234,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
           AND m.type != 'system'
           AND m.created_at > cm.last_read_at
           AND ${messageVisibleToUserSql("$1")}
+          AND ${historySql}
       ) unread ON TRUE
       LEFT JOIN LATERAL (
         SELECT json_agg(json_build_object(
@@ -262,6 +270,42 @@ router.get("/user/:userId/events", (req: Request, res: Response) => {
   if (!assertSameUser(req, res, userId)) return;
   const detach = attachChatEventStream(userId, res);
   req.on("close", detach);
+});
+
+/** Clear all chat history for this user (delete from chat list — messages stay hidden until new ones arrive). */
+router.post("/:chatId/clear-history", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { userId } = req.body as { userId?: number };
+  if (!userId) {
+    res.status(400).json({ success: false, message: "userId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    await ensureChatMemberHistoryClearedColumn();
+    const member = await query(
+      "SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, userId],
+    );
+    if (member.rows.length === 0) {
+      res.status(403).json({ success: false, message: "Not a member of this chat" });
+      return;
+    }
+    const updated = await query(
+      `UPDATE chat_members
+       SET history_cleared_at = NOW(), last_read_at = NOW()
+       WHERE chat_id = $1 AND user_id = $2
+       RETURNING history_cleared_at`,
+      [chatId, userId],
+    );
+    res.json({
+      success: true,
+      clearedAt: updated.rows[0]?.history_cleared_at ?? new Date().toISOString(),
+    });
+  } catch (err) {
+    req.log.error({ err }, "clear chat history error");
+    res.status(500).json({ success: false, message: "Could not clear chat history" });
+  }
 });
 
 router.patch("/:chatId/archive", async (req: Request, res: Response) => {
@@ -503,9 +547,11 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
   if (!assertSameUser(req, res, userId)) return;
   try {
     await ensureMessageUserHidesTable();
+    await ensureChatMemberHistoryClearedColumn();
     await ensureViewOnceColumns();
     const viewerId = Number(userId);
     const viewerParam = before ? "$4" : "$3";
+    const historySql = messageAfterHistoryClearedSql("cm");
     const result = await query(`
       SELECT
         m.id, m.chat_id, m.sender_id, m.content, m.type,
@@ -532,11 +578,13 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
           LIMIT 1
         ) AS delivery_status
       FROM messages m
+      JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ${viewerParam}::int
       LEFT JOIN users u ON u.id = m.sender_id
       LEFT JOIN messages rm ON rm.id = m.reply_to_id
       LEFT JOIN users rm_u ON rm_u.id = rm.sender_id
       WHERE m.chat_id = $1
         AND ${messageVisibleToUserSql(viewerParam)}
+        AND ${historySql}
         ${before ? "AND m.created_at < $3" : ""}
       ORDER BY m.created_at DESC
       LIMIT $2
@@ -1257,7 +1305,8 @@ router.get("/:chatId/details", async (req: Request, res: Response) => {
     await ensureGroupMetadataColumns();
     const result = await query(`
       SELECT id, is_group, group_name, group_avatar_url, group_description, disappear_after_seconds,
-             COALESCE(NULLIF(TRIM(group_messaging_policy), ''), 'everyone') AS group_messaging_policy
+             COALESCE(NULLIF(TRIM(group_messaging_policy), ''), 'everyone') AS group_messaging_policy,
+             created_by, created_at
       FROM chats WHERE id = $1
     `, [chatId]);
     if (result.rows.length === 0) { res.status(404).json({ success: false }); return; }
@@ -1347,6 +1396,17 @@ router.put("/:chatId/members/:memberId/admin", async (req: Request, res: Respons
     const adminCheck = await query("SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2", [chatId, requesterId]);
     if (!adminCheck.rows[0]?.is_admin) { res.status(403).json({ success: false }); return; }
     await query("UPDATE chat_members SET is_admin = $1 WHERE chat_id = $2 AND user_id = $3", [isAdmin ?? true, chatId, memberId]);
+
+    if (isAdmin ?? true) {
+      const nameRes = await query("SELECT name FROM users WHERE id = $1", [memberId]);
+      const { insertChatSystemMessage } = await import("../lib/chatSystemMessages");
+      await insertChatSystemMessage(chatId, Number(requesterId), {
+        kind: "promoted_admin",
+        targetUserId: Number(memberId),
+        targetUserName: nameRes.rows[0]?.name ?? undefined,
+      });
+    }
+
     res.json({ success: true });
   } catch { res.status(500).json({ success: false }); }
 });

@@ -2,17 +2,33 @@ import { parseCallMessageMeta } from "./callMessage";
 import { stripWaveformMeta } from "./webVoiceWaveform";
 
 type DisappearSystemPayload = { kind: "disappear_timer"; seconds: number | null };
+type PromotedAdminPayload = { kind: "promoted_admin"; targetUserId: number; targetUserName?: string };
+type ChatSystemPayload = DisappearSystemPayload | PromotedAdminPayload;
 
 export function parseDisappearSystemPayload(text: string): DisappearSystemPayload | null {
+  const p = parseChatSystemPayload(text);
+  return p?.kind === "disappear_timer" ? p : null;
+}
+
+export function parseChatSystemPayload(text: string): ChatSystemPayload | null {
   const raw = (text ?? "").trim();
   if (!raw.startsWith("{")) return null;
   try {
-    const parsed = JSON.parse(raw) as DisappearSystemPayload;
+    const parsed = JSON.parse(raw) as ChatSystemPayload;
     if (parsed?.kind === "disappear_timer") return parsed;
+    if (parsed?.kind === "promoted_admin" && typeof parsed.targetUserId === "number") return parsed;
   } catch {
     /* ignore */
   }
   return null;
+}
+
+export function formatPromotedAdminMessage(text: string, viewerUserId?: number): string | null {
+  const payload = parseChatSystemPayload(text);
+  if (payload?.kind !== "promoted_admin") return null;
+  if (viewerUserId != null && viewerUserId === payload.targetUserId) return "You're now an admin";
+  const name = payload.targetUserName?.trim();
+  return name ? `${name} is now an admin` : "A member is now an admin";
 }
 
 function disappearDurationPhrase(seconds: number): string {
@@ -46,6 +62,9 @@ export function formatMessageBody(
 
   const disappear = formatDisappearSystemMessage(text);
   if (disappear) return disappear;
+
+  const admin = formatPromotedAdminMessage(text);
+  if (admin) return admin;
 
   if (type === "system") return text || "System message";
 
