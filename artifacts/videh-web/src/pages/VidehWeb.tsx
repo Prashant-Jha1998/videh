@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Copy, Forward, MessageSquarePlus, MoreVertical, Search, Star, Trash2, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import "../components/web/webShell.css";
@@ -565,6 +565,25 @@ export default function VidehWeb() {
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     : [];
   const activeChat = chats.find((c) => c.id === activeChatId);
+  const pickerExtraContacts = useMemo(() => {
+    const byId = new Map<number, ChatMember>();
+    for (const chat of chats) {
+      if (chat.is_group) continue;
+      for (const m of chat.other_members ?? []) {
+        if (!byId.has(m.id)) {
+          byId.set(m.id, {
+            id: m.id,
+            name: m.name,
+            phone: m.phone,
+            about: m.about,
+            avatar_url: m.avatar_url,
+            is_online: m.is_online,
+          });
+        }
+      }
+    }
+    return [...byId.values()];
+  }, [chats]);
   const chatSearchLower = chatSearchQuery.trim().toLowerCase();
   const displayMessages = chatSearchLower
     ? messages.filter((m) => {
@@ -827,6 +846,7 @@ export default function VidehWeb() {
           onGroupNext={() => setSidebarView("group-name")}
           onCreateGroup={createGroupChat}
           busy={groupBusy}
+          extraContacts={pickerExtraContacts}
         />
       ) : mainSection === "status" ? (
         <WebStatusPanel
@@ -1318,7 +1338,19 @@ export default function VidehWeb() {
       )}
 
       {showContactInfo && user && token && (
-        <WebContactInfo token={token} self={user} chatId={contactInfoChatId} onClose={() => setShowContactInfo(false)} onSaveProfile={saveProfile} onMuteToggle={contactInfoChatId ? () => toggleMute() : undefined} />
+        <WebContactInfo
+          token={token}
+          self={user}
+          chatId={contactInfoChatId}
+          chatPreview={
+            contactInfoChatId != null
+              ? chats.find((c) => c.id === contactInfoChatId) ?? (activeChatId === contactInfoChatId ? activeChat : null)
+              : null
+          }
+          onClose={() => setShowContactInfo(false)}
+          onSaveProfile={saveProfile}
+          onMuteToggle={contactInfoChatId ? () => toggleMute() : undefined}
+        />
       )}
       </div>
       {statusViewerUserId != null && viewingStatuses.length > 0 && (

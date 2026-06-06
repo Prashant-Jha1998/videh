@@ -641,6 +641,13 @@
 .vw-msg-wrap {
   position: relative;
   margin-bottom: 1px;
+  overflow: visible;
+}
+
+.vw-msg-wrap--actions-open .vw-msg-emoji-btn,
+.vw-msg-wrap--actions-open .vw-msg-bubble__chevron--float {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .vw-msg-select-row {
@@ -675,16 +682,14 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
 }
 
 .vw-msg-hover-zone {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 8px;
-  max-width: min(75%, 420px);
+  position: relative;
+  display: block;
   width: fit-content;
+  max-width: min(75%, 420px);
   flex-shrink: 0;
 }
 
 .vw-msg-hover-zone--sent {
-  flex-direction: row-reverse;
   margin-left: auto;
 }
 
@@ -692,16 +697,31 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
   margin-right: auto;
 }
 
-.vw-msg-hover-zone .vw-msg-bubble {
-  flex-shrink: 0;
+.vw-msg-bubble-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+}
+
+.vw-msg-bubble-wrap .vw-msg-bubble {
   min-width: 48px;
   max-width: min(75vw, 420px);
 }
 
 .vw-msg-side-action {
-  position: relative;
-  flex-shrink: 0;
-  margin-bottom: 4px;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 4;
+}
+
+.vw-msg-bubble-wrap--sent .vw-msg-side-action {
+  left: -40px;
+}
+
+.vw-msg-bubble-wrap--recv .vw-msg-side-action {
+  right: -40px;
 }
 
 .vw-msg-emoji-btn {
@@ -717,14 +737,14 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
   justify-content: center;
   cursor: pointer;
   opacity: 0;
-  transform: scale(0.92);
-  transition: opacity 0.12s ease, transform 0.12s ease;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
 }
 
 .vw-msg-wrap:hover .vw-msg-emoji-btn,
 .vw-msg-emoji-btn:focus-visible {
   opacity: 1;
-  transform: scale(1);
+  pointer-events: auto;
 }
 
 .vw-msg-reaction-picker {
@@ -742,7 +762,7 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
   z-index: 5;
 }
 
-.vw-msg-hover-zone--sent .vw-msg-reaction-picker {
+.vw-msg-bubble-wrap--sent .vw-msg-reaction-picker {
   left: auto;
   right: 0;
   transform: none;
@@ -762,21 +782,42 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
   background: rgba(0, 0, 0, 0.06);
 }
 
-.vw-msg-bubble__chevron {
+.vw-msg-bubble__chevron--float {
+  position: absolute;
+  top: 2px;
+  z-index: 5;
+  width: 28px;
+  height: 28px;
   border: none;
-  background: none;
-  padding: 0;
-  margin: 0 0 0 2px;
-  color: inherit;
-  opacity: 0.75;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.94);
+  color: #54656f;
+  box-shadow: 0 1px 4px rgba(11, 20, 26, 0.16);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  vertical-align: middle;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
 }
 
-.vw-msg-bubble__chevron:hover {
+.vw-msg-bubble-wrap--sent .vw-msg-bubble__chevron--float {
+  right: 4px;
+}
+
+.vw-msg-bubble-wrap--recv .vw-msg-bubble__chevron--float {
+  left: 4px;
+}
+
+.vw-msg-wrap:hover .vw-msg-bubble__chevron--float,
+.vw-msg-bubble__chevron--float:focus-visible {
   opacity: 1;
+  pointer-events: auto;
+}
+
+.vw-msg-bubble__chevron--float:hover {
+  background: #fff;
 }
 
 .vw-msg-bubble__forwarded {

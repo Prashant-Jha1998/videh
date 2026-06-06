@@ -104,6 +104,9 @@ export default function LinkedDevicesScreen() {
         setScanning(false);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         await loadDevices();
+        void import("@/lib/syncContactsToServer").then(({ syncDeviceContactsToServer }) =>
+          syncDeviceContactsToServer(BASE_URL, user?.sessionToken).catch(() => 0),
+        );
       } else {
         throw new Error(result.message ?? "Link failed");
       }

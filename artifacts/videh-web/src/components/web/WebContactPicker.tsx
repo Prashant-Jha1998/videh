@@ -4,6 +4,20 @@ import { Avatar, groupContactsByLetter, WA_BG, WA_GREEN, WA_MUTED, WA_TEXT } fro
 
 export type ContactPickerMode = "direct" | "group-members" | "group-name";
 
+const EMPTY_EXTRA_CONTACTS: ChatMember[] = [];
+
+function mergeContactLists(primary: ChatMember[], extra: ChatMember[]): ChatMember[] {
+  const byId = new Map<number, ChatMember>();
+  for (const u of primary) byId.set(Number(u.id), u);
+  for (const u of extra) {
+    const id = Number(u.id);
+    if (!byId.has(id)) byId.set(id, u);
+  }
+  return [...byId.values()].sort((a, b) =>
+    (a.name ?? a.phone ?? "").localeCompare(b.name ?? b.phone ?? "", undefined, { sensitivity: "base" }),
+  );
+}
+
 export function WebContactPicker({
   token,
   mode,
@@ -16,6 +30,7 @@ export function WebContactPicker({
   onGroupNext,
   onCreateGroup,
   busy,
+  extraContacts,
 }: {
   token: string;
   mode: ContactPickerMode;
@@ -28,10 +43,12 @@ export function WebContactPicker({
   onGroupNext: () => void;
   onCreateGroup: () => void;
   busy?: boolean;
+  extraContacts?: ChatMember[];
 }) {
   const [query, setQuery] = useState("");
   const [users, setUsers] = useState<ChatMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const mergedExtras = extraContacts ?? EMPTY_EXTRA_CONTACTS;
 
   useEffect(() => {
     let cancelled = false;
@@ -42,9 +59,11 @@ export function WebContactPicker({
         const res = q.length > 0
           ? await webApi.searchUsers(token, q)
           : await webApi.contacts(token);
-        if (!cancelled) setUsers(res.users);
+        if (!cancelled) {
+          setUsers(query.trim() ? res.users : mergeContactLists(res.users, mergedExtras));
+        }
       } catch {
-        if (!cancelled) setUsers([]);
+        if (!cancelled) setUsers(query.trim() ? [] : mergeContactLists([], mergedExtras));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -54,7 +73,7 @@ export function WebContactPicker({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [token, query]);
+  }, [token, query, mergedExtras]);
 
   const title =
     mode === "direct" ? "New chat" : mode === "group-members" ? "Add group members" : "New group";

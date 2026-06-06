@@ -33,9 +33,8 @@ export async function loadVidehContacts(
   const { status: perm } = await Contacts.requestPermissionsAsync();
   if (perm !== "granted") return [];
 
-  const { data } = await Contacts.getContactsAsync({
-    fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
-  });
+  const { loadAllDeviceContacts, checkPhonesRegistered } = await import("@/lib/deviceContacts");
+  const data = await loadAllDeviceContacts();
 
   const seen = new Set<string>();
   const deviceContacts: { id: string; name: string; phone: string; normalizedPhone: string }[] = [];
@@ -53,18 +52,7 @@ export async function loadVidehContacts(
   const phones = [...seen];
   if (phones.length === 0) return [];
 
-  const res = await fetch(`${apiUrl}/api/users/check-phones`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
-    },
-    body: JSON.stringify({ phones }),
-  });
-  if (res.status === 401 || res.status === 429) return [];
-  const json = await res.json();
-  const registered: Record<string, { id: number; name?: string; about?: string; avatarUrl?: string }> =
-    json.registered ?? {};
+  const registered = await checkPhonesRegistered(apiUrl, phones, sessionToken);
 
   const onVideh: VidehContact[] = [];
   for (const c of deviceContacts) {

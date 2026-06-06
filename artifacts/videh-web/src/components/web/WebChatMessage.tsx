@@ -204,7 +204,7 @@ export function WebChatMessage({
 
   return (
     <div
-      className={`vw-msg-wrap${isMe ? " vw-msg-wrap--sent" : " vw-msg-wrap--recv"}${selectionMode ? " vw-msg-wrap--selecting" : ""}${isSelected ? " vw-msg-wrap--selected" : ""}`}
+      className={`vw-msg-wrap${isMe ? " vw-msg-wrap--sent" : " vw-msg-wrap--recv"}${selectionMode ? " vw-msg-wrap--selecting" : ""}${isSelected ? " vw-msg-wrap--selected" : ""}${menuOpen || reactionOpen ? " vw-msg-wrap--actions-open" : ""}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => {
         setHovered(false);
@@ -228,38 +228,54 @@ export function WebChatMessage({
 
         <div className={`vw-msg-content${isMe ? " vw-msg-content--sent" : " vw-msg-content--recv"}`}>
           <div className={`vw-msg-hover-zone${isMe ? " vw-msg-hover-zone--sent" : " vw-msg-hover-zone--recv"}`}>
-            {showHoverActions ? (
-              <div className="vw-msg-side-action" ref={reactionRef}>
-                <button
-                  type="button"
-                  className="vw-msg-emoji-btn"
-                  title="React"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setReactionOpen((o) => !o);
-                    setMenuOpen(false);
-                  }}
-                >
-                  <Smile size={18} strokeWidth={1.75} />
-                </button>
-                {reactionOpen ? (
-                  <div className="vw-msg-reaction-picker">
-                    {QUICK_REACTIONS.map((emoji) => (
-                      <button key={emoji} type="button" className="vw-msg-reaction-picker__emoji" onClick={() => void react(emoji)}>
-                        {emoji}
-                      </button>
-                    ))}
+            <div className={`vw-msg-bubble-wrap${isMe ? " vw-msg-bubble-wrap--sent" : " vw-msg-bubble-wrap--recv"}`}>
+              {showHoverActions ? (
+                <>
+                  <div className="vw-msg-side-action" ref={reactionRef}>
+                    <button
+                      type="button"
+                      className="vw-msg-emoji-btn"
+                      title="React"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setReactionOpen((o) => !o);
+                        setMenuOpen(false);
+                      }}
+                    >
+                      <Smile size={18} strokeWidth={1.75} />
+                    </button>
+                    {reactionOpen ? (
+                      <div className="vw-msg-reaction-picker">
+                        {QUICK_REACTIONS.map((emoji) => (
+                          <button key={emoji} type="button" className="vw-msg-reaction-picker__emoji" onClick={() => void react(emoji)}>
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
-            ) : null}
+                  <button
+                    ref={menuBtnRef}
+                    type="button"
+                    className="vw-msg-bubble__chevron vw-msg-bubble__chevron--float"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpen((o) => !o);
+                      setReactionOpen(false);
+                    }}
+                    aria-label="Message options"
+                  >
+                    <ChevronDown size={15} strokeWidth={2} />
+                  </button>
+                </>
+              ) : null}
 
-            <div
-              className={bubbleClass}
-              onClick={handleRowClick}
-              onDoubleClick={handleDoubleClick}
-              role={selectionMode ? "button" : undefined}
-            >
+              <div
+                className={bubbleClass}
+                onClick={handleRowClick}
+                onDoubleClick={handleDoubleClick}
+                role={selectionMode ? "button" : undefined}
+              >
               {msg.is_forwarded ? <div className="vw-msg-bubble__forwarded">Forwarded</div> : null}
               {msg.reply_to_id && (msg.reply_content || msg.reply_sender_name) ? (
                 <div className={`vw-msg-bubble__quote${isMe ? " vw-msg-bubble__quote--sent" : ""}`}>
@@ -303,24 +319,11 @@ export function WebChatMessage({
               ) : null}
               <div className={`vw-msg-bubble__meta${isVisualMedia && !showBodyText && !callMeta ? " vw-msg-bubble__meta--overlay" : ""}`}>
                 <span>{formatTime(msg.created_at)}</span>
-                {!showHoverActions && msg.is_starred ? <Star size={11} fill="#f59e0b" color="#f59e0b" /> : null}
-                {showHoverActions ? (
-                  <button
-                    ref={menuBtnRef}
-                    type="button"
-                    className="vw-msg-bubble__chevron"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMenuOpen((o) => !o);
-                      setReactionOpen(false);
-                    }}
-                    aria-label="Message options"
-                  >
-                    <ChevronDown size={15} strokeWidth={2} />
-                  </button>
-                ) : isMe ? (
+                {msg.is_starred ? <Star size={11} fill="#f59e0b" color="#f59e0b" /> : null}
+                {isMe ? (
                   <svg viewBox="0 0 16 11" width="16" height="11" fill="#53bdeb" aria-hidden><path d="M11.071.653a.45.45 0 0 0-.641 0L4.5 6.582 1.571 3.653a.45.45 0 0 0-.641.642l3.25 3.25a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/><path d="M15.071.653a.45.45 0 0 0-.641 0L8.5 6.582 7.071 5.153a.45.45 0 0 0-.641.642l1.75 1.75a.45.45 0 0 0 .641 0l6.25-6.25a.45.45 0 0 0 0-.642z"/></svg>
                 ) : null}
+              </div>
               </div>
             </div>
           </div>

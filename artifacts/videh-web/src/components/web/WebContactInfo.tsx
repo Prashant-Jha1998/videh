@@ -1,12 +1,19 @@
-import { useEffect, useState, type CSSProperties } from "react";
-import { webApi, type ChatDetails, type WebUser } from "../../lib/webApi";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { webApi, type ChatDetails, type ChatEntry, type ChatMember, type WebUser } from "../../lib/webApi";
 import { WEB_CONTACT_PANEL_WIDTH } from "../../lib/webDesktop";
 import { Avatar, WA_BG, WA_GREEN, WA_MUTED, WA_TEXT } from "./webUiShared";
+
+function findOtherMember(members: ChatMember[] | undefined, selfId: number): ChatMember | undefined {
+  if (!members?.length) return undefined;
+  const self = Number(selfId);
+  return members.find((m) => Number(m.id) !== self);
+}
 
 export function WebContactInfo({
   token,
   self,
   chatId,
+  chatPreview,
   onClose,
   onSaveProfile,
   onMuteToggle,
@@ -14,6 +21,7 @@ export function WebContactInfo({
   token: string;
   self: WebUser;
   chatId: number | null;
+  chatPreview?: ChatEntry | null;
   onClose: () => void;
   onSaveProfile: (name: string, about: string) => Promise<void>;
   onMuteToggle?: (muted: boolean) => void;
@@ -38,20 +46,30 @@ export function WebContactInfo({
     setLoading(true);
     webApi
       .details(token, chatId)
-      .then((d) => setDetails(d))
+      .then((d) => setDetails({ chat: d.chat, members: d.members ?? [] }))
       .catch(() => setDetails(null))
       .finally(() => setLoading(false));
   }, [token, chatId, isSelf, self.name, self.about]);
 
-  const other = !isSelf ? details?.members?.find((m) => m.id !== self.id) : undefined;
+  const previewOther = chatPreview?.other_members?.[0];
+  const other = useMemo(() => {
+    if (isSelf) return undefined;
+    return findOtherMember(details?.members, self.id) ?? previewOther;
+  }, [isSelf, details?.members, self.id, previewOther]);
+
+  const isGroup = details?.chat?.is_group ?? chatPreview?.is_group ?? false;
   const displayName = isSelf
     ? self.name
-    : details?.chat?.is_group
-      ? details.chat.group_name ?? "Group"
-      : other?.name ?? "Contact";
-  const avatarUrl = isSelf ? self.avatarUrl : other?.avatar_url ?? details?.chat?.group_avatar_url;
-  const phone = isSelf ? self.phone : other?.phone;
-  const aboutText = isSelf ? about : other?.about;
+    : isGroup
+      ? details?.chat?.group_name ?? chatPreview?.group_name ?? "Group"
+      : other?.name ?? previewOther?.name ?? "Contact";
+  const avatarUrl = isSelf
+    ? self.avatarUrl
+    : isGroup
+      ? details?.chat?.group_avatar_url ?? chatPreview?.group_avatar_url
+      : other?.avatar_url ?? previewOther?.avatar_url;
+  const phone = isSelf ? self.phone : other?.phone ?? previewOther?.phone;
+  const aboutText = isSelf ? about : other?.about ?? previewOther?.about;
 
   return (
     <div
@@ -189,7 +207,7 @@ export function WebContactInfo({
             </div>
 
             {aboutText && !editing && <Row label="About" value={aboutText} />}
-            {!isSelf && details?.chat?.is_group && (
+            {!isSelf && isGroup && details?.members && (
               <Row label="Members" value={`${details.members.length} participants`} />
             )}
             {!isSelf && onMuteToggle && (

@@ -447,14 +447,41 @@ router.post("/check-phones", requireAuth, async (req: Request, res: Response) =>
     return;
   }
   try {
-    const placeholders = phones.map((_: string, i: number) => `$${i + 1}`).join(", ");
+    const inputByDigits = new Map<string, string>();
+    for (const raw of phones) {
+      const digits = String(raw ?? "").replace(/\D/g, "");
+      if (digits.length >= 10) inputByDigits.set(digits, raw);
+    }
+    const digitList = [...inputByDigits.keys()];
+    if (digitList.length === 0) {
+      res.json({ success: true, registered: {} });
+      return;
+    }
+
     const result = await query(
-      `SELECT id, phone, name, about, avatar_url FROM users WHERE phone = ANY(ARRAY[${placeholders}])`,
-      phones
+      `SELECT id, phone, name, about, avatar_url,
+              regexp_replace(phone, '[^0-9]', '', 'g') AS phone_digits
+       FROM users
+       WHERE regexp_replace(phone, '[^0-9]', '', 'g') = ANY($1::text[])`,
+      [digitList],
     );
-    const registered: Record<string, any> = {};
+
+    const byDigits = new Map<string, (typeof result.rows)[0]>();
     for (const row of result.rows) {
-      registered[row.phone] = {
+      byDigits.set(String(row.phone_digits), row);
+    }
+
+    const registered: Record<string, {
+      id: number;
+      phone: string;
+      name: string;
+      about: string | null;
+      avatarUrl: string | null;
+    }> = {};
+    for (const [digits, inputPhone] of inputByDigits) {
+      const row = byDigits.get(digits);
+      if (!row) continue;
+      registered[inputPhone] = {
         id: row.id,
         phone: row.phone,
         name: row.name ?? row.phone,

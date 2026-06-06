@@ -30,19 +30,34 @@ function blockedClause(userIdParam: string): string {
 
 type ContactRow = { id: number; phone: string; name: string; avatar_url: string | null; about: string | null };
 
+function phoneDigits(column: string): string {
+  return `regexp_replace(${column}, '[^0-9]', '', 'g')`;
+}
+
 /** Phone-synced Videh users + people you already chat with (WhatsApp Web style). */
 export async function listVidehContactsForUser(userId: number): Promise<ContactRow[]> {
   await ensureUserSyncedContactsTable();
 
   const synced = await query(
     `SELECT u.id, u.phone,
-            COALESCE(NULLIF(TRIM(sc.display_name), ''), u.name, u.phone) AS name,
+            COALESCE(
+              (SELECT NULLIF(TRIM(sc.display_name), '')
+               FROM user_synced_contacts sc
+               WHERE sc.user_id = $1
+                 AND ${phoneDigits("sc.phone")} = ${phoneDigits("u.phone")}
+               LIMIT 1),
+              u.name, u.phone
+            ) AS name,
             u.avatar_url, u.about
-     FROM user_synced_contacts sc
-     JOIN users u ON u.phone = sc.phone
-     WHERE sc.user_id = $1 AND u.id != $1 AND ${blockedClause("$1")}
+     FROM users u
+     WHERE u.id != $1 AND ${blockedClause("$1")}
+       AND ${phoneDigits("u.phone")} IN (
+         SELECT ${phoneDigits("sc.phone")}
+         FROM user_synced_contacts sc
+         WHERE sc.user_id = $1
+       )
      ORDER BY name ASC NULLS LAST
-     LIMIT 500`,
+     LIMIT 2000`,
     [userId],
   );
 
@@ -56,11 +71,13 @@ export async function listVidehContactsForUser(userId: number): Promise<ContactR
          JOIN chat_members cm_other ON cm_other.chat_id = cm_self.chat_id AND cm_other.user_id != cm_self.user_id
          WHERE cm_self.user_id = $1
        )
-       AND u.phone NOT IN (
-         SELECT sc.phone FROM user_synced_contacts sc WHERE sc.user_id = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM user_synced_contacts sc
+         WHERE sc.user_id = $1
+           AND ${phoneDigits("sc.phone")} = ${phoneDigits("u.phone")}
        )
      ORDER BY name ASC NULLS LAST
-     LIMIT 200`,
+     LIMIT 500`,
     [userId],
   );
 

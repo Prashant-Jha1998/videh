@@ -1,7 +1,7 @@
-import * as Contacts from "expo-contacts";
 import { Platform } from "react-native";
+import * as Contacts from "expo-contacts";
 import { jsonAuthHeaders } from "@/lib/authHeaders";
-import { normalizePhone } from "@/lib/videhContacts";
+import { deviceContactsToPhoneEntries, loadAllDeviceContacts } from "@/lib/deviceContacts";
 
 /** Upload device address book to server so Videh Web can show contacts (WhatsApp-style). */
 export async function syncDeviceContactsToServer(
@@ -13,23 +13,8 @@ export async function syncDeviceContactsToServer(
   const { status } = await Contacts.requestPermissionsAsync();
   if (status !== "granted") return 0;
 
-  const { data } = await Contacts.getContactsAsync({
-    fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
-  });
-
-  const payload: Array<{ phone: string; name: string }> = [];
-  const seen = new Set<string>();
-
-  for (const c of data) {
-    if (!c.name || !c.phoneNumbers?.length) continue;
-    for (const pn of c.phoneNumbers) {
-      const norm = normalizePhone(pn.number ?? "");
-      if (norm.length < 10 || seen.has(norm)) continue;
-      seen.add(norm);
-      payload.push({ phone: norm, name: c.name });
-    }
-  }
-
+  const data = await loadAllDeviceContacts();
+  const payload = deviceContactsToPhoneEntries(data);
   if (payload.length === 0) return 0;
 
   const res = await fetch(`${apiUrl}/api/users/sync-contacts`, {

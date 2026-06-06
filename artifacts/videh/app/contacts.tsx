@@ -90,9 +90,8 @@ export default function ContactsScreen() {
       return;
     }
 
-    const { data } = await Contacts.getContactsAsync({
-      fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
-    });
+    const { loadAllDeviceContacts, checkPhonesRegistered } = await import("@/lib/deviceContacts");
+    const data = await loadAllDeviceContacts();
 
     const seen = new Set<string>();
     const deviceContacts: DeviceContact[] = [];
@@ -118,13 +117,7 @@ export default function ContactsScreen() {
     }
 
     try {
-      const res = await fetch(`${getApiUrl()}/api/users/check-phones`, {
-        method: "POST",
-        headers: jsonAuthHeaders(user?.sessionToken),
-        body: JSON.stringify({ phones }),
-      });
-      const json = await res.json();
-      const registered: Record<string, any> = json.registered ?? {};
+      const registered = await checkPhonesRegistered(getApiUrl(), phones, user?.sessionToken);
 
       const myPhone = user?.phone ?? "";
       const onVideh: VidehContact[] = [];
