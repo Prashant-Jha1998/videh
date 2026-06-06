@@ -9,6 +9,7 @@ import { WebContactPicker, type ContactPickerMode } from "../components/web/WebC
 import { WebContactInfo } from "../components/web/WebContactInfo";
 import { WebChatImage, WebChatVideo } from "../components/web/WebChatMedia";
 import { WebStatusPanel } from "../components/web/WebStatusPanel";
+import { WebStatusDetailPane } from "../components/web/WebStatusDetailPane";
 import { WebStarredPanel } from "../components/web/WebStarredPanel";
 import { WebFilterChips } from "../components/web/WebFilterChips";
 import { WebEmptyPane } from "../components/web/WebEmptyPane";
@@ -83,6 +84,8 @@ export default function VidehWeb() {
   const [groupName, setGroupName] = useState("");
   const [groupBusy, setGroupBusy] = useState(false);
   const [statusViewerUserId, setStatusViewerUserId] = useState<number | null>(null);
+  const [statusDetailUserId, setStatusDetailUserId] = useState<number | null>(null);
+  const [statusComposeOpen, setStatusComposeOpen] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
@@ -318,6 +321,12 @@ export default function VidehWeb() {
   }, [statusFeed]);
 
   const openStatusViewer = useCallback(async (userId: number) => {
+    if (userId === user?.id) {
+      setStatusDetailUserId(userId);
+      setStatusViewerUserId(null);
+      return;
+    }
+    setStatusDetailUserId(null);
     setStatusViewerUserId(userId);
     if (!token) return;
     const items = statusFeed.filter((s) => s.user_id === userId && !s.viewed);
@@ -327,7 +336,19 @@ export default function VidehWeb() {
       } catch {}
     }
     if (items.length > 0) loadStatuses(token);
-  }, [token, statusFeed, loadStatuses]);
+  }, [token, statusFeed, loadStatuses, user?.id]);
+
+  const myStatuses = statusFeed.filter((s) => s.user_id === user?.id);
+
+  useEffect(() => {
+    if (mainSection === "status" && user && myStatuses.length > 0) {
+      setStatusDetailUserId(user.id);
+    }
+    if (mainSection !== "status") {
+      setStatusDetailUserId(null);
+      setStatusViewerUserId(null);
+    }
+  }, [mainSection, user, myStatuses.length]);
 
   useEffect(() => {
     try {
@@ -451,7 +472,9 @@ export default function VidehWeb() {
     : null;
 
   const viewingStatuses = statusViewerUserId != null
-    ? statusFeed.filter((s) => s.user_id === statusViewerUserId)
+    ? statusFeed
+        .filter((s) => s.user_id === statusViewerUserId)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     : [];
   const activeChat = chats.find((c) => c.id === activeChatId);
   const chatSearchLower = chatSearchQuery.trim().toLowerCase();
@@ -629,7 +652,14 @@ export default function VidehWeb() {
           selfName={user!.name}
           selfAvatar={user?.avatarUrl}
           onSelectUser={openStatusViewer}
-          onRefresh={() => token && loadStatuses(token)}
+          onRefresh={() => {
+            if (token) {
+              void loadStatuses(token);
+              setStatusDetailUserId(user!.id);
+            }
+          }}
+          composeOpen={statusComposeOpen}
+          onComposeOpenChange={setStatusComposeOpen}
         />
       ) : mainSection === "starred" ? (
         <WebStarredPanel messages={starredMessages} onClose={() => setMainSection("chats")} onOpenChat={openChatById} />
@@ -1001,6 +1031,15 @@ export default function VidehWeb() {
             </button>
           </div>
         </div>
+      ) : mainSection === "status" && statusDetailUserId === user?.id && myStatuses.length > 0 && token ? (
+        <WebStatusDetailPane
+          token={token}
+          selfName={user!.name}
+          selfAvatar={user?.avatarUrl}
+          statuses={myStatuses}
+          onRefresh={() => void loadStatuses(token)}
+          onAddStatus={() => setStatusComposeOpen(true)}
+        />
       ) : mainSection === "settings" && user && token && settingsSection ? (
         <WebSettingsDetail
           section={settingsSection}

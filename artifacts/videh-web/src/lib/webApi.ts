@@ -214,6 +214,29 @@ export const webApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
+  statusViewers: (token: string, statusId: number) =>
+    request<{
+      success: true;
+      viewers: Array<{ id: number; name: string; avatar?: string; viewed_at: string; reaction?: string }>;
+      viewCount: number;
+      reactions: Record<string, number>;
+    }>(`/web-session/${token}/statuses/${statusId}/viewers`),
+  deleteStatus: (token: string, statusId: number) =>
+    request<{ success: true }>(`/web-session/${token}/statuses/${statusId}`, { method: "DELETE" }),
+  statusBoostQuote: (params: { durationDays: number; radiusKm: number; targetCity?: string; targetState?: string }) => {
+    const qs = new URLSearchParams({
+      durationDays: String(params.durationDays),
+      radiusKm: String(params.radiusKm),
+    });
+    if (params.targetCity?.trim()) qs.set("targetCity", params.targetCity.trim());
+    if (params.targetState?.trim()) qs.set("targetState", params.targetState.trim());
+    return request<{
+      success: true;
+      plan: { amountInr: number; durationDays: number; radiusKm: number; estimatedReach: number };
+      razorpayKeyId: string | null;
+      note: string;
+    }>(`/statuses/boost/quote?${qs.toString()}`);
+  },
   starredMessages: (token: string) =>
     request<{ success: true; messages: StarredMessage[] }>(`/web-session/${token}/starred`),
   callLogs: (token: string) =>

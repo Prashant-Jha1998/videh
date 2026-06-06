@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Camera, PenLine, X } from "lucide-react";
 import { webApi, type WebStatus } from "../../lib/webApi";
-import { Avatar, WA_BG, WA_MUTED, WA_TEXT } from "./webUiShared";
+import { Avatar } from "./webUiShared";
 
 const TEXT_BG_COLORS = [
   "#00A884", "#128C7E", "#075E54", "#2563EB", "#7C3AED", "#DB2777",
@@ -176,6 +176,8 @@ export function WebStatusPanel({
   selfAvatar,
   onSelectUser,
   onRefresh,
+  composeOpen: composeOpenProp,
+  onComposeOpenChange,
 }: {
   token: string;
   statuses: WebStatus[];
@@ -184,8 +186,12 @@ export function WebStatusPanel({
   selfAvatar?: string;
   onSelectUser: (userId: number) => void;
   onRefresh: () => void;
+  composeOpen?: boolean;
+  onComposeOpenChange?: (open: boolean) => void;
 }) {
-  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeOpenLocal, setComposeOpenLocal] = useState(false);
+  const composeOpen = composeOpenProp ?? composeOpenLocal;
+  const setComposeOpen = onComposeOpenChange ?? setComposeOpenLocal;
   const myStatuses = statuses.filter((s) => s.user_id === selfId);
   const byUser = (() => {
     const map = new Map<number, WebStatus[]>();
@@ -227,6 +233,7 @@ export function WebStatusPanel({
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
               if (myStatuses.length) onSelectUser(selfId);
               else setComposeOpen(true);
             }

@@ -1037,6 +1037,75 @@ router.post("/:token/statuses", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/:token/statuses/:statusId/viewers", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const statusId = parseInt(routeParam(req.params.statusId), 10);
+  if (isNaN(statusId)) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  try {
+    const owner = await query(
+      "SELECT user_id FROM statuses WHERE id = $1 AND expires_at > NOW()",
+      [statusId],
+    );
+    if (!owner.rows[0] || Number(owner.rows[0].user_id) !== session.userId) {
+      res.status(403).json({ success: false, message: "Only the status owner can see viewers." });
+      return;
+    }
+    const result = await query(
+      `SELECT
+        u.id, u.name, u.avatar_url AS avatar,
+        sv.viewed_at,
+        sr.emoji AS reaction
+      FROM status_views sv
+      JOIN users u ON u.id = sv.viewer_id
+      LEFT JOIN status_reactions sr ON sr.status_id = sv.status_id AND sr.user_id = sv.viewer_id
+      WHERE sv.status_id = $1
+      ORDER BY sv.viewed_at DESC`,
+      [statusId],
+    );
+    const reactionMap: Record<string, number> = {};
+    for (const row of result.rows as Array<{ reaction?: string }>) {
+      if (row.reaction) reactionMap[row.reaction] = (reactionMap[row.reaction] ?? 0) + 1;
+    }
+    res.json({
+      success: true,
+      viewers: result.rows,
+      viewCount: result.rows.length,
+      reactions: reactionMap,
+    });
+  } catch (err) {
+    req.log.error({ err }, "web status viewers");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.delete("/:token/statuses/:statusId", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const statusId = parseInt(routeParam(req.params.statusId), 10);
+  if (isNaN(statusId)) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  try {
+    const result = await query(
+      "DELETE FROM statuses WHERE id = $1 AND user_id = $2 RETURNING id",
+      [statusId, session.userId],
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ success: false, message: "Status not found." });
+      return;
+    }
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "web status delete");
+    res.status(500).json({ success: false });
+  }
+});
+
 router.get("/:token/calls", async (req: Request, res: Response) => {
   const session = await requireLinkedSession(req, res);
   if (!session) return;
