@@ -794,17 +794,121 @@
   font-size: 0.875rem;
 }
 
+.vw-msg-wrap--selecting {
+  cursor: pointer;
+}
+
+.vw-msg-wrap--selected .vw-msg-bubble {
+  outline: 2px solid rgba(0, 168, 132, 0.45);
+}
+
+.vw-msg-check {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin: 8px 10px 0 4px;
+  border: 2px solid #8696a0;
+  border-radius: 4px;
+  background: var(--vw-surface, #fff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #fff;
+  padding: 0;
+  order: -1;
+}
+
+.vw-msg-check--on {
+  background: #00a884;
+  border-color: #00a884;
+}
+
 .vw-msg-row {
   display: flex;
+  align-items: flex-start;
   margin-bottom: 0;
 }
 
-.vw-msg-row--sent {
-  justify-content: flex-end;
+.vw-msg-wrap--selecting .vw-msg-row {
+  width: 100%;
+  justify-content: flex-start;
 }
 
-.vw-msg-row--recv {
-  justify-content: flex-start;
+.vw-msg-wrap--selecting .vw-msg-row--sent .vw-msg-bubble {
+  margin-left: auto;
+}
+
+.vw-chat__header--selection {
+  background: #00a884;
+  color: #fff;
+}
+
+.vw-chat__header--selection .vw-chat__header-name {
+  color: #fff;
+}
+
+.vw-chat__header--selection .vw-icon-btn {
+  color: #fff;
+}
+
+.vw-selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #1f2c34;
+  color: #e9edef;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.vw-selection-bar__close {
+  border: none;
+  background: none;
+  color: #aebac1;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.vw-selection-bar__count {
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.vw-selection-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vw-selection-bar__action {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e9edef;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.vw-selection-bar__action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.vw-selection-bar__action:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.vw-selection-bar__action--danger:hover:not(:disabled) {
+  background: rgba(234, 67, 53, 0.25);
+  color: #ff8a80;
 }
 
 .vw-msg-bubble {

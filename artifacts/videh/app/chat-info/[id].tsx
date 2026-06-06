@@ -136,6 +136,8 @@ export default function ChatInfoScreen() {
   const router = useRouter();
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
   const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, reportUser, createDirectChat } = useApp();
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
   const authedJsonHeaders = useCallback(() => ({
     "Content-Type": "application/json",
     ...(user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
@@ -377,7 +379,7 @@ export default function ChatInfoScreen() {
       try {
         if (Platform.OS === "web") {
           const { chatsToWebMembers } = await import("@/lib/web/webContacts");
-          const candidates = chatsToWebMembers(chats, user?.dbId)
+          const candidates = chatsToWebMembers(chatsRef.current, user?.dbId)
             .filter((m) => !members.some((gm) => gm.id === m.id))
             .map((m) => ({ id: `videh_${m.id}`, name: m.name, phone: m.phone ?? "" }));
           if (!cancelled) setAddPickRows(candidates);
@@ -403,7 +405,7 @@ export default function ChatInfoScreen() {
     return () => {
       cancelled = true;
     };
-  }, [addMemberModal, chats, members, user?.dbId]);
+  }, [addMemberModal, members, user?.dbId]);
 
   const addPickFiltered = useMemo(() => {
     const q = searchPhone.trim().toLowerCase();

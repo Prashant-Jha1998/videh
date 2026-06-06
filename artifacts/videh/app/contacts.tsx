@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Contacts from "expo-contacts";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -50,15 +50,22 @@ export default function ContactsScreen() {
   const { chats, user } = useApp();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "denied" | "done">("idle");
+  const [refreshing, setRefreshing] = useState(false);
   const [videhContacts, setVidehContacts] = useState<VidehContact[]>([]);
   const [inviteContacts, setInviteContacts] = useState<DeviceContact[]>([]);
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
+  const hasContactsRef = useRef(false);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const loadContacts = useCallback(async () => {
-    setStatus("loading");
+  const loadContacts = useCallback(async (opts?: { manual?: boolean }) => {
+    const showFullLoader = !hasContactsRef.current;
+    if (showFullLoader) setStatus("loading");
+    else if (opts?.manual) setRefreshing(true);
+
     if (Platform.OS === "web") {
-      const { chatsToWebMembers, searchUsersByPhoneWeb } = await import("@/lib/web/webContacts");
-      const fromChats = chatsToWebMembers(chats, user?.dbId).map((m) => ({
+      const { chatsToWebMembers } = await import("@/lib/web/webContacts");
+      const fromChats = chatsToWebMembers(chatsRef.current, user?.dbId).map((m) => ({
         id: `videh_${m.id}`,
         name: m.name,
         phone: m.phone ?? "",
@@ -68,31 +75,20 @@ export default function ContactsScreen() {
         about: m.about ?? undefined,
         avatarUrl: m.avatarUrl,
       }));
-      if (search.trim().length >= 3) {
-        const found = await searchUsersByPhoneWeb(search, user?.sessionToken);
-        for (const u of found) {
-          if (!fromChats.some((c) => c.videhId === u.id)) {
-            fromChats.push({
-              id: `videh_${u.id}`,
-              name: u.name,
-              phone: u.phone ?? "",
-              normalizedPhone: u.phone ?? "",
-              videhId: u.id,
-              videhName: u.name,
-              about: u.about,
-              avatarUrl: u.avatarUrl,
-            });
-          }
-        }
-      }
+      hasContactsRef.current = fromChats.length > 0;
       setVidehContacts(fromChats.sort((a, b) => a.videhName.localeCompare(b.videhName)));
       setInviteContacts([]);
       setStatus("done");
+      setRefreshing(false);
       return;
     }
 
     const { status: perm } = await Contacts.requestPermissionsAsync();
-    if (perm !== "granted") { setStatus("denied"); return; }
+    if (perm !== "granted") {
+      setStatus("denied");
+      setRefreshing(false);
+      return;
+    }
 
     const { data } = await Contacts.getContactsAsync({
       fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
@@ -112,7 +108,14 @@ export default function ContactsScreen() {
     }
 
     const phones = [...seen];
-    if (phones.length === 0) { setStatus("done"); return; }
+    if (phones.length === 0) {
+      hasContactsRef.current = false;
+      setVidehContacts([]);
+      setInviteContacts([]);
+      setStatus("done");
+      setRefreshing(false);
+      return;
+    }
 
     try {
       const res = await fetch(`${getApiUrl()}/api/users/check-phones`, {
@@ -139,21 +142,58 @@ export default function ContactsScreen() {
 
       onVideh.sort((a, b) => a.videhName.localeCompare(b.videhName));
       toInvite.sort((a, b) => a.name.localeCompare(b.name));
+      hasContactsRef.current = onVideh.length > 0 || toInvite.length > 0;
       setVidehContacts(onVideh);
       setInviteContacts(toInvite);
       void import("@/lib/syncContactsToServer").then(({ syncDeviceContactsToServer }) =>
         syncDeviceContactsToServer(getApiUrl(), user?.sessionToken).catch(() => 0),
       );
     } catch {
+      hasContactsRef.current = deviceContacts.length > 0;
       setInviteContacts(deviceContacts);
     }
 
     setStatus("done");
-  }, [user?.phone, user?.dbId, user?.sessionToken, chats, search]);
+    setRefreshing(false);
+  }, [user?.phone, user?.sessionToken]);
 
   useEffect(() => {
     void loadContacts();
   }, [loadContacts]);
+
+  useEffect(() => {
+    if (Platform.OS !== "web" || search.trim().length < 3) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const { searchUsersByPhoneWeb } = await import("@/lib/web/webContacts");
+        const found = await searchUsersByPhoneWeb(search, user?.sessionToken);
+        if (cancelled) return;
+        setVidehContacts((prev) => {
+          const merged = [...prev];
+          for (const u of found) {
+            if (!merged.some((c) => c.videhId === u.id)) {
+              merged.push({
+                id: `videh_${u.id}`,
+                name: u.name,
+                phone: u.phone ?? "",
+                normalizedPhone: u.phone ?? "",
+                videhId: u.id,
+                videhName: u.name,
+                about: u.about,
+                avatarUrl: u.avatarUrl,
+              });
+            }
+          }
+          return merged.sort((a, b) => a.videhName.localeCompare(b.videhName));
+        });
+      })();
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [search, user?.sessionToken]);
 
   const openChat = (contact: VidehContact) => {
     // Check if chat already exists by otherUserId or by name
@@ -244,8 +284,16 @@ export default function ContactsScreen() {
             <Text style={styles.headerSub}>{videhContacts.length} on Videh</Text>
           )}
         </View>
-        <TouchableOpacity style={styles.headerBtn} onPress={loadContacts}>
-          <Ionicons name="refresh-outline" size={22} color="#fff" />
+        <TouchableOpacity
+          style={styles.headerBtn}
+          onPress={() => void loadContacts({ manual: true })}
+          disabled={refreshing}
+        >
+          {refreshing ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Ionicons name="refresh-outline" size={22} color="#fff" />
+          )}
         </TouchableOpacity>
       </View>
 
@@ -265,7 +313,7 @@ export default function ContactsScreen() {
         )}
       </View>
 
-      {status === "loading" ? (
+      {status === "loading" && videhContacts.length === 0 && inviteContacts.length === 0 ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={[styles.loadingText, { color: colors.mutedForeground }]}>Loading contacts…</Text>

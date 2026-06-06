@@ -78,6 +78,10 @@ export function ContactSharePickerModal({ visible, colors, onClose, onPick }: Pr
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadGen = useRef(0);
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
+  const queryRef = useRef(query);
+  queryRef.current = query;
 
   const reset = useCallback(() => {
     setQuery("");
@@ -98,12 +102,12 @@ export function ContactSharePickerModal({ visible, colors, onClose, onPick }: Pr
     try {
       let list = await loadDeviceContactsForShare({
         forceRefresh: force,
-        webChats: Platform.OS === "web" ? chats : undefined,
+        webChats: Platform.OS === "web" ? chatsRef.current : undefined,
         sessionToken: user?.sessionToken,
       });
       if (gen !== loadGen.current) return;
-      if (Platform.OS === "web" && query.trim().length >= 3) {
-        const extra = await searchUsersForContactShare(query.trim(), user?.sessionToken);
+      if (Platform.OS === "web" && queryRef.current.trim().length >= 3) {
+        const extra = await searchUsersForContactShare(queryRef.current.trim(), user?.sessionToken);
         const seen = new Set(list.map((r) => r.id));
         for (const row of extra) {
           if (!seen.has(row.id)) list.push(row);
@@ -134,7 +138,7 @@ export function ContactSharePickerModal({ visible, colors, onClose, onPick }: Pr
     } finally {
       if (gen === loadGen.current) setLoading(false);
     }
-  }, [close, chats, query, user?.sessionToken]);
+  }, [close, user?.sessionToken]);
 
   useEffect(() => {
     if (!visible) return;

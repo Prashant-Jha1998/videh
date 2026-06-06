@@ -1,4 +1,5 @@
 import { callMessagePreviewText, parseCallMessageMeta } from "./callMessage";
+import { stripWaveformMeta } from "./webVoiceWaveform";
 
 const DOC_PAYLOAD_PREFIX = "\u2063doc:";
 const CONTACT_PREFIX = "__VCONTACT__:";
@@ -75,6 +76,20 @@ function contactChatPreview(text: string): string {
   }
 }
 
+function voiceListPreview(text: string): string {
+  const clean = stripWaveformMeta(text).trim();
+  if (!clean) return "Voice message";
+  if (/voice message/i.test(clean) || clean.includes("🎤")) return clean;
+  return "Voice message";
+}
+
+function isVoiceNoteContent(text: string, type: string): boolean {
+  const declared = type.toLowerCase();
+  if (declared === "audio" || declared === "voice") return true;
+  const t = text.trim();
+  return t.includes("|w:") || /voice message/i.test(t);
+}
+
 function looksLikeLocationJson(raw: string): boolean {
   if (!raw.startsWith("{")) return false;
   try {
@@ -124,7 +139,10 @@ export function inferListPreview(
     return text && text !== "🎥 Video" ? text : "Video";
   }
   if (declared === "audio" || declared === "voice") {
-    return text && !text.startsWith("{") ? text : "Voice message";
+    return voiceListPreview(text);
+  }
+  if (isVoiceNoteContent(text, declared)) {
+    return voiceListPreview(text);
   }
   if (declared === "location" || looksLikeLocationJson(text)) {
     return "Location";

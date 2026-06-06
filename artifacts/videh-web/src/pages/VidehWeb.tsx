@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { MessageSquarePlus, MoreVertical, Search } from "lucide-react";
+import { Forward, MessageSquarePlus, MoreVertical, Search, Trash2, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import "../components/web/webShell.css";
 import { webApi, type WebStatus, type WebUser } from "../lib/webApi";
@@ -17,6 +17,7 @@ import { WebSettingsPane } from "../components/web/WebSettingsPane";
 import { WebSettingsDetail } from "../components/web/settings/WebSettingsDetail";
 import type { SettingsSectionId } from "../lib/webSettingsTypes";
 import { WebChatMessage } from "../components/web/WebChatMessage";
+import { WebChatForwardModal } from "../components/web/WebChatForwardModal";
 import { useWebVoiceRecorder } from "../hooks/useWebVoiceRecorder";
 import { encodeVoiceMessageText, formatVoiceDuration } from "../lib/webVoiceWaveform";
 import { Avatar, initials, hue } from "../components/web/webUiShared";
@@ -76,6 +77,9 @@ export default function VidehWeb() {
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<number[]>([]);
+  const [bulkForwardOpen, setBulkForwardOpen] = useState(false);
+  const [selectionBusy, setSelectionBusy] = useState(false);
   const voiceRecorder = useWebVoiceRecorder();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
@@ -545,6 +549,71 @@ export default function VidehWeb() {
     .filter((c) => c.id !== activeChatId && !c.is_archived)
     .map((c) => ({ id: c.id, name: getChatName(c) }));
 
+  const selectionMode = selectedMessageIds.length > 0;
+  const selectedMessages = messages.filter((m) => selectedMessageIds.includes(m.id));
+  const forwardableSelected = selectedMessages.filter((m) => !m.is_deleted);
+  const deletableSelected = selectedMessages.filter((m) => m.sender_id === user?.id && !m.is_deleted);
+  const othersSelectedCount = selectedMessages.filter((m) => m.sender_id !== user?.id && !m.is_deleted).length;
+
+  const clearSelection = useCallback(() => {
+    setSelectedMessageIds([]);
+    setBulkForwardOpen(false);
+  }, []);
+
+  const enterSelection = useCallback((messageId: number) => {
+    setSelectedMessageIds([messageId]);
+  }, []);
+
+  const toggleMessageSelect = useCallback((messageId: number) => {
+    setSelectedMessageIds((prev) => (
+      prev.includes(messageId) ? prev.filter((id) => id !== messageId) : [...prev, messageId]
+    ));
+  }, []);
+
+  const bulkForwardTo = useCallback(async (targetChatId: number) => {
+    if (!token || !activeChatId || forwardableSelected.length === 0) return;
+    setSelectionBusy(true);
+    try {
+      for (const msg of forwardableSelected) {
+        await webApi.forwardMessage(token, activeChatId, msg.id, targetChatId);
+      }
+      setBulkForwardOpen(false);
+      clearSelection();
+      await loadMessages(activeChatId);
+      await loadChats(token);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not forward messages.");
+    } finally {
+      setSelectionBusy(false);
+    }
+  }, [token, activeChatId, forwardableSelected, clearSelection, loadMessages, loadChats]);
+
+  const bulkDeleteSelected = useCallback(async () => {
+    if (!token || !activeChatId || deletableSelected.length === 0) return;
+    const count = deletableSelected.length;
+    const hint = othersSelectedCount > 0
+      ? `Only your ${count} message${count === 1 ? "" : "s"} will be deleted. ${othersSelectedCount} from others will stay.`
+      : `Delete ${count} message${count === 1 ? "" : "s"} for everyone?`;
+    if (!confirm(hint)) return;
+    setSelectionBusy(true);
+    try {
+      for (const msg of deletableSelected) {
+        await webApi.deleteMessage(token, activeChatId, msg.id);
+      }
+      clearSelection();
+      await loadMessages(activeChatId);
+      await loadChats(token);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not delete messages.");
+    } finally {
+      setSelectionBusy(false);
+    }
+  }, [token, activeChatId, deletableSelected, othersSelectedCount, clearSelection, loadMessages, loadChats]);
+
+  useEffect(() => {
+    clearSelection();
+  }, [activeChatId, clearSelection]);
+
   // ─── QR LANDING ───────────────────────────────────────────────────────────
   if (status !== "linked") {
     return (
@@ -873,62 +942,75 @@ export default function VidehWeb() {
       {activeChatId && activeChat ? (
         <div className="vw-chat">
 
-          <header className="vw-chat__header">
-            {(() => {
-              const av = getChatAvatar(activeChat);
-              const chatName = getChatName(activeChat);
-              return av ? (
-                <img src={av} alt={chatName} style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover" }} />
-              ) : (
-                <div style={{ width: 40, height: 40, borderRadius: "50%", backgroundColor: `hsl(${hue(chatName)},50%,45%)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{initials(chatName)}</span>
+          <header className={`vw-chat__header${selectionMode ? " vw-chat__header--selection" : ""}`}>
+            {selectionMode ? (
+              <>
+                <button type="button" className="vw-icon-btn" title="Cancel selection" onClick={clearSelection}>
+                  <X size={22} />
+                </button>
+                <div className="vw-chat__header-name" style={{ flex: 1 }}>
+                  {selectedMessageIds.length} selected
                 </div>
-              );
-            })()}
-            <button
-              type="button"
-              className="vw-chat__header-btn"
-              onClick={() => { if (activeChatId) { setContactInfoChatId(activeChatId); setShowContactInfo(true); } }}
-            >
-              <div className="vw-chat__header-name">{getChatName(activeChat)}</div>
-              <div className="vw-chat__header-status">
-                {activeChat.is_group ? "Group" : activeChat.other_members?.[0]?.is_online ? "online" : ""}
-              </div>
-            </button>
-            <div style={{ display: "flex", gap: 4, position: "relative", alignItems: "center" }}>
-              <button
-                type="button"
-                title="Search in chat"
-                className="vw-icon-btn"
-                onClick={() => setChatSearchOpen((o) => !o)}
-                style={{ background: chatSearchOpen ? "#e9edef" : undefined }}
-              >
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M15.9 14.3H15l-.3-.3c1-1.1 1.6-2.7 1.6-4.3 0-3.7-3-6.7-6.7-6.7S2.9 6 2.9 9.7s3 6.7 6.7 6.7c1.6 0 3.2-.6 4.3-1.6l.3.3v.8l5.1 5.1 1.5-1.5-4.9-5.2zm-6.2 0C7.1 14.3 4 11.3 4 7.6S7 .9 9.7.9s5.7 3 5.7 5.7-2.5 7.7-5.5 7.7z"/></svg>
-              </button>
-              <button
-                ref={chatMenuBtnRef}
-                type="button"
-                title="Chat menu"
-                className="vw-icon-btn"
-                onClick={() => setChatMenuOpen((o) => !o)}
-              >
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z"/></svg>
-              </button>
-              <DropdownMenu
-                open={chatMenuOpen}
-                onClose={() => setChatMenuOpen(false)}
-                anchorRef={chatMenuBtnRef}
-                items={[
-                  { label: chatSearchOpen ? "Close search" : "Search messages", onClick: () => setChatSearchOpen((o) => !o) },
-                  { label: activeChat.is_muted ? "Unmute notifications" : "Mute notifications", onClick: toggleMute },
-                  {
-                    label: favoriteChatIds.includes(activeChatId!) ? "Remove from favourites" : "Add to favourites",
-                    onClick: () => toggleFavoriteChat(activeChatId!),
-                  },
-                  { label: "Contact info", onClick: () => { setContactInfoChatId(activeChatId); setShowContactInfo(true); } },
-                ]}
-              />
-            </div>
+              </>
+            ) : (
+              <>
+                {(() => {
+                  const av = getChatAvatar(activeChat);
+                  const chatName = getChatName(activeChat);
+                  return av ? (
+                    <img src={av} alt={chatName} style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover" }} />
+                  ) : (
+                    <div style={{ width: 40, height: 40, borderRadius: "50%", backgroundColor: `hsl(${hue(chatName)},50%,45%)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <span style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{initials(chatName)}</span>
+                    </div>
+                  );
+                })()}
+                <button
+                  type="button"
+                  className="vw-chat__header-btn"
+                  onClick={() => { if (activeChatId) { setContactInfoChatId(activeChatId); setShowContactInfo(true); } }}
+                >
+                  <div className="vw-chat__header-name">{getChatName(activeChat)}</div>
+                  <div className="vw-chat__header-status">
+                    {activeChat.is_group ? "Group" : activeChat.other_members?.[0]?.is_online ? "online" : ""}
+                  </div>
+                </button>
+                <div style={{ display: "flex", gap: 4, position: "relative", alignItems: "center" }}>
+                  <button
+                    type="button"
+                    title="Search in chat"
+                    className="vw-icon-btn"
+                    onClick={() => setChatSearchOpen((o) => !o)}
+                    style={{ background: chatSearchOpen ? "#e9edef" : undefined }}
+                  >
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M15.9 14.3H15l-.3-.3c1-1.1 1.6-2.7 1.6-4.3 0-3.7-3-6.7-6.7-6.7S2.9 6 2.9 9.7s3 6.7 6.7 6.7c1.6 0 3.2-.6 4.3-1.6l.3.3v.8l5.1 5.1 1.5-1.5-4.9-5.2zm-6.2 0C7.1 14.3 4 11.3 4 7.6S7 .9 9.7.9s5.7 3 5.7 5.7-2.5 7.7-5.5 7.7z"/></svg>
+                  </button>
+                  <button
+                    ref={chatMenuBtnRef}
+                    type="button"
+                    title="Chat menu"
+                    className="vw-icon-btn"
+                    onClick={() => setChatMenuOpen((o) => !o)}
+                  >
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z"/></svg>
+                  </button>
+                  <DropdownMenu
+                    open={chatMenuOpen}
+                    onClose={() => setChatMenuOpen(false)}
+                    anchorRef={chatMenuBtnRef}
+                    items={[
+                      { label: chatSearchOpen ? "Close search" : "Search messages", onClick: () => setChatSearchOpen((o) => !o) },
+                      { label: activeChat.is_muted ? "Unmute notifications" : "Mute notifications", onClick: toggleMute },
+                      {
+                        label: favoriteChatIds.includes(activeChatId!) ? "Remove from favourites" : "Add to favourites",
+                        onClick: () => toggleFavoriteChat(activeChatId!),
+                      },
+                      { label: "Contact info", onClick: () => { setContactInfoChatId(activeChatId); setShowContactInfo(true); } },
+                    ]}
+                  />
+                </div>
+              </>
+            )}
           </header>
 
           {chatSearchOpen && (
@@ -970,6 +1052,10 @@ export default function VidehWeb() {
                 isGroup={Boolean(activeChat?.is_group)}
                 chatSearchQuery={chatSearchLower ? chatSearchQuery : undefined}
                 forwardTargets={forwardTargets}
+                selectionMode={selectionMode}
+                isSelected={selectedMessageIds.includes(msg.id)}
+                onToggleSelect={() => toggleMessageSelect(msg.id)}
+                onEnterSelection={enterSelection}
                 onRefresh={() => {
                   if (activeChatId) void loadMessages(activeChatId);
                   if (token) void loadChats(token);
@@ -992,6 +1078,34 @@ export default function VidehWeb() {
               e.target.value = "";
             }}
           />
+          {selectionMode ? (
+            <div className="vw-selection-bar">
+              <button type="button" className="vw-selection-bar__close" title="Cancel" onClick={clearSelection}>
+                <X size={20} />
+              </button>
+              <span className="vw-selection-bar__count">{selectedMessageIds.length} selected</span>
+              <div className="vw-selection-bar__actions">
+                <button
+                  type="button"
+                  className="vw-selection-bar__action"
+                  title="Forward"
+                  disabled={selectionBusy || forwardableSelected.length === 0}
+                  onClick={() => setBulkForwardOpen(true)}
+                >
+                  <Forward size={20} />
+                </button>
+                <button
+                  type="button"
+                  className="vw-selection-bar__action vw-selection-bar__action--danger"
+                  title="Delete"
+                  disabled={selectionBusy || deletableSelected.length === 0}
+                  onClick={() => void bulkDeleteSelected()}
+                >
+                  <Trash2 size={20} />
+                </button>
+              </div>
+            </div>
+          ) : (
           <div className="vw-chat__input-bar">
             {voiceRecorder.recording ? (
               <div className="vw-voice-rec">
@@ -1077,6 +1191,18 @@ export default function VidehWeb() {
             </>
             )}
           </div>
+          )}
+
+          {bulkForwardOpen ? (
+            <WebChatForwardModal
+              title={`Forward ${forwardableSelected.length} message${forwardableSelected.length === 1 ? "" : "s"}`}
+              hint="Choose a chat"
+              targets={forwardTargets}
+              busy={selectionBusy}
+              onClose={() => setBulkForwardOpen(false)}
+              onSelect={(id) => void bulkForwardTo(id)}
+            />
+          ) : null}
         </div>
       ) : mainSection === "status" && statusDetailUserId === user?.id && myStatuses.length > 0 && token ? (
         <WebStatusDetailPane

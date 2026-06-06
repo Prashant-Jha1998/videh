@@ -1,10 +1,11 @@
 import { useMemo, useRef, useState } from "react";
-import { ChevronDown, Forward, Star } from "lucide-react";
+import { Check, ChevronDown, Star } from "lucide-react";
 import { webApi, type Message, type Reaction } from "../../lib/webApi";
 import { WebChatImage, WebChatVideo } from "./WebChatMedia";
 import { WebDocumentBubble } from "./WebDocumentBubble";
 import { WebCallMessageBubble } from "./WebCallMessageBubble";
 import { WebVoiceMessageBubble } from "./WebVoiceMessageBubble";
+import { WebChatForwardModal } from "./WebChatForwardModal";
 import { formatMessageBody, isSystemStyleMessage } from "../../lib/chatMessageDisplay";
 import { isDocumentMessage } from "../../lib/documentMessage";
 import { parseCallMessageMeta } from "../../lib/callMessage";
@@ -36,6 +37,10 @@ export function WebChatMessage({
   chatSearchQuery,
   forwardTargets,
   onRefresh,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelect,
+  onEnterSelection,
 }: {
   msg: Message;
   token: string;
@@ -45,6 +50,10 @@ export function WebChatMessage({
   chatSearchQuery?: string;
   forwardTargets: Array<{ id: number; name: string }>;
   onRefresh: () => void;
+  selectionMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
+  onEnterSelection?: (messageId: number) => void;
 }) {
   const isMe = msg.sender_id === selfId;
   const isDeleted = msg.is_deleted;
@@ -71,9 +80,10 @@ export function WebChatMessage({
   const bodyText = formatMessageBody(msg);
   const showBodyText = Boolean(bodyText && !callMeta && !isAudio && !hasImage && !hasVideo && !hasDocument);
   const reactionGroups = useMemo(() => groupReactions(msg.reactions, selfId), [msg.reactions, selfId]);
+  const showCheckbox = selectionMode || hovered;
 
   const react = async (emoji: string) => {
-    if (busy || isDeleted) return;
+    if (busy || isDeleted || selectionMode) return;
     setBusy(true);
     try {
       await webApi.reactMessage(token, chatId, msg.id, emoji);
@@ -100,7 +110,7 @@ export function WebChatMessage({
   };
 
   const starMsg = async () => {
-    if (isDeleted) return;
+    if (isDeleted || selectionMode) return;
     setBusy(true);
     try {
       await webApi.starMessage(token, chatId, msg.id);
@@ -126,6 +136,18 @@ export function WebChatMessage({
     }
   };
 
+  const handleCheckbox = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isDeleted) return;
+    if (!selectionMode) onEnterSelection?.(msg.id);
+    else onToggleSelect?.();
+  };
+
+  const handleRowClick = () => {
+    if (!selectionMode || isDeleted) return;
+    onToggleSelect?.();
+  };
+
   if (isSystem) {
     return (
       <div className="vw-system-msg">
@@ -140,18 +162,19 @@ export function WebChatMessage({
     isVisualMedia || hasDocument ? "vw-msg-bubble--media" : "",
     isAudio ? "vw-msg-bubble--audio" : "",
     isDeleted ? "vw-msg-bubble--deleted" : "",
+    isSelected ? "vw-msg-bubble--selected" : "",
   ].filter(Boolean).join(" ");
 
   return (
     <div
-      className={`vw-msg-wrap${isMe ? " vw-msg-wrap--sent" : " vw-msg-wrap--recv"}`}
+      className={`vw-msg-wrap${isMe ? " vw-msg-wrap--sent" : " vw-msg-wrap--recv"}${selectionMode ? " vw-msg-wrap--selecting" : ""}${isSelected ? " vw-msg-wrap--selected" : ""}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => {
         setHovered(false);
         if (!menuOpen) setMenuOpen(false);
       }}
     >
-      {!isDeleted && hovered ? (
+      {!isDeleted && !selectionMode && hovered ? (
         <div className={`vw-msg-toolbar${isMe ? " vw-msg-toolbar--sent" : " vw-msg-toolbar--recv"}`}>
           <div className="vw-msg-toolbar__reactions">
             {QUICK_REACTIONS.map((emoji) => (
@@ -173,7 +196,17 @@ export function WebChatMessage({
       ) : null}
 
       <div className={`vw-msg-row${isMe ? " vw-msg-row--sent" : " vw-msg-row--recv"}`}>
-        <div className={bubbleClass}>
+        {!isDeleted && showCheckbox ? (
+          <button
+            type="button"
+            className={`vw-msg-check${isSelected ? " vw-msg-check--on" : ""}`}
+            onClick={handleCheckbox}
+            aria-label={isSelected ? "Deselect message" : "Select message"}
+          >
+            {isSelected ? <Check size={14} strokeWidth={3} /> : null}
+          </button>
+        ) : null}
+        <div className={bubbleClass} onClick={handleRowClick} role={selectionMode ? "button" : undefined}>
           {msg.is_forwarded ? <div className="vw-msg-bubble__forwarded">Forwarded</div> : null}
           {!isMe && isGroup && msg.sender_name ? (
             <div className="vw-msg-bubble__sender" style={{ color: `hsl(${hue(msg.sender_name)},60%,40%)` }}>
@@ -230,43 +263,32 @@ export function WebChatMessage({
         </div>
       ) : null}
 
-      <DropdownMenu
-        open={menuOpen}
-        onClose={() => setMenuOpen(false)}
-        anchorRef={menuBtnRef}
-        items={[
-          { label: "React 👍", onClick: () => void react("👍") },
-          { label: "Forward", onClick: () => setForwardOpen(true) },
-          { label: msg.is_starred ? "Unstar" : "Star", onClick: () => void starMsg() },
-          ...(isMe && !isDeleted
-            ? [{ label: "Delete", danger: true, onClick: () => void deleteMsg() }]
-            : []),
-        ]}
-      />
+      {!selectionMode ? (
+        <DropdownMenu
+          open={menuOpen}
+          onClose={() => setMenuOpen(false)}
+          anchorRef={menuBtnRef}
+          items={[
+            { label: "Select", onClick: () => onEnterSelection?.(msg.id) },
+            { label: "React 👍", onClick: () => void react("👍") },
+            { label: "Forward", onClick: () => setForwardOpen(true) },
+            { label: msg.is_starred ? "Unstar" : "Star", onClick: () => void starMsg() },
+            ...(isMe && !isDeleted
+              ? [{ label: "Delete", danger: true, onClick: () => void deleteMsg() }]
+              : []),
+          ]}
+        />
+      ) : null}
 
       {forwardOpen ? (
-        <div className="vw-forward-overlay" onClick={() => setForwardOpen(false)}>
-          <div className="vw-forward-modal" onClick={(e) => e.stopPropagation()}>
-            <header className="vw-forward-modal__head">
-              <Forward size={18} />
-              <h4>Forward message</h4>
-            </header>
-            <p className="vw-forward-modal__hint">Choose a chat</p>
-            <ul className="vw-forward-modal__list">
-              {forwardTargets.length === 0 ? (
-                <li className="vw-forward-modal__empty">No other chats available</li>
-              ) : (
-                forwardTargets.map((c) => (
-                  <li key={c.id}>
-                    <button type="button" disabled={busy} onClick={() => void forwardTo(c.id)}>
-                      {c.name}
-                    </button>
-                  </li>
-                ))
-              )}
-            </ul>
-          </div>
-        </div>
+        <WebChatForwardModal
+          title="Forward message"
+          hint="Choose a chat"
+          targets={forwardTargets}
+          busy={busy}
+          onClose={() => setForwardOpen(false)}
+          onSelect={(id) => void forwardTo(id)}
+        />
       ) : null}
     </div>
   );

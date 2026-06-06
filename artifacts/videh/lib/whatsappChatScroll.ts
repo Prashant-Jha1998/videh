@@ -19,6 +19,10 @@
  */
 
 export const WHATSAPP_CHAT_NEAR_BOTTOM_PX = 80;
+/** User must scroll past this to leave the bottom zone (hysteresis). */
+export const WHATSAPP_CHAT_SCROLL_AWAY_PX = 110;
+/** User must return within this to re-enter the bottom zone (hysteresis). */
+export const WHATSAPP_CHAT_BACK_TO_BOTTOM_PX = 48;
 
 /** Distance from the visual bottom of a normal (non-inverted) message list. */
 export function chatDistanceFromBottom(
@@ -38,8 +42,21 @@ export function isChatNearBottom(
   return chatDistanceFromBottom(contentOffsetY, contentHeight, layoutHeight) <= threshold;
 }
 
-/** One immediate + one post-layout pin after keyboard (avoid triple-jump jitter). */
-export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0, 180] as const;
+/** Hysteresis avoids jitter when content height changes near the bottom threshold. */
+export function isChatScrolledUp(
+  contentOffsetY: number,
+  contentHeight: number,
+  layoutHeight: number,
+  currentlyScrolledUp: boolean,
+): boolean {
+  const dist = chatDistanceFromBottom(contentOffsetY, contentHeight, layoutHeight);
+  if (currentlyScrolledUp) return dist > WHATSAPP_CHAT_BACK_TO_BOTTOM_PX;
+  return dist > WHATSAPP_CHAT_SCROLL_AWAY_PX;
+}
+
+/** One immediate pin; keyboard end may schedule a second post-layout pin. */
+export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0] as const;
+export const WHATSAPP_KEYBOARD_PIN_DELAYS_MS = [0, 180] as const;
 
 export function shouldWhatsAppAutoPin(userScrolledUp: boolean, searching: boolean): boolean {
   return !searching && !userScrolledUp;

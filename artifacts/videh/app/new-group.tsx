@@ -3,7 +3,7 @@ import * as Haptics from "expo-haptics";
 import * as Contacts from "expo-contacts";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -52,6 +52,8 @@ export default function NewGroupScreen() {
   const [groupAvatarUri, setGroupAvatarUri] = useState<string | undefined>();
   const [groupName, setGroupName] = useState("");
   const [step, setStep] = useState<"select" | "name">("select");
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const loadGroupCandidates = useCallback(async () => {
@@ -59,7 +61,7 @@ export default function NewGroupScreen() {
     try {
       if (Platform.OS === "web") {
         const { chatsToWebMembers } = await import("@/lib/web/webContacts");
-        const candidates = chatsToWebMembers(chats, user?.dbId).map((m) => ({
+        const candidates = chatsToWebMembers(chatsRef.current, user?.dbId).map((m) => ({
           id: m.id,
           name: m.name,
           phone: m.phone ?? "",
@@ -112,7 +114,7 @@ export default function NewGroupScreen() {
     } finally {
       setLoadingMembers(false);
     }
-  }, [chats, user?.dbId, user?.sessionToken]);
+  }, [user?.dbId, user?.sessionToken]);
 
   useEffect(() => {
     loadGroupCandidates();

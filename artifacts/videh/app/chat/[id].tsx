@@ -90,10 +90,10 @@ import { DisappearSystemMessageBubble } from "@/components/DisappearSystemMessag
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
 import { formatChatBubbleTime } from "@/utils/time";
 import {
-  isChatNearBottom,
+  isChatScrolledUp,
   isCompactChatText,
   shouldWhatsAppAutoPin,
-  WHATSAPP_CHAT_NEAR_BOTTOM_PX,
+  WHATSAPP_KEYBOARD_PIN_DELAYS_MS,
   WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS,
 } from "@/lib/whatsappChatScroll";
 import { extractUrls, primaryUrlFromText } from "@/lib/chatUrls";
@@ -980,7 +980,7 @@ export default function ChatScreen() {
   const [translatedMsgs, setTranslatedMsgs] = useState<Record<string, string>>({});
 
   // Forward modal
-  const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
+  const [forwardIds, setForwardIds] = useState<string[]>([]);
   const [forwardSearch, setForwardSearch] = useState("");
 
   // Share contact â€” full-screen picker (Alert.alert only fits ~3 buttons on Android)
@@ -1090,8 +1090,8 @@ export default function ChatScreen() {
       const typingTimer = setInterval(pollTyping, 1500);
       const unsubMsgSignal = onChatMessageSignal((signal) => {
         if (String(signal.chatId) !== String(chatId)) return;
+        if (userScrolledUpRef.current) return;
         pendingScrollToEndRef.current = true;
-        userScrolledUpRef.current = false;
         schedulePinToBottom();
       });
       const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
@@ -1395,12 +1395,13 @@ export default function ChatScreen() {
       listRef.current?.scrollToEnd({ animated });
     });
   }, [searching]);
-  /** WhatsApp: after keyboard/composer layout, scroll to latest more than once. */
-  const schedulePinToBottom = useCallback(() => {
+  /** WhatsApp: pin to latest — single quiet scroll unless keyboard is settling. */
+  const schedulePinToBottom = useCallback((keyboardSettling = false) => {
     if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
     for (const t of pinToBottomTimersRef.current) clearTimeout(t);
     pinToBottomTimersRef.current = [];
-    for (const delay of WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS) {
+    const delays = keyboardSettling ? WHATSAPP_KEYBOARD_PIN_DELAYS_MS : WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS;
+    for (const delay of delays) {
       const t = setTimeout(() => scrollToLatest(delay >= 150), delay);
       pinToBottomTimersRef.current.push(t);
     }
@@ -1419,19 +1420,19 @@ export default function ChatScreen() {
   );
   const syncScrollAwayFromBottom = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
-      const away = !isChatNearBottom(
+      const away = isChatScrolledUp(
         contentOffsetY,
         contentHeight,
         layoutHeight,
-        WHATSAPP_CHAT_NEAR_BOTTOM_PX,
+        userScrolledUpRef.current,
       );
-      // adjustResize / keyboard animation shrinks the list before scroll catches up — don't treat as "scrolled up".
+      // adjustResize / keyboard animation shrinks the list before scroll catches up — pin only if user was already at bottom.
       if (
         away
         && !userScrolledUpRef.current
         && (keyboardVisibleRef.current || keyboardAnimatingRef.current)
       ) {
-        schedulePinToBottom();
+        schedulePinToBottom(true);
         return;
       }
       if (away === userScrolledUpRef.current) return;
@@ -1499,7 +1500,7 @@ export default function ChatScreen() {
   }, []);
   const onKeyboardAnimEnd = useCallback(() => {
     keyboardAnimatingRef.current = false;
-    schedulePinToBottom();
+    schedulePinToBottom(true);
   }, [schedulePinToBottom]);
 
   /** WhatsApp: pin once when keyboard finishes opening — not on every frame while it animates. */
@@ -1552,21 +1553,15 @@ export default function ChatScreen() {
   }, [keyboardVisible]);
 
   useEffect(() => {
-    if (!keyboardVisible || keyboardHeight <= 0) return;
+    if (!keyboardVisible || keyboardHeight <= 0 || userScrolledUpRef.current) return;
     pendingScrollToEndRef.current = true;
-    userScrolledUpRef.current = false;
-    const t1 = setTimeout(() => scrollToLatest(false), 50);
-    const t2 = setTimeout(() => scrollToLatest(false), 150);
-    const t3 = setTimeout(() => scrollToLatest(false), 300);
-    const t4 = setTimeout(() => scrollToLatest(false), 500);
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); };
-  }, [keyboardHeight, keyboardVisible, scrollToLatest]);
+    schedulePinToBottom(true);
+  }, [keyboardHeight, keyboardVisible, schedulePinToBottom]);
 
   useEffect(() => {
-    if (androidKeyboardLift <= 0) return;
+    if (androidKeyboardLift <= 0 || userScrolledUpRef.current) return;
     pendingScrollToEndRef.current = true;
-    userScrolledUpRef.current = false;
-    schedulePinToBottom();
+    schedulePinToBottom(true);
   }, [androidKeyboardLift, schedulePinToBottom]);
 
   useEffect(() => {
@@ -1614,7 +1609,7 @@ export default function ChatScreen() {
     if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
     if (!keyboardVisible) return;
     if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
-    keyboardScrollTimerRef.current = setTimeout(() => schedulePinToBottom(), 60);
+    keyboardScrollTimerRef.current = setTimeout(() => schedulePinToBottom(true), 60);
     return () => {
       if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
     };
@@ -1632,9 +1627,10 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
+    if (androidKeyboardLift <= 0) return;
     pendingScrollToEndRef.current = true;
     scrollToLatest(false);
-  }, [androidKeyboardLift, composerHeight, searching, scrollToLatest]);
+  }, [androidKeyboardLift, searching, scrollToLatest]);
 
   useEffect(() => {
     if (searching) return;
@@ -2159,7 +2155,7 @@ export default function ChatScreen() {
             onPress: () => { void saveImageToGallery(msg.mediaUrl!); },
           }]
         : []),
-      ...(!msg.isViewOnce ? [{ text: "Forward", onPress: () => { setForwardSearch(""); setForwardMsg(msg); } }] : []),
+      ...(!msg.isViewOnce ? [{ text: "Forward", onPress: () => { setForwardSearch(""); setForwardIds([msg.id]); } }] : []),
       { text: "Star", onPress: () => { if (chatId) starMessage(chatId, msg.id); } },
       { text: "Translate", onPress: () => Alert.alert("Translate to:", "", [
           { text: "à¤¹à¤¿à¤‚à¤¦à¥€ (Hindi)", onPress: () => translateMsg(msg, "hi") },
@@ -2970,9 +2966,10 @@ export default function ChatScreen() {
                   onFocus={() => {
                     setEmojiPanelOpen(false);
                     setAssistantChatInputFocused(true);
-                    userScrolledUpRef.current = false;
-                    pendingScrollToEndRef.current = true;
-                    schedulePinToBottom();
+                    if (!userScrolledUpRef.current) {
+                      pendingScrollToEndRef.current = true;
+                      schedulePinToBottom(true);
+                    }
                     if (chatId && inputVal.length > 0) setTyping(chatId);
                     if (Platform.OS === "android") {
                       setTimeout(() => {
@@ -3111,18 +3108,6 @@ export default function ChatScreen() {
                 >
                   <Ionicons name="star-outline" size={21} color="#fff" />
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.headerBtn}
-                  onPress={() => {
-                    const m = allMessages.find((x) => x.id === selectedIds[0]);
-                    if (!m || m.type === "deleted" || m.isViewOnce) return;
-                    setForwardSearch("");
-                    setForwardMsg(m);
-                    clearSelection();
-                  }}
-                >
-                  <Ionicons name="arrow-redo-outline" size={21} color="#fff" />
-                </TouchableOpacity>
                 {canOpenMessageInfo ? (
                   <TouchableOpacity
                     style={styles.headerBtn}
@@ -3133,6 +3118,21 @@ export default function ChatScreen() {
                 ) : null}
               </>
             ) : null}
+            <TouchableOpacity
+              style={styles.headerBtn}
+              onPress={() => {
+                const ids = selectedIds.filter((id) => {
+                  const m = allMessages.find((x) => x.id === id);
+                  return m && m.type !== "deleted" && !m.isViewOnce;
+                });
+                if (ids.length === 0) return;
+                setForwardSearch("");
+                setForwardIds(ids);
+                clearSelection();
+              }}
+            >
+              <Ionicons name="arrow-redo-outline" size={21} color="#fff" />
+            </TouchableOpacity>
             <TouchableOpacity style={styles.headerBtn} onPress={() => setBulkDeleteOpen(true)}>
               <Ionicons name="trash-outline" size={22} color="#fff" />
             </TouchableOpacity>
@@ -3283,7 +3283,7 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={false}
           maintainVisibleContentPosition={
-            (searching || keyboardOpen)
+            (searching || keyboardOpen || showJumpToLatest)
               ? undefined
               : { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
           }
@@ -3713,10 +3713,12 @@ export default function ChatScreen() {
       </Modal>
 
       {/* Forward modal */}
-      <DismissibleModal visible={!!forwardMsg} onClose={() => { setForwardMsg(null); setForwardSearch(""); }} animationType="slide">
+      <DismissibleModal visible={forwardIds.length > 0} onClose={() => { setForwardIds([]); setForwardSearch(""); }} animationType="slide">
         <View style={styles.forwardModalWrap}>
           <View style={[styles.forwardSheet, { backgroundColor: colors.card }]}>
-            <Text style={[styles.attachTitle, { color: colors.foreground }]}>Forward to Videh chat</Text>
+            <Text style={[styles.attachTitle, { color: colors.foreground }]}>
+              Forward {forwardIds.length > 1 ? `${forwardIds.length} messages` : "to Videh chat"}
+            </Text>
             <Text style={[styles.forwardHint, { color: colors.mutedForeground }]}>
               Only your Videh contacts and groups. Not shared outside Videh.
             </Text>
@@ -3734,10 +3736,13 @@ export default function ChatScreen() {
                 </Text>
               ) : videhForwardTargets.map((c) => (
                 <TouchableOpacity key={c.id} style={styles.forwardRow} onPress={() => {
-                  if (chatId && forwardMsg) { forwardMessage(chatId, forwardMsg.id, c.id); }
-                  setForwardMsg(null);
+                  if (chatId && forwardIds.length > 0) {
+                    for (const id of forwardIds) forwardMessage(chatId, id, c.id);
+                  }
+                  const count = forwardIds.length;
+                  setForwardIds([]);
                   setForwardSearch("");
-                  Alert.alert("Forwarded", `Sent to ${c.name} on Videh`);
+                  Alert.alert("Forwarded", count > 1 ? `Sent ${count} messages to ${c.name}` : `Sent to ${c.name} on Videh`);
                 }}>
                   <View style={[styles.forwardAvatar, { backgroundColor: `hsl(${(c.name.charCodeAt(0) * 37) % 360},50%,40%)` }]}>
                     {c.avatar ? <Image source={{ uri: c.avatar }} style={{ width: 40, height: 40, borderRadius: 20 }} contentFit="cover" /> : (
