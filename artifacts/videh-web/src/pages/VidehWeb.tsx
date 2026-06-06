@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { MessageSquarePlus, MoreVertical, Search } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import "../components/web/webShell.css";
 import { webApi, type WebStatus, type WebUser } from "../lib/webApi";
 import { DropdownMenu, EmojiPicker, useClickOutside } from "../components/web/WebOverlays";
 import { WebNavRail } from "../components/web/WebNavRail";
@@ -12,13 +14,15 @@ import { WebFilterChips } from "../components/web/WebFilterChips";
 import { WebEmptyPane } from "../components/web/WebEmptyPane";
 import { WebCallsListPane } from "../components/web/WebCallsListPane";
 import { WebSettingsPane } from "../components/web/WebSettingsPane";
+import { WebSettingsDetail } from "../components/web/settings/WebSettingsDetail";
+import type { SettingsSectionId } from "../lib/webSettingsTypes";
 import { WebDocumentBubble } from "../components/web/WebDocumentBubble";
 import { WebCallMessageBubble } from "../components/web/WebCallMessageBubble";
 import { parseCallMessageMeta } from "../lib/callMessage";
 import { Avatar, initials, hue } from "../components/web/webUiShared";
 import type { CallLogEntry, ChatMember } from "../lib/webApi";
 import type { WebSection } from "../lib/webDesktop";
-import { WEB_LIST_PANE_WIDTH } from "../lib/webDesktop";
+import { isDocumentMessage } from "../lib/documentMessage";
 import { inferListPreview } from "../lib/messagePreview";
 
 const FAV_CHATS_KEY = "videh_web_favorite_chats";
@@ -30,7 +34,7 @@ interface ChatEntry {
   is_group: boolean;
   group_name?: string;
   other_members?: { id: number; name: string; avatar_url?: string; is_online: boolean; about?: string; phone?: string }[];
-  last_message?: { content: string; type?: string; created_at: string; is_deleted: boolean; sender_id: number };
+  last_message?: { content: string; type?: string; media_url?: string; created_at: string; is_deleted: boolean; sender_id: number };
   unread_count: number;
   is_pinned?: boolean;
   is_muted?: boolean;
@@ -63,6 +67,7 @@ export default function VidehWeb() {
   const [msgText, setMsgText] = useState("");
   const [search, setSearch] = useState("");
   const [mainSection, setMainSection] = useState<WebSection>("chats");
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId | null>(null);
   const [chatFilter, setChatFilter] = useState<"all" | "unread" | "favorites">("all");
   const [favoriteChatIds, setFavoriteChatIds] = useState<number[]>([]);
   const [callLogs, setCallLogs] = useState<CallLogEntry[]>([]);
@@ -242,6 +247,7 @@ export default function VidehWeb() {
       setMainSection(section);
       setActiveChatId(null);
       setSidebarMenuOpen(false);
+      if (section !== "settings") setSettingsSection(null);
       if (section === "starred") void openStarred();
       if (section === "calls" && token) void loadCallLogs(token);
       if (section === "archived") setChatFilter("all");
@@ -571,7 +577,7 @@ export default function VidehWeb() {
 
   // ─── CHAT INTERFACE ────────────────────────────────────────────────────────
   return (
-    <div style={{ display: "flex", height: "100vh", fontFamily: "Segoe UI, sans-serif", overflow: "hidden" }}>
+    <div className="vw-app">
       <WebNavRail
         active={mainSection}
         onSectionChange={handleSectionChange}
@@ -579,6 +585,7 @@ export default function VidehWeb() {
         userName={user?.name ?? "Videh"}
         onProfileClick={() => { setContactInfoChatId(null); setShowContactInfo(true); }}
       />
+      <div className="vw-main">
       {pickerMode && token ? (
         <WebContactPicker
           token={token}
@@ -602,49 +609,48 @@ export default function VidehWeb() {
       ) : mainSection === "settings" && user ? (
         <WebSettingsPane
           user={user}
+          activeSection={settingsSection}
+          onSectionSelect={setSettingsSection}
           onProfileClick={() => { setContactInfoChatId(null); setShowContactInfo(true); }}
           onLogout={() => void handleLogout()}
         />
       ) : (
-      <div style={{ width: WEB_LIST_PANE_WIDTH, display: "flex", flexDirection: "column", borderRight: "1px solid #e9edef", backgroundColor: "white", flexShrink: 0 }}>
+      <div className="vw-list">
 
-        {/* Sidebar header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", backgroundColor: "#f0f2f5", height: 60 }}>
-          <div
-            role="button"
-            tabIndex={0}
+        <header className="vw-list__header">
+          <button
+            type="button"
+            className="vw-list__profile"
             onClick={() => { setContactInfoChatId(null); setShowContactInfo(true); }}
-            onKeyDown={(e) => { if (e.key === "Enter") { setContactInfoChatId(null); setShowContactInfo(true); } }}
-            style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", flex: 1, minWidth: 0 }}
           >
             {user?.avatarUrl ? (
               <img src={user.avatarUrl} alt={user.name} style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover" }} />
             ) : (
-              <div style={{ width: 40, height: 40, borderRadius: "50%", backgroundColor: `hsl(${hue(user?.name ?? "V")},50%,45%)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ width: 40, height: 40, borderRadius: "50%", backgroundColor: `hsl(${hue(user?.name ?? "V")},50%,45%)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <span style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{initials(user?.name ?? "V")}</span>
               </div>
             )}
-            <span style={{ fontWeight: 600, color: "#111b21", fontSize: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span className="vw-list__profile-name">
               {mainSection === "archived" ? "Archived" : user?.name}
             </span>
-          </div>
-          <div style={{ display: "flex", gap: 8, color: "#54656f", position: "relative" }}>
+          </button>
+          <div className="vw-list__actions">
             <button
               type="button"
               title="New chat"
+              className="vw-icon-btn"
               onClick={() => { setSidebarMenuOpen(false); setSidebarView("contacts-direct"); }}
-              style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}
             >
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M19.005 3.175H4.674C3.642 3.175 3 3.789 3 4.821V21.02l3.544-3.514h12.461c1.033 0 2.064-1.06 2.064-2.093V4.821c-.001-1.032-1.032-1.646-2.064-1.646zm-4.989 9.869H7.041V11.1h6.975v1.944zm3-4H7.041V7.1h9.975v1.944z"/></svg>
+              <MessageSquarePlus size={21} strokeWidth={1.75} />
             </button>
             <button
               ref={sidebarMenuBtnRef}
               type="button"
               title="Menu"
+              className="vw-icon-btn"
               onClick={() => setSidebarMenuOpen((o) => !o)}
-              style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}
             >
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z"/></svg>
+              <MoreVertical size={21} strokeWidth={1.75} />
             </button>
             <DropdownMenu
               open={sidebarMenuOpen}
@@ -660,17 +666,15 @@ export default function VidehWeb() {
               ]}
             />
           </div>
-        </div>
+        </header>
 
-        {/* Search */}
-        <div style={{ padding: "8px 12px", backgroundColor: "white" }}>
-          <div style={{ display: "flex", alignItems: "center", backgroundColor: "#f0f2f5", borderRadius: 8, padding: "8px 12px", gap: 8 }}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="#54656f"><path d="M15.009 13.805h-.636l-.22-.219a5.184 5.184 0 0 0 1.256-3.386 5.207 5.207 0 1 0-5.207 5.208 5.183 5.183 0 0 0 3.385-1.255l.221.22v.635l4.004 3.999 1.194-1.195-3.997-4.007zm-4.808 0a3.605 3.605 0 1 1 0-7.21 3.605 3.605 0 0 1 0 7.21z"/></svg>
+        <div className="vw-list__search-wrap">
+          <div className="vw-list__search">
+            <Search size={17} strokeWidth={2} color="#8696a0" />
             <input
               placeholder="Search or start new chat"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              style={{ border: "none", background: "none", outline: "none", flex: 1, fontSize: 14, color: "#111b21" }}
             />
           </div>
         </div>
@@ -687,11 +691,16 @@ export default function VidehWeb() {
           />
         )}
 
-        {/* Chat list */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        <div className="vw-list__scroll">
           {filteredChats.length === 0 && (
-            <div style={{ padding: 40, textAlign: "center", color: "#667781" }}>
-              <p style={{ margin: 0 }}>{search ? `No results for "${search}"` : "No chats yet"}</p>
+            <div className="vw-list__empty">
+              <div className="vw-list__empty-icon">
+                <MessageSquarePlus size={28} strokeWidth={1.5} />
+              </div>
+              <p className="vw-list__empty-title">{search ? "No results found" : "No chats yet"}</p>
+              <p className="vw-list__empty-sub">
+                {search ? `Nothing matched "${search}"` : "Start a conversation by tapping the new chat button above"}
+              </p>
             </div>
           )}
           {filteredChats.map((chat) => {
@@ -699,47 +708,40 @@ export default function VidehWeb() {
             const av = getChatAvatar(chat);
             const isActive = chat.id === activeChatId;
             const lastMsgText = chat.last_message
-              ? inferListPreview(chat.last_message.type, chat.last_message.content, chat.last_message.is_deleted)
+              ? inferListPreview(
+                  chat.last_message.type,
+                  chat.last_message.content,
+                  chat.last_message.is_deleted,
+                  chat.last_message.media_url,
+                )
               : "No messages yet";
             const isFav = favoriteChatIds.includes(chat.id);
 
             return (
               <div
                 key={chat.id}
+                role="button"
+                tabIndex={0}
+                className={`vw-chat-row${isActive ? " vw-chat-row--active" : ""}`}
                 onClick={() => setActiveChatId(chat.id)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  padding: "12px 16px",
-                  gap: 12,
-                  cursor: "pointer",
-                  backgroundColor: isActive ? "#f0f2f5" : "white",
-                  borderBottom: "1px solid #f0f2f5",
-                  transition: "background 0.1s",
-                }}
-                onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLDivElement).style.backgroundColor = "#f5f6f6"; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.backgroundColor = isActive ? "#f0f2f5" : "white"; }}
+                onKeyDown={(e) => { if (e.key === "Enter") setActiveChatId(chat.id); }}
               >
                 <Avatar name={chatName} url={av} size={49} ring={!chat.is_group && chat.other_members?.[0] ? statusRingForUser(chat.other_members[0].id) : null} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                    <span style={{ fontWeight: 600, color: "#111b21", fontSize: 16 }}>
+                    <span className="vw-chat-row__name">
                       {chatName}
-                      {isFav ? <span style={{ marginLeft: 4, color: "#8696a0" }}>★</span> : null}
+                      {isFav ? <span style={{ marginLeft: 4, color: "#f5b800" }}>★</span> : null}
                     </span>
-                    <span style={{ fontSize: 12, color: chat.unread_count > 0 ? "#00a884" : "#667781", flexShrink: 0, marginLeft: 8 }}>
+                    <span className={`vw-chat-row__time${chat.unread_count > 0 ? " vw-chat-row__time--unread" : ""}`}>
                       {chat.last_message ? formatChatTime(chat.last_message.created_at) : ""}
                     </span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <p style={{ margin: 0, color: "#667781", fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                      {lastMsgText}
-                    </p>
-                    {chat.unread_count > 0 && (
-                      <span style={{ marginLeft: 8, backgroundColor: "#00a884", color: "white", borderRadius: 10, padding: "2px 6px", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
-                        {chat.unread_count}
-                      </span>
-                    )}
+                    <p className="vw-chat-row__preview">{lastMsgText}</p>
+                    {chat.unread_count > 0 ? (
+                      <span className="vw-badge-count">{chat.unread_count}</span>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -751,10 +753,9 @@ export default function VidehWeb() {
 
       {/* Right panel */}
       {activeChatId && activeChat ? (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", backgroundColor: "#efeae2", backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c8c8c8' fill-opacity='0.15'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }}>
+        <div className="vw-chat">
 
-          {/* Chat header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", backgroundColor: "#f0f2f5", height: 60, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+          <header className="vw-chat__header">
             {(() => {
               const av = getChatAvatar(activeChat);
               const chatName = getChatName(activeChat);
@@ -766,18 +767,23 @@ export default function VidehWeb() {
                 </div>
               );
             })()}
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, color: "#111b21", fontSize: 16 }}>{getChatName(activeChat)}</div>
-              <div style={{ fontSize: 13, color: "#667781" }}>
+            <button
+              type="button"
+              className="vw-chat__header-btn"
+              onClick={() => { if (activeChatId) { setContactInfoChatId(activeChatId); setShowContactInfo(true); } }}
+            >
+              <div className="vw-chat__header-name">{getChatName(activeChat)}</div>
+              <div className="vw-chat__header-status">
                 {activeChat.is_group ? "Group" : activeChat.other_members?.[0]?.is_online ? "online" : ""}
               </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, color: "#54656f", position: "relative", alignItems: "center" }}>
+            </button>
+            <div style={{ display: "flex", gap: 4, position: "relative", alignItems: "center" }}>
               <button
                 type="button"
                 title="Search in chat"
+                className="vw-icon-btn"
                 onClick={() => setChatSearchOpen((o) => !o)}
-                style={{ background: chatSearchOpen ? "#e9edef" : "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}
+                style={{ background: chatSearchOpen ? "#e9edef" : undefined }}
               >
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M15.9 14.3H15l-.3-.3c1-1.1 1.6-2.7 1.6-4.3 0-3.7-3-6.7-6.7-6.7S2.9 6 2.9 9.7s3 6.7 6.7 6.7c1.6 0 3.2-.6 4.3-1.6l.3.3v.8l5.1 5.1 1.5-1.5-4.9-5.2zm-6.2 0C7.1 14.3 4 11.3 4 7.6S7 .9 9.7.9s5.7 3 5.7 5.7-2.5 7.7-5.5 7.7z"/></svg>
               </button>
@@ -785,8 +791,8 @@ export default function VidehWeb() {
                 ref={chatMenuBtnRef}
                 type="button"
                 title="Chat menu"
+                className="vw-icon-btn"
                 onClick={() => setChatMenuOpen((o) => !o)}
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: "50%", color: "#54656f" }}
               >
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z"/></svg>
               </button>
@@ -805,7 +811,7 @@ export default function VidehWeb() {
                 ]}
               />
             </div>
-          </div>
+          </header>
 
           {chatSearchOpen && (
             <div style={{ padding: "8px 16px", backgroundColor: "#f0f2f5", borderBottom: "1px solid #e9edef" }}>
@@ -819,8 +825,7 @@ export default function VidehWeb() {
             </div>
           )}
 
-          {/* Messages */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "20px 8% 8px" }}>
+          <div className="vw-chat__messages">
             {displayMessages.length === 0 && messages.length === 0 && (
               <div style={{ textAlign: "center", color: "#667781", marginTop: 40 }}>
                 <p style={{ margin: 0, fontSize: 14 }}>No messages yet. Say hello! 👋</p>
@@ -851,8 +856,8 @@ export default function VidehWeb() {
                     {!isDeleted && msg.type === "video" && msg.media_url ? (
                       <WebChatVideo url={msg.media_url} token={token} />
                     ) : null}
-                    {!isDeleted && msg.type === "document" && msg.media_url ? (
-                      <WebDocumentBubble url={msg.media_url} token={token} filename={msg.content || "Document"} />
+                    {!isDeleted && isDocumentMessage(msg) ? (
+                      <WebDocumentBubble url={msg.media_url!} token={token} content={msg.content || "Document"} />
                     ) : null}
                     {callMeta ? (
                       <WebCallMessageBubble content={msg.content} isMe={isMe} />
@@ -860,8 +865,8 @@ export default function VidehWeb() {
                     <p style={{ margin: 0, fontSize: 14.5, color: "#111b21", lineHeight: 1.4, fontStyle: isDeleted ? "italic" : "normal" }}>
                       {isDeleted
                         ? "🚫 This message was deleted"
-                        : ((msg.type === "image" || msg.type === "video" || msg.type === "document") && msg.media_url
-                          ? (msg.type === "document" ? "" : msg.content !== "Attachment" && msg.content !== "🎥 Video" && msg.content !== "📷 Photo" ? msg.content : "")
+                        : ((msg.type === "image" || msg.type === "video" || isDocumentMessage(msg)) && msg.media_url
+                          ? (isDocumentMessage(msg) ? "" : msg.content !== "Attachment" && msg.content !== "🎥 Video" && msg.content !== "📷 Photo" ? msg.content : "")
                           : msg.content)}
                     </p>
                     )}
@@ -891,13 +896,14 @@ export default function VidehWeb() {
               e.target.value = "";
             }}
           />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", backgroundColor: "#f0f2f5", position: "relative" }}>
+          <div className="vw-chat__input-bar">
             <div ref={emojiWrapRef} style={{ position: "relative" }}>
               <button
                 type="button"
                 title="Emoji"
+                className="vw-icon-btn"
                 onClick={() => setEmojiOpen((o) => !o)}
-                style={{ background: emojiOpen ? "#e9edef" : "none", border: "none", cursor: "pointer", color: "#54656f", padding: 6 }}
+                style={{ background: emojiOpen ? "#e9edef" : undefined }}
               >
                 <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M9.153 11.603c.795 0 1.439-.879 1.439-1.962s-.644-1.962-1.439-1.962-1.439.879-1.439 1.962.644 1.962 1.439 1.962zm-3.204 1.362c-.026-.307-.131 5.218 6.063 5.551 6.066-.25 6.066-5.551 6.066-5.551-6.078 1.416-12.129 0-12.129 0zm11.363 1.108s-.669 1.959-5.051 1.959c-3.505 0-5.388-1.164-5.607-1.959 0 0 5.912 1.055 10.658 0zM11.804 1.011C5.609 1.011.978 6.033.978 12.228s4.826 10.761 11.021 10.761S23.02 18.423 23.02 12.228c.001-6.195-5.021-11.217-11.216-11.217zM12 21.354c-5.273 0-9.381-4.085-9.381-9.381 0-5.295 3.942-9.424 9.215-9.424 5.273 0 9.381 4.129 9.381 9.424-.001 5.297-3.942 9.381-9.215 9.381z"/></svg>
               </button>
@@ -913,29 +919,40 @@ export default function VidehWeb() {
             <button
               type="button"
               title="Attach file"
+              className="vw-icon-btn"
               disabled={uploading}
               onClick={() => fileInputRef.current?.click()}
-              style={{ background: "none", border: "none", cursor: uploading ? "wait" : "pointer", color: "#54656f", padding: 6, opacity: uploading ? 0.5 : 1 }}
+              style={{ opacity: uploading ? 0.5 : 1, cursor: uploading ? "wait" : "pointer" }}
             >
               <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M1.816 15.556v.002c0 1.502.584 2.912 1.646 3.972s2.472 1.647 3.974 1.647a5.58 5.58 0 0 0 3.972-1.645l9.547-9.548c.769-.768 1.147-1.767 1.058-2.817-.079-.968-.548-1.927-1.319-2.698-1.594-1.592-4.068-1.711-5.517-.262l-7.916 7.915c-.881.881-.792 2.25.214 3.261.959.958 2.423 1.053 3.263.215l5.511-5.512c.28-.28.267-.722.053-.936l-.244-.244c-.191-.191-.567-.349-.957.04l-5.506 5.506c-.18.18-.635.127-.976-.214-.098-.097-.576-.613-.213-.973l7.915-7.917c.818-.817 2.267-.699 3.23.262.5.501.802 1.1.849 1.685.051.573-.156 1.111-.589 1.543l-9.547 9.549a3.97 3.97 0 0 1-2.829 1.171 3.975 3.975 0 0 1-2.83-1.173 3.973 3.973 0 0 1-1.172-2.828c0-1.071.415-2.076 1.172-2.83l7.209-7.211c.157-.157.264-.579.028-.814L11.5 4.36a.572.572 0 0 0-.834.018L3.456 11.59a5.58 5.58 0 0 0-1.64 3.966z"/></svg>
             </button>
             <input
               ref={inputRef}
+              className="vw-chat__input"
               value={msgText}
               onChange={(e) => setMsgText(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
               placeholder="Type a message"
-              style={{ flex: 1, padding: "10px 16px", border: "none", borderRadius: 8, backgroundColor: "white", fontSize: 15, outline: "none", color: "#111b21" }}
             />
             <button
+              type="button"
+              className="vw-send-btn"
               onClick={sendMessage}
               disabled={!msgText.trim()}
-              style={{ width: 44, height: 44, borderRadius: "50%", backgroundColor: "#00a884", border: "none", cursor: msgText.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", opacity: msgText.trim() ? 1 : 0.5, transition: "opacity 0.2s" }}
             >
               <svg viewBox="0 0 24 24" width="22" height="22" fill="white"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
             </button>
           </div>
         </div>
+      ) : mainSection === "settings" && user && token && settingsSection ? (
+        <WebSettingsDetail
+          section={settingsSection}
+          token={token}
+          user={user}
+          currentToken={token}
+          onLogout={() => void handleLogout()}
+          onOpenSupportChat={() => alert("Search for Videh Support in New chat, or email support@videh.app")}
+        />
       ) : (
         <WebEmptyPane section={mainSection} />
       )}
@@ -943,6 +960,7 @@ export default function VidehWeb() {
       {showContactInfo && user && token && (
         <WebContactInfo token={token} self={user} chatId={contactInfoChatId} onClose={() => setShowContactInfo(false)} onSaveProfile={saveProfile} onMuteToggle={contactInfoChatId ? () => toggleMute() : undefined} />
       )}
+      </div>
       {statusViewerUserId != null && viewingStatuses.length > 0 && (
         <div style={{ position: "fixed", inset: 0, zIndex: 3000, backgroundColor: "#0b141a", display: "flex", flexDirection: "column" }} onClick={() => setStatusViewerUserId(null)}>
           <div style={{ padding: 16, color: "white", display: "flex", justifyContent: "space-between" }}>

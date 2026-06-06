@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { webApi, type ChatMember, type WebUser } from "../../lib/webApi";
+import "./webShell.css";
 
 const EMOJIS = ["😀", "😂", "😍", "😊", "😢", "😡", "👍", "👎", "🙏", "❤️", "🔥", "🎉", "✅", "👋", "💯", "⭐"];
 
@@ -41,46 +42,20 @@ export function DropdownMenu({
   return (
     <div
       ref={menuRef}
-      style={{
-        position: "fixed",
-        top,
-        right,
-        zIndex: 900,
-        minWidth: 200,
-        backgroundColor: "white",
-        borderRadius: 8,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
-        overflow: "hidden",
-        padding: "6px 0",
-      }}
+      className="vw-dropdown"
+      style={{ top, right }}
     >
       {items.map((item, idx) =>
         item.divider ? (
-          <div key={`div-${idx}`} style={{ height: 1, backgroundColor: "#e9edef", margin: "6px 0" }} />
+          <div key={`div-${idx}`} className="vw-dropdown__divider" />
         ) : (
         <button
           key={item.label}
           type="button"
+          className={`vw-dropdown__item${item.danger ? " vw-dropdown__item--danger" : ""}`}
           onClick={() => {
             item.onClick?.();
             onClose();
-          }}
-          style={{
-            display: "block",
-            width: "100%",
-            textAlign: "left",
-            padding: "12px 20px",
-            border: "none",
-            background: "none",
-            cursor: "pointer",
-            fontSize: 14,
-            color: item.danger ? "#e53e3e" : "#111b21",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#f5f6f6";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent";
           }}
         >
           {item.label}

@@ -141,6 +141,9 @@ export default function ContactsScreen() {
       toInvite.sort((a, b) => a.name.localeCompare(b.name));
       setVidehContacts(onVideh);
       setInviteContacts(toInvite);
+      void import("@/lib/syncContactsToServer").then(({ syncDeviceContactsToServer }) =>
+        syncDeviceContactsToServer(getApiUrl(), user?.sessionToken).catch(() => 0),
+      );
     } catch {
       setInviteContacts(deviceContacts);
     }

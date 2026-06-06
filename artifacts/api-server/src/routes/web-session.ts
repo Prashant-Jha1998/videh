@@ -9,6 +9,20 @@ import { publicMediaUrl } from "../lib/mediaStorage";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
 import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
 import { userCanAccessChatMedia } from "../lib/chatMediaAccess";
+import {
+  ensurePrivacyColumns,
+  getUserPrivacy,
+  privacyLabels,
+  type LastSeenPrivacy,
+  type OnlinePrivacy,
+} from "../lib/presencePrivacy";
+import {
+  disappearLabel,
+  ensureExtendedPrivacyColumns,
+  fieldPrivacyLabel,
+  getExtendedPrivacy,
+  type FieldPrivacy,
+} from "../lib/userPrivacySettings";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -352,13 +366,14 @@ router.get("/:token/chats", async (req: Request, res: Response) => {
             'id', m.id, 'content', m.content, 'type', m.type, 'media_url', m.media_url,
             'sender_id', m.sender_id, 'created_at', m.created_at, 'is_deleted', m.is_deleted
           )
-          FROM messages m WHERE m.chat_id = c.id AND m.is_deleted = FALSE
+          FROM messages m
+          WHERE m.chat_id = c.id AND m.is_deleted = FALSE AND m.type != 'system'
           ORDER BY m.created_at DESC LIMIT 1
         ) AS last_message,
         (
           SELECT COUNT(*)::int FROM messages m
           WHERE m.chat_id = c.id AND m.sender_id != $1::int
-            AND m.created_at > cm.last_read_at AND m.is_deleted = FALSE
+            AND m.created_at > cm.last_read_at AND m.is_deleted = FALSE AND m.type != 'system'
         ) AS unread_count,
         (
           SELECT json_agg(json_build_object(
@@ -767,36 +782,28 @@ router.get("/:token/contacts", async (req: Request, res: Response) => {
   const q = String(req.query.q ?? "").trim();
   try {
     if (q.length > 0) {
+      const like = `%${q}%`;
+      const digits = q.replace(/\D/g, "");
+      const phoneLike = digits.length > 0 ? `%${digits}%` : like;
       const result = await query(
-        `SELECT id, phone, name, avatar_url, about FROM users
-         WHERE id != $1 AND (phone LIKE $2 OR COALESCE(name, '') ILIKE $2)
-         ORDER BY name NULLS LAST
+        `SELECT u.id, u.phone, u.name, u.avatar_url, u.about FROM users u
+         WHERE u.id != $1
+           AND NOT EXISTS (
+             SELECT 1 FROM blocked_users b
+             WHERE (b.blocker_id = $1 AND b.blocked_id = u.id)
+                OR (b.blocker_id = u.id AND b.blocked_id = $1)
+           )
+           AND (COALESCE(u.name, '') ILIKE $2 OR u.phone LIKE $3)
+         ORDER BY COALESCE(u.name, u.phone) ASC NULLS LAST
          LIMIT 100`,
-        [session.userId, `%${q}%`],
+        [session.userId, like, phoneLike],
       );
       res.json({ success: true, users: result.rows });
       return;
     }
-    const result = await query(
-      `SELECT DISTINCT u.id, u.phone, u.name, u.avatar_url, u.about
-       FROM users u
-       WHERE u.id != $1
-         AND u.id IN (
-           SELECT cm_other.user_id
-           FROM chat_members cm_self
-           JOIN chat_members cm_other ON cm_other.chat_id = cm_self.chat_id AND cm_other.user_id != cm_self.user_id
-           WHERE cm_self.user_id = $1
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM blocked_users b
-           WHERE (b.blocker_id = $1 AND b.blocked_id = u.id)
-              OR (b.blocker_id = u.id AND b.blocked_id = $1)
-         )
-       ORDER BY COALESCE(u.name, u.phone) ASC
-       LIMIT 500`,
-      [session.userId],
-    );
-    res.json({ success: true, users: result.rows });
+    const { listVidehContactsForUser } = await import("../lib/userSyncedContacts");
+    const users = await listVidehContactsForUser(session.userId);
+    res.json({ success: true, users });
   } catch (err) {
     req.log.error({ err }, "web contacts list");
     res.status(500).json({ success: false });
@@ -812,12 +819,21 @@ router.get("/:token/users/search", async (req: Request, res: Response) => {
     return;
   }
   try {
+    const like = `%${q}%`;
+    const digits = q.replace(/\D/g, "");
+    const phoneLike = digits.length > 0 ? `%${digits}%` : like;
     const result = await query(
-      `SELECT id, phone, name, avatar_url, about FROM users
-       WHERE id != $1 AND (phone LIKE $2 OR COALESCE(name, '') ILIKE $2)
-       ORDER BY name NULLS LAST
+      `SELECT u.id, u.phone, u.name, u.avatar_url, u.about FROM users u
+       WHERE u.id != $1
+         AND NOT EXISTS (
+           SELECT 1 FROM blocked_users b
+           WHERE (b.blocker_id = $1 AND b.blocked_id = u.id)
+              OR (b.blocker_id = u.id AND b.blocked_id = $1)
+         )
+         AND (COALESCE(u.name, '') ILIKE $2 OR u.phone LIKE $3)
+       ORDER BY COALESCE(u.name, u.phone) ASC NULLS LAST
        LIMIT 25`,
-      [session.userId, `%${q}%`],
+      [session.userId, like, phoneLike],
     );
     res.json({ success: true, users: result.rows });
   } catch (err) {
@@ -1050,6 +1066,316 @@ router.post("/:token/groups", async (req: Request, res: Response) => {
     res.json({ success: true, chatId });
   } catch (err) {
     req.log.error({ err }, "web create group");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:token/privacy", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  try {
+    await ensurePrivacyColumns();
+    await ensureExtendedPrivacyColumns();
+    const privacy = await getUserPrivacy(session.userId);
+    const extended = await getExtendedPrivacy(session.userId);
+    if (!privacy || !extended) {
+      res.status(404).json({ success: false });
+      return;
+    }
+    const labels = privacyLabels(privacy.last_seen_privacy, privacy.online_privacy);
+    res.json({
+      success: true,
+      lastSeenLabel: labels.lastSeenLabel,
+      onlineLabel: labels.onlineLabel,
+      profilePhotoLabel: fieldPrivacyLabel(extended.profile_photo_privacy),
+      aboutLabel: fieldPrivacyLabel(extended.about_privacy),
+      statusLabel: fieldPrivacyLabel(extended.status_privacy),
+      groupsLabel: fieldPrivacyLabel(extended.groups_privacy),
+      readReceiptsEnabled: extended.read_receipts_enabled,
+      defaultDisappearSeconds: extended.default_disappear_seconds,
+      disappearLabel: disappearLabel(extended.default_disappear_seconds),
+      silenceUnknownCallers: extended.silence_unknown_callers,
+    });
+  } catch (err) {
+    req.log.error({ err }, "web get privacy");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.patch("/:token/privacy", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const body = req.body as {
+    lastSeenPrivacy?: LastSeenPrivacy;
+    onlinePrivacy?: OnlinePrivacy;
+    profilePhotoPrivacy?: FieldPrivacy;
+    aboutPrivacy?: FieldPrivacy;
+    statusPrivacy?: FieldPrivacy;
+    groupsPrivacy?: FieldPrivacy;
+    readReceiptsEnabled?: boolean;
+    defaultDisappearSeconds?: number | null;
+    silenceUnknownCallers?: boolean;
+  };
+  try {
+    await ensurePrivacyColumns();
+    await ensureExtendedPrivacyColumns();
+    const current = await getUserPrivacy(session.userId);
+    const extended = await getExtendedPrivacy(session.userId);
+    if (!current || !extended) {
+      res.status(404).json({ success: false });
+      return;
+    }
+    const lastSeen = body.lastSeenPrivacy ?? current.last_seen_privacy;
+    const online = body.onlinePrivacy ?? current.online_privacy;
+    const profilePhoto = body.profilePhotoPrivacy ?? extended.profile_photo_privacy;
+    const about = body.aboutPrivacy ?? extended.about_privacy;
+    const status = body.statusPrivacy ?? extended.status_privacy;
+    const groups = body.groupsPrivacy ?? extended.groups_privacy;
+    const readReceipts =
+      typeof body.readReceiptsEnabled === "boolean" ? body.readReceiptsEnabled : extended.read_receipts_enabled;
+    const disappearSeconds =
+      body.defaultDisappearSeconds !== undefined ? body.defaultDisappearSeconds : extended.default_disappear_seconds;
+    const silenceUnknown =
+      typeof body.silenceUnknownCallers === "boolean" ? body.silenceUnknownCallers : extended.silence_unknown_callers;
+    await query(
+      `UPDATE users SET
+        last_seen_privacy = $1,
+        online_privacy = $2,
+        profile_photo_privacy = $3,
+        about_privacy = $4,
+        status_privacy = $5,
+        groups_privacy = $6,
+        read_receipts_enabled = $7,
+        default_disappear_seconds = $8,
+        silence_unknown_callers = $9,
+        updated_at = NOW()
+       WHERE id = $10`,
+      [lastSeen, online, profilePhoto, about, status, groups, readReceipts, disappearSeconds, silenceUnknown, session.userId],
+    );
+    const labels = privacyLabels(lastSeen, online);
+    res.json({
+      success: true,
+      lastSeenLabel: labels.lastSeenLabel,
+      onlineLabel: labels.onlineLabel,
+      profilePhotoLabel: fieldPrivacyLabel(profilePhoto),
+      aboutLabel: fieldPrivacyLabel(about),
+      statusLabel: fieldPrivacyLabel(status),
+      groupsLabel: fieldPrivacyLabel(groups),
+      readReceiptsEnabled: readReceipts,
+      defaultDisappearSeconds: disappearSeconds,
+      disappearLabel: disappearLabel(disappearSeconds),
+      silenceUnknownCallers: silenceUnknown,
+    });
+  } catch (err) {
+    req.log.error({ err }, "web patch privacy");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:token/blocked", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  try {
+    const result = await query(
+      `SELECT u.id, u.name, u.phone, u.avatar_url FROM blocked_users b
+       JOIN users u ON u.id = b.blocked_id WHERE b.blocker_id = $1`,
+      [session.userId],
+    );
+    res.json({ success: true, blocked: result.rows });
+  } catch (err) {
+    req.log.error({ err }, "web list blocked");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.delete("/:token/blocked/:blockedUserId", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const blockedId = Number(routeParam(req.params.blockedUserId));
+  if (!Number.isFinite(blockedId)) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  try {
+    await query("DELETE FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2", [session.userId, blockedId]);
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "web unblock");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:token/two-step-status", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  try {
+    const r = await query("SELECT two_step_pin FROM users WHERE id = $1", [session.userId]);
+    if (r.rows.length === 0) {
+      res.status(404).json({ success: false });
+      return;
+    }
+    res.json({ success: true, enabled: !!r.rows[0].two_step_pin });
+  } catch (err) {
+    req.log.error({ err }, "web two-step status");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:token/two-step-pin", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const { pin } = req.body as { pin?: string };
+  if (!pin || pin.length !== 6 || !/^\d+$/.test(pin)) {
+    res.status(400).json({ success: false, message: "6-digit numeric PIN required" });
+    return;
+  }
+  try {
+    await query("UPDATE users SET two_step_pin = $1 WHERE id = $2", [pin, session.userId]);
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "web set two-step");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.delete("/:token/two-step-pin", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const { pin } = req.body as { pin?: string };
+  try {
+    const r = await query("SELECT two_step_pin FROM users WHERE id = $1", [session.userId]);
+    if (!r.rows[0] || r.rows[0].two_step_pin !== pin) {
+      res.status(403).json({ success: false, message: "Incorrect PIN" });
+      return;
+    }
+    await query("UPDATE users SET two_step_pin = NULL WHERE id = $1", [session.userId]);
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "web remove two-step");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:token/devices", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  try {
+    const result = await query(
+      `SELECT token, device_name, platform, linked_at, last_active
+       FROM web_sessions
+       WHERE user_id = $1 AND status = 'linked' AND expires_at > NOW()
+       ORDER BY linked_at DESC`,
+      [session.userId],
+    );
+    res.json({ success: true, devices: result.rows });
+  } catch (err) {
+    req.log.error({ err }, "web list devices");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:token/storage-stats", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  try {
+    const stats = await query(
+      `SELECT
+        COUNT(DISTINCT c.id)::int as total_chats,
+        COUNT(m.id)::int as total_messages,
+        COUNT(CASE WHEN m.type != 'text' THEN 1 END)::int as media_messages,
+        COUNT(CASE WHEN m.type = 'text' THEN 1 END)::int as text_messages
+      FROM chat_members cm
+      JOIN chats c ON c.id = cm.chat_id
+      LEFT JOIN messages m ON m.chat_id = c.id AND m.is_deleted = FALSE
+      WHERE cm.user_id = $1`,
+      [session.userId],
+    );
+    res.json({ success: true, stats: stats.rows[0] });
+  } catch (err) {
+    req.log.error({ err }, "web storage stats");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:token/sos/contacts", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  try {
+    const result = await query(
+      `SELECT sc.*, u.name as linked_name, u.phone as linked_phone
+       FROM sos_contacts sc
+       LEFT JOIN users u ON u.id = sc.contact_user_id
+       WHERE sc.user_id = $1
+       ORDER BY sc.created_at ASC`,
+      [session.userId],
+    );
+    res.json({ success: true, contacts: result.rows });
+  } catch (err) {
+    req.log.error({ err }, "web sos contacts");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:token/sos/contacts", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const { contactName, contactPhone } = req.body as { contactName?: string; contactPhone?: string };
+  const trimmedName = String(contactName ?? "").trim();
+  if (!trimmedName) {
+    res.status(400).json({ success: false, message: "contactName required" });
+    return;
+  }
+  const normalizedPhone = contactPhone ? contactPhone.replace(/[^\d+]/g, "").trim() : null;
+  try {
+    const countResult = await query("SELECT COUNT(*)::int AS count FROM sos_contacts WHERE user_id = $1", [session.userId]);
+    if ((countResult.rows[0]?.count ?? 0) >= 5) {
+      res.status(400).json({ success: false, message: "Maximum 5 SOS contacts allowed" });
+      return;
+    }
+    await query(
+      "INSERT INTO sos_contacts (user_id, contact_name, contact_phone) VALUES ($1, $2, $3)",
+      [session.userId, trimmedName, normalizedPhone],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "web add sos contact");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.delete("/:token/sos/contacts/:contactId", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const contactId = Number(routeParam(req.params.contactId));
+  if (!Number.isFinite(contactId)) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  try {
+    await query("DELETE FROM sos_contacts WHERE id = $1 AND user_id = $2", [contactId, session.userId]);
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "web remove sos contact");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.patch("/:token/language", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const { preferredLang } = req.body as { preferredLang?: string };
+  if (!preferredLang?.trim()) {
+    res.status(400).json({ success: false, message: "preferredLang required" });
+    return;
+  }
+  try {
+    await query("UPDATE users SET preferred_lang = $1, updated_at = NOW() WHERE id = $2", [
+      preferredLang.trim(),
+      session.userId,
+    ]);
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "web set language");
     res.status(500).json({ success: false });
   }
 });

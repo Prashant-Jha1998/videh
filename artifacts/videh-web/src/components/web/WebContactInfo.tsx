@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { webApi, type ChatDetails, type WebUser } from "../../lib/webApi";
+import { WEB_CONTACT_PANEL_WIDTH } from "../../lib/webDesktop";
 import { Avatar, WA_BG, WA_GREEN, WA_MUTED, WA_TEXT } from "./webUiShared";
 
 export function WebContactInfo({
@@ -18,6 +19,7 @@ export function WebContactInfo({
   onMuteToggle?: (muted: boolean) => void;
 }) {
   const [details, setDetails] = useState<ChatDetails | null>(null);
+  const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(self.name);
   const [about, setAbout] = useState(self.about ?? "");
@@ -30,9 +32,15 @@ export function WebContactInfo({
       setName(self.name);
       setAbout(self.about ?? "");
       setDetails(null);
+      setLoading(false);
       return;
     }
-    webApi.details(token, chatId).then((d) => setDetails(d)).catch(() => setDetails(null));
+    setLoading(true);
+    webApi
+      .details(token, chatId)
+      .then((d) => setDetails(d))
+      .catch(() => setDetails(null))
+      .finally(() => setLoading(false));
   }, [token, chatId, isSelf, self.name, self.about]);
 
   const other = !isSelf ? details?.members?.find((m) => m.id !== self.id) : undefined;
@@ -48,13 +56,17 @@ export function WebContactInfo({
   return (
     <div
       style={{
-        width: 360,
+        width: WEB_CONTACT_PANEL_WIDTH,
+        maxWidth: "100%",
         borderLeft: "1px solid #e9edef",
         backgroundColor: WA_BG,
         display: "flex",
         flexDirection: "column",
         flexShrink: 0,
         height: "100%",
+        minHeight: 0,
+        boxSizing: "border-box",
+        overflow: "hidden",
       }}
     >
       <div
@@ -63,74 +75,142 @@ export function WebContactInfo({
           alignItems: "center",
           padding: "12px 16px",
           backgroundColor: WA_BG,
-          gap: 24,
+          gap: 16,
+          flexShrink: 0,
         }}
       >
-        <button type="button" onClick={onClose} style={{ border: "none", background: "none", fontSize: 22, cursor: "pointer", color: "#54656f" }}>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close contact info"
+          style={{ border: "none", background: "none", fontSize: 24, lineHeight: 1, cursor: "pointer", color: "#54656f", padding: 4 }}
+        >
           ×
         </button>
-        <span style={{ fontSize: 16, color: WA_TEXT }}>Contact info</span>
+        <span style={{ fontSize: 16, color: WA_TEXT, fontWeight: 500 }}>Contact info</span>
         {isSelf && (
           <button
             type="button"
             onClick={() => setEditing((e) => !e)}
-            style={{ marginLeft: "auto", border: "none", background: "none", cursor: "pointer", color: WA_MUTED }}
+            style={{ marginLeft: "auto", border: "none", background: "none", cursor: "pointer", color: WA_MUTED, fontSize: 18 }}
           >
             ✎
           </button>
         )}
       </div>
-      <div style={{ flex: 1, overflowY: "auto", backgroundColor: "white" }}>
-        <div style={{ padding: "28px 24px", textAlign: "center", backgroundColor: WA_BG }}>
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
-            <Avatar name={displayName} url={avatarUrl} size={200} />
-          </div>
-          {editing && isSelf ? (
-            <>
-              <input value={name} onChange={(e) => setName(e.target.value)} style={{ width: "100%", textAlign: "center", fontSize: 20, fontWeight: 500, border: "1px solid #e9edef", borderRadius: 8, padding: 8 }} />
-              <input value={about} onChange={(e) => setAbout(e.target.value)} placeholder="About" style={{ width: "100%", textAlign: "center", marginTop: 8, fontSize: 14, border: "1px solid #e9edef", borderRadius: 8, padding: 8 }} />
-              <button
-                type="button"
-                disabled={saving}
-                onClick={async () => {
-                  setSaving(true);
-                  try {
-                    await onSaveProfile(name.trim(), about.trim());
-                    setEditing(false);
-                  } finally {
-                    setSaving(false);
-                  }
-                }}
-                style={{ marginTop: 12, padding: "10px 24px", backgroundColor: WA_GREEN, color: "white", border: "none", borderRadius: 20, cursor: "pointer", fontWeight: 600 }}
-              >
-                Save
+
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", backgroundColor: "white" }}>
+        {loading && !isSelf ? (
+          <div style={{ padding: 32, textAlign: "center", color: WA_MUTED }}>Loading…</div>
+        ) : (
+          <>
+            <div style={{ padding: "24px 20px", textAlign: "center", backgroundColor: WA_BG, boxSizing: "border-box" }}>
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+                <Avatar name={displayName} url={avatarUrl} size={168} />
+              </div>
+              {editing && isSelf ? (
+                <>
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    style={{
+                      width: "100%",
+                      maxWidth: "100%",
+                      boxSizing: "border-box",
+                      textAlign: "center",
+                      fontSize: 20,
+                      fontWeight: 500,
+                      border: "1px solid #e9edef",
+                      borderRadius: 8,
+                      padding: 8,
+                    }}
+                  />
+                  <input
+                    value={about}
+                    onChange={(e) => setAbout(e.target.value)}
+                    placeholder="About"
+                    style={{
+                      width: "100%",
+                      maxWidth: "100%",
+                      boxSizing: "border-box",
+                      textAlign: "center",
+                      marginTop: 8,
+                      fontSize: 14,
+                      border: "1px solid #e9edef",
+                      borderRadius: 8,
+                      padding: 8,
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={async () => {
+                      setSaving(true);
+                      try {
+                        await onSaveProfile(name.trim(), about.trim());
+                        setEditing(false);
+                      } finally {
+                        setSaving(false);
+                      }
+                    }}
+                    style={{
+                      marginTop: 12,
+                      padding: "10px 24px",
+                      backgroundColor: WA_GREEN,
+                      color: "white",
+                      border: "none",
+                      borderRadius: 20,
+                      cursor: "pointer",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Save
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h2
+                    style={{
+                      margin: "0 0 6px",
+                      fontSize: 22,
+                      fontWeight: 400,
+                      color: WA_TEXT,
+                      wordBreak: "break-word",
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {displayName}
+                  </h2>
+                  {phone && (
+                    <p style={{ margin: 0, color: WA_MUTED, fontSize: 15, wordBreak: "break-word" }}>{phone}</p>
+                  )}
+                </>
+              )}
+            </div>
+
+            {aboutText && !editing && <Row label="About" value={aboutText} />}
+            {!isSelf && details?.chat?.is_group && (
+              <Row label="Members" value={`${details.members.length} participants`} />
+            )}
+            {!isSelf && onMuteToggle && (
+              <button type="button" onClick={() => onMuteToggle(true)} style={rowBtn}>
+                Mute notifications
               </button>
-            </>
-          ) : (
-            <>
-              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 400, color: WA_TEXT }}>{displayName}</h2>
-              {phone && <p style={{ margin: 0, color: WA_MUTED, fontSize: 15 }}>{phone}</p>}
-            </>
-          )}
-        </div>
-        {aboutText && !editing && (
-          <Row label="About" value={aboutText} />
+            )}
+            <div
+              style={{
+                padding: "16px 20px",
+                fontSize: 13,
+                color: WA_MUTED,
+                borderTop: "8px solid #f0f2f5",
+                lineHeight: 1.45,
+                wordBreak: "break-word",
+              }}
+            >
+              🔒 Messages and calls are end-to-end encrypted
+            </div>
+          </>
         )}
-        {!isSelf && details?.chat?.is_group && (
-          <Row label="Members" value={`${details.members.length} participants`} />
-        )}
-        {!isSelf && onMuteToggle && (
-          <button
-            type="button"
-            onClick={() => onMuteToggle(true)}
-            style={rowBtn}
-          >
-            Mute notifications
-          </button>
-        )}
-        <div style={{ padding: "16px 24px", fontSize: 13, color: WA_MUTED, borderTop: "8px solid #f0f2f5" }}>
-          🔒 Messages and calls are end-to-end encrypted
-        </div>
       </div>
     </div>
   );
@@ -138,22 +218,23 @@ export function WebContactInfo({
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ padding: "16px 24px", borderTop: "1px solid #f0f2f5" }}>
+    <div style={{ padding: "16px 20px", borderTop: "1px solid #f0f2f5", boxSizing: "border-box" }}>
       <div style={{ fontSize: 13, color: WA_MUTED, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 15, color: WA_TEXT }}>{value}</div>
+      <div style={{ fontSize: 15, color: WA_TEXT, wordBreak: "break-word", overflowWrap: "anywhere" }}>{value}</div>
     </div>
   );
 }
 
-const rowBtn: React.CSSProperties = {
+const rowBtn: CSSProperties = {
   display: "block",
   width: "100%",
   textAlign: "left",
-  padding: "16px 24px",
+  padding: "16px 20px",
   border: "none",
   borderTop: "1px solid #f0f2f5",
   background: "white",
   fontSize: 15,
   cursor: "pointer",
   color: WA_TEXT,
+  boxSizing: "border-box",
 };

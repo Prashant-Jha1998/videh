@@ -215,6 +215,76 @@ export const webApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
+  privacy: (token: string) =>
+    request<{ success: true } & import("./webSettingsTypes").WebPrivacySettings>(`/web-session/${token}/privacy`),
+  patchPrivacy: (
+    token: string,
+    patch: Partial<{
+      profilePhotoPrivacy: string;
+      aboutPrivacy: string;
+      statusPrivacy: string;
+      groupsPrivacy: string;
+      readReceiptsEnabled: boolean;
+      defaultDisappearSeconds: number | null;
+      silenceUnknownCallers: boolean;
+      lastSeenPrivacy: string;
+      onlinePrivacy: string;
+    }>,
+  ) =>
+    request<{ success: true } & import("./webSettingsTypes").WebPrivacySettings>(`/web-session/${token}/privacy`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }),
+  blocked: (token: string) =>
+    request<{ success: true; blocked: Array<{ id: number; name?: string | null; phone?: string; avatar_url?: string | null }> }>(
+      `/web-session/${token}/blocked`,
+    ),
+  unblock: (token: string, blockedUserId: number) =>
+    request<{ success: true }>(`/web-session/${token}/blocked/${blockedUserId}`, { method: "DELETE" }),
+  twoStepStatus: (token: string) => request<{ success: true; enabled: boolean }>(`/web-session/${token}/two-step-status`),
+  setTwoStepPin: (token: string, pin: string) =>
+    request<{ success: true }>(`/web-session/${token}/two-step-pin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    }),
+  removeTwoStepPin: (token: string, pin: string) =>
+    request<{ success: true }>(`/web-session/${token}/two-step-pin`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    }),
+  linkedDevices: (token: string) =>
+    request<{
+      success: true;
+      devices: Array<{ token: string; device_name: string; platform: string; linked_at: string; last_active: string }>;
+    }>(`/web-session/${token}/devices`),
+  logoutDevice: (deviceToken: string) => request<{ success: true }>(`/web-session/${deviceToken}`, { method: "DELETE" }),
+  storageStats: (token: string) =>
+    request<{
+      success: true;
+      stats: { total_chats: number; total_messages: number; media_messages: number; text_messages: number };
+    }>(`/web-session/${token}/storage-stats`),
+  sosContacts: (token: string) =>
+    request<{
+      success: true;
+      contacts: Array<{ id: number; contact_name: string; contact_phone: string | null; linked_name: string | null }>;
+    }>(`/web-session/${token}/sos/contacts`),
+  addSosContact: (token: string, payload: { contactName: string; contactPhone?: string }) =>
+    request<{ success: true }>(`/web-session/${token}/sos/contacts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  removeSosContact: (token: string, contactId: number) =>
+    request<{ success: true }>(`/web-session/${token}/sos/contacts/${contactId}`, { method: "DELETE" }),
+  setLanguage: (token: string, preferredLang: string) =>
+    request<{ success: true }>(`/web-session/${token}/language`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ preferredLang }),
+    }),
 };
 
 export function eventsUrl(token: string): string {

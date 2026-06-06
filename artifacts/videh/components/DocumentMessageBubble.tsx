@@ -70,13 +70,22 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, o
       disabled={uploading}
     >
       {showPdfPreview ? (
-        <PdfPagePreview
-          mediaUrl={item.mediaUrl!}
-          filename={filename}
-          sessionToken={sessionToken}
-          localUri={item.localMediaUri}
-          height={200}
-        />
+        <View style={styles.previewTap}>
+          <PdfPagePreview
+            mediaUrl={item.mediaUrl!}
+            filename={filename}
+            sessionToken={sessionToken}
+            localUri={item.localMediaUri}
+            height={200}
+          />
+          <Pressable
+            style={styles.previewOverlay}
+            onPress={onPress}
+            disabled={uploading}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${filename}`}
+          />
+        </View>
       ) : null}
 
       <View style={styles.waMain}>
@@ -165,6 +174,14 @@ const styles = StyleSheet.create({
     maxWidth: 340,
     paddingTop: 4,
     paddingBottom: 4,
+  },
+  previewTap: {
+    position: "relative",
+    width: "100%",
+  },
+  previewOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
   },
   waMain: {
     flexDirection: "row",

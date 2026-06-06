@@ -1,4 +1,5 @@
 import { useAuthenticatedMediaUrl } from "../../lib/authenticatedMedia";
+import { documentFilenameFromContent } from "../../lib/documentMessage";
 
 function docBadge(filename: string): { label: string; bg: string; color: string } {
   const ext = (filename.split(".").pop() ?? "file").toLowerCase();
@@ -11,12 +12,13 @@ function docBadge(filename: string): { label: string; bg: string; color: string 
 export function WebDocumentBubble({
   url,
   token,
-  filename,
+  content,
 }: {
   url: string;
   token: string | null;
-  filename: string;
+  content: string;
 }) {
+  const filename = documentFilenameFromContent(content);
   const { blobUrl, loading, failed } = useAuthenticatedMediaUrl(url, token);
   const badge = docBadge(filename);
 
@@ -34,38 +36,73 @@ export function WebDocumentBubble({
   };
 
   const isPdf = filename.toLowerCase().endsWith(".pdf");
+  const canOpen = Boolean(blobUrl) && !failed;
 
   return (
-    <div style={{ minWidth: 240, maxWidth: 320 }}>
+    <button
+      type="button"
+      onClick={openDoc}
+      disabled={!canOpen}
+      title={canOpen ? "Open document" : loading ? "Loading document…" : "Could not load document"}
+      style={{
+        display: "block",
+        width: "100%",
+        minWidth: 240,
+        maxWidth: 320,
+        padding: 0,
+        margin: 0,
+        border: "none",
+        borderRadius: 8,
+        background: "transparent",
+        cursor: canOpen ? "pointer" : loading ? "wait" : "default",
+        textAlign: "left",
+        overflow: "hidden",
+      }}
+    >
       {isPdf && blobUrl ? (
-        <iframe
-          title="PDF preview"
-          src={blobUrl}
+        <div
           style={{
+            position: "relative",
             width: "100%",
             height: 140,
-            border: "none",
+            marginBottom: 2,
             borderRadius: "8px 8px 0 0",
+            overflow: "hidden",
             backgroundColor: "#f0f2f5",
-            marginBottom: 4,
           }}
-        />
+        >
+          <iframe
+            title="PDF preview"
+            src={`${blobUrl}#page=1&toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+            style={{
+              width: "100%",
+              height: "100%",
+              border: "none",
+              pointerEvents: "none",
+            }}
+          />
+          {canOpen ? (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background: "transparent",
+              }}
+              aria-hidden
+            />
+          ) : null}
+        </div>
       ) : null}
-      <button
-        type="button"
-        onClick={openDoc}
-        disabled={loading || failed || !blobUrl}
+
+      <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: 12,
           width: "100%",
           padding: "10px 12px",
-          border: "none",
-          borderRadius: 8,
+          borderRadius: isPdf && blobUrl ? "0 0 8px 8px" : 8,
           backgroundColor: "rgba(0,0,0,0.04)",
-          cursor: blobUrl ? "pointer" : "wait",
-          textAlign: "left",
         }}
       >
         <div
@@ -99,10 +136,10 @@ export function WebDocumentBubble({
             {filename || "Document"}
           </div>
           <div style={{ fontSize: 12, color: failed ? "#ea0038" : "#667781", marginTop: 2 }}>
-            {failed ? "Could not load file" : loading ? "Loading…" : "Click to open"}
+            {failed ? "Could not load file" : loading ? "Loading…" : "Tap to open"}
           </div>
         </div>
-      </button>
-    </div>
+      </div>
+    </button>
   );
 }

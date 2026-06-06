@@ -29,6 +29,7 @@ import {
   labelToFieldPrivacy,
   type FieldPrivacy,
 } from "../lib/userPrivacySettings";
+import { replaceUserSyncedContacts } from "../lib/userSyncedContacts";
 
 const router = Router();
 
@@ -389,6 +390,38 @@ router.post("/:id/report", async (req: Request, res: Response) => {
     }
     res.json({ success: true });
   } catch { res.status(500).json({ success: false }); }
+});
+
+// Sync phone address book from mobile app (powers Videh Web contact list)
+router.post("/sync-contacts", requireAuth, async (req: Request, res: Response) => {
+  const authUserId = getAuthUserId(req);
+  if (!authUserId) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return;
+  }
+  const rateKey = `sync-contacts:${authUserId}`;
+  if (isRateLimited(rateKey, 12, 60_000)) {
+    res.status(429).json({ success: false, message: "Syncing too often. Try again shortly." });
+    return;
+  }
+
+  const { contacts } = req.body as { contacts?: Array<{ phone?: string; name?: string }> };
+  if (!contacts || !Array.isArray(contacts)) {
+    res.status(400).json({ success: false, message: "contacts array required" });
+    return;
+  }
+  if (contacts.length > 2500) {
+    res.status(400).json({ success: false, message: "Maximum 2500 contacts per sync." });
+    return;
+  }
+
+  try {
+    const synced = await replaceUserSyncedContacts(authUserId, contacts);
+    res.json({ success: true, synced });
+  } catch (err) {
+    req.log.error({ err }, "sync-contacts error");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
 });
 
 // Bulk check which phone numbers are registered on Videh (authenticated + rate limited)

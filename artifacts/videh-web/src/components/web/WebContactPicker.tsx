@@ -198,8 +198,8 @@ export function WebContactPicker({
         {!loading && users.length === 0 && (
           <p style={{ padding: 16, color: WA_MUTED, fontSize: 14, lineHeight: 1.5 }}>
             {query.trim()
-              ? "No users found. Check the name or phone number."
-              : "No contacts yet. Search by name or phone, or start a chat from the Videh app on your phone."}
+              ? "No Videh users found. Check the name or full phone number."
+              : "Open Videh on your phone once to sync contacts here. You can also search by name or number below."}
           </p>
         )}
         {groups.map((g) => (
@@ -227,8 +227,14 @@ export function WebContactPicker({
                 >
                   <Avatar name={name} url={u.avatar_url} size={49} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500, fontSize: 16, color: WA_TEXT }}>{name}</div>
-                    {u.about ? (
+                    <div style={{ fontWeight: 500, fontSize: 16, color: WA_TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {name}
+                    </div>
+                    {u.phone ? (
+                      <div style={{ fontSize: 13, color: WA_MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {formatPhoneDisplay(u.phone)}
+                      </div>
+                    ) : u.about ? (
                       <div style={{ fontSize: 13, color: WA_MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {u.about}
                       </div>
@@ -260,6 +266,14 @@ export function WebContactPicker({
       </div>
     </SidebarShell>
   );
+}
+
+function formatPhoneDisplay(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
+  }
+  return phone;
 }
 
 function SidebarShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {

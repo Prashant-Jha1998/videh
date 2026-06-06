@@ -727,6 +727,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         try {
           await registerPushTokenWithServer(u.dbId);
         } catch {}
+        void import("@/lib/syncContactsToServer").then(({ syncDeviceContactsToServer }) =>
+          syncDeviceContactsToServer(`${getApiUrl()}`, u.sessionToken).catch(() => 0),
+        );
       }
     }
   }, [loadChats, loadStatuses]);
