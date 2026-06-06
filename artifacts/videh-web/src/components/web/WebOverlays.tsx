@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { webApi, type ChatMember, type WebUser } from "../../lib/webApi";
 import "./webShell.css";
 
@@ -24,26 +24,66 @@ export function DropdownMenu({
   onClose,
   anchorRef,
   items,
+  preferAbove,
 }: {
   open: boolean;
   onClose: () => void;
   anchorRef: React.RefObject<HTMLElement | null>;
   items: Array<{ label: string; icon?: React.ReactNode; onClick?: () => void; danger?: boolean; divider?: boolean }>;
+  preferAbove?: boolean;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left?: number; right?: number; maxHeight: number } | null>(null);
   useClickOutside(menuRef, onClose, open);
 
-  if (!open) return null;
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    const updatePosition = () => {
+      const anchor = anchorRef.current?.getBoundingClientRect();
+      const estimatedH = items.reduce((h, i) => h + (i.divider ? 13 : 46), 16);
+      const menuH = menuRef.current?.offsetHeight || estimatedH;
+      const margin = 8;
+      const viewportH = window.innerHeight;
+      const viewportW = window.innerWidth;
+      if (!anchor) {
+        setPos({ top: 60, right: 16, maxHeight: viewportH - 80 });
+        return;
+      }
+      const spaceBelow = viewportH - anchor.bottom - margin;
+      const spaceAbove = anchor.top - margin;
+      const openAbove = preferAbove ?? (spaceBelow < menuH + 20 && spaceAbove > spaceBelow);
+      const maxHeight = Math.min(360, Math.max(120, openAbove ? spaceAbove - 6 : spaceBelow - 6), viewportH - margin * 2);
+      const top = openAbove
+        ? Math.max(margin, anchor.top - Math.min(menuH, maxHeight) - 6)
+        : Math.min(anchor.bottom + 6, viewportH - maxHeight - margin);
+      const alignLeft = anchor.left < viewportW * 0.45;
+      if (alignLeft) {
+        setPos({ top, left: Math.max(margin, anchor.left), maxHeight });
+      } else {
+        setPos({ top, right: Math.max(margin, viewportW - anchor.right), maxHeight });
+      }
+    };
+    updatePosition();
+    const raf = requestAnimationFrame(updatePosition);
+    return () => cancelAnimationFrame(raf);
+  }, [open, anchorRef, preferAbove, items]);
 
-  const rect = anchorRef.current?.getBoundingClientRect();
-  const top = rect ? rect.bottom + 6 : 60;
-  const right = rect ? window.innerWidth - rect.right : 16;
+  if (!open) return null;
 
   return (
     <div
       ref={menuRef}
       className="vw-dropdown vw-dropdown--message"
-      style={{ top, right }}
+      style={{
+        top: pos?.top ?? 60,
+        left: pos?.left,
+        right: pos?.right ?? 16,
+        maxHeight: pos?.maxHeight ?? 320,
+        overflowY: "auto",
+      }}
     >
       {items.map((item, idx) =>
         item.divider ? (

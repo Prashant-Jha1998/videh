@@ -4,6 +4,7 @@ import {
   CheckSquare,
   ChevronDown,
   Copy,
+  CornerDownLeft,
   Forward,
   Smile,
   Star,
@@ -15,7 +16,7 @@ import { WebDocumentBubble } from "./WebDocumentBubble";
 import { WebCallMessageBubble } from "./WebCallMessageBubble";
 import { WebVoiceMessageBubble } from "./WebVoiceMessageBubble";
 import { WebChatForwardModal } from "./WebChatForwardModal";
-import { formatMessageBody, isSystemStyleMessage } from "../../lib/chatMessageDisplay";
+import { formatMessageBody, isSystemStyleMessage, replyPreviewText } from "../../lib/chatMessageDisplay";
 import { isDocumentMessage } from "../../lib/documentMessage";
 import { parseCallMessageMeta } from "../../lib/callMessage";
 import { highlightMatches } from "../../lib/highlightText";
@@ -50,6 +51,7 @@ export function WebChatMessage({
   isSelected = false,
   onToggleSelect,
   onEnterSelection,
+  onReply,
 }: {
   msg: Message;
   token: string;
@@ -63,6 +65,7 @@ export function WebChatMessage({
   isSelected?: boolean;
   onToggleSelect?: () => void;
   onEnterSelection?: (messageId: number) => void;
+  onReply?: (msg: Message) => void;
 }) {
   const isMe = msg.sender_id === selfId;
   const isDeleted = msg.is_deleted;
@@ -170,6 +173,19 @@ export function WebChatMessage({
     onToggleSelect?.();
   };
 
+  const startReply = () => {
+    if (isDeleted || selectionMode) return;
+    onReply?.(msg);
+    setMenuOpen(false);
+    setReactionOpen(false);
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    if (selectionMode || isDeleted) return;
+    e.stopPropagation();
+    startReply();
+  };
+
   if (isSystem) {
     return (
       <div className="vw-system-msg">
@@ -238,8 +254,23 @@ export function WebChatMessage({
               </div>
             ) : null}
 
-            <div className={bubbleClass} onClick={handleRowClick} role={selectionMode ? "button" : undefined}>
+            <div
+              className={bubbleClass}
+              onClick={handleRowClick}
+              onDoubleClick={handleDoubleClick}
+              role={selectionMode ? "button" : undefined}
+            >
               {msg.is_forwarded ? <div className="vw-msg-bubble__forwarded">Forwarded</div> : null}
+              {msg.reply_to_id && (msg.reply_content || msg.reply_sender_name) ? (
+                <div className={`vw-msg-bubble__quote${isMe ? " vw-msg-bubble__quote--sent" : ""}`}>
+                  {msg.reply_sender_name ? (
+                    <span className="vw-msg-bubble__quote-name">{msg.reply_sender_name}</span>
+                  ) : null}
+                  <span className="vw-msg-bubble__quote-text">
+                    {msg.reply_content ? replyPreviewText({ type: "text", content: msg.reply_content }) : "Message"}
+                  </span>
+                </div>
+              ) : null}
               {!isMe && isGroup && msg.sender_name ? (
                 <div className="vw-msg-bubble__sender" style={{ color: `hsl(${hue(msg.sender_name)},60%,40%)` }}>
                   {chatSearchLower ? highlightMatches(msg.sender_name, chatSearchQuery!) : msg.sender_name}
@@ -316,7 +347,9 @@ export function WebChatMessage({
           open={menuOpen}
           onClose={() => setMenuOpen(false)}
           anchorRef={menuBtnRef}
+          preferAbove
           items={[
+            { label: "Reply", icon: <CornerDownLeft size={18} strokeWidth={1.75} />, onClick: startReply },
             { label: "Copy", icon: <Copy size={18} strokeWidth={1.75} />, onClick: () => void copyMsg() },
             { label: "Forward", icon: <Forward size={18} strokeWidth={1.75} />, onClick: () => setForwardOpen(true) },
             { label: msg.is_starred ? "Unstar" : "Star", icon: <Star size={18} strokeWidth={1.75} />, onClick: () => void starMsg() },

@@ -67,3 +67,19 @@ export function formatMessageBody(
 
   return text;
 }
+
+export function replyPreviewText(
+  msg: { type: string; content: string; media_url?: string; is_deleted?: boolean },
+): string {
+  if (msg.is_deleted) return "Message deleted";
+  const body = formatMessageBody(msg);
+  if (body?.trim()) {
+    return body.length > 120 ? `${body.slice(0, 120)}…` : body;
+  }
+  const type = (msg.type ?? "text").toLowerCase();
+  if (type === "image") return "Photo";
+  if (type === "video") return "Video";
+  if (type === "audio") return "Voice message";
+  if (type === "call" || parseCallMessageMeta(msg.content)) return "Call";
+  return "Message";
+}

@@ -25,7 +25,7 @@ import type { CallLogEntry, ChatMember, Message } from "../lib/webApi";
 import type { WebSection } from "../lib/webDesktop";
 import { highlightMatches } from "../lib/highlightText";
 import { inferListPreview } from "../lib/messagePreview";
-import { formatMessageBody } from "../lib/chatMessageDisplay";
+import { formatMessageBody, replyPreviewText } from "../lib/chatMessageDisplay";
 
 const FAV_CHATS_KEY = "videh_web_favorite_chats";
 
@@ -81,6 +81,7 @@ export default function VidehWeb() {
   const [selectedMessageIds, setSelectedMessageIds] = useState<number[]>([]);
   const [bulkForwardOpen, setBulkForwardOpen] = useState(false);
   const [selectionBusy, setSelectionBusy] = useState(false);
+  const [replyTo, setReplyTo] = useState<{ id: number; name: string; text: string } | null>(null);
   const voiceRecorder = useWebVoiceRecorder();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
@@ -161,6 +162,17 @@ export default function VidehWeb() {
     } catch {}
   }, [token]);
 
+  const scrollMessagesToBottom = useCallback((smooth = false) => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const top = el.scrollHeight - el.clientHeight;
+    if (smooth) {
+      el.scrollTo({ top, behavior: "smooth" });
+    } else {
+      el.scrollTop = top;
+    }
+  }, []);
+
   const handleMessagesScroll = useCallback(() => {
     const el = messagesContainerRef.current;
     if (!el) return;
@@ -170,15 +182,31 @@ export default function VidehWeb() {
   const sendMessage = useCallback(async () => {
     if (!token || !activeChatId || !msgText.trim()) return;
     const text = msgText.trim();
+    const replyId = replyTo?.id;
     setMsgText("");
+    setReplyTo(null);
     setEmojiOpen(false);
     stickToBottomRef.current = true;
     try {
-      await webApi.sendMessage(token, activeChatId, { content: text, type: "text" });
+      await webApi.sendMessage(token, activeChatId, {
+        content: text,
+        type: "text",
+        replyToId: replyId,
+      });
       await loadMessages(activeChatId);
       if (token) loadChats(token);
     } catch {}
-  }, [token, activeChatId, msgText, loadMessages, loadChats]);
+  }, [token, activeChatId, msgText, replyTo, loadMessages, loadChats]);
+
+  const startReplyToMessage = useCallback((msg: Message) => {
+    const name = msg.sender_id === user?.id ? "You" : (msg.sender_name || "Contact");
+    setReplyTo({
+      id: msg.id,
+      name,
+      text: replyPreviewText(msg),
+    });
+    inputRef.current?.focus();
+  }, [user?.id]);
 
   const handleLogout = useCallback(async () => {
     if (!token) return;
@@ -452,6 +480,7 @@ export default function VidehWeb() {
     setChatSearchQuery("");
     setChatMenuOpen(false);
     setEmojiOpen(false);
+    setReplyTo(null);
   }, [activeChatId]);
 
   useClickOutside(emojiWrapRef, () => setEmojiOpen(false), emojiOpen);
@@ -463,10 +492,10 @@ export default function VidehWeb() {
     if (!stickToBottomRef.current) return;
     if (len > prevLen || prevLen === 0) {
       requestAnimationFrame(() => {
-        msgsEndRef.current?.scrollIntoView({ behavior: len > prevLen && prevLen > 0 ? "smooth" : "auto" });
+        scrollMessagesToBottom(len > prevLen && prevLen > 0);
       });
     }
-  }, [messages]);
+  }, [messages, scrollMessagesToBottom]);
 
   // Refresh messages periodically when chat is open
   useEffect(() => {
@@ -559,6 +588,7 @@ export default function VidehWeb() {
   const clearSelection = useCallback(() => {
     setSelectedMessageIds([]);
     setBulkForwardOpen(false);
+    setReplyTo(null);
   }, []);
 
   const enterSelection = useCallback((messageId: number) => {
@@ -1081,15 +1111,17 @@ export default function VidehWeb() {
                 isSelected={selectedMessageIds.includes(msg.id)}
                 onToggleSelect={() => toggleMessageSelect(msg.id)}
                 onEnterSelection={enterSelection}
+                onReply={startReplyToMessage}
                 onRefresh={() => {
                   if (activeChatId) void loadMessages(activeChatId);
                   if (token) void loadChats(token);
                 }}
               />
             ))}
-            <div ref={msgsEndRef} />
+            <div ref={msgsEndRef} className="vw-chat__scroll-end" aria-hidden />
           </div>
 
+          <div className="vw-chat__footer">
           {/* Input bar */}
           <input
             ref={fileInputRef}
@@ -1149,6 +1181,19 @@ export default function VidehWeb() {
               </div>
             </div>
           ) : (
+          <>
+          {replyTo ? (
+            <div className="vw-reply-compose">
+              <div className="vw-reply-compose__accent" />
+              <div className="vw-reply-compose__body">
+                <span className="vw-reply-compose__name">{replyTo.name}</span>
+                <span className="vw-reply-compose__text">{replyTo.text}</span>
+              </div>
+              <button type="button" className="vw-reply-compose__close" onClick={() => setReplyTo(null)} aria-label="Cancel reply">
+                <X size={20} />
+              </button>
+            </div>
+          ) : null}
           <div className="vw-chat__input-bar">
             {voiceRecorder.recording ? (
               <div className="vw-voice-rec">
@@ -1234,7 +1279,9 @@ export default function VidehWeb() {
             </>
             )}
           </div>
+          </>
           )}
+          </div>
 
           {bulkForwardOpen ? (
             <WebChatForwardModal

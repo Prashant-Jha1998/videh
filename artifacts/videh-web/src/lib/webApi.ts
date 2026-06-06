@@ -147,11 +147,16 @@ export const webApi = {
       body: form,
     });
   },
-  sendMessage: (token: string, chatId: number, payload: { content?: string; type?: string; mediaUrl?: string }) =>
+  sendMessage: (token: string, chatId: number, payload: { content?: string; type?: string; mediaUrl?: string; replyToId?: number }) =>
     request<{ success: true; message: Message }>(`/web-session/${token}/chats/${chatId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        content: payload.content,
+        type: payload.type,
+        mediaUrl: payload.mediaUrl,
+        replyToId: payload.replyToId,
+      }),
     }),
   markRead: (token: string, chatId: number) => request<{ success: true }>(`/web-session/${token}/chats/${chatId}/read`, { method: "POST" }),
   setTyping: (token: string, chatId: number, active: boolean) =>

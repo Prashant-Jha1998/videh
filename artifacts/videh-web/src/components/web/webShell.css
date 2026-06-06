@@ -535,6 +535,7 @@
 }
 
 .vw-chat-search-bar {
+  flex-shrink: 0;
   padding: 10px 18px;
   background: linear-gradient(180deg, #fafbfc 0%, var(--vw-panel) 100%);
   border-bottom: 1px solid var(--vw-border);
@@ -567,13 +568,16 @@
 .vw-chat {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background-color: #efeae2;
   background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c8c8c8' fill-opacity='0.12'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
 }
 
 .vw-chat__header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -611,11 +615,27 @@
 
 .vw-chat__messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 20px 8% 8px;
+  overflow-x: hidden;
+  padding: 20px 8% 28px;
+  scroll-padding-bottom: 28px;
   background-color: var(--vw-chat-bg);
   background-size: cover;
   transition: background 0.35s var(--vw-ease);
+}
+
+.vw-chat__scroll-end {
+  height: 1px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.vw-chat__footer {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+  background: var(--vw-panel);
 }
 
 .vw-msg-wrap {
@@ -655,14 +675,27 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
 }
 
 .vw-msg-hover-zone {
-  display: flex;
+  display: inline-flex;
   align-items: flex-end;
   gap: 8px;
-  max-width: min(78%, 440px);
+  max-width: min(75%, 420px);
+  width: fit-content;
+  flex-shrink: 0;
 }
 
 .vw-msg-hover-zone--sent {
   flex-direction: row-reverse;
+  margin-left: auto;
+}
+
+.vw-msg-hover-zone--recv {
+  margin-right: auto;
+}
+
+.vw-msg-hover-zone .vw-msg-bubble {
+  flex-shrink: 0;
+  min-width: 48px;
+  max-width: min(75vw, 420px);
 }
 
 .vw-msg-side-action {
@@ -964,11 +997,91 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
 .vw-msg-bubble {
   position: relative;
   width: fit-content;
-  max-width: min(75%, 420px);
+  max-width: min(75vw, 420px);
   padding: 6px 9px 5px;
   border-radius: 8px;
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
   word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.vw-msg-bubble__quote {
+  border-left: 3px solid #00a884;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  max-width: 100%;
+}
+
+.vw-msg-bubble__quote--sent {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.vw-msg-bubble__quote-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #00a884;
+  margin-bottom: 1px;
+}
+
+.vw-msg-bubble__quote-text {
+  display: block;
+  font-size: 12.5px;
+  color: #667781;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
+.vw-reply-compose {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--vw-surface, #f0f2f5);
+  border-top: 1px solid var(--vw-border, #e9edef);
+}
+
+.vw-reply-compose__accent {
+  width: 4px;
+  border-radius: 2px;
+  background: #00a884;
+  flex-shrink: 0;
+}
+
+.vw-reply-compose__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vw-reply-compose__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #00a884;
+}
+
+.vw-reply-compose__text {
+  font-size: 13px;
+  color: var(--vw-muted, #667781);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vw-reply-compose__close {
+  border: none;
+  background: none;
+  color: var(--vw-muted, #667781);
+  cursor: pointer;
+  padding: 4px;
+  align-self: center;
+  display: flex;
 }
 
 .vw-msg-bubble--sent {
@@ -1480,6 +1593,7 @@ html[data-wallpaper="festival-lights"] .vw-chat__messages {
   min-width: 240px;
   border-radius: 12px;
   padding: 8px 0;
+  z-index: 1100;
 }
 
 .vw-dropdown__item:hover {
@@ -1505,6 +1619,7 @@ html[data-theme="dark"] .vw-dropdown__item:hover,
 .vw-main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   overflow: hidden;
 }
