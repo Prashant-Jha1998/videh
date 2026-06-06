@@ -48,6 +48,7 @@ export function mapPublicReelsChannel(
     id: row.id,
     handle: row.handle,
     avatarUrl: row.avatar_url ?? null,
+    coverUrl: row.cover_url ?? null,
     bio: row.bio ? redactPhoneNumbersInText(String(row.bio)) : null,
     subscriberCount: Number(row.subscriber_count ?? 0),
     totalViews: Number(row.total_views ?? 0),
@@ -60,7 +61,13 @@ export function mapPublicReelsChannel(
     monetizationStatus: row.monetization_status ?? "not_eligible",
     isSubscribed: Boolean(row.is_subscribed),
     isOwner,
-    displayName: reelsVideoDisplayName(String(row.handle ?? "")),
+    displayName: (() => {
+      const custom = String(row.display_name ?? "").trim();
+      if (custom && !isPhoneLikeDisplayName(custom)) {
+        return redactPhoneNumbersInText(custom);
+      }
+      return reelsVideoDisplayName(String(row.handle ?? ""));
+    })(),
     createdAt: row.created_at,
   };
   if (isOwner) base.userId = row.user_id;

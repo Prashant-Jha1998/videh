@@ -72,6 +72,7 @@ export async function ensureReelsTables(): Promise<void> {
   `);
   await ensureReelsAdminColumns();
   await ensureReelsModerationColumns();
+  await ensureReelsChannelBrandingColumns();
   ensured = true;
 }
 
@@ -154,6 +155,15 @@ export async function ensureReelsModerationColumns(): Promise<void> {
   moderationColsEnsured = true;
 }
 
+let brandingColsEnsured = false;
+
+export async function ensureReelsChannelBrandingColumns(): Promise<void> {
+  if (brandingColsEnsured) return;
+  await query(`ALTER TABLE reels_channels ADD COLUMN IF NOT EXISTS display_name VARCHAR(80)`);
+  await query(`ALTER TABLE reels_channels ADD COLUMN IF NOT EXISTS cover_url TEXT`);
+  brandingColsEnsured = true;
+}
+
 const HANDLE_RE = /^[a-zA-Z][a-zA-Z0-9_]{2,29}$/;
 
 export function normalizeReelsHandle(raw: string): string | null {
@@ -162,4 +172,5 @@ export function normalizeReelsHandle(raw: string): string | null {
   return trimmed.toLowerCase();
 }
 
-export const MAX_REELS_VIDEO_SECONDS = 300;
+/** No short cap — allow long uploads (up to ~4 hours metadata). */
+export const MAX_REELS_VIDEO_SECONDS = 14400;

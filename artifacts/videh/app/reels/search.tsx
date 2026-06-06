@@ -13,7 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-import { formatViewCount, searchReels, type ReelsChannel, type ReelsVideo } from "@/lib/reelsApi";
+import { formatTimeAgo, formatViewCount, searchReels, type ReelsChannel, type ReelsVideo } from "@/lib/reelsApi";
 
 export default function ReelsSearchScreen() {
   const colors = useColors();
@@ -69,7 +69,9 @@ export default function ReelsSearchScreen() {
                   <View style={[styles.avatar, { backgroundColor: colors.primary }]} />
                 )}
                 <View>
-                  <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold" }}>@{item.handle}</Text>
+                  <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold" }}>
+                    {item.displayName?.trim() || `@${item.handle}`}
+                  </Text>
                   <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
                     {formatViewCount(item.subscriberCount)} subscribers
                   </Text>
@@ -98,7 +100,10 @@ export default function ReelsSearchScreen() {
                 )}
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: colors.foreground }} numberOfLines={2}>{item.title}</Text>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>@{item.channelHandle}</Text>
+                  <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+                    {item.channelDisplayName ?? `@${item.channelHandle}`}
+                    {item.createdAt ? ` · ${formatTimeAgo(item.createdAt)}` : ""}
+                  </Text>
                 </View>
               </TouchableOpacity>
             )}

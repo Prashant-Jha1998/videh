@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v20-reels-nsfw"
+        "key": "apk-release-v21-youtube-feed-branding"
       }
     },
     "production": {

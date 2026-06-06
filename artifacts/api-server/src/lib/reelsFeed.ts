@@ -3,8 +3,88 @@ import { getReelsPlatformConfig, type ReelsPlatformConfig } from "./reelsConfig"
 
 export type FeedVideoRow = Record<string, unknown>;
 
+export type FeedCursor = { at: string; id: number };
+
+const FEED_BASE_SELECT = `
+  SELECT v.*,
+         c.handle AS channel_handle,
+         c.display_name AS channel_display_name,
+         c.avatar_url AS channel_avatar_url,
+         r.reaction AS my_reaction
+  FROM reels_videos v
+  JOIN reels_channels c ON c.id = v.channel_id
+  LEFT JOIN reels_video_reactions r ON r.video_id = v.id AND r.user_id = $1
+  WHERE v.status = 'published' AND v.play_enabled = TRUE
+`;
+
 /**
- * YouTube-style feed: subscribers first, then engagement + recency, penalize fraud.
+ * Trending: high engagement velocity in the last 30 days.
+ */
+export async function fetchTrendingReels(
+  viewerId: number,
+  limit = 12,
+): Promise<FeedVideoRow[]> {
+  const result = await query(
+    `${FEED_BASE_SELECT}
+       AND v.created_at > NOW() - INTERVAL '30 days'
+     ORDER BY (
+       (v.view_count::numeric * 1.0
+        + v.like_count * 8
+        + v.comment_count * 12
+        + COALESCE(v.share_count, 0) * 15)
+       / (EXTRACT(EPOCH FROM (NOW() - v.created_at)) / 3600.0 + 2.0)
+     ) DESC,
+     v.created_at DESC
+     LIMIT $2`,
+    [viewerId || 0, limit],
+  );
+  return result.rows as FeedVideoRow[];
+}
+
+/**
+ * Latest-first home feed with keyset pagination (never-ending scroll).
+ * Newest uploads always at the top; scroll loads older videos.
+ */
+export async function fetchLatestReelsFeed(
+  viewerId: number,
+  limit: number,
+  cursor: FeedCursor | null,
+): Promise<{ videos: FeedVideoRow[]; nextCursor: FeedCursor | null }> {
+  const result = await query(
+    `${FEED_BASE_SELECT}
+       AND (
+         $2::timestamptz IS NULL
+         OR v.created_at < $2::timestamptz
+         OR (v.created_at = $2::timestamptz AND v.id < $3::bigint)
+       )
+     ORDER BY v.created_at DESC, v.id DESC
+     LIMIT $4`,
+    [
+      viewerId || 0,
+      cursor?.at ?? null,
+      cursor?.id ?? 0,
+      limit,
+    ],
+  );
+
+  const videos = result.rows as FeedVideoRow[];
+  if (videos.length < limit) {
+    return { videos, nextCursor: null };
+  }
+  const last = videos[videos.length - 1];
+  const at = last?.created_at;
+  const id = Number(last?.id);
+  if (!at || !Number.isFinite(id)) {
+    return { videos, nextCursor: null };
+  }
+  return {
+    videos,
+    nextCursor: { at: new Date(String(at)).toISOString(), id },
+  };
+}
+
+/**
+ * Legacy ranked feed (subscriptions + engagement). Kept for admin/other use.
  */
 export async function fetchRankedReelsFeed(
   viewerId: number,
@@ -20,6 +100,7 @@ export async function fetchRankedReelsFeed(
     `WITH scored AS (
        SELECT v.*,
               c.handle AS channel_handle,
+              c.display_name AS channel_display_name,
               c.avatar_url AS channel_avatar_url,
               c.fraud_score AS channel_fraud_score,
               r.reaction AS my_reaction,

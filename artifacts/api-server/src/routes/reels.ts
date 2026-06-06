@@ -14,7 +14,7 @@ import {
 } from "../lib/reelsSchema";
 import { getReelsPlatformConfig, publicReelsRules } from "../lib/reelsConfig";
 import { checkCommentFraud, checkSubscribeFraud, checkViewFraud, recordViewSession } from "../lib/reelsFraud";
-import { fetchRankedReelsFeed } from "../lib/reelsFeed";
+import { fetchLatestReelsFeed, fetchTrendingReels, type FeedCursor } from "../lib/reelsFeed";
 import { canPlayVideo, evaluateChannelMonetization } from "../lib/reelsMonetization";
 import { notifySubscribersNewVideo } from "../lib/reelsNotifications";
 import {
@@ -45,7 +45,7 @@ const reelsUpload = multer({
       cb(null, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${safeExt}`);
     },
   }),
-  limits: { fileSize: 500 * 1024 * 1024 },
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const isVideo = /^video\//.test(file.mimetype) || file.fieldname === "video";
     const isImage = /^image\//.test(file.mimetype) || file.fieldname === "thumbnail";
@@ -64,7 +64,7 @@ function runReelsUpload(req: Request, res: Response, next: NextFunction): void {
       return;
     }
     const message = err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE"
-      ? "Video is too large (max 500 MB)."
+      ? "Video is too large (max 2 GB)."
       : err instanceof Error ? err.message : "Upload failed.";
     res.status(400).json({ success: false, message });
   });
@@ -79,7 +79,23 @@ function parseHashtags(raw: unknown): string[] {
   return s.split(/[\s,#]+/).map((t) => t.trim().replace(/^#/, "")).filter(Boolean).slice(0, 20);
 }
 
-function mapVideoRow(row: Record<string, unknown>) {
+function needsReelsImageProxy(url: string): boolean {
+  return /images\.pexels\.com|picsum\.photos/i.test(url);
+}
+
+function proxyReelsImageUrl(req: Request, url: unknown): string | null {
+  const u = String(url ?? "").trim();
+  if (!u) return null;
+  if (!needsReelsImageProxy(u)) return u;
+  const proxy = publicMediaUrl(req, "/api/reels/proxy-image");
+  return `${proxy}?url=${encodeURIComponent(u)}`;
+}
+
+function mapVideoRow(row: Record<string, unknown>, req?: Request) {
+  const thumb = row.thumbnail_url ?? null;
+  const avatar = row.channel_avatar_url ?? null;
+  const channelLabel = String(row.channel_display_name ?? "").trim()
+    || (row.channel_handle ? `@${row.channel_handle}` : null);
   return {
     id: row.id,
     channelId: row.channel_id,
@@ -87,7 +103,7 @@ function mapVideoRow(row: Record<string, unknown>) {
     description: redactPhoneNumbersInText(String(row.description ?? "")),
     hashtags: row.hashtags ?? [],
     videoUrl: row.video_url,
-    thumbnailUrl: row.thumbnail_url ?? null,
+    thumbnailUrl: req ? proxyReelsImageUrl(req, thumb) : (thumb ?? null),
     durationSeconds: Number(row.duration_seconds ?? 0),
     viewCount: Number(row.view_count ?? 0),
     likeCount: Number(row.like_count ?? 0),
@@ -100,11 +116,66 @@ function mapVideoRow(row: Record<string, unknown>) {
     moderationStatus: row.moderation_status ?? "approved",
     moderationReason: row.moderation_reason ?? null,
     channelHandle: row.channel_handle ?? null,
-    channelAvatarUrl: row.channel_avatar_url ?? null,
+    channelDisplayName: channelLabel,
+    channelAvatarUrl: req ? proxyReelsImageUrl(req, avatar) : (avatar ?? null),
     myReaction: row.my_reaction ?? null,
     createdAt: row.created_at,
   };
 }
+
+function mapPublicChannelResponse(
+  req: Request,
+  row: Record<string, unknown>,
+  viewerId?: number,
+): Record<string, unknown> {
+  const ch = mapPublicReelsChannel(row, viewerId);
+  if (ch.avatarUrl) ch.avatarUrl = proxyReelsImageUrl(req, ch.avatarUrl);
+  if (ch.coverUrl) ch.coverUrl = proxyReelsImageUrl(req, ch.coverUrl);
+  return ch;
+}
+
+function runChannelBrandingUpload(req: Request, res: Response, next: NextFunction): void {
+  reelsUpload.fields([
+    { name: "avatar", maxCount: 1 },
+    { name: "cover", maxCount: 1 },
+  ])(req, res, (err: unknown) => {
+    if (!err) {
+      next();
+      return;
+    }
+    const message = err instanceof Error ? err.message : "Upload failed.";
+    res.status(400).json({ success: false, message });
+  });
+}
+
+router.get("/proxy-image", async (req: Request, res: Response) => {
+  const url = String(req.query.url ?? "").trim();
+  if (!url.startsWith("https://images.pexels.com/") && !url.startsWith("https://picsum.photos/")) {
+    res.status(400).json({ success: false, message: "Invalid image URL" });
+    return;
+  }
+  try {
+    const upstream = await fetch(url, {
+      headers: {
+        Referer: "https://www.pexels.com/",
+        "User-Agent": "Videh-Messenger/1.0",
+        Accept: "image/*",
+      },
+    });
+    if (!upstream.ok) {
+      res.status(upstream.status).end();
+      return;
+    }
+    const ct = upstream.headers.get("content-type") ?? "image/jpeg";
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.send(buf);
+  } catch (err) {
+    req.log.error({ err }, "reels proxy-image");
+    res.status(502).json({ success: false, message: "Image proxy failed" });
+  }
+});
 
 router.get("/rules", async (_req: Request, res: Response) => {
   try {
@@ -164,7 +235,7 @@ router.post("/channel", async (req: Request, res: Response) => {
     );
     res.json({
       success: true,
-      channel: mapPublicReelsChannel(inserted.rows[0] as Record<string, unknown>, userId),
+      channel: mapPublicChannelResponse(req, inserted.rows[0] as Record<string, unknown>, userId),
     });
   } catch (err) {
     req.log.error({ err }, "reels create channel");
@@ -196,13 +267,74 @@ router.get("/channel/me", async (req: Request, res: Response) => {
     const config = await getReelsPlatformConfig();
     res.json({
       success: true,
-      channel: mapPublicReelsChannel(channelRow, userId),
+      channel: mapPublicChannelResponse(req, channelRow, userId),
       monetization,
       rules: publicReelsRules(config),
     });
   } catch (err) {
     req.log.error({ err }, "reels my channel");
     res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.patch("/channel/me", runChannelBrandingUpload, async (req: Request, res: Response) => {
+  const userId = Number((req.body as { userId?: string }).userId);
+  const displayName = String((req.body as { displayName?: string }).displayName ?? "").trim().slice(0, 80);
+  const bio = String((req.body as { bio?: string }).bio ?? "").trim();
+  if (!userId) {
+    res.status(400).json({ success: false, message: "userId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    await ensureReelsTables();
+    const existing = await query("SELECT * FROM reels_channels WHERE user_id = $1", [userId]);
+    if (!existing.rows.length) {
+      res.status(404).json({ success: false, message: "Create your channel first." });
+      return;
+    }
+    const files = req.files as { avatar?: { filename: string }[]; cover?: { filename: string }[] } | undefined;
+    const avatarFile = files?.avatar?.[0];
+    const coverFile = files?.cover?.[0];
+    const avatarUrl = avatarFile
+      ? publicMediaUrl(req, `/uploads/reels/${avatarFile.filename}`)
+      : undefined;
+    const coverUrl = coverFile
+      ? publicMediaUrl(req, `/uploads/reels/${coverFile.filename}`)
+      : undefined;
+
+    const body = req.body as { displayName?: string; bio?: string };
+    const sets = ["updated_at = NOW()"];
+    const params: unknown[] = [userId];
+    let p = 2;
+    if (body.displayName !== undefined) {
+      sets.push(`display_name = $${p++}`);
+      params.push(displayName || null);
+    }
+    if (body.bio !== undefined) {
+      sets.push(`bio = $${p++}`);
+      params.push(bio || null);
+    }
+    if (avatarUrl) {
+      sets.push(`avatar_url = $${p++}`);
+      params.push(avatarUrl);
+    }
+    if (coverUrl) {
+      sets.push(`cover_url = $${p++}`);
+      params.push(coverUrl);
+    }
+    await query(
+      `UPDATE reels_channels SET ${sets.join(", ")} WHERE user_id = $1`,
+      params,
+    );
+    const updated = await query("SELECT * FROM reels_channels WHERE user_id = $1", [userId]);
+    res.json({
+      success: true,
+      channel: mapPublicChannelResponse(req, updated.rows[0] as Record<string, unknown>, userId),
+    });
+  } catch (err) {
+    req.log.error({ err }, "reels update channel");
+    res.status(500).json({ success: false, message: "Could not update channel." });
   }
 });
 
@@ -232,7 +364,8 @@ router.get("/channel/:handle", async (req: Request, res: Response) => {
     const channelRow = ch.rows[0] as Record<string, unknown>;
     const isOwner = viewerId > 0 && Number(channelRow.user_id) === viewerId;
     const videos = await query(
-      `SELECT v.*, c.handle AS channel_handle, c.avatar_url AS channel_avatar_url
+      `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
+              c.avatar_url AS channel_avatar_url
        FROM reels_videos v JOIN reels_channels c ON c.id = v.channel_id
        WHERE v.channel_id = $1
          AND ($2::boolean OR (v.status = 'published' AND v.play_enabled = TRUE))
@@ -243,8 +376,8 @@ router.get("/channel/:handle", async (req: Request, res: Response) => {
     const monetization = await evaluateChannelMonetization(Number(channelRow.id));
     res.json({
       success: true,
-      channel: mapPublicReelsChannel(channelRow, viewerId),
-      videos: videos.rows.map((r) => mapVideoRow(r as Record<string, unknown>)),
+      channel: mapPublicChannelResponse(req, channelRow, viewerId),
+      videos: videos.rows.map((r) => mapVideoRow(r as Record<string, unknown>, req)),
       monetization,
       rules: publicReelsRules(config),
     });
@@ -256,17 +389,19 @@ router.get("/channel/:handle", async (req: Request, res: Response) => {
 
 router.get("/feed", async (req: Request, res: Response) => {
   const viewerId = Number(req.query.userId) || 0;
-  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
-  const cursor = Number(req.query.cursor) || 0;
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 15));
+  const cursorAt = String(req.query.cursorAt ?? "").trim();
+  const cursorId = Number(req.query.cursorId) || 0;
+  const cursor: FeedCursor | null = cursorAt && cursorId > 0
+    ? { at: cursorAt, id: cursorId }
+    : null;
   try {
     await ensureReelsTables();
-    const { videos: rows, nextCursor } = await fetchRankedReelsFeed(
-      viewerId,
-      limit,
-      cursor > 0 ? cursor : null,
-    );
-    const videos = rows.map((r) => mapVideoRow(r));
-    res.json({ success: true, videos, nextCursor });
+    const trendingRows = cursor ? [] : await fetchTrendingReels(viewerId, 10);
+    const { videos: rows, nextCursor } = await fetchLatestReelsFeed(viewerId, limit, cursor);
+    const videos = rows.map((r) => mapVideoRow(r, req));
+    const trending = trendingRows.map((r) => mapVideoRow(r, req));
+    res.json({ success: true, videos, trending, nextCursor });
   } catch (err) {
     req.log.error({ err }, "reels feed");
     res.status(500).json({ success: false, message: "Server error" });
@@ -297,7 +432,8 @@ router.get("/search", async (req: Request, res: Response) => {
         [like, viewerId || null],
       ),
       query(
-        `SELECT v.*, c.handle AS channel_handle, c.avatar_url AS channel_avatar_url
+        `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
+                c.avatar_url AS channel_avatar_url
          FROM reels_videos v JOIN reels_channels c ON c.id = v.channel_id
          WHERE v.status = 'published' AND v.play_enabled = TRUE
            AND (LOWER(v.title) LIKE $1
@@ -309,8 +445,8 @@ router.get("/search", async (req: Request, res: Response) => {
     ]);
     res.json({
       success: true,
-      channels: channels.rows.map((r) => mapPublicReelsChannel(r as Record<string, unknown>, viewerId)),
-      videos: videos.rows.map((r) => mapVideoRow(r as Record<string, unknown>)),
+      channels: channels.rows.map((r) => mapPublicChannelResponse(req, r as Record<string, unknown>, viewerId)),
+      videos: videos.rows.map((r) => mapVideoRow(r as Record<string, unknown>, req)),
     });
   } catch (err) {
     req.log.error({ err }, "reels search");
@@ -334,7 +470,7 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
     return;
   }
   if (durationSeconds > MAX_REELS_VIDEO_SECONDS) {
-    res.status(400).json({ success: false, message: "Video must be 5 minutes or shorter." });
+    res.status(400).json({ success: false, message: "Video is too long (max 4 hours)." });
     return;
   }
   const files = req.files as { video?: { filename: string }[]; thumbnail?: { filename: string }[] } | undefined;
@@ -417,7 +553,7 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
         ...finalRow,
         channel_handle: chRow?.handle,
         channel_avatar_url: chRow?.avatar_url,
-      }),
+      }, req),
     });
   } catch (err) {
     req.log.error({ err }, "reels post video");
@@ -435,8 +571,8 @@ router.get("/videos/:videoId", async (req: Request, res: Response) => {
   try {
     await ensureReelsTables();
     const result = await query(
-      `SELECT v.*, c.handle AS channel_handle, c.avatar_url AS channel_avatar_url,
-              c.user_id AS channel_owner_id, r.reaction AS my_reaction
+      `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
+              c.avatar_url AS channel_avatar_url, c.user_id AS channel_owner_id, r.reaction AS my_reaction
        FROM reels_videos v
        JOIN reels_channels c ON c.id = v.channel_id
        LEFT JOIN reels_video_reactions r ON r.video_id = v.id AND r.user_id = $2
@@ -458,7 +594,7 @@ router.get("/videos/:videoId", async (req: Request, res: Response) => {
     const play = canPlayVideo(row, config);
     res.json({
       success: true,
-      video: mapVideoRow(row),
+      video: mapVideoRow(row, req),
       playAllowed: play.allowed,
       playBlockReasons: play.reasons,
     });

@@ -56,7 +56,7 @@ export default function ReelsUploadScreen() {
     const durMs = asset.duration ?? 0;
     const durSec = Math.round(durMs / 1000);
     if (durSec > MAX_REELS_VIDEO_SECONDS) {
-      Alert.alert("Too long", "Video must be 5 minutes or shorter.");
+      Alert.alert("Too long", "Video must be 4 hours or shorter.");
       return;
     }
     setVideoUri(asset.uri);
@@ -136,7 +136,7 @@ export default function ReelsUploadScreen() {
       </TouchableOpacity>
       <Text style={[styles.title, { color: colors.foreground }]}>Upload video</Text>
       <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-        Max length: 5 minutes. Nudity/sexual content is auto-blocked before publish.
+        Upload videos of any length (up to 4 hours). Nudity/sexual content is auto-blocked before publish.
       </Text>
 
       <TouchableOpacity style={[styles.pickBox, { borderColor: colors.border }]} onPress={pickVideo}>

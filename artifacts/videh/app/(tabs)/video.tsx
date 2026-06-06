@@ -1,11 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Dimensions,
   FlatList,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -18,9 +20,16 @@ import {
   fetchMyReelsChannel,
   fetchReelsFeed,
   formatDuration,
+  formatTimeAgo,
   formatViewCount,
+  type ReelsFeedCursor,
   type ReelsVideo,
 } from "@/lib/reelsApi";
+
+const SCREEN_W = Dimensions.get("window").width;
+const THUMB_H = Math.round((SCREEN_W * 9) / 16);
+const TREND_W = Math.round(SCREEN_W * 0.72);
+const TREND_H = Math.round((TREND_W * 9) / 16);
 
 export default function VideoTabScreen() {
   const colors = useColors();
@@ -28,34 +37,55 @@ export default function VideoTabScreen() {
   const router = useRouter();
   const { user } = useApp();
   const [videos, setVideos] = useState<ReelsVideo[]>([]);
+  const [trending, setTrending] = useState<ReelsVideo[]>([]);
+  const [nextCursor, setNextCursor] = useState<ReelsFeedCursor | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [hasChannel, setHasChannel] = useState<boolean | null>(null);
+  const loadingMoreRef = useRef(false);
 
-  const load = useCallback(async () => {
+  const loadInitial = useCallback(async () => {
     if (!user?.dbId) return;
     const ch = await fetchMyReelsChannel(user.dbId, user.sessionToken);
     setHasChannel(Boolean(ch.channel));
-    if (!ch.channel) {
-      setVideos([]);
-      setLoading(false);
-      return;
-    }
-    const feed = await fetchReelsFeed(user.dbId, undefined, user.sessionToken);
+    const feed = await fetchReelsFeed(user.dbId, null, user.sessionToken);
     setVideos(feed.videos ?? []);
+    setTrending(feed.trending ?? []);
+    setNextCursor(feed.nextCursor ?? null);
     setLoading(false);
   }, [user?.dbId, user?.sessionToken]);
+
+  const loadMore = useCallback(async () => {
+    if (!user?.dbId || !nextCursor || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const feed = await fetchReelsFeed(user.dbId, nextCursor, user.sessionToken);
+      const incoming = feed.videos ?? [];
+      if (incoming.length > 0) {
+        setVideos((prev) => {
+          const seen = new Set(prev.map((v) => v.id));
+          return [...prev, ...incoming.filter((v) => !seen.has(v.id))];
+        });
+      }
+      setNextCursor(feed.nextCursor ?? null);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [user?.dbId, user?.sessionToken, nextCursor]);
 
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
-      void load();
-    }, [load]),
+      void loadInitial();
+    }, [loadInitial]),
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await load();
+    await loadInitial();
     setRefreshing(false);
   };
 
@@ -63,54 +93,109 @@ export default function VideoTabScreen() {
     router.push({ pathname: "/reels/watch/[id]", params: { id: String(v.id) } });
   };
 
-  const renderItem = ({ item }: { item: ReelsVideo }) => (
-    <TouchableOpacity style={styles.card} onPress={() => openVideo(item)} activeOpacity={0.85}>
+  const channelLabel = (v: ReelsVideo) =>
+    v.channelDisplayName ?? (v.channelHandle ? `@${v.channelHandle}` : "Channel");
+
+  const renderVideoCard = (item: ReelsVideo, compact = false) => (
+    <TouchableOpacity
+      style={compact ? styles.trendCard : styles.ytCard}
+      onPress={() => openVideo(item)}
+      activeOpacity={0.9}
+    >
       <View style={styles.thumbWrap}>
         {item.thumbnailUrl ? (
-          <Image source={{ uri: item.thumbnailUrl }} style={styles.thumb} contentFit="cover" />
+          <Image
+            source={{ uri: item.thumbnailUrl }}
+            style={compact ? styles.trendThumb : styles.thumb}
+            contentFit="cover"
+            recyclingKey={String(item.id)}
+          />
         ) : (
-          <View style={[styles.thumb, styles.thumbPlaceholder, { backgroundColor: colors.muted }]}>
-            <Ionicons name="videocam" size={32} color={colors.mutedForeground} />
+          <View
+            style={[
+              compact ? styles.trendThumb : styles.thumb,
+              styles.thumbPlaceholder,
+              { backgroundColor: colors.muted },
+            ]}
+          >
+            <Ionicons name="videocam" size={compact ? 28 : 40} color={colors.mutedForeground} />
           </View>
         )}
         <View style={styles.durationBadge}>
           <Text style={styles.durationText}>{formatDuration(item.durationSeconds)}</Text>
         </View>
       </View>
-      <View style={styles.cardBody}>
-        <Text style={[styles.title, { color: colors.foreground }]} numberOfLines={2}>{item.title}</Text>
-        <Text style={[styles.meta, { color: colors.mutedForeground }]} numberOfLines={1}>
-          @{item.channelHandle ?? "channel"} · {formatViewCount(item.viewCount)} views
-        </Text>
-        <Text style={[styles.stats, { color: colors.mutedForeground }]}>
-          👍 {item.likeCount} · 💬 {item.commentCount} · 👎 {item.dislikeCount}
-        </Text>
+
+      <View style={compact ? styles.trendInfo : styles.infoRow}>
+        {!compact && (
+          <TouchableOpacity
+            onPress={() => item.channelHandle && router.push({ pathname: "/reels/channel/[handle]", params: { handle: item.channelHandle } })}
+          >
+            {item.channelAvatarUrl ? (
+              <Image source={{ uri: item.channelAvatarUrl }} style={styles.channelAvatar} contentFit="cover" />
+            ) : (
+              <View style={[styles.channelAvatar, { backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }]}>
+                <Text style={{ color: "#fff", fontFamily: "Inter_700Bold" }}>{(item.channelHandle ?? "?")[0]?.toUpperCase()}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
+        <View style={styles.infoText}>
+          <Text style={[styles.ytTitle, { color: colors.foreground }]} numberOfLines={compact ? 2 : 2}>{item.title}</Text>
+          <Text style={[styles.ytMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
+            {channelLabel(item)} · {formatViewCount(item.viewCount)} views
+            {item.createdAt ? ` · ${formatTimeAgo(item.createdAt)}` : ""}
+          </Text>
+        </View>
       </View>
     </TouchableOpacity>
+  );
+
+  const renderItem = ({ item }: { item: ReelsVideo }) => renderVideoCard(item);
+
+  const listHeader = (
+    <>
+      {hasChannel === false ? (
+        <TouchableOpacity
+          style={[styles.setupBanner, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => router.push("/reels/setup")}
+        >
+          <Ionicons name="add-circle-outline" size={22} color={colors.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.bannerTitle, { color: colors.foreground }]}>Create your channel</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+              Upload videos of any length and grow subscribers
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
+        </TouchableOpacity>
+      ) : null}
+
+      {trending.length > 0 ? (
+        <View style={styles.trendingSection}>
+          <View style={styles.sectionHead}>
+            <Ionicons name="flame" size={18} color={colors.primary} />
+            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Trending</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.trendScroll}>
+            {trending.map((v) => (
+              <View key={`trend-${v.id}`}>{renderVideoCard(v, true)}</View>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
+      <View style={styles.sectionHead}>
+        <Ionicons name="time-outline" size={18} color={colors.primary} />
+        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Latest</Text>
+      </View>
+    </>
   );
 
   if (loading) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
         <ActivityIndicator color={colors.primary} />
-      </View>
-    );
-  }
-
-  if (hasChannel === false) {
-    return (
-      <View style={[styles.setupWrap, { backgroundColor: colors.background, paddingTop: insets.top + 24 }]}>
-        <Ionicons name="logo-youtube" size={56} color={colors.primary} />
-        <Text style={[styles.setupTitle, { color: colors.foreground }]}>Set up your Video channel</Text>
-        <Text style={[styles.setupSub, { color: colors.mutedForeground }]}>
-          Create your @username, post videos up to 5 minutes, and grow subscribers.
-        </Text>
-        <TouchableOpacity
-          style={[styles.setupBtn, { backgroundColor: colors.primary }]}
-          onPress={() => router.push("/reels/setup")}
-        >
-          <Text style={styles.setupBtnText}>Create channel</Text>
-        </TouchableOpacity>
       </View>
     );
   }
@@ -124,7 +209,13 @@ export default function VideoTabScreen() {
             <Ionicons name="search" size={22} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={() => user?.dbId && router.push({ pathname: "/reels/channel/[handle]", params: { handle: "me" } })}
+            onPress={() => {
+              if (hasChannel) {
+                router.push({ pathname: "/reels/channel/[handle]", params: { handle: "me" } });
+              } else {
+                router.push("/reels/setup");
+              }
+            }}
             style={styles.iconBtn}
           >
             <Ionicons name="person-circle-outline" size={24} color="#fff" />
@@ -136,18 +227,37 @@ export default function VideoTabScreen() {
         data={videos}
         keyExtractor={(v) => String(v.id)}
         renderItem={renderItem}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 100, paddingTop: 8 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        ListHeaderComponent={listHeader}
         ListEmptyComponent={
           <View style={styles.center}>
             <Text style={{ color: colors.mutedForeground }}>No videos yet. Be the first to post!</Text>
           </View>
         }
+        onEndReached={() => void loadMore()}
+        onEndReachedThreshold={0.35}
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={styles.footerLoader}>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={{ color: colors.mutedForeground, marginTop: 8, fontSize: 12 }}>Loading more videos…</Text>
+            </View>
+          ) : nextCursor ? (
+            <View style={styles.footerLoader}>
+              <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Scroll for more</Text>
+            </View>
+          ) : videos.length > 0 ? (
+            <View style={styles.footerLoader}>
+              <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>You're all caught up for now</Text>
+            </View>
+          ) : null
+        }
       />
 
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: colors.primary, bottom: insets.bottom + 72 }]}
-        onPress={() => router.push("/reels/upload")}
+        onPress={() => (hasChannel ? router.push("/reels/upload") : router.push("/reels/setup"))}
       >
         <Ionicons name="add" size={28} color="#fff" />
       </TouchableOpacity>
@@ -168,24 +278,43 @@ const styles = StyleSheet.create({
   headerTitle: { color: "#fff", fontSize: 20, fontFamily: "Inter_700Bold" },
   headerActions: { flexDirection: "row", gap: 4 },
   iconBtn: { padding: 8 },
-  card: { flexDirection: "row", paddingHorizontal: 12, paddingVertical: 10, gap: 12 },
+  setupBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    margin: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  bannerTitle: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
+  trendingSection: { marginBottom: 8 },
+  sectionHead: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, marginTop: 8, marginBottom: 8 },
+  sectionTitle: { fontFamily: "Inter_700Bold", fontSize: 16 },
+  trendScroll: { paddingHorizontal: 12, gap: 12 },
+  trendCard: { width: TREND_W, marginRight: 12 },
+  trendThumb: { width: TREND_W, height: TREND_H, borderRadius: 10 },
+  trendInfo: { paddingTop: 8 },
+  ytCard: { marginBottom: 16 },
   thumbWrap: { position: "relative" },
-  thumb: { width: 140, height: 78, borderRadius: 8 },
+  thumb: { width: SCREEN_W, height: THUMB_H },
   thumbPlaceholder: { alignItems: "center", justifyContent: "center" },
   durationBadge: {
     position: "absolute",
-    bottom: 4,
-    right: 4,
-    backgroundColor: "rgba(0,0,0,0.75)",
-    paddingHorizontal: 4,
+    bottom: 8,
+    right: 8,
+    backgroundColor: "rgba(0,0,0,0.8)",
+    paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
   },
-  durationText: { color: "#fff", fontSize: 10, fontFamily: "Inter_600SemiBold" },
-  cardBody: { flex: 1, justifyContent: "center" },
-  title: { fontSize: 15, fontFamily: "Inter_600SemiBold", marginBottom: 4 },
-  meta: { fontSize: 12, fontFamily: "Inter_400Regular" },
-  stats: { fontSize: 11, marginTop: 4 },
+  durationText: { color: "#fff", fontSize: 11, fontFamily: "Inter_600SemiBold" },
+  infoRow: { flexDirection: "row", paddingHorizontal: 12, paddingTop: 10, gap: 10, alignItems: "flex-start" },
+  channelAvatar: { width: 36, height: 36, borderRadius: 18 },
+  infoText: { flex: 1 },
+  ytTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", lineHeight: 18 },
+  ytMeta: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 4 },
+  footerLoader: { alignItems: "center", paddingVertical: 20 },
   fab: {
     position: "absolute",
     right: 20,
@@ -196,9 +325,4 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     elevation: 4,
   },
-  setupWrap: { flex: 1, alignItems: "center", paddingHorizontal: 28 },
-  setupTitle: { fontSize: 22, fontFamily: "Inter_700Bold", marginTop: 20, textAlign: "center" },
-  setupSub: { fontSize: 14, textAlign: "center", lineHeight: 20, marginTop: 10, marginBottom: 28 },
-  setupBtn: { paddingHorizontal: 28, paddingVertical: 14, borderRadius: 28 },
-  setupBtnText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 16 },
 });

@@ -12,6 +12,7 @@ export type ReelsChannel = {
   handle: string;
   displayName?: string;
   avatarUrl: string | null;
+  coverUrl?: string | null;
   bio: string | null;
   subscriberCount: number;
   totalViews: number;
@@ -60,26 +61,41 @@ export type ReelsVideo = {
   moderationStatus?: string;
   moderationReason?: string | null;
   channelHandle: string | null;
+  channelDisplayName?: string | null;
   channelAvatarUrl: string | null;
   myReaction?: "like" | "dislike" | null;
   createdAt?: string;
 };
 
 export const REELS_HANDLE_RE = /^[a-zA-Z][a-zA-Z0-9_]{2,29}$/;
-export const MAX_REELS_VIDEO_SECONDS = 300;
+/** No 5-minute cap — server allows up to 4 hours. */
+export const MAX_REELS_VIDEO_SECONDS = 14400;
 /** YouTube-style thumbnail: 16:9 */
 export const REELS_THUMB_WIDTH = 1280;
 export const REELS_THUMB_HEIGHT = 720;
 export const REELS_THUMB_ASPECT = 16 / 9;
 export const REELS_THUMB_HINT = `16:9 · ${REELS_THUMB_WIDTH}×${REELS_THUMB_HEIGHT} recommended (JPG/PNG)`;
 
-/** Crop to 16:9 and resize to standard reels thumbnail size. */
-export async function prepareReelsThumbnail(uri: string): Promise<string> {
+/** Channel logo — square, YouTube-style profile picture. */
+export const CHANNEL_AVATAR_SIZE = 800;
+export const CHANNEL_AVATAR_ASPECT = 1;
+export const CHANNEL_AVATAR_HINT =
+  `Square 1:1 · ${CHANNEL_AVATAR_SIZE}×${CHANNEL_AVATAR_SIZE} px · JPG/PNG · face/logo centered`;
+
+/** Channel cover/banner — 16:9 landscape. */
+export const CHANNEL_COVER_WIDTH = 1280;
+export const CHANNEL_COVER_HEIGHT = 720;
+export const CHANNEL_COVER_ASPECT = 16 / 9;
+export const CHANNEL_COVER_HINT =
+  `Landscape 16:9 · ${CHANNEL_COVER_WIDTH}×${CHANNEL_COVER_HEIGHT} px · JPG/PNG · keep text in center`;
+
+/** Crop center and resize to exact width × height. */
+export async function prepareFixedImage(uri: string, width: number, height: number): Promise<string> {
   const local = await ensureEditableImageUri(uri);
   const size = await new Promise<{ width: number; height: number }>((resolve, reject) => {
-    Image.getSize(local, (width, height) => resolve({ width, height }), reject);
+    Image.getSize(local, (w, h) => resolve({ width: w, height: h }), reject);
   });
-  const targetAspect = REELS_THUMB_ASPECT;
+  const targetAspect = width / height;
   const srcAspect = size.width / size.height;
   const crop = srcAspect > targetAspect
     ? {
@@ -98,11 +114,24 @@ export async function prepareReelsThumbnail(uri: string): Promise<string> {
     local,
     [
       { crop: clampCropRect(crop, size.width, size.height) },
-      { resize: { width: REELS_THUMB_WIDTH, height: REELS_THUMB_HEIGHT } },
+      { resize: { width, height } },
     ],
     { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG },
   );
   return result.uri;
+}
+
+export function prepareChannelAvatar(uri: string): Promise<string> {
+  return prepareFixedImage(uri, CHANNEL_AVATAR_SIZE, CHANNEL_AVATAR_SIZE);
+}
+
+export function prepareChannelCover(uri: string): Promise<string> {
+  return prepareFixedImage(uri, CHANNEL_COVER_WIDTH, CHANNEL_COVER_HEIGHT);
+}
+
+/** Crop to 16:9 and resize to standard reels thumbnail size. */
+export async function prepareReelsThumbnail(uri: string): Promise<string> {
+  return prepareFixedImage(uri, REELS_THUMB_WIDTH, REELS_THUMB_HEIGHT);
 }
 
 function reelsUrl(path: string, sessionToken?: string | null) {
@@ -176,10 +205,23 @@ export async function fetchReelsChannel(handle: string, userId?: number, session
   );
 }
 
-export async function fetchReelsFeed(userId: number, cursor?: number, sessionToken?: string | null) {
-  const c = cursor ? `&cursor=${cursor}` : "";
-  return reelsJson<{ success: boolean; videos: ReelsVideo[]; nextCursor: number | null }>(
-    `/feed?userId=${userId}&limit=20${c}`,
+export type ReelsFeedCursor = { at: string; id: number };
+
+export async function fetchReelsFeed(
+  userId: number,
+  cursor?: ReelsFeedCursor | null,
+  sessionToken?: string | null,
+) {
+  const c = cursor
+    ? `&cursorAt=${encodeURIComponent(cursor.at)}&cursorId=${cursor.id}`
+    : "";
+  return reelsJson<{
+    success: boolean;
+    videos: ReelsVideo[];
+    trending?: ReelsVideo[];
+    nextCursor: ReelsFeedCursor | null;
+  }>(
+    `/feed?userId=${userId}&limit=15${c}`,
     { sessionToken },
   );
 }
@@ -378,4 +420,68 @@ export function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+export function formatTimeAgo(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+export function updateChannelProfile(opts: {
+  userId: number;
+  sessionToken?: string;
+  displayName?: string;
+  bio?: string;
+  avatarUri?: string;
+  coverUri?: string;
+}): Promise<{ success: boolean; channel?: ReelsChannel; message?: string }> {
+  const { userId, sessionToken, displayName, bio, avatarUri, coverUri } = opts;
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PATCH", `${getApiUrl()}/api/reels/channel/me`);
+    if (sessionToken) xhr.setRequestHeader("Authorization", `Bearer ${sessionToken}`);
+
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText) as {
+          success: boolean;
+          channel?: ReelsChannel;
+          message?: string;
+        };
+        if (xhr.status >= 200 && xhr.status < 300 && data.success) resolve(data);
+        else resolve({ success: false, message: data.message ?? "Update failed" });
+      } catch {
+        reject(new Error("Update failed"));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error"));
+
+    const form = new FormData();
+    form.append("userId", String(userId));
+    if (displayName !== undefined) form.append("displayName", displayName);
+    if (bio !== undefined) form.append("bio", bio);
+    if (avatarUri) {
+      const web = Platform.OS === "web" ? getWebFile(avatarUri) : undefined;
+      if (web) form.append("avatar", web, "avatar.jpg");
+      else form.append("avatar", { uri: avatarUri, name: "avatar.jpg", type: "image/jpeg" } as unknown as Blob);
+    }
+    if (coverUri) {
+      const web = Platform.OS === "web" ? getWebFile(coverUri) : undefined;
+      if (web) form.append("cover", web, "cover.jpg");
+      else form.append("cover", { uri: coverUri, name: "cover.jpg", type: "image/jpeg" } as unknown as Blob);
+    }
+    xhr.send(form);
+  });
 }
