@@ -4,12 +4,15 @@ import { query } from "./db";
 import { notifySubscribersNewVideo } from "./reelsNotifications";
 import { evaluateChannelMonetization } from "./reelsMonetization";
 import { applyVideoModerationResult, moderateReelsUpload } from "./reelsContentModeration";
+import { ensureVideoThumbnail } from "./reelsAutoThumbnail";
 import { ensureReelsModerationColumns } from "./reelsSchema";
+import fs from "node:fs";
+import { localPathForUploadsRel, uploadsRelPathFromStoredUrl } from "./mediaStorage";
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const libDir = path.dirname(currentFilePath);
 const apiServerDir = path.resolve(libDir, "../..");
-const reelsUploadsDir = path.join(apiServerDir, "uploads", "reels");
+const uploadsRootDir = path.join(apiServerDir, "uploads");
 
 export async function processPendingReelsModeration(limit = 10): Promise<number> {
   await ensureReelsModerationColumns();
@@ -26,13 +29,26 @@ export async function processPendingReelsModeration(limit = 10): Promise<number>
 
   let processed = 0;
   for (const row of pending.rows) {
-    const thumbUrl = row.thumbnail_url as string | null;
+    const videoId = Number(row.id);
+    let thumbUrl = row.thumbnail_url as string | null;
     let thumbPath: string | null = null;
     if (thumbUrl) {
-      const fname = thumbUrl.split("/").pop()?.split("?")[0];
-      if (fname) {
-        const p = path.join(reelsUploadsDir, fname);
-        thumbPath = p;
+      const rel = uploadsRelPathFromStoredUrl(thumbUrl);
+      if (rel) {
+        thumbPath = localPathForUploadsRel(rel, uploadsRootDir);
+        if (!thumbPath || !fs.existsSync(thumbPath)) thumbPath = null;
+      }
+    }
+    if (!thumbPath) {
+      const generated = await ensureVideoThumbnail({
+        videoId,
+        videoStoredUrl: String(row.video_url ?? ""),
+        uploadsRootDir,
+        durationSeconds: Number(row.duration_seconds ?? 0),
+      });
+      if (generated) {
+        thumbUrl = generated;
+        thumbPath = localPathForUploadsRel(generated, uploadsRootDir);
       }
     }
 

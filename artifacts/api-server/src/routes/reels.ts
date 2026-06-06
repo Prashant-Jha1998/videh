@@ -6,7 +6,9 @@ import { Router, type NextFunction, type Request, type Response } from "express"
 import multer from "multer";
 import { query } from "../lib/db";
 import { assertSameUser, getAuthUserId } from "../lib/auth";
-import { publicMediaUrl } from "../lib/mediaStorage";
+import { ensureVideoThumbnail } from "../lib/reelsAutoThumbnail";
+import { permanentlyDeleteReelsVideo } from "../lib/reelsDeleteVideo";
+import { localPathForUploadsRel, publicMediaUrl, resolveStoredMediaUrl, uploadsRelPathFromStoredUrl } from "../lib/mediaStorage";
 import {
   ensureReelsTables,
   MAX_REELS_VIDEO_SECONDS,
@@ -48,7 +50,11 @@ const reelsUpload = multer({
   limits: { fileSize: 2 * 1024 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const isVideo = /^video\//.test(file.mimetype) || file.fieldname === "video";
-    const isImage = /^image\//.test(file.mimetype) || file.fieldname === "thumbnail";
+    const isImage =
+      /^image\//.test(file.mimetype)
+      || file.fieldname === "thumbnail"
+      || file.fieldname === "avatar"
+      || file.fieldname === "cover";
     if (isVideo || isImage) cb(null, true);
     else cb(new Error("Only video and image files are allowed."));
   },
@@ -91,6 +97,26 @@ function proxyReelsImageUrl(req: Request, url: unknown): string | null {
   return `${proxy}?url=${encodeURIComponent(u)}`;
 }
 
+/** Always return a loadable thumbnail — auto-generate endpoint if missing/broken. */
+function resolveVideoThumbnailUrl(req: Request, thumb: unknown, videoId: unknown): string {
+  const u = String(thumb ?? "").trim();
+  if (u) {
+    if (needsReelsImageProxy(u)) {
+      return proxyReelsImageUrl(req, u) ?? publicMediaUrl(req, `/api/reels/videos/${videoId}/thumbnail`);
+    }
+    const rel = uploadsRelPathFromStoredUrl(u);
+    if (rel) {
+      const local = localPathForUploadsRel(rel, path.join(apiServerDir, "uploads"));
+      if (local && fs.existsSync(local)) {
+        return resolveStoredMediaUrl(req, u) ?? publicMediaUrl(req, rel);
+      }
+    }
+    const resolved = resolveStoredMediaUrl(req, u);
+    if (resolved && !needsReelsImageProxy(resolved)) return resolved;
+  }
+  return publicMediaUrl(req, `/api/reels/videos/${videoId}/thumbnail`);
+}
+
 function mapVideoRow(row: Record<string, unknown>, req?: Request) {
   const thumb = row.thumbnail_url ?? null;
   const avatar = row.channel_avatar_url ?? null;
@@ -103,7 +129,7 @@ function mapVideoRow(row: Record<string, unknown>, req?: Request) {
     description: redactPhoneNumbersInText(String(row.description ?? "")),
     hashtags: row.hashtags ?? [],
     videoUrl: row.video_url,
-    thumbnailUrl: req ? proxyReelsImageUrl(req, thumb) : (thumb ?? null),
+    thumbnailUrl: req ? resolveVideoThumbnailUrl(req, thumb, row.id) : (thumb ?? null),
     durationSeconds: Number(row.duration_seconds ?? 0),
     viewCount: Number(row.view_count ?? 0),
     likeCount: Number(row.like_count ?? 0),
@@ -174,6 +200,75 @@ router.get("/proxy-image", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "reels proxy-image");
     res.status(502).json({ success: false, message: "Image proxy failed" });
+  }
+});
+
+/** Serve stored thumbnail or auto-extract a frame from the video file. */
+router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
+  const videoId = Number(req.params.id);
+  if (!videoId) {
+    res.status(400).end();
+    return;
+  }
+  try {
+    const row = await query(
+      `SELECT thumbnail_url, video_url, duration_seconds FROM reels_videos WHERE id = $1`,
+      [videoId],
+    );
+    if (!row.rows.length) {
+      res.status(404).end();
+      return;
+    }
+    const stored = row.rows[0] as {
+      thumbnail_url?: string | null;
+      video_url?: string | null;
+      duration_seconds?: number | null;
+    };
+    const uploadsRoot = path.join(apiServerDir, "uploads");
+    const thumbStored = String(stored.thumbnail_url ?? "").trim();
+    if (thumbStored) {
+      const rel = uploadsRelPathFromStoredUrl(thumbStored);
+      if (rel) {
+        const filePath = localPathForUploadsRel(rel, uploadsRoot);
+        if (filePath && fs.existsSync(filePath)) {
+          res.type("image/jpeg");
+          res.setHeader("Cache-Control", "public, max-age=86400");
+          res.sendFile(filePath);
+          return;
+        }
+      }
+      if (needsReelsImageProxy(thumbStored)) {
+        const proxied = proxyReelsImageUrl(req, thumbStored);
+        if (proxied) {
+          res.redirect(proxied);
+          return;
+        }
+      }
+      const external = resolveStoredMediaUrl(req, thumbStored);
+      if (external && /^https?:\/\//i.test(external) && !needsReelsImageProxy(external)) {
+        res.redirect(external);
+        return;
+      }
+    }
+    const generated = await ensureVideoThumbnail({
+      videoId,
+      videoStoredUrl: String(stored.video_url ?? ""),
+      uploadsRootDir: uploadsRoot,
+      durationSeconds: Number(stored.duration_seconds ?? 0),
+    });
+    if (generated) {
+      const filePath = localPathForUploadsRel(generated, uploadsRoot);
+      if (filePath && fs.existsSync(filePath)) {
+        res.type("image/jpeg");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        res.sendFile(filePath);
+        return;
+      }
+    }
+    res.status(404).end();
+  } catch (err) {
+    req.log.error({ err, videoId }, "reels video thumbnail");
+    res.status(500).end();
   }
 });
 
@@ -296,12 +391,8 @@ router.patch("/channel/me", runChannelBrandingUpload, async (req: Request, res: 
     const files = req.files as { avatar?: { filename: string }[]; cover?: { filename: string }[] } | undefined;
     const avatarFile = files?.avatar?.[0];
     const coverFile = files?.cover?.[0];
-    const avatarUrl = avatarFile
-      ? publicMediaUrl(req, `/uploads/reels/${avatarFile.filename}`)
-      : undefined;
-    const coverUrl = coverFile
-      ? publicMediaUrl(req, `/uploads/reels/${coverFile.filename}`)
-      : undefined;
+    const avatarUrl = avatarFile ? `/uploads/reels/${avatarFile.filename}` : undefined;
+    const coverUrl = coverFile ? `/uploads/reels/${coverFile.filename}` : undefined;
 
     const body = req.body as { displayName?: string; bio?: string };
     const sets = ["updated_at = NOW()"];
@@ -495,12 +586,22 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
       return;
     }
 
-    const videoUrl = publicMediaUrl(req, `/uploads/reels/${videoFile.filename}`);
+    const videoUrl = `/uploads/reels/${videoFile.filename}`;
+    const videoPath = path.join(reelsUploadsDir, videoFile.filename);
     const thumbFile = files?.thumbnail?.[0];
-    const thumbnailUrl = thumbFile
-      ? publicMediaUrl(req, `/uploads/reels/${thumbFile.filename}`)
-      : null;
-    const thumbPath = thumbFile ? path.join(reelsUploadsDir, thumbFile.filename) : null;
+    let thumbnailUrl = thumbFile ? `/uploads/reels/${thumbFile.filename}` : null;
+    let thumbPath = thumbFile ? path.join(reelsUploadsDir, thumbFile.filename) : null;
+
+    if (!thumbFile) {
+      const autoName = `thumb_auto_upload_${Date.now()}_${crypto.randomBytes(4).toString("hex")}.jpg`;
+      const autoPath = path.join(reelsUploadsDir, autoName);
+      const { extractVideoFrameToJpeg } = await import("../lib/reelsAutoThumbnail");
+      const seek = durationSeconds > 10 ? Math.min(5, Math.floor(durationSeconds * 0.1)) : 1;
+      if (await extractVideoFrameToJpeg(videoPath, autoPath, seek)) {
+        thumbnailUrl = `/uploads/reels/${autoName}`;
+        thumbPath = autoPath;
+      }
+    }
 
     const inserted = await query(
       `INSERT INTO reels_videos (
@@ -802,6 +903,43 @@ router.post("/videos/:videoId/share", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "reels share");
     res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.delete("/videos/:videoId", async (req: Request, res: Response) => {
+  const videoId = Number(req.params.videoId);
+  const userId = Number(req.query.userId) || Number((req.body as { userId?: number }).userId);
+  if (!videoId) {
+    res.status(400).json({ success: false, message: "Invalid video" });
+    return;
+  }
+  if (!userId || !assertSameUser(req, res, userId)) return;
+  try {
+    await ensureReelsTables();
+    const owner = await query(
+      `SELECT c.user_id FROM reels_videos v
+       JOIN reels_channels c ON c.id = v.channel_id
+       WHERE v.id = $1`,
+      [videoId],
+    );
+    if (!owner.rows.length) {
+      res.status(404).json({ success: false, message: "Video not found" });
+      return;
+    }
+    if (Number(owner.rows[0].user_id) !== userId) {
+      res.status(403).json({ success: false, message: "Only your own videos can be deleted." });
+      return;
+    }
+    const uploadsRoot = path.join(apiServerDir, "uploads");
+    const deleted = await permanentlyDeleteReelsVideo(videoId, uploadsRoot);
+    if (!deleted) {
+      res.status(404).json({ success: false, message: "Video not found" });
+      return;
+    }
+    res.json({ success: true, message: "Video permanently deleted." });
+  } catch (err) {
+    req.log.error({ err, videoId }, "reels delete video");
+    res.status(500).json({ success: false, message: "Could not delete video." });
   }
 });
 

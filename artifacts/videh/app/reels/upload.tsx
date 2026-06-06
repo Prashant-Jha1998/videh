@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
+  autoThumbnailFromVideo,
   MAX_REELS_VIDEO_SECONDS,
   prepareReelsThumbnail,
   REELS_THUMB_ASPECT,
@@ -62,6 +63,13 @@ export default function ReelsUploadScreen() {
     setVideoUri(asset.uri);
     setVideoMime(asset.mimeType ?? "video/mp4");
     setDurationSec(durSec);
+    setThumbPreparing(true);
+    try {
+      const auto = await autoThumbnailFromVideo(asset.uri, durSec);
+      if (auto) setThumbUri(auto);
+    } finally {
+      setThumbPreparing(false);
+    }
   };
 
   const pickThumb = async () => {
@@ -85,9 +93,14 @@ export default function ReelsUploadScreen() {
 
   const post = async () => {
     if (!user?.dbId || !videoUri || title.trim().length < 2) return;
-    if (!thumbUri) {
-      Alert.alert("Thumbnail required", `Add a thumbnail (${REELS_THUMB_HINT}). Every video is scanned before going public.`);
-      return;
+    let thumbToUpload = thumbUri;
+    if (!thumbToUpload) {
+      setThumbPreparing(true);
+      try {
+        thumbToUpload = await autoThumbnailFromVideo(videoUri, durationSec);
+      } finally {
+        setThumbPreparing(false);
+      }
     }
     setUploading(true);
     try {
@@ -99,7 +112,7 @@ export default function ReelsUploadScreen() {
         durationSeconds: durationSec,
         videoUri,
         videoMime,
-        thumbnailUri: thumbUri,
+        thumbnailUri: thumbToUpload ?? undefined,
         sessionToken: user.sessionToken,
         onProgress: setProgress,
       });
@@ -153,8 +166,10 @@ export default function ReelsUploadScreen() {
         )}
       </TouchableOpacity>
 
-      <Text style={[styles.sectionLabel, { color: colors.foreground }]}>Thumbnail *</Text>
-      <Text style={[styles.thumbHint, { color: colors.mutedForeground }]}>{REELS_THUMB_HINT}</Text>
+      <Text style={[styles.sectionLabel, { color: colors.foreground }]}>Thumbnail</Text>
+      <Text style={[styles.thumbHint, { color: colors.mutedForeground }]}>
+        {REELS_THUMB_HINT} — optional; video se auto frame ban jayega agar skip karein.
+      </Text>
       <TouchableOpacity
         style={[styles.thumbBox, { borderColor: colors.border }]}
         onPress={pickThumb}
@@ -167,7 +182,7 @@ export default function ReelsUploadScreen() {
         ) : (
           <View style={styles.thumbPlaceholder}>
             <Ionicons name="image-outline" size={36} color={colors.primary} />
-            <Text style={{ color: colors.foreground, marginTop: 8 }}>Add thumbnail</Text>
+            <Text style={{ color: colors.foreground, marginTop: 8 }}>Custom thumbnail (optional)</Text>
             <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4 }}>16:9 landscape</Text>
           </View>
         )}
@@ -199,8 +214,8 @@ export default function ReelsUploadScreen() {
       />
 
       <TouchableOpacity
-        style={[styles.postBtn, { backgroundColor: colors.primary, opacity: videoUri && thumbUri && title.trim() && !uploading && !thumbPreparing ? 1 : 0.5 }]}
-        disabled={!videoUri || !thumbUri || title.trim().length < 2 || uploading || thumbPreparing}
+        style={[styles.postBtn, { backgroundColor: colors.primary, opacity: videoUri && title.trim() && !uploading && !thumbPreparing ? 1 : 0.5 }]}
+        disabled={!videoUri || title.trim().length < 2 || uploading || thumbPreparing}
         onPress={post}
       >
         {uploading ? (

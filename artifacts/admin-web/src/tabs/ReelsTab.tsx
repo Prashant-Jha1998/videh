@@ -85,6 +85,8 @@ type ModerationVideo = {
   nsfw_score: string;
   thumbnail_url?: string;
   video_url?: string;
+  preview_stream_url?: string;
+  file_on_server?: boolean;
   channel_handle: string;
   user_id: number;
   created_at: string;
@@ -104,6 +106,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
   const [previewProgress, setPreviewProgress] = useState(0);
   const [previewRequired, setPreviewRequired] = useState(MIN_PREVIEW_SEC);
   const [previewLogging, setPreviewLogging] = useState(false);
+  const [previewPlayError, setPreviewPlayError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const maxWatchedRef = useRef(0);
   const previewLoggedRef = useRef(false);
@@ -160,9 +163,13 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
     maxWatchedRef.current = 0;
     previewLoggedRef.current = false;
     setPreviewProgress(0);
+    setPreviewPlayError(null);
     setPreviewRequired(requiredPreviewSeconds(Number(v.duration_seconds ?? 0)));
     setPreviewVideo(v);
   };
+
+  const previewPlaybackUrl = (v: ModerationVideo) =>
+    v.preview_stream_url ?? v.video_url ?? "";
 
   const closePreview = () => {
     setPreviewVideo(null);
@@ -437,17 +444,47 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
                   </div>
                   <button type="button" className="nav-btn" onClick={closePreview}>✕ Close</button>
                 </div>
-                {previewVideo.video_url ? (
-                  <video
-                    ref={videoRef}
-                    src={previewVideo.video_url}
-                    controls
-                    playsInline
-                    style={{ width: "100%", marginTop: 16, borderRadius: 8, background: "#000", maxHeight: 420 }}
-                    onTimeUpdate={onVideoTimeUpdate}
-                    onEnded={onVideoEnded}
-                    poster={previewVideo.thumbnail_url}
-                  />
+                {previewPlaybackUrl(previewVideo) ? (
+                  <>
+                    <p style={{ marginTop: 12, fontSize: 13, color: "#444" }}>
+                      <strong>Step 1:</strong> Neeche video player par <strong>▶ Play</strong> dabayein.
+                      {" "}<strong>Step 2:</strong> Kam se kam <strong>{previewRequired}s</strong> dekhein — tabhi Approve khulega.
+                    </p>
+                    {previewVideo.file_on_server === false ? (
+                      <p style={{ color: "#b45309", marginTop: 8, fontSize: 13 }}>
+                        ⚠ Video file server par nahi mili (server restart ke baad upload gayab ho sakta hai).
+                        User se dubara upload karwayein, ya Reject karein.
+                      </p>
+                    ) : null}
+                    <video
+                      key={previewVideo.id}
+                      ref={videoRef}
+                      src={previewPlaybackUrl(previewVideo)}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      style={{ width: "100%", marginTop: 12, borderRadius: 8, background: "#000", maxHeight: 420 }}
+                      onTimeUpdate={onVideoTimeUpdate}
+                      onEnded={onVideoEnded}
+                      onError={() => {
+                        setPreviewPlayError(
+                          "Video load nahi hui — API redeploy karein, ya file server par missing hai. "
+                          + "Neeche Open link try karein.",
+                        );
+                      }}
+                      poster={previewVideo.thumbnail_url}
+                    />
+                    {previewPlayError ? (
+                      <p style={{ color: "#c00", marginTop: 8, fontSize: 13 }}>{previewPlayError}</p>
+                    ) : null}
+                    {previewVideo.video_url ? (
+                      <p style={{ marginTop: 8, fontSize: 12 }}>
+                        <a href={previewPlaybackUrl(previewVideo)} target="_blank" rel="noreferrer">
+                          Video nayi tab mein kholein
+                        </a>
+                      </p>
+                    ) : null}
+                  </>
                 ) : (
                   <p style={{ color: "#c00", marginTop: 16 }}>Video URL missing — server se file check karein.</p>
                 )}

@@ -1,6 +1,7 @@
 import * as ImageManipulator from "expo-image-manipulator";
 import { Image, Platform } from "react-native";
 import { getApiUrl } from "./api";
+import { resolvePublicAssetUrl } from "./publicAssetUrl";
 import { jsonAuthHeaders } from "./authHeaders";
 import { clampCropRect, ensureEditableImageUri } from "./imageEdit";
 import { ensureUploadableFileUri } from "./prepareFileUpload";
@@ -134,6 +135,51 @@ export async function prepareReelsThumbnail(uri: string): Promise<string> {
   return prepareFixedImage(uri, REELS_THUMB_WIDTH, REELS_THUMB_HEIGHT);
 }
 
+/** Auto-pick one frame from a local video when user skipped manual thumbnail. */
+export async function autoThumbnailFromVideo(videoUri: string, durationSeconds = 0): Promise<string | null> {
+  try {
+    const VideoThumbnails = await import("expo-video-thumbnails");
+    const timeMs = durationSeconds > 10
+      ? Math.min(5000, Math.floor(durationSeconds * 100)) : 1000;
+    const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, {
+      time: timeMs,
+      quality: 0.85,
+    });
+    return prepareReelsThumbnail(uri);
+  } catch {
+    return null;
+  }
+}
+
+/** Fix stored media URLs (wrong host or relative /uploads paths) for Image/Video components. */
+export function normalizeReelsMediaUrl(url?: string | null): string | null {
+  const raw = String(url ?? "").trim();
+  if (!raw) return null;
+  const uploadsPath = raw.match(/\/uploads\/[^\s?#]+/)?.[0]
+    ?? (raw.startsWith("uploads/") ? `/${raw.split(/[?#]/)[0]}` : null);
+  if (uploadsPath) {
+    return `${getApiUrl().replace(/\/$/, "")}${uploadsPath}`;
+  }
+  return resolvePublicAssetUrl(raw) ?? raw;
+}
+
+function normalizeReelsChannel(ch: ReelsChannel): ReelsChannel {
+  return {
+    ...ch,
+    avatarUrl: normalizeReelsMediaUrl(ch.avatarUrl),
+    coverUrl: normalizeReelsMediaUrl(ch.coverUrl ?? null),
+  };
+}
+
+function normalizeReelsVideo(v: ReelsVideo): ReelsVideo {
+  return {
+    ...v,
+    thumbnailUrl: normalizeReelsMediaUrl(v.thumbnailUrl),
+    videoUrl: normalizeReelsMediaUrl(v.videoUrl) ?? v.videoUrl,
+    channelAvatarUrl: normalizeReelsMediaUrl(v.channelAvatarUrl),
+  };
+}
+
 function reelsUrl(path: string, sessionToken?: string | null) {
   return `${getApiUrl()}/api/reels${path}`;
 }
@@ -179,7 +225,7 @@ export async function fetchReelsRules(sessionToken?: string | null) {
 }
 
 export async function fetchMyReelsChannel(userId: number, sessionToken?: string | null) {
-  return reelsJson<{
+  const res = await reelsJson<{
     success: boolean;
     channel: ReelsChannel | null;
     monetization?: ReelsMonetizationStatus;
@@ -188,11 +234,13 @@ export async function fetchMyReelsChannel(userId: number, sessionToken?: string 
     `/channel/me?userId=${userId}`,
     { sessionToken },
   );
+  if (res.channel) res.channel = normalizeReelsChannel(res.channel);
+  return res;
 }
 
 export async function fetchReelsChannel(handle: string, userId?: number, sessionToken?: string | null) {
   const q = userId ? `?userId=${userId}` : "";
-  return reelsJson<{
+  const res = await reelsJson<{
     success: boolean;
     channel: ReelsChannel;
     videos: ReelsVideo[];
@@ -203,6 +251,9 @@ export async function fetchReelsChannel(handle: string, userId?: number, session
     `/channel/${encodeURIComponent(handle.replace(/^@/, ""))}${q}`,
     { sessionToken },
   );
+  if (res.channel) res.channel = normalizeReelsChannel(res.channel);
+  if (res.videos) res.videos = res.videos.map(normalizeReelsVideo);
+  return res;
 }
 
 export type ReelsFeedCursor = { at: string; id: number };
@@ -215,7 +266,7 @@ export async function fetchReelsFeed(
   const c = cursor
     ? `&cursorAt=${encodeURIComponent(cursor.at)}&cursorId=${cursor.id}`
     : "";
-  return reelsJson<{
+  const res = await reelsJson<{
     success: boolean;
     videos: ReelsVideo[];
     trending?: ReelsVideo[];
@@ -224,17 +275,23 @@ export async function fetchReelsFeed(
     `/feed?userId=${userId}&limit=15${c}`,
     { sessionToken },
   );
+  res.videos = (res.videos ?? []).map(normalizeReelsVideo);
+  if (res.trending) res.trending = res.trending.map(normalizeReelsVideo);
+  return res;
 }
 
 export async function searchReels(q: string, userId: number, sessionToken?: string | null) {
-  return reelsJson<{ success: boolean; channels: ReelsChannel[]; videos: ReelsVideo[] }>(
+  const res = await reelsJson<{ success: boolean; channels: ReelsChannel[]; videos: ReelsVideo[] }>(
     `/search?q=${encodeURIComponent(q)}&userId=${userId}`,
     { sessionToken },
   );
+  if (res.channels) res.channels = res.channels.map(normalizeReelsChannel);
+  if (res.videos) res.videos = res.videos.map(normalizeReelsVideo);
+  return res;
 }
 
 export async function fetchReelsVideo(videoId: number, userId: number, sessionToken?: string | null) {
-  return reelsJson<{
+  const res = await reelsJson<{
     success: boolean;
     video: ReelsVideo;
     playAllowed?: boolean;
@@ -244,6 +301,8 @@ export async function fetchReelsVideo(videoId: number, userId: number, sessionTo
     `/videos/${videoId}?userId=${userId}`,
     { sessionToken },
   );
+  if (res.video) res.video = normalizeReelsVideo(res.video);
+  return res;
 }
 
 export async function recordReelsView(
@@ -325,6 +384,17 @@ export async function unsubscribeReelsChannel(
     method: "DELETE",
     sessionToken,
   });
+}
+
+export async function deleteReelsVideo(
+  videoId: number,
+  userId: number,
+  sessionToken?: string | null,
+) {
+  return reelsJson<{ success: boolean; message?: string }>(
+    `/videos/${videoId}?userId=${userId}`,
+    { method: "DELETE", sessionToken },
+  );
 }
 
 export type UploadReelsVideoOpts = {
@@ -460,8 +530,10 @@ export function updateChannelProfile(opts: {
           channel?: ReelsChannel;
           message?: string;
         };
-        if (xhr.status >= 200 && xhr.status < 300 && data.success) resolve(data);
-        else resolve({ success: false, message: data.message ?? "Update failed" });
+        if (xhr.status >= 200 && xhr.status < 300 && data.success) {
+          if (data.channel) data.channel = normalizeReelsChannel(data.channel);
+          resolve(data);
+        } else resolve({ success: false, message: data.message ?? "Update failed" });
       } catch {
         reject(new Error("Update failed"));
       }

@@ -25,6 +25,7 @@ import { DismissibleModal } from "@/components/DismissibleModal";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
+  deleteReelsVideo,
   fetchReelsChannel,
   fetchReelsComments,
   fetchReelsFeed,
@@ -155,6 +156,35 @@ export default function ReelsWatchScreen() {
     void load();
   };
 
+  const confirmDeleteVideo = () => {
+    if (!user?.dbId || !video || !channel?.isOwner) return;
+    Alert.alert(
+      "Delete video permanently?",
+      `"${video.title}" hamesha ke liye delete ho jayega. Undo nahi hoga.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              const res = await deleteReelsVideo(video.id, user.dbId!, user.sessionToken);
+              if (!res.success) {
+                Alert.alert("Delete failed", res.message ?? "Phir se try karein.");
+                return;
+              }
+              if (video.channelHandle) {
+                router.replace({ pathname: "/reels/channel/[handle]", params: { handle: video.channelHandle } });
+              } else {
+                router.replace("/(tabs)/video");
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
+
   const sendComment = async () => {
     if (!user?.dbId || !commentText.trim() || !id) return;
     await postReelsComment(Number(id), user.dbId, commentText.trim(), user.sessionToken);
@@ -253,6 +283,12 @@ export default function ReelsWatchScreen() {
             <Text style={styles.blockedText}>
               {video.moderationReason ?? playBlockReasons.join(" · ") ?? "This video is not public yet."}
             </Text>
+            {channel?.isOwner ? (
+              <TouchableOpacity style={styles.deleteOwnBtn} onPress={confirmDeleteVideo}>
+                <Ionicons name="trash-outline" size={18} color="#fff" />
+                <Text style={styles.deleteOwnBtnText}>Delete video</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         )}
         <TouchableOpacity
@@ -294,11 +330,22 @@ export default function ReelsWatchScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.chip, { backgroundColor: subscribed ? colors.muted : colors.primary }]}
+                style={[
+                  styles.chip,
+                  subscribed
+                    ? { backgroundColor: colors.primary, borderColor: colors.primary }
+                    : { backgroundColor: colors.background, borderColor: colors.foreground },
+                ]}
                 onPress={toggleSubscribe}
               >
-                <Ionicons name={subscribed ? "notifications" : "notifications-outline"} size={16} color="#fff" />
-                <Text style={[styles.chipText, { color: "#fff" }]}>{subscribed ? "Subscribed" : "Subscribe"}</Text>
+                <Ionicons
+                  name={subscribed ? "notifications" : "notifications-outline"}
+                  size={16}
+                  color={subscribed ? "#fff" : colors.foreground}
+                />
+                <Text style={[styles.chipText, { color: subscribed ? "#fff" : colors.foreground }]}>
+                  {subscribed ? "Subscribed" : "Subscribe"}
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={[styles.chip, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => toggleReaction("like")}>
@@ -322,6 +369,16 @@ export default function ReelsWatchScreen() {
                 <Ionicons name="share-outline" size={16} color={colors.foreground} />
                 <Text style={[styles.chipText, { color: colors.foreground }]}>Share</Text>
               </TouchableOpacity>
+
+              {channel?.isOwner ? (
+                <TouchableOpacity
+                  style={[styles.chip, { backgroundColor: colors.card, borderColor: "#e53935" }]}
+                  onPress={confirmDeleteVideo}
+                >
+                  <Ionicons name="trash-outline" size={16} color="#e53935" />
+                  <Text style={[styles.chipText, { color: "#e53935" }]}>Delete</Text>
+                </TouchableOpacity>
+              ) : null}
             </ScrollView>
 
             {video.description ? (
@@ -403,10 +460,21 @@ export default function ReelsWatchScreen() {
                     </Text>
                   </View>
                   <TouchableOpacity
-                    style={[styles.sheetSubBtn, { backgroundColor: subscribed ? colors.muted : colors.primary }]}
+                    style={[
+                      styles.sheetSubBtn,
+                      subscribed
+                        ? { backgroundColor: colors.primary, borderWidth: 0 }
+                        : { backgroundColor: "transparent", borderWidth: 1, borderColor: colors.foreground },
+                    ]}
                     onPress={toggleSubscribe}
                   >
-                    <Text style={{ color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 13 }}>
+                    <Text
+                      style={{
+                        color: subscribed ? "#fff" : colors.foreground,
+                        fontFamily: "Inter_600SemiBold",
+                        fontSize: 13,
+                      }}
+                    >
                       {subscribed ? "Subscribed" : "Subscribe"}
                     </Text>
                   </TouchableOpacity>
@@ -505,6 +573,18 @@ const styles = StyleSheet.create({
   blockedPlayer: { alignItems: "center", justifyContent: "center", padding: 20 },
   blockedTitle: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 16, marginTop: 12 },
   blockedText: { color: "#ccc", textAlign: "center", marginTop: 8, fontSize: 13 },
+  deleteOwnBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.5)",
+  },
+  deleteOwnBtnText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 14 },
   headerBlock: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 },
   vTitle: { fontSize: 16, fontFamily: "Inter_700Bold", lineHeight: 22 },
   metaLine: { fontSize: 13, marginTop: 6 },

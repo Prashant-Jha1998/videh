@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   StyleSheet,
@@ -15,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
+  deleteReelsVideo,
   fetchMyReelsChannel,
   fetchReelsChannel,
   formatDuration,
@@ -65,7 +67,36 @@ export default function ReelsChannelScreen() {
     setLoading(false);
   }, [rawHandle, user?.dbId, user?.sessionToken, router]);
 
-  useEffect(() => { void load(); }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load]),
+  );
+
+  const confirmDeleteVideo = (item: ReelsVideo) => {
+    if (!user?.dbId || !channel?.isOwner) return;
+    Alert.alert(
+      "Delete video permanently?",
+      `"${item.title}" hamesha ke liye delete ho jayega.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              const res = await deleteReelsVideo(item.id, user.dbId!, user.sessionToken);
+              if (!res.success) {
+                Alert.alert("Delete failed", res.message ?? "Phir se try karein.");
+                return;
+              }
+              void load();
+            })();
+          },
+        },
+      ],
+    );
+  };
 
   if (loading) {
     return (
@@ -158,7 +189,12 @@ export default function ReelsChannelScreen() {
               ) : null}
               {user?.dbId && !channel.isOwner ? (
                 <TouchableOpacity
-                  style={[styles.subBtn, { backgroundColor: channel.isSubscribed ? colors.muted : colors.primary }]}
+                  style={[
+                    styles.subBtn,
+                    channel.isSubscribed
+                      ? { backgroundColor: colors.primary, borderWidth: 0 }
+                      : { backgroundColor: "transparent", borderWidth: 1, borderColor: colors.foreground },
+                  ]}
                   onPress={async () => {
                     if (!user.dbId) return;
                     if (channel.isSubscribed) {
@@ -169,7 +205,14 @@ export default function ReelsChannelScreen() {
                     void load();
                   }}
                 >
-                  <Text style={styles.subBtnText}>{channel.isSubscribed ? "Subscribed" : "Subscribe"}</Text>
+                  <Text
+                    style={[
+                      styles.subBtnText,
+                      { color: channel.isSubscribed ? "#fff" : colors.foreground },
+                    ]}
+                  >
+                    {channel.isSubscribed ? "Subscribed" : "Subscribe"}
+                  </Text>
                 </TouchableOpacity>
               ) : channel.isOwner ? (
                 <TouchableOpacity
@@ -186,10 +229,10 @@ export default function ReelsChannelScreen() {
         }
         ListEmptyComponent={<Text style={{ color: colors.mutedForeground, padding: 20 }}>No videos posted yet</Text>}
         renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.ytCard}
-            onPress={() => router.push({ pathname: "/reels/watch/[id]", params: { id: String(item.id) } })}
-          >
+          <View style={styles.ytCard}>
+            <TouchableOpacity
+              onPress={() => router.push({ pathname: "/reels/watch/[id]", params: { id: String(item.id) } })}
+            >
             <View style={styles.thumbWrap}>
               {item.thumbnailUrl ? (
                 <Image source={{ uri: item.thumbnailUrl }} style={styles.thumb} contentFit="cover" />
@@ -215,12 +258,26 @@ export default function ReelsChannelScreen() {
                 </Text>
               </View>
             </View>
-            {item.status !== "published" || item.moderationStatus === "pending_scan" || item.moderationStatus === "pending_review" ? (
-              <Text style={{ color: "#e6a700", fontSize: 11, marginLeft: 12, marginBottom: 8 }}>
-                {item.moderationStatus === "rejected" ? "Blocked" : "Under review"}
-              </Text>
-            ) : null}
-          </TouchableOpacity>
+            </TouchableOpacity>
+            <View style={styles.videoFooter}>
+              {item.status !== "published" || item.moderationStatus === "pending_scan" || item.moderationStatus === "pending_review" ? (
+                <Text style={{ color: "#e6a700", fontSize: 11 }}>
+                  {item.moderationStatus === "rejected" ? "Blocked" : "Under review"}
+                </Text>
+              ) : (
+                <View />
+              )}
+              {channel.isOwner ? (
+                <TouchableOpacity
+                  onPress={() => confirmDeleteVideo(item)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={styles.deleteIconBtn}
+                >
+                  <Ionicons name="trash-outline" size={18} color="#e53935" />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
         )}
       />
     </View>
@@ -270,4 +327,13 @@ const styles = StyleSheet.create({
   smallAvatar: { width: 36, height: 36, borderRadius: 18 },
   rulesBox: { marginTop: 16, padding: 14, borderRadius: 12, borderWidth: 1, width: "100%" },
   rulesTitle: { fontFamily: "Inter_600SemiBold", marginBottom: 6 },
+  videoFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  deleteIconBtn: { padding: 4 },
 });

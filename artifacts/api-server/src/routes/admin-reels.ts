@@ -1,5 +1,14 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Router } from "express";
 import { query } from "../lib/db";
+import {
+  localPathForUploadsRel,
+  resolveStoredMediaUrl,
+  storedUploadFileExists,
+  uploadsRelPathFromStoredUrl,
+} from "../lib/mediaStorage";
 import { logAdminAction } from "../lib/adminAudit";
 import { getReelsPlatformConfig, saveReelsPlatformConfig, type ReelsPlatformConfig } from "../lib/reelsConfig";
 import { runChannelFraudRescan } from "../lib/reelsFraud";
@@ -16,6 +25,23 @@ import { processPendingReelsModeration } from "../lib/reelsModerationQueue";
 import { notifySubscribersNewVideo } from "../lib/reelsNotifications";
 import { ensureReelsModerationColumns, ensureReelsTables } from "../lib/reelsSchema";
 import { requireAnyPermission, requirePermission, type RequireAdmin } from "./admin-rbac";
+
+const adminRoutesDir = path.dirname(fileURLToPath(import.meta.url));
+const apiServerDir = path.resolve(adminRoutesDir, "../..");
+const uploadsRootDir = path.join(apiServerDir, "uploads");
+
+function mapModerationQueueRow(req: Parameters<typeof resolveStoredMediaUrl>[0], row: Record<string, unknown>) {
+  const videoUrl = resolveStoredMediaUrl(req, row.video_url);
+  const thumbnailUrl = resolveStoredMediaUrl(req, row.thumbnail_url);
+  const hasLocalFile = storedUploadFileExists(row.video_url, uploadsRootDir);
+  return {
+    ...row,
+    video_url: videoUrl,
+    thumbnail_url: thumbnailUrl,
+    preview_stream_url: `/api/admin/reels/videos/${row.id}/stream`,
+    file_on_server: hasLocalFile,
+  };
+}
 
 export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAdmin): void {
   router.get("/reels/config", requireAdmin, requirePermission("reels.read"), async (_req, res) => {
@@ -161,9 +187,54 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
          LIMIT $1`,
         [limit],
       );
-      res.json({ success: true, videos: r.rows });
+      res.json({
+        success: true,
+        videos: r.rows.map((row) => mapModerationQueueRow(req, row as Record<string, unknown>)),
+      });
     } catch (err) {
       res.status(500).json({ success: false, message: "Moderation queue failed" });
+    }
+  });
+
+  router.get("/reels/videos/:videoId/stream", requireAdmin, requireAnyPermission("reels.read", "moderation.read"), async (req, res) => {
+    const videoId = Number(req.params.videoId);
+    try {
+      const r = await query(`SELECT video_url FROM reels_videos WHERE id = $1`, [videoId]);
+      if (!r.rows.length) {
+        res.status(404).json({ success: false, message: "Video not found" });
+        return;
+      }
+      const storedUrl = r.rows[0].video_url;
+      const rel = uploadsRelPathFromStoredUrl(storedUrl);
+      if (rel) {
+        const filePath = localPathForUploadsRel(rel, uploadsRootDir);
+        if (!filePath || !fs.existsSync(filePath)) {
+          res.status(404).json({
+            success: false,
+            message: "Video file server par nahi mili — ho sakta hai server restart ke baad upload delete ho gaya. User se dubara upload karwayein.",
+          });
+          return;
+        }
+        const ext = path.extname(filePath).toLowerCase();
+        const mime: Record<string, string> = {
+          ".mp4": "video/mp4",
+          ".mov": "video/quicktime",
+          ".webm": "video/webm",
+          ".m4v": "video/mp4",
+          ".3gp": "video/3gpp",
+        };
+        res.type(mime[ext] ?? "application/octet-stream");
+        res.sendFile(filePath);
+        return;
+      }
+      const external = resolveStoredMediaUrl(req, storedUrl);
+      if (external && /^https?:\/\//i.test(external)) {
+        res.redirect(external);
+        return;
+      }
+      res.status(404).json({ success: false, message: "Video URL invalid" });
+    } catch (err) {
+      res.status(500).json({ success: false, message: "Stream failed" });
     }
   });
 
