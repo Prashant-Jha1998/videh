@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  ScrollView,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
@@ -140,9 +141,12 @@ export default function ReelsUploadScreen() {
   };
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollViewCompat
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: insets.bottom + 40, paddingHorizontal: 20 }}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      bottomOffset={Platform.OS === "ios" ? 20 : 16}
     >
       <TouchableOpacity onPress={() => router.back()} style={styles.back}>
         <Ionicons name="close" size={26} color={colors.foreground} />
@@ -227,7 +231,7 @@ export default function ReelsUploadScreen() {
           <Text style={styles.postText}>Post video</Text>
         )}
       </TouchableOpacity>
-    </ScrollView>
+    </KeyboardAwareScrollViewCompat>
   );
 }
 

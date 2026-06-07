@@ -1606,15 +1606,17 @@ export default function ChatScreen() {
     }
   }, [keyboardVisible, windowHeight]);
 
-  /** adjustResize shrinks the window; Expo Go adjustPan does not — lift manually. */
-  const windowShrunkForKeyboard =
-    keyboardVisible
-    && effectiveKeyboardHeight > 0
-    && windowHeightWhenKeyboardHiddenRef.current - windowHeight > effectiveKeyboardHeight * 0.3;
+  /**
+   * adjustResize may only shrink the window partially on some devices/APKs.
+   * Lift only the gap the system did not already cover (full lift when adjustPan / no shrink).
+   */
   const keyboardOpen = keyboardVisible || keyboardLiftFallback > 0;
+  const windowShrinkDelta = keyboardOpen
+    ? Math.max(0, windowHeightWhenKeyboardHiddenRef.current - windowHeight)
+    : 0;
   const androidKeyboardLift =
-    Platform.OS === "android" && keyboardOpen && effectiveKeyboardHeight > 0 && !windowShrunkForKeyboard
-      ? effectiveKeyboardHeight
+    Platform.OS === "android" && keyboardOpen && effectiveKeyboardHeight > 0
+      ? Math.max(0, effectiveKeyboardHeight - windowShrinkDelta)
       : 0;
 
   useEffect(() => {
