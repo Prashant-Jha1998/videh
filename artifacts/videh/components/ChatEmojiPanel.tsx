@@ -67,7 +67,8 @@ type Props = {
 };
 
 const NUM_COLUMNS = 3;
-const PANEL_HEIGHT = 300;
+export const CHAT_EMOJI_PANEL_HEIGHT = 300;
+const PANEL_HEIGHT = CHAT_EMOJI_PANEL_HEIGHT;
 const SCREEN_W = Dimensions.get("window").width;
 const CELL_SIZE = Math.floor((SCREEN_W - 12) / NUM_COLUMNS);
 

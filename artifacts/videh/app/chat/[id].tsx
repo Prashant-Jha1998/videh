@@ -24,10 +24,12 @@ import {
   Alert,
   Animated,
   Clipboard,
+  BackHandler,
   Dimensions,
   FlatList,
   Linking,
   Modal,
+  useWindowDimensions,
   Image as NativeImage,
   Keyboard,
   Platform,
@@ -58,7 +60,7 @@ import {
 import { validateGalleryAssets, type GalleryAsset } from "@/lib/galleryPicker";
 import { ChatAttachSheet } from "@/components/ChatAttachSheet";
 import { VidehVoiceMic } from "@/components/VidehVoiceMic";
-import { ChatEmojiPanel } from "@/components/ChatEmojiPanel";
+import { CHAT_EMOJI_PANEL_HEIGHT, ChatEmojiPanel } from "@/components/ChatEmojiPanel";
 import type { GifMediaItem } from "@/lib/chatGifApi";
 import { uploadRemoteGifOrSticker } from "@/lib/sendChatGifSticker";
 import { ChatMessageText } from "@/components/ChatMessageText";
@@ -96,10 +98,11 @@ import {
   isCompactChatText,
   isInvertedChatNearBottom,
   isInvertedChatScrolledUp,
-  OPEN_CHAT_PIN_DELAYS_MS,
-  shouldLiveChatAutoPin,
-  WHATSAPP_KEYBOARD_PIN_DELAYS_MS,
-  WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS,
+  SCROLL_PIN_DEBOUNCE_MS,
+  shouldAnimateChatPin,
+  shouldWhatsAppAutoPin,
+  WHATSAPP_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
+  WHATSAPP_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
 } from "@/lib/whatsappChatScroll";
 import { extractUrls, primaryUrlFromText } from "@/lib/chatUrls";
 import { ComposerLinkPreview } from "@/components/ComposerLinkPreview";
@@ -1087,7 +1090,6 @@ export default function ChatScreen() {
 
   const remoteTypingNames = chatId ? (typingByChatId[chatId] ?? []) : [];
   const scheduleOpenChatPinRef = useRef<() => void>(() => {});
-  const schedulePinToBottomRef = useRef<(keyboardSettling?: boolean) => void>(() => {});
   const messagesReadyRef = useRef(false);
   const messagesLenRef = useRef(0);
 
@@ -1097,25 +1099,14 @@ export default function ChatScreen() {
       void loadEnterIsSend().then(setEnterIsSend);
       if (!chatId) return;
       pendingScrollToEndRef.current = true;
+      openChatPinDoneRef.current = false;
       userScrolledUpRef.current = false;
       setReadingHistory(false);
       lastNearBottomRef.current = true;
       setShowJumpToLatest((p) => (p ? false : p));
       setUnreadBelowCount((p) => (p > 0 ? 0 : p));
       setActiveChatId(chatId);
-      const tryOpenPin = () => {
-        if (
-          !userScrolledUpRef.current
-          && messagesLenRef.current > 0
-          && messagesReadyRef.current
-          && pendingScrollToEndRef.current
-        ) {
-          pendingScrollToEndRef.current = false;
-          scheduleOpenChatPinRef.current();
-        }
-      };
-      void loadMessages(chatId).finally(tryOpenPin);
-      tryOpenPin();
+      void loadMessages(chatId);
       const syncDisappearTimer = async () => {
         try {
           const res = await fetch(`${BASE_URL}/api/chats/${chatId}/details`);
@@ -1158,10 +1149,7 @@ export default function ChatScreen() {
       const typingTimer = setInterval(pollTyping, 1500);
       const unsubMsgSignal = onChatMessageSignal((signal) => {
         if (String(signal.chatId) !== String(chatId)) return;
-        if (userScrolledUpRef.current) return;
-        if (!keyboardVisibleRef.current) return;
-        pendingScrollToEndRef.current = true;
-        schedulePinToBottomRef.current();
+        // Incoming messages update `messages.length`; scroll only when following (see messages effect).
       });
       const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
       const loadPresence = async () => {
@@ -1231,8 +1219,8 @@ export default function ChatScreen() {
 
   const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
   const listExtraData = useMemo(
-    () => `${selectedIds.length}|${flashMessageId ?? ""}|${allMessages.length}|${readingHistory ? 1 : 0}`,
-    [selectedIds.length, flashMessageId, allMessages.length, readingHistory],
+    () => `${selectedIds.length}|${flashMessageId ?? ""}|${readingHistory ? 1 : 0}`,
+    [selectedIds.length, flashMessageId, readingHistory],
   );
   const flashAnim = useRef(new Animated.Value(0)).current;
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1484,80 +1472,84 @@ export default function ChatScreen() {
   const scrollLockRef = useRef(false);
   const userDraggingRef = useRef(false);
   const hadRemoteTypingRef = useRef(false);
-  const pinToBottomTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const openPinTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const openChatPinDoneRef = useRef(false);
+  const pendingPinAnimatedRef = useRef(false);
+  const lastPinAtRef = useRef(0);
   const lastNearBottomRef = useRef(true);
   const scrollCoalesceRef = useRef<number | null>(null);
   const composerPinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelOpenChatPin = useCallback(() => {
-    for (const t of openPinTimersRef.current) clearTimeout(t);
-    openPinTimersRef.current = [];
+  const cancelAllScrollPins = useCallback(() => {
+    if (composerPinTimerRef.current) {
+      clearTimeout(composerPinTimerRef.current);
+      composerPinTimerRef.current = null;
+    }
+    if (scrollCoalesceRef.current != null) {
+      cancelAnimationFrame(scrollCoalesceRef.current);
+      scrollCoalesceRef.current = null;
+    }
+    pendingPinAnimatedRef.current = false;
   }, []);
-  const cancelPinToBottom = useCallback(() => {
-    for (const t of pinToBottomTimersRef.current) clearTimeout(t);
-    pinToBottomTimersRef.current = [];
-  }, []);
-  const forceScrollToLatest = useCallback((animated = false) => {
-    if (userDraggingRef.current) return;
-    if (scrollCoalesceRef.current != null) cancelAnimationFrame(scrollCoalesceRef.current);
+  const forceScrollToLatest = useCallback((animated = false, opts?: { bypassDrag?: boolean }) => {
+    if (!opts?.bypassDrag && userDraggingRef.current) return;
+    pendingPinAnimatedRef.current = pendingPinAnimatedRef.current || animated;
+    if (scrollCoalesceRef.current != null) return;
     scrollCoalesceRef.current = requestAnimationFrame(() => {
       scrollCoalesceRef.current = null;
+      const useAnimated = pendingPinAnimatedRef.current;
+      pendingPinAnimatedRef.current = false;
+      lastPinAtRef.current = Date.now();
       if (searching) {
-        listRef.current?.scrollToEnd({ animated });
+        listRef.current?.scrollToEnd({ animated: useAnimated });
       } else {
-        listRef.current?.scrollToOffset({ offset: 0, animated });
+        listRef.current?.scrollToOffset({ offset: 0, animated: useAnimated });
       }
     });
   }, [searching]);
-  const scrollToLatestLive = useCallback((animated = false) => {
-    if (scrollLockRef.current || userDraggingRef.current) return;
-    if (!shouldLiveChatAutoPin(userScrolledUpRef.current, searching, keyboardVisibleRef.current)) return;
-    forceScrollToLatest(animated);
-  }, [searching, forceScrollToLatest]);
-  const scrollToLatest = scrollToLatestLive;
+  const pinToLatest = useCallback(
+    (animated = false, opts?: { force?: boolean }) => {
+      if (userDraggingRef.current) return;
+      if (scrollLockRef.current && !opts?.force) return;
+      if (!opts?.force && !shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
+      const now = Date.now();
+      if (!animated && !opts?.force && now - lastPinAtRef.current < SCROLL_PIN_DEBOUNCE_MS) return;
+      forceScrollToLatest(animated);
+    },
+    [searching, forceScrollToLatest],
+  );
+  const scrollToLatestIfFollowing = useCallback(
+    (animated = false) => {
+      pinToLatest(animated);
+    },
+    [pinToLatest],
+  );
+  const scrollToLatest = scrollToLatestIfFollowing;
   const scheduleOpenChatPin = useCallback(() => {
-    cancelOpenChatPin();
+    if (openChatPinDoneRef.current) return;
+    openChatPinDoneRef.current = true;
+    cancelAllScrollPins();
+    pendingScrollToEndRef.current = false;
     userScrolledUpRef.current = false;
     setReadingHistory(false);
     lastNearBottomRef.current = true;
     setShowJumpToLatest((p) => (p ? false : p));
     setUnreadBelowCount((p) => (p > 0 ? 0 : p));
-    OPEN_CHAT_PIN_DELAYS_MS.forEach((delay, index) => {
-      const animated = index === OPEN_CHAT_PIN_DELAYS_MS.length - 1;
-      const t = setTimeout(() => {
-        if (userScrolledUpRef.current) return;
-        forceScrollToLatest(animated);
-      }, delay);
-      openPinTimersRef.current.push(t);
-    });
-  }, [cancelOpenChatPin, forceScrollToLatest]);
+    pinToLatest(false, { force: true });
+  }, [cancelAllScrollPins, pinToLatest]);
   const markUserScrolledUp = useCallback(() => {
     if (userScrolledUpRef.current) return;
-    cancelOpenChatPin();
-    cancelPinToBottom();
+    cancelAllScrollPins();
     pendingScrollToEndRef.current = false;
     userScrolledUpRef.current = true;
     lastNearBottomRef.current = false;
     frozenMessageCountRef.current = messages.length;
     setReadingHistory(true);
-    const showFab = messages.length > 6;
-    setShowJumpToLatest((p) => (p === showFab ? p : showFab));
-  }, [cancelOpenChatPin, cancelPinToBottom, messages.length]);
-  /** WhatsApp: pin to latest — single quiet scroll unless keyboard is settling. */
-  const schedulePinToBottom = useCallback((keyboardSettling = false) => {
-    if (!shouldLiveChatAutoPin(userScrolledUpRef.current, searching, keyboardVisibleRef.current)) return;
-    for (const t of pinToBottomTimersRef.current) clearTimeout(t);
-    pinToBottomTimersRef.current = [];
-    const delays = keyboardSettling ? WHATSAPP_KEYBOARD_PIN_DELAYS_MS : WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS;
-    for (const delay of delays) {
-      const t = setTimeout(() => scrollToLatestLive(delay >= 150), delay);
-      pinToBottomTimersRef.current.push(t);
-    }
-  }, [searching, scrollToLatestLive]);
+    setShowJumpToLatest(true);
+  }, [cancelAllScrollPins, messages.length]);
   const pinChatToBottom = useCallback(
     (animated = false) => {
-      cancelOpenChatPin();
-      cancelPinToBottom();
+      cancelAllScrollPins();
+      userDraggingRef.current = false;
+      scrollLockRef.current = false;
       userScrolledUpRef.current = false;
       setReadingHistory(false);
       lastNearBottomRef.current = true;
@@ -1565,13 +1557,17 @@ export default function ChatScreen() {
       setUnreadBelowCount((p) => (p > 0 ? 0 : p));
       frozenMessageCountRef.current = messages.length;
       pendingScrollToEndRef.current = false;
-      if (animated) forceScrollToLatest(true);
-      else schedulePinToBottom();
+      forceScrollToLatest(animated, { bypassDrag: true });
     },
-    [messages.length, cancelOpenChatPin, cancelPinToBottom, schedulePinToBottom, forceScrollToLatest],
+    [messages.length, cancelAllScrollPins, forceScrollToLatest],
+  );
+  const scrollToBottomIfFollowing = useCallback(
+    (animated = true) => {
+      if (!userScrolledUpRef.current) pinChatToBottom(animated);
+    },
+    [pinChatToBottom],
   );
   scheduleOpenChatPinRef.current = scheduleOpenChatPin;
-  schedulePinToBottomRef.current = schedulePinToBottom;
   const syncScrollAwayFromBottom = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
       const away = searching
@@ -1593,7 +1589,7 @@ export default function ChatScreen() {
         ? isChatNearBottom(contentOffsetY, contentHeight, layoutHeight)
         : isInvertedChatNearBottom(contentOffsetY);
       if (!nearBottom) return;
-      cancelOpenChatPin();
+      cancelAllScrollPins();
       userScrolledUpRef.current = false;
       setReadingHistory(false);
       lastNearBottomRef.current = true;
@@ -1601,7 +1597,17 @@ export default function ChatScreen() {
       setShowJumpToLatest((p) => (p ? false : p));
       setUnreadBelowCount((p) => (p > 0 ? 0 : p));
     },
-    [messages.length, cancelOpenChatPin, searching],
+    [messages.length, cancelAllScrollPins, searching],
+  );
+  const finishScrollInteraction = useCallback(
+    (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
+      syncScrollAwayFromBottom(contentOffsetY, contentHeight, layoutHeight);
+      tryClearReadingHistory(contentOffsetY, contentHeight, layoutHeight);
+      if (!userScrolledUpRef.current && !searching && lastNearBottomRef.current) {
+        pinToLatest(false);
+      }
+    },
+    [syncScrollAwayFromBottom, tryClearReadingHistory, searching, pinToLatest],
   );
   const tryLoadOlderMessages = useCallback(async () => {
     if (loadingOlderRef.current || !hasMoreOlderRef.current || searching || !chatId) return;
@@ -1639,8 +1645,9 @@ export default function ChatScreen() {
   const prevMessageCountRef = useRef(0);
 
   useEffect(() => {
-    cancelOpenChatPin();
+    cancelAllScrollPins();
     pendingScrollToEndRef.current = true;
+    openChatPinDoneRef.current = false;
     userScrolledUpRef.current = false;
     setReadingHistory(false);
     lastNearBottomRef.current = true;
@@ -1650,8 +1657,8 @@ export default function ChatScreen() {
     hasMoreOlderRef.current = true;
     prevMessageCountRef.current = 0;
     hadRemoteTypingRef.current = false;
-    return () => cancelOpenChatPin();
-  }, [chatId, cancelOpenChatPin]);
+    return () => cancelAllScrollPins();
+  }, [chatId, cancelAllScrollPins]);
 
   useEffect(() => {
     if (!userScrolledUpRef.current) {
@@ -1701,12 +1708,80 @@ export default function ChatScreen() {
     };
   }, []);
 
-  const { keyboardVisible } = useChatKeyboard();
+  const { keyboardVisible, keyboardHeight } = useChatKeyboard();
+  const { height: windowHeight } = useWindowDimensions();
+  const prevKeyboardVisibleRef = useRef(false);
+  const prevWindowHeightRef = useRef(windowHeight);
+  const emojiPanelOpenRef = useRef(false);
+  useEffect(() => {
+    emojiPanelOpenRef.current = emojiPanelOpen;
+  }, [emojiPanelOpen]);
 
   useEffect(() => {
     keyboardVisibleRef.current = keyboardVisible;
     if (!keyboardVisible) keyboardAnimatingRef.current = false;
   }, [keyboardVisible]);
+
+  /** WhatsApp: keyboard opens at bottom → one quiet pin so latest stays above keyboard. */
+  useEffect(() => {
+    if (searching) return;
+    const justOpened = keyboardVisible && !prevKeyboardVisibleRef.current;
+    prevKeyboardVisibleRef.current = keyboardVisible;
+    if (
+      justOpened
+      && !userScrolledUpRef.current
+      && lastNearBottomRef.current
+      && !userDraggingRef.current
+      && !emojiPanelOpenRef.current
+    ) {
+      pinToLatest(false);
+    }
+  }, [keyboardVisible, searching, pinToLatest]);
+
+  /** Emoji panel replaces keyboard — keep latest visible above panel. */
+  useEffect(() => {
+    if (searching || !emojiPanelOpen) return;
+    if (userScrolledUpRef.current || userDraggingRef.current) return;
+    if (!lastNearBottomRef.current) return;
+    pinToLatest(false);
+  }, [emojiPanelOpen, searching, pinToLatest]);
+
+  /** After rotation, re-pin quietly when following the tail. */
+  useEffect(() => {
+    if (searching || userScrolledUpRef.current) {
+      prevWindowHeightRef.current = windowHeight;
+      return;
+    }
+    if (Math.abs(windowHeight - prevWindowHeightRef.current) > 48 && lastNearBottomRef.current) {
+      pinToLatest(false);
+    }
+    prevWindowHeightRef.current = windowHeight;
+  }, [windowHeight, searching, pinToLatest]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (keyboardVisibleRef.current) {
+        Keyboard.dismiss();
+        return true;
+      }
+      if (emojiPanelOpenRef.current) {
+        setEmojiPanelOpen(false);
+        return true;
+      }
+      if (selectionActive) {
+        clearSelection();
+        return true;
+      }
+      if (searching) {
+        setSearching(false);
+        setSearchQuery("");
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [selectionActive, searching, clearSelection]);
 
   useEffect(() => {
     messagesReadyRef.current = messagesReady;
@@ -1726,22 +1801,34 @@ export default function ChatScreen() {
       return;
     }
     const count = messages.length;
-    if (count > prevMessageCountRef.current && keyboardVisibleRef.current && !userScrolledUpRef.current) {
-      const animated = count - prevMessageCountRef.current <= 2;
-      scrollToLatestLive(animated);
+    if (count > prevMessageCountRef.current && !userScrolledUpRef.current && !userDraggingRef.current) {
+      const delta = count - prevMessageCountRef.current;
+      scrollToLatestIfFollowing(shouldAnimateChatPin(delta, keyboardAnimatingRef.current));
     }
     prevMessageCountRef.current = count;
-  }, [messages.length, messagesReady, searching, scrollToLatestLive, scheduleOpenChatPin]);
+  }, [messages.length, messagesReady, searching, scrollToLatestIfFollowing, scheduleOpenChatPin]);
 
-  /** Inverted list: reserve space above sticky composer at the visual bottom. */
+  /** Inverted list: reserve space above sticky composer + keyboard/emoji at visual bottom. */
   const listVisualBottomPad = useMemo(() => {
     if (searching) return 8;
-    return Math.max(10, composerHeight + 8);
-  }, [searching, composerHeight]);
+    const kbInset = keyboardVisible ? Math.max(0, keyboardHeight) : 0;
+    const emojiInset =
+      emojiPanelOpen && !selectionActive && voiceRecPhase === "idle" && !keyboardVisible
+        ? CHAT_EMOJI_PANEL_HEIGHT
+        : 0;
+    return Math.max(10, composerHeight + kbInset + emojiInset + 8);
+  }, [searching, composerHeight, keyboardVisible, keyboardHeight, emojiPanelOpen, selectionActive, voiceRecPhase]);
   const listTopPadding = 12;
   const jumpFabBottom = useMemo(
-    () => Math.max(12, composerHeight + 16),
-    [composerHeight],
+    () => {
+      const kbInset = keyboardVisible ? keyboardHeight : 0;
+      const emojiInset =
+        emojiPanelOpen && !selectionActive && voiceRecPhase === "idle" && !keyboardVisible
+          ? CHAT_EMOJI_PANEL_HEIGHT
+          : 0;
+      return Math.max(12, composerHeight + kbInset + emojiInset + 16);
+    },
+    [composerHeight, keyboardVisible, keyboardHeight, emojiPanelOpen, selectionActive, voiceRecPhase],
   );
   const onComposerLayout = useCallback(
     (e: { nativeEvent: { layout: { height: number } } }) => {
@@ -1753,34 +1840,29 @@ export default function ChatScreen() {
 
   useEffect(() => {
     return () => {
-      cancelOpenChatPin();
-      for (const t of pinToBottomTimersRef.current) clearTimeout(t);
-      pinToBottomTimersRef.current = [];
-      if (scrollCoalesceRef.current != null) cancelAnimationFrame(scrollCoalesceRef.current);
-      if (composerPinTimerRef.current) clearTimeout(composerPinTimerRef.current);
+      cancelAllScrollPins();
     };
-  }, [cancelOpenChatPin]);
+  }, [cancelAllScrollPins]);
 
-  /** Composer grew (reply / link preview) — pin only while keyboard is open at bottom. */
+  /** Composer grew (reply / link preview) — pin only while user is following the tail. */
   useEffect(() => {
-    if (!keyboardVisibleRef.current) return;
-    if (readingHistory || !shouldLiveChatAutoPin(userScrolledUpRef.current, searching, true) || userDraggingRef.current) return;
+    if (readingHistory || !shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current) return;
     if (!lastNearBottomRef.current) return;
     if (composerPinTimerRef.current) clearTimeout(composerPinTimerRef.current);
-    composerPinTimerRef.current = setTimeout(() => scrollToLatestLive(false), 120);
+    composerPinTimerRef.current = setTimeout(() => scrollToLatestIfFollowing(false), 120);
     return () => {
       if (composerPinTimerRef.current) clearTimeout(composerPinTimerRef.current);
     };
-  }, [composerHeight, readingHistory, searching, scrollToLatestLive]);
+  }, [composerHeight, readingHistory, searching, scrollToLatestIfFollowing]);
 
   useEffect(() => {
-    if (searching || !keyboardVisibleRef.current) return;
+    if (searching) return;
     const hasTyping = remoteTypingNames.length > 0;
     if (hasTyping && !hadRemoteTypingRef.current && !userScrolledUpRef.current) {
-      scrollToLatestLive(true);
+      scrollToLatestIfFollowing(true);
     }
     hadRemoteTypingRef.current = hasTyping;
-  }, [remoteTypingNames.length, searching, scrollToLatestLive, keyboardVisible]);
+  }, [remoteTypingNames.length, searching, scrollToLatestIfFollowing]);
 
   // @mentions state
   const [groupMembers, setGroupMembers] = useState<{ id: number; name: string }[]>([]);
@@ -1825,16 +1907,10 @@ export default function ChatScreen() {
     if (!composerEnabled || editTarget) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setEmojiPanelOpen((open) => {
-      const next = !open;
-      if (next) {
-        Keyboard.dismiss();
-        userScrolledUpRef.current = false;
-        pendingScrollToEndRef.current = true;
-        requestAnimationFrame(() => schedulePinToBottom());
-      }
-      return next;
+      if (!open) Keyboard.dismiss();
+      return !open;
     });
-  }, [composerEnabled, editTarget, schedulePinToBottom]);
+  }, [composerEnabled, editTarget]);
 
   const sendGifOrSticker = useCallback(async (item: GifMediaItem, kind: "gif" | "sticker") => {
     if (!chatId || !composerEnabled || editTarget) return;
@@ -1843,11 +1919,10 @@ export default function ChatScreen() {
     try {
       const mediaUrl = await uploadRemoteGifOrSticker(item, user?.sessionToken, kind);
       sendPreparedMediaMessage(chatId, { mediaUrl, kind: "image" });
-      pinChatToBottom(true);
     } catch (e) {
       Alert.alert("Error", e instanceof Error ? e.message : kind === "gif" ? "Could not send GIF." : "Could not send sticker.");
     }
-  }, [chatId, composerEnabled, editTarget, user?.sessionToken, sendPreparedMediaMessage, pinChatToBottom]);
+  }, [chatId, composerEnabled, editTarget, user?.sessionToken, sendPreparedMediaMessage]);
 
   const handlePickGif = useCallback((item: GifMediaItem) => {
     void sendGifOrSticker(item, "gif");
@@ -1934,8 +2009,7 @@ export default function ChatScreen() {
     );
     setText("");
     setReplyTo(null);
-    pinChatToBottom(true);
-  }, [text, chatId, sendMessage, replyTo, clearTyping, editTarget, editText, editMessage, composerEnabled, chat?.isGroup, groupSendPermission?.policy, user?.dbId, user?.name, name, chat?.name, pinChatToBottom]);
+  }, [text, chatId, sendMessage, replyTo, clearTyping, editTarget, editText, editMessage, composerEnabled, chat?.isGroup, groupSendPermission?.policy, user?.dbId, user?.name, name, chat?.name]);
 
   const sendMediaMessage = async (
     type: "camera" | "videocamera" | "gallery" | "document" | "location" | "contact" | "viewonce" | "audiofile",
@@ -2003,7 +2077,6 @@ export default function ChatScreen() {
             sessionToken: user?.sessionToken,
           });
           sendSpecialMessage(chatId, picked.name, "audio", upload.url);
-          pinChatToBottom(true);
         } catch (e) {
           Alert.alert("Error", e instanceof Error ? e.message : "Could not send this audio file.");
         }
@@ -2127,8 +2200,7 @@ export default function ChatScreen() {
       emails: dedupeEmails(contactToConfirm.emails),
     });
     setContactToConfirm(null);
-    pinChatToBottom(true);
-  }, [chatId, contactToConfirm, sendContactMessage, pinChatToBottom]);
+  }, [chatId, contactToConfirm, sendContactMessage]);
 
   const saveSharedContactToPhone = useCallback(async (text: string) => {
     const parsed = parseContactMessage(text);
@@ -3742,36 +3814,29 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS !== "web"}
           maintainVisibleContentPosition={
-            searching || readingHistory || !keyboardVisible
+            searching
               ? undefined
-              : { minIndexForVisible: 0, autoscrollToTopThreshold: 20 }
+              : {
+                  minIndexForVisible: 0,
+                  autoscrollToTopThreshold: readingHistory
+                    ? WHATSAPP_MVCP_HISTORY_AUTOSCROLL_THRESHOLD
+                    : WHATSAPP_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
+                }
           }
           initialNumToRender={12}
           maxToRenderPerBatch={8}
           windowSize={7}
           updateCellsBatchingPeriod={100}
-          onScrollBeginDrag={(e) => {
+          onScrollBeginDrag={() => {
             scrollLockRef.current = true;
             userDraggingRef.current = true;
-            cancelOpenChatPin();
-            cancelPinToBottom();
-            if (!searching) {
-              const y = e.nativeEvent.contentOffset.y;
-              if (isInvertedChatScrolledUp(y, userScrolledUpRef.current)) {
-                markUserScrolledUp();
-              }
-            }
+            cancelAllScrollPins();
           }}
           onScrollEndDrag={(e) => {
             scrollLockRef.current = false;
             userDraggingRef.current = false;
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-            syncScrollAwayFromBottom(
-              contentOffset.y,
-              contentSize.height,
-              layoutMeasurement.height,
-            );
-            tryClearReadingHistory(
+            finishScrollInteraction(
               contentOffset.y,
               contentSize.height,
               layoutMeasurement.height,
@@ -3779,13 +3844,9 @@ export default function ChatScreen() {
           }}
           onMomentumScrollEnd={(e) => {
             userDraggingRef.current = false;
+            scrollLockRef.current = false;
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-            syncScrollAwayFromBottom(
-              contentOffset.y,
-              contentSize.height,
-              layoutMeasurement.height,
-            );
-            tryClearReadingHistory(
+            finishScrollInteraction(
               contentOffset.y,
               contentSize.height,
               layoutMeasurement.height,
@@ -3797,24 +3858,16 @@ export default function ChatScreen() {
             handleListScroll(contentOffset.y, contentSize.height, layoutMeasurement.height);
           }}
           scrollEventThrottle={96}
-          onContentSizeChange={() => {
-            if (readingHistory || userScrolledUpRef.current || !keyboardVisibleRef.current) return;
-            if (userDraggingRef.current || scrollLockRef.current || searching) return;
-            if (!lastNearBottomRef.current) return;
-            scrollToLatestLive(false);
-          }}
           onScrollToIndexFailed={(info) => {
-            listRef.current?.scrollToOffset({
-              offset: Math.max(0, info.averageItemLength * info.index),
-              animated: true,
-            });
-            setTimeout(() => {
+            const offset = Math.max(0, info.averageItemLength * info.index);
+            listRef.current?.scrollToOffset({ offset, animated: false });
+            requestAnimationFrame(() => {
               listRef.current?.scrollToIndex({
                 index: info.index,
                 animated: true,
-                viewPosition: 0.5,
+                viewPosition: searching ? 0.5 : 0.5,
               });
-            }, 120);
+            });
           }}
           ListEmptyComponent={
             initializing ? (
@@ -3843,24 +3896,38 @@ export default function ChatScreen() {
         />
 
         {showJumpToLatest ? (
-          <TouchableOpacity
-            style={[
-              styles.scrollToBottomFab,
-              { bottom: jumpFabBottom, backgroundColor: colors.card },
-            ]}
-            onPress={() => pinChatToBottom(true)}
-            activeOpacity={0.88}
-            accessibilityLabel="Scroll to latest messages"
+          <View
+            pointerEvents="box-none"
+            style={[styles.jumpFabHost, { bottom: jumpFabBottom }]}
           >
-            <Ionicons name="chevron-down" size={22} color={colors.primary} />
-            {unreadBelowCount > 0 ? (
-              <View style={[styles.unreadFabBadge, { backgroundColor: colors.primary }]}>
-                <Text style={styles.unreadFabBadgeText}>
-                  {unreadBelowCount > 99 ? "99+" : String(unreadBelowCount)}
+            <TouchableOpacity
+              style={[
+                unreadBelowCount > 0 ? styles.newMessagesFab : styles.scrollToBottomFab,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: unreadBelowCount > 0 ? colors.border : "transparent",
+                },
+              ]}
+              onPress={() => pinChatToBottom(true)}
+              activeOpacity={0.88}
+              accessibilityLabel={
+                unreadBelowCount > 0
+                  ? `${unreadBelowCount} new messages`
+                  : "Scroll to latest messages"
+              }
+            >
+              <Ionicons name="chevron-down" size={20} color={colors.primary} />
+              {unreadBelowCount > 0 ? (
+                <Text style={[styles.newMessagesFabText, { color: colors.primary }]}>
+                  {unreadBelowCount > 99
+                    ? "99+ new messages"
+                    : unreadBelowCount === 1
+                      ? "1 new message"
+                      : `${unreadBelowCount} new messages`}
                 </Text>
-              </View>
-            ) : null}
-          </TouchableOpacity>
+              ) : null}
+            </TouchableOpacity>
+          </View>
         ) : null}
 
         </View>
@@ -4262,9 +4329,14 @@ const styles = StyleSheet.create({
   composerWrap: { flexShrink: 0 },
   messageList: { flex: 1, minHeight: 0 },
   messageListContent: { paddingHorizontal: 10, paddingTop: 8 },
-  scrollToBottomFab: {
+  jumpFabHost: {
     position: "absolute",
-    right: 14,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 8,
+  },
+  scrollToBottomFab: {
     width: 42,
     height: 42,
     borderRadius: 21,
@@ -4275,20 +4347,25 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    zIndex: 8,
   },
-  unreadFabBadge: {
-    position: "absolute",
-    top: -4,
-    right: -4,
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    paddingHorizontal: 5,
+  newMessagesFab: {
+    minWidth: 168,
+    maxWidth: "92%",
+    height: 40,
+    borderRadius: 20,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
   },
-  unreadFabBadgeText: { color: "#fff", fontSize: 11, fontFamily: "Inter_700Bold" },
+  newMessagesFabText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   olderLoader: { paddingVertical: 12, alignItems: "center" },
   // @mention autocomplete
   mentionList: { borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)", maxHeight: 220, elevation: 4, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4 },
