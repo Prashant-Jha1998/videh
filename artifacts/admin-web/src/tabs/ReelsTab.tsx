@@ -82,6 +82,60 @@ type ReelsConfig = {
   };
 };
 
+type AdsPlatformOverview = {
+  totals: {
+    advertisers: number;
+    campaigns: number;
+    running_campaigns: number;
+    live_ads: number;
+    pending_ads: number;
+    ad_spend_inr: string;
+    revenue_inr: string;
+    wallet_balance_inr: string;
+    total_impressions: string;
+    total_clicks: string;
+  };
+  advertisers: Array<{
+    id: number;
+    email: string;
+    company_name: string;
+    balance_inr: string;
+    status: string;
+    campaigns: number;
+    running_campaigns: number;
+    spent_inr: string;
+    paid_inr: string;
+    created_at: string;
+  }>;
+  runningCampaigns: Array<{
+    id: number;
+    name: string;
+    status: string;
+    start_date: string;
+    end_date: string | null;
+    daily_budget_inr: string;
+    total_budget_inr: string;
+    spent_inr: string;
+    objective: string;
+    company_name: string;
+    advertiser_email: string;
+    live_ads: number;
+    impressions: string;
+    clicks: string;
+    days_left: number | null;
+  }>;
+  revenueByDay: Array<{ day: string; revenue_inr: string; payments: number }>;
+  geo: Array<{ city: string; state: string; impressions: string; clicks: string }>;
+  recentPayments: Array<{
+    amount_inr: string;
+    razorpay_payment_id: string;
+    payment_method: string | null;
+    created_at: string;
+    company_name: string;
+    email: string;
+  }>;
+};
+
 type AdReviewCreative = {
   id: number;
   title: string;
@@ -129,8 +183,9 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [moderationQueue, setModerationQueue] = useState<ModerationVideo[]>([]);
-  const [subTab, setSubTab] = useState<"channels" | "rules" | "fraud" | "moderation" | "ads">("channels");
+  const [subTab, setSubTab] = useState<"channels" | "rules" | "fraud" | "moderation" | "ads_overview" | "ads">("channels");
   const [adReviewQueue, setAdReviewQueue] = useState<AdReviewCreative[]>([]);
+  const [adsOverview, setAdsOverview] = useState<AdsPlatformOverview | null>(null);
   const [previewVideo, setPreviewVideo] = useState<ModerationVideo | null>(null);
   const [previewReadyIds, setPreviewReadyIds] = useState<Set<number>>(new Set());
   const [previewProgress, setPreviewProgress] = useState(0);
@@ -143,7 +198,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
 
   const load = useCallback(async () => {
     onErr(null);
-    const [st, ch, fe, cfg, mq, aq] = await Promise.all([
+    const [st, ch, fe, cfg, mq, aq, ao] = await Promise.all([
       adminApi<{ success: boolean; stats: ReelsStats }>("/admin/reels/stats"),
       adminApi<{ success: boolean; channels: ReelsChannel[] }>(
         `/admin/reels/channels?limit=100${search ? `&q=${encodeURIComponent(search)}` : ""}`,
@@ -152,6 +207,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
       adminApi<{ success: boolean; config: ReelsConfig }>("/admin/reels/config"),
       adminApi<{ success: boolean; videos: ModerationVideo[] }>("/admin/reels/moderation-queue?limit=80"),
       adminApi<{ success: boolean; creatives: AdReviewCreative[] }>("/admin/reels/ads/review-queue?limit=80"),
+      adminApi<{ success: boolean; overview: AdsPlatformOverview }>("/admin/reels/ads/platform-overview"),
     ]);
     setStats(st.stats);
     setChannels(ch.channels ?? []);
@@ -159,6 +215,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
     setConfig(cfg.config);
     setModerationQueue(mq.videos ?? []);
     setAdReviewQueue(aq.creatives ?? []);
+    setAdsOverview(ao.overview ?? null);
   }, [search, onErr]);
 
   useEffect(() => {
@@ -390,6 +447,9 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
           </button>
           <button type="button" className={subTab === "moderation" ? "active" : ""} onClick={() => setSubTab("moderation")}>
             NSFW queue{moderationQueue.length > 0 ? ` (${moderationQueue.length})` : ""}
+          </button>
+          <button type="button" className={subTab === "ads_overview" ? "active" : ""} onClick={() => setSubTab("ads_overview")}>
+            Ads overview
           </button>
           <button type="button" className={subTab === "ads" ? "active" : ""} onClick={() => setSubTab("ads")}>
             Ad review{adReviewQueue.length > 0 ? ` (${adReviewQueue.length})` : ""}
@@ -712,6 +772,173 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
               </div>
             </div>
           ) : null}
+        </>
+      ) : null}
+
+      {subTab === "ads_overview" && adsOverview ? (
+        <>
+          <div className="stats-grid" style={{ marginBottom: 16 }}>
+            <div className="stat-card">
+              <div className="stat-val">{adsOverview.totals.running_campaigns}</div>
+              <div className="stat-label">Running campaigns</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-val">₹{Number(adsOverview.totals.revenue_inr).toLocaleString("en-IN")}</div>
+              <div className="stat-label">Total revenue (Razorpay)</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-val">₹{Number(adsOverview.totals.ad_spend_inr).toLocaleString("en-IN")}</div>
+              <div className="stat-label">Ad spend (platform)</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-val">{adsOverview.totals.advertisers}</div>
+              <div className="stat-label">Advertisers</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-val">{adsOverview.totals.live_ads}</div>
+              <div className="stat-label">Live ads</div>
+            </div>
+            <div className="stat-card stat-card--warn">
+              <div className="stat-val">{adsOverview.totals.pending_ads}</div>
+              <div className="stat-label">Pending review</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-val">{formatCompactStat(Number(adsOverview.totals.total_impressions))}</div>
+              <div className="stat-label">Impressions</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-val">{formatCompactStat(Number(adsOverview.totals.total_clicks))}</div>
+              <div className="stat-label">Clicks</div>
+            </div>
+          </div>
+
+          <div className="admin-card">
+            <h3 style={{ margin: "0 0 12px" }}>Running campaigns — kab se kab tak</h3>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Campaign</th>
+                    <th>Advertiser</th>
+                    <th>Schedule</th>
+                    <th>Days left</th>
+                    <th>Spend / Budget</th>
+                    <th>Live ads</th>
+                    <th>Impressions</th>
+                    <th>Clicks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adsOverview.runningCampaigns.map((c) => (
+                    <tr key={c.id}>
+                      <td><strong>{c.name}</strong><div className="muted">#{c.id} · {c.objective}</div></td>
+                      <td><div>{c.company_name}</div><div className="muted">{c.advertiser_email}</div></td>
+                      <td>{fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : "No end"}</td>
+                      <td>{c.days_left != null ? `${c.days_left}d` : "—"}</td>
+                      <td>₹{Number(c.spent_inr).toLocaleString("en-IN")} / ₹{Number(c.total_budget_inr).toLocaleString("en-IN")}</td>
+                      <td>{c.live_ads}</td>
+                      <td>{Number(c.impressions).toLocaleString("en-IN")}</td>
+                      <td>{Number(c.clicks).toLocaleString("en-IN")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {adsOverview.runningCampaigns.length === 0 ? (
+                <p className="admin-empty">Abhi koi campaign live nahi chal rahi.</p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="admin-card">
+            <h3 style={{ margin: "0 0 12px" }}>Advertisers — kitna paisa aaya</h3>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Company</th>
+                    <th>Email</th>
+                    <th>Paid (Razorpay)</th>
+                    <th>Wallet balance</th>
+                    <th>Ad spend</th>
+                    <th>Campaigns</th>
+                    <th>Running</th>
+                    <th>Joined</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adsOverview.advertisers.map((a) => (
+                    <tr key={a.id}>
+                      <td><strong>{a.company_name}</strong></td>
+                      <td>{a.email}</td>
+                      <td>₹{Number(a.paid_inr).toLocaleString("en-IN")}</td>
+                      <td>₹{Number(a.balance_inr).toLocaleString("en-IN")}</td>
+                      <td>₹{Number(a.spent_inr).toLocaleString("en-IN")}</td>
+                      <td>{a.campaigns}</td>
+                      <td>{a.running_campaigns}</td>
+                      <td>{fmtDate(a.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {adsOverview.advertisers.length === 0 ? <p className="admin-empty">No advertisers yet.</p> : null}
+            </div>
+          </div>
+
+          <div className="admin-card">
+            <h3 style={{ margin: "0 0 12px" }}>City-wise impressions (30 days)</h3>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>City</th>
+                    <th>State</th>
+                    <th>Impressions</th>
+                    <th>Clicks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adsOverview.geo.map((g, i) => (
+                    <tr key={`${g.city}-${g.state}-${i}`}>
+                      <td>{g.city}</td>
+                      <td>{g.state}</td>
+                      <td>{Number(g.impressions).toLocaleString("en-IN")}</td>
+                      <td>{Number(g.clicks).toLocaleString("en-IN")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {adsOverview.geo.length === 0 ? <p className="admin-empty">Geo data jab ads chalengi tab dikhegi.</p> : null}
+            </div>
+          </div>
+
+          <div className="admin-card">
+            <h3 style={{ margin: "0 0 12px" }}>Recent payments</h3>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Advertiser</th>
+                    <th>Amount</th>
+                    <th>Method</th>
+                    <th>Payment ID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adsOverview.recentPayments.map((p) => (
+                    <tr key={p.razorpay_payment_id}>
+                      <td>{fmtDate(p.created_at)}</td>
+                      <td><div>{p.company_name}</div><div className="muted">{p.email}</div></td>
+                      <td>₹{Number(p.amount_inr).toLocaleString("en-IN")}</td>
+                      <td>{p.payment_method ?? "—"}</td>
+                      <td className="muted" style={{ fontSize: 12 }}>{p.razorpay_payment_id}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {adsOverview.recentPayments.length === 0 ? <p className="admin-empty">No payments yet.</p> : null}
+            </div>
+          </div>
         </>
       ) : null}
 

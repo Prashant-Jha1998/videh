@@ -3,7 +3,7 @@ import { query } from "./db";
 import { getReelsPlatformConfig, type ReelsAdsRules } from "./reelsConfig";
 import { ensureReelsAdsTables } from "./reelsAdsSchema";
 
-export type ReelsAdFormat = "video" | "image" | "app_install" | "shopping";
+export type ReelsAdFormat = "video" | "image" | "app_install" | "shopping" | "bumper" | "shorts_video" | "carousel" | "lead_form";
 export type ReelsAdCta = "shop_now" | "install" | "learn_more" | "watch_now" | "play_store" | "app_store";
 export type ReelsAdObjective = "brand_awareness" | "video_views" | "app_promotion" | "shopping";
 export type ReelsAdBidModel = "cpm" | "cpc" | "cpv" | "cpi";
@@ -137,8 +137,8 @@ function mapCreative(row: CreativeRow, placement: "pre_roll" | "mid_roll"): Reel
 }
 
 async function pickCreative(
-  placement: "pre_roll" | "mid_roll" | "feed_instream",
-  adType?: "non_skippable" | "skippable",
+  placement: "pre_roll" | "mid_roll" | "feed_instream" | "shorts_feed",
+  adType?: "non_skippable" | "skippable" | "bumper",
   format?: ReelsAdFormat,
 ): Promise<CreativeRow | null> {
   const clauses: string[] = [];
@@ -168,6 +168,8 @@ async function pickCreative(
        AND adv.status = 'active'
        AND adv.balance_inr > 0
        AND camp.spent_inr < camp.total_budget_inr
+       AND camp.start_date <= CURRENT_DATE
+       AND (camp.end_date IS NULL OR camp.end_date >= CURRENT_DATE)
        AND (cr.placement = $1 OR cr.placement = 'any')
        ${clauses.join(" ")}
      ORDER BY RANDOM()
@@ -184,7 +186,8 @@ export async function pickFeedAds(count: number): Promise<ReelsFeedAdItem[]> {
 
   const out: ReelsFeedAdItem[] = [];
   for (let i = 0; i < count; i++) {
-    const row = await pickCreative("feed_instream");
+    const row = await pickCreative("feed_instream")
+      ?? await pickCreative("shorts_feed");
     if (!row) break;
     out.push(mapFeedAd(row));
   }
@@ -296,13 +299,21 @@ export async function resolveReelsAdBreaks(opts: {
 
   const preRoll: ReelsAdBreakItem[] = [];
 
+  const bumper = await pickCreative("pre_roll", "bumper");
+  if (bumper) {
+    preRoll.push(mapCreative(
+      { ...bumper, duration_seconds: Math.min(6, bumper.duration_seconds || 6) },
+      "pre_roll",
+    ));
+  }
+
   const nonSkip = await pickCreative("pre_roll", "non_skippable");
   if (nonSkip) {
     preRoll.push(mapCreative(
       { ...nonSkip, duration_seconds: nonSkip.duration_seconds || ads.preRollNonSkipSeconds },
       "pre_roll",
     ));
-  } else {
+  } else if (!bumper) {
     preRoll.push(fallbackPreRoll(ads)[0]);
   }
 
@@ -347,6 +358,9 @@ export async function recordReelsAdImpression(opts: {
   watchedSeconds: number;
   skipped: boolean;
   completed: boolean;
+  viewerCity?: string;
+  viewerState?: string;
+  viewerCountry?: string;
 }): Promise<void> {
   await ensureReelsAdsTables();
   if (opts.creativeId <= 0) return;
@@ -368,8 +382,9 @@ export async function recordReelsAdImpression(opts: {
   }
   await query(
     `INSERT INTO reels_ad_impressions
-      (creative_id, content_video_id, viewer_user_id, placement, watched_seconds, skipped, completed, cost_inr)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      (creative_id, content_video_id, viewer_user_id, placement, watched_seconds, skipped, completed, cost_inr,
+       viewer_city, viewer_state, viewer_country)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [
       opts.creativeId,
       opts.contentVideoId || null,
@@ -379,6 +394,9 @@ export async function recordReelsAdImpression(opts: {
       opts.skipped,
       opts.completed,
       cost,
+      opts.viewerCity ?? null,
+      opts.viewerState ?? null,
+      opts.viewerCountry ?? "India",
     ],
   );
   if (opts.skipped) {
@@ -395,6 +413,9 @@ export async function recordReelsAdClick(opts: {
   viewerUserId: number;
   placement: string;
   clickTarget: "cta" | "play_store" | "app_store" | "destination";
+  viewerCity?: string;
+  viewerState?: string;
+  viewerCountry?: string;
 }): Promise<{ success: boolean }> {
   await ensureReelsAdsTables();
   if (opts.creativeId <= 0) return { success: false };
@@ -414,9 +435,18 @@ export async function recordReelsAdClick(opts: {
   }
   await query(
     `INSERT INTO reels_ad_impressions
-      (creative_id, viewer_user_id, placement, watched_seconds, skipped, completed, clicked, cost_inr)
-     VALUES ($1, $2, $3, 0, FALSE, FALSE, TRUE, $4)`,
-    [opts.creativeId, opts.viewerUserId || null, opts.placement, cost],
+      (creative_id, viewer_user_id, placement, watched_seconds, skipped, completed, clicked, cost_inr,
+       viewer_city, viewer_state, viewer_country)
+     VALUES ($1, $2, $3, 0, FALSE, FALSE, TRUE, $4, $5, $6, $7)`,
+    [
+      opts.creativeId,
+      opts.viewerUserId || null,
+      opts.placement,
+      cost,
+      opts.viewerCity ?? null,
+      opts.viewerState ?? null,
+      opts.viewerCountry ?? "India",
+    ],
   );
   await query(`UPDATE reels_ad_creatives SET impressions = impressions + 1, clicks = clicks + 1 WHERE id = $1`, [opts.creativeId]);
   return { success: true };

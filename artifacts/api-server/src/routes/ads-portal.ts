@@ -26,6 +26,8 @@ import {
   verifyAdsAdvertiser,
 } from "../lib/reelsAds";
 import { getReelsPlatformConfig } from "../lib/reelsConfig";
+import { AD_FORMATS_CATALOG, findAdFormat } from "../lib/adFormatsCatalog";
+import { getAdvertiserDashboard } from "../lib/adsAnalytics";
 import { getRazorpayConfig } from "../lib/razorpay";
 
 const router = Router();
@@ -165,6 +167,16 @@ router.get("/pricing", async (_req, res) => {
           { id: "app_promotion", label: "App promotion", bidModel: "cpi", defaultBid: ads.appInstallCpiInr },
           { id: "video_views", label: "Video views (pre/mid-roll)", bidModel: "cpv", defaultBid: ads.videoCpvInr },
         ],
+        adFormats: AD_FORMATS_CATALOG,
+        placements: [
+          { id: "pre_roll", label: "Pre-roll (before video)" },
+          { id: "mid_roll", label: "Mid-roll (during video)" },
+          { id: "feed_instream", label: "Home feed (between videos)" },
+          { id: "shorts_feed", label: "Shorts vertical feed" },
+          { id: "search_promoted", label: "Search & discovery" },
+          { id: "channel_banner", label: "Channel masthead" },
+          { id: "video_overlay", label: "Video overlay" },
+        ],
       },
     });
   } catch {
@@ -263,6 +275,17 @@ router.post("/wallet/demo-topup", async (req, res) => {
   }
 });
 
+router.get("/dashboard", async (req, res) => {
+  const user = requireAdsUser(req, res);
+  if (!user) return;
+  try {
+    const dashboard = await getAdvertiserDashboard(user.advertiserId);
+    res.json({ success: true, dashboard });
+  } catch {
+    res.status(500).json({ success: false, message: "Failed to load dashboard" });
+  }
+});
+
 router.get("/campaigns", async (req, res) => {
   const user = requireAdsUser(req, res);
   if (!user) return;
@@ -270,7 +293,8 @@ router.get("/campaigns", async (req, res) => {
     await ensureReelsAdsTables();
     const r = await query(
       `SELECT id, name, status, objective, bid_model, bid_amount_inr,
-              daily_budget_inr, total_budget_inr, spent_inr, created_at
+              daily_budget_inr, total_budget_inr, spent_inr,
+              start_date::text, end_date::text, created_at
        FROM reels_ad_campaigns WHERE advertiser_id = $1 ORDER BY created_at DESC`,
       [user.advertiserId],
     );
@@ -290,6 +314,8 @@ router.post("/campaigns", async (req, res) => {
     objective?: string;
     bidModel?: string;
     bidAmountInr?: number;
+    startDate?: string;
+    endDate?: string;
   };
   const name = String(body.name ?? "").trim();
   if (!name) {
@@ -317,10 +343,14 @@ router.post("/campaigns", async (req, res) => {
       ? String(body.bidModel)
       : defaults.bidModel;
     const bidAmount = Math.max(0.01, Number(body.bidAmountInr) || defaults.bidAmount);
+    const startDate = String(body.startDate ?? "").trim() || new Date().toISOString().slice(0, 10);
+    const defaultEnd = new Date();
+    defaultEnd.setDate(defaultEnd.getDate() + 30);
+    const endDate = String(body.endDate ?? "").trim() || defaultEnd.toISOString().slice(0, 10);
     const r = await query(
       `INSERT INTO reels_ad_campaigns
-        (advertiser_id, name, objective, bid_model, bid_amount_inr, daily_budget_inr, total_budget_inr)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        (advertiser_id, name, objective, bid_model, bid_amount_inr, daily_budget_inr, total_budget_inr, start_date, end_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9::date) RETURNING *`,
       [
         user.advertiserId,
         name,
@@ -329,6 +359,8 @@ router.post("/campaigns", async (req, res) => {
         bidAmount,
         Math.max(100, Number(body.dailyBudgetInr) || 500),
         Math.max(500, Number(body.totalBudgetInr) || 5000),
+        startDate,
+        endDate,
       ],
     );
     res.json({ success: true, campaign: r.rows[0] });
@@ -398,21 +430,24 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
       });
       return;
     }
-    const format = ["video", "image", "app_install", "shopping"].includes(String(body.format))
-      ? String(body.format)
-      : "image";
+    const specFromId = body.adFormatId ? findAdFormat(String(body.adFormatId)) : undefined;
+    const allowedFormats = ["video", "image", "app_install", "shopping", "bumper", "shorts_video", "carousel", "lead_form"];
+    const format = specFromId?.format
+      ?? (allowedFormats.includes(String(body.format)) ? String(body.format) : "image");
     const files = req.files as { video?: Express.Multer.File[]; image?: Express.Multer.File[] } | undefined;
     let videoUrl = String(body.videoUrl ?? "").trim();
     let imageUrl = String(body.imageUrl ?? "").trim();
     if (files?.video?.[0]) videoUrl = `/uploads/reels/ads/${files.video[0].filename}`;
     if (files?.image?.[0]) imageUrl = `/uploads/reels/ads/${files.image[0].filename}`;
 
-    if (format === "video" && !videoUrl) {
-      res.status(400).json({ success: false, message: "Video required for video ads" });
+    const needsVideo = specFromId?.requiresVideo ?? ["video", "bumper", "shorts_video"].includes(format);
+    const needsImage = specFromId?.requiresImage ?? !needsVideo;
+    if (needsVideo && !videoUrl) {
+      res.status(400).json({ success: false, message: "Video required for this ad format" });
       return;
     }
-    if (format !== "video" && !imageUrl) {
-      res.status(400).json({ success: false, message: "Image required for this ad type" });
+    if (needsImage && !imageUrl && format !== "video") {
+      res.status(400).json({ success: false, message: "Image required for this ad format" });
       return;
     }
     if (format === "app_install" && !body.playStoreUrl && !body.appStoreUrl) {
@@ -424,15 +459,20 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
       return;
     }
 
-    const placement = ["pre_roll", "mid_roll", "feed_instream", "any"].includes(String(body.placement))
-      ? String(body.placement)
-      : format === "video" ? "any" : "feed_instream";
-    const adType = body.adType === "skippable" ? "skippable" : "non_skippable";
-    const skipAfter = adType === "skippable" ? Number(body.skipAfterSeconds) || 5 : null;
+    const allowedPlacements = ["pre_roll", "mid_roll", "feed_instream", "shorts_feed", "search_promoted", "channel_banner", "video_overlay", "any"];
+    const placement = specFromId?.placement
+      ?? (allowedPlacements.includes(String(body.placement)) ? String(body.placement) : format === "shorts_video" ? "shorts_feed" : format === "video" || format === "bumper" ? "any" : "feed_instream");
+    const adTypeRaw = specFromId?.adType ?? String(body.adType ?? "non_skippable");
+    const adType = ["skippable", "bumper"].includes(adTypeRaw) ? adTypeRaw : "non_skippable";
+    const skipAfter = adType === "skippable"
+      ? (specFromId?.skipAfterSeconds ?? Number(body.skipAfterSeconds) || 5)
+      : null;
+    const maxDur = specFromId?.maxDurationSeconds;
     const ctaType = String(body.ctaType ?? (
       format === "shopping" ? "shop_now"
         : format === "app_install" ? "install"
-          : "learn_more"
+          : format === "lead_form" ? "learn_more"
+            : "learn_more"
     ));
     try {
       const own = await query(
@@ -457,7 +497,12 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
           imageUrl || null,
           body.headline?.trim() || title,
           body.description?.trim() || null,
-          format === "video" ? Math.max(5, Number(body.durationSeconds) || 30) : 0,
+          needsVideo
+            ? Math.min(
+              maxDur ?? 120,
+              Math.max(format === "bumper" ? 6 : 5, Number(body.durationSeconds) || (format === "bumper" ? 6 : format === "shorts_video" ? 15 : 30)),
+            )
+            : 0,
           skipAfter,
           placement,
           adType,

@@ -25,6 +25,7 @@ import type { AdminIdentity } from "../lib/adminSession";
 import { processPendingReelsModeration } from "../lib/reelsModerationQueue";
 import { notifySubscribersNewVideo } from "../lib/reelsNotifications";
 import { ensureReelsModerationColumns, ensureReelsTables } from "../lib/reelsSchema";
+import { getAdminAdsPlatformOverview } from "../lib/adsAnalytics";
 import { ensureReelsAdsTables } from "../lib/reelsAdsSchema";
 import { requireAnyPermission, requirePermission, type RequireAdmin } from "./admin-rbac";
 
@@ -323,6 +324,15 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ success: false, message: "Reject failed" });
+    }
+  });
+
+  router.get("/reels/ads/platform-overview", requireAdmin, requireAnyPermission("reels.read", "moderation.read"), async (_req, res) => {
+    try {
+      const overview = await getAdminAdsPlatformOverview();
+      res.json({ success: true, overview });
+    } catch {
+      res.status(500).json({ success: false, message: "Failed to load ads platform overview" });
     }
   });
 

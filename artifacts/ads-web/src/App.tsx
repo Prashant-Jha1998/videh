@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { VidehLogo } from "./components/VidehLogo";
+import { BID_MODEL_LABELS, CATEGORY_LABELS, type AdFormatSpec } from "./lib/adFormats";
 import { openAdsRazorpayCheckout } from "./lib/razorpayCheckout";
 
 const API = "/api/ads-portal";
@@ -8,12 +10,29 @@ type Campaign = {
   id: number; name: string; status: string; objective?: string;
   bid_model?: string; bid_amount_inr?: string;
   daily_budget_inr: string; total_budget_inr: string; spent_inr: string;
+  start_date?: string; end_date?: string | null;
+};
+type DashboardCampaign = Campaign & {
+  impressions: string; clicks: string;
+  active_creatives: number; approved_creatives: number; pending_creatives: number;
+  is_running: boolean; days_left: number | null;
+};
+type Dashboard = {
+  summary: {
+    total_campaigns: number; running_campaigns: number;
+    total_spent_inr: string; impressions: string; clicks: string; completions: string;
+  };
+  campaigns: DashboardCampaign[];
+  byCity: Array<{ city: string; state: string; impressions: string; clicks: string; spend_inr: string }>;
+  byDay: Array<{ day: string; impressions: string; clicks: string; spend_inr: string }>;
+  payments: { total_paid_inr: string; payment_count: number };
 };
 type Stats = { impressions: string; completions: string; skips: string; clicks?: string; spent_inr?: string; creatives: number };
 type Pricing = {
   feedCpmInr: number; feedCpcInr: number; appInstallCpiInr: number; videoCpvInr: number; minTopUpInr: number;
   feedAdEveryVideos: number;
   objectives: Array<{ id: string; label: string; bidModel: string; defaultBid: number }>;
+  adFormats?: AdFormatSpec[];
 };
 type Nav = "overview" | "campaigns" | "ads" | "billing";
 type AdCreative = {
@@ -90,8 +109,18 @@ export default function App() {
   const [bidAmount, setBidAmount] = useState("120");
   const [dailyBudget, setDailyBudget] = useState("500");
   const [totalBudget, setTotalBudget] = useState("5000");
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
 
-  const [adFormat, setAdFormat] = useState<"video" | "image" | "app_install" | "shopping">("shopping");
+  const [selectedAdFormatId, setSelectedAdFormatId] = useState("feed_shopping");
+  const [adFormat, setAdFormat] = useState("shopping");
+  const [adType, setAdType] = useState("non_skippable");
+  const [durationSeconds, setDurationSeconds] = useState(30);
   const [creativeTitle, setCreativeTitle] = useState("");
   const [headline, setHeadline] = useState("");
   const [description, setDescription] = useState("");
@@ -113,16 +142,18 @@ export default function App() {
     const me = await api<{ success: boolean; advertiser?: Advertiser }>("/me");
     if (!me.success || !me.advertiser) { setScreen("auth"); return; }
     setAdvertiser(me.advertiser);
-    const [c, s, p, w, pay, cr] = await Promise.all([
+    const [c, s, p, w, pay, cr, dash] = await Promise.all([
       api<{ success: boolean; campaigns: Campaign[] }>("/campaigns"),
       api<{ success: boolean; stats: Stats }>("/stats"),
       api<{ success: boolean; pricing: Pricing }>("/pricing"),
       api<{ success: boolean } & WalletConfig>("/wallet/config"),
       api<{ success: boolean; payments: PaymentRow[] }>("/wallet/payments"),
       api<{ success: boolean; creatives: AdCreative[] }>("/creatives"),
+      api<{ success: boolean; dashboard: Dashboard }>("/dashboard"),
     ]);
     if (c.success) setCampaigns(c.campaigns);
     if (s.success) setStats(s.stats);
+    if (dash.success) setDashboard(dash.dashboard);
     if (p.success) setPricing(p.pricing);
     if (w.success) setWalletConfig(w);
     if (pay.success) setPayments(pay.payments ?? []);
@@ -132,15 +163,28 @@ export default function App() {
 
   useEffect(() => { void loadDash(); }, [loadDash]);
 
+  const applyAdFormat = useCallback((spec: AdFormatSpec) => {
+    setSelectedAdFormatId(spec.id);
+    setAdFormat(spec.format);
+    setPlacement(spec.placement);
+    setAdType(spec.adType);
+    if (spec.maxDurationSeconds) setDurationSeconds(spec.maxDurationSeconds);
+    if (spec.format === "shopping") setObjective("shopping");
+    else if (spec.format === "app_install") setObjective("app_promotion");
+    else if (spec.category === "video_watch" || spec.category === "shorts") setObjective("video_views");
+    else setObjective("brand_awareness");
+  }, []);
+
   useEffect(() => {
     if (!pricing) return;
     const obj = pricing.objectives.find((o) => o.id === objective);
     if (obj) setBidAmount(String(obj.defaultBid));
-    if (objective === "app_promotion") setAdFormat("app_install");
-    else if (objective === "shopping") setAdFormat("shopping");
-    else if (objective === "video_views") setAdFormat("video");
-    else setAdFormat("image");
   }, [objective, pricing]);
+
+  useEffect(() => {
+    const spec = pricing?.adFormats?.find((f) => f.id === selectedAdFormatId);
+    if (spec) applyAdFormat(spec);
+  }, [pricing, selectedAdFormatId, applyAdFormat]);
 
   const handleAuth = async () => {
     setError("");
@@ -167,6 +211,8 @@ export default function App() {
         bidAmountInr: Number(bidAmount),
         dailyBudgetInr: Number(dailyBudget),
         totalBudgetInr: Number(totalBudget),
+        startDate,
+        endDate,
       }),
     });
     if (!res.success) {
@@ -186,7 +232,9 @@ export default function App() {
       method: "POST",
       body: JSON.stringify({
         title: creativeTitle.trim(),
+        adFormatId: selectedAdFormatId,
         format: adFormat,
+        adType,
         headline: headline.trim() || creativeTitle.trim(),
         description: description.trim(),
         imageUrl: imageUrl.trim(),
@@ -195,9 +243,10 @@ export default function App() {
         playStoreUrl: playStoreUrl.trim(),
         appStoreUrl: appStoreUrl.trim(),
         appName: appName.trim(),
-        placement: adFormat === "video" ? placement : "feed_instream",
+        placement,
         ctaType: adFormat === "shopping" ? "shop_now" : adFormat === "app_install" ? "install" : "learn_more",
-        durationSeconds: adFormat === "video" ? 30 : 0,
+        durationSeconds,
+        skipAfterSeconds: adType === "skippable" ? 5 : undefined,
       }),
     });
     if (!res.success) {
@@ -282,7 +331,7 @@ export default function App() {
       <div style={S.authWrap}>
         <div style={S.authCard}>
           <div style={S.logoRow}>
-            <div style={S.logoMark}>V</div>
+            <VidehLogo size={40} />
             <div>
               <h1 style={S.h1}>Videh Ads</h1>
               <p style={S.sub}>Professional ad campaigns for Videh Video</p>
@@ -311,7 +360,7 @@ export default function App() {
     <div style={S.shell}>
       <aside style={S.sidebar}>
         <div style={S.logoRow}>
-          <div style={S.logoMark}>V</div>
+          <VidehLogo size={36} />
           <strong>Videh Ads</strong>
         </div>
         <nav style={S.nav}>
@@ -349,17 +398,150 @@ export default function App() {
           {nav === "overview" && (
             <>
               <div style={S.statGrid}>
-                <Stat label="Impressions" value={stats?.impressions ?? "0"} />
-                <Stat label="Clicks" value={stats?.clicks ?? "0"} />
-                <Stat label="Completed views" value={stats?.completions ?? "0"} />
-                <Stat label="Spend" value={`₹${Number(stats?.spent_inr ?? 0).toFixed(0)}`} />
+                <Stat label="Running campaigns" value={String(dashboard?.summary.running_campaigns ?? 0)} />
+                <Stat label="Total campaigns" value={String(dashboard?.summary.total_campaigns ?? 0)} />
+                <Stat label="Impressions" value={dashboard?.summary.impressions ?? stats?.impressions ?? "0"} />
+                <Stat label="Clicks" value={dashboard?.summary.clicks ?? stats?.clicks ?? "0"} />
+                <Stat label="Completed views" value={dashboard?.summary.completions ?? stats?.completions ?? "0"} />
+                <Stat label="Ad spend" value={`₹${Number(dashboard?.summary.total_spent_inr ?? stats?.spent_inr ?? 0).toLocaleString("en-IN")}`} />
+                <Stat label="Wallet paid (Razorpay)" value={`₹${Number(dashboard?.payments?.total_paid_inr ?? 0).toLocaleString("en-IN")}`} />
+                <Stat label="Wallet balance" value={`₹${balance.toLocaleString("en-IN")}`} />
               </div>
-              <Panel title="How Videh Ads work">
+
+              <Panel title={`Live campaigns (${dashboard?.summary.running_campaigns ?? 0} chal rahi hain)`}>
+                {(dashboard?.campaigns.filter((c) => c.is_running) ?? []).length === 0 ? (
+                  <p style={S.sub}>Abhi koi campaign live nahi hai. Campaign banao, ad submit karo, admin approve ke baad chalegi.</p>
+                ) : (
+                  <table style={S.table}>
+                    <thead>
+                      <tr>
+                        <th style={S.th}>Campaign</th>
+                        <th style={S.th}>Schedule</th>
+                        <th style={S.th}>Days left</th>
+                        <th style={S.th}>Spend / Budget</th>
+                        <th style={S.th}>Impressions</th>
+                        <th style={S.th}>Clicks</th>
+                        <th style={S.th}>Live ads</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dashboard!.campaigns.filter((c) => c.is_running).map((c) => (
+                        <tr key={c.id}>
+                          <td style={S.td}><strong>{c.name}</strong><div style={S.sub}>{OBJECTIVE_LABELS[c.objective ?? ""] ?? c.objective}</div></td>
+                          <td style={S.td}>{fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : "No end"}</td>
+                          <td style={S.td}>{c.days_left != null ? `${c.days_left} days` : "—"}</td>
+                          <td style={S.td}>₹{Number(c.spent_inr).toLocaleString("en-IN")} / ₹{Number(c.total_budget_inr).toLocaleString("en-IN")}</td>
+                          <td style={S.td}>{Number(c.impressions).toLocaleString("en-IN")}</td>
+                          <td style={S.td}>{Number(c.clicks).toLocaleString("en-IN")}</td>
+                          <td style={S.td}>{c.approved_creatives} live · {c.pending_creatives} pending</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Panel>
+
+              <Panel title="All campaigns">
+                {(dashboard?.campaigns ?? []).length === 0 ? <p style={S.sub}>No campaigns yet.</p> : (
+                  <table style={S.table}>
+                    <thead>
+                      <tr>
+                        <th style={S.th}>Name</th>
+                        <th style={S.th}>Status</th>
+                        <th style={S.th}>Start → End</th>
+                        <th style={S.th}>Spend</th>
+                        <th style={S.th}>Impressions</th>
+                        <th style={S.th}>Clicks</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dashboard!.campaigns.map((c) => (
+                        <tr key={c.id}>
+                          <td style={S.td}>{c.name}</td>
+                          <td style={S.td}>
+                            <span style={{ color: c.is_running ? "#188038" : "#5f6368", fontWeight: 600 }}>
+                              {c.is_running ? "Running" : c.status}
+                            </span>
+                          </td>
+                          <td style={S.td}>{fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : "—"}</td>
+                          <td style={S.td}>₹{Number(c.spent_inr).toLocaleString("en-IN")}</td>
+                          <td style={S.td}>{Number(c.impressions).toLocaleString("en-IN")}</td>
+                          <td style={S.td}>{Number(c.clicks).toLocaleString("en-IN")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Panel>
+
+              <Panel title="Performance by city (last 30 days)">
+                {(dashboard?.byCity ?? []).length === 0 ? (
+                  <p style={S.sub}>Jab ads chalengi, yahan city-wise impressions dikhengi.</p>
+                ) : (
+                  <table style={S.table}>
+                    <thead>
+                      <tr>
+                        <th style={S.th}>City</th>
+                        <th style={S.th}>State</th>
+                        <th style={S.th}>Impressions</th>
+                        <th style={S.th}>Clicks</th>
+                        <th style={S.th}>Spend</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dashboard!.byCity.map((row, i) => (
+                        <tr key={`${row.city}-${row.state}-${i}`}>
+                          <td style={S.td}>{row.city}</td>
+                          <td style={S.td}>{row.state}</td>
+                          <td style={S.td}>{Number(row.impressions).toLocaleString("en-IN")}</td>
+                          <td style={S.td}>{Number(row.clicks).toLocaleString("en-IN")}</td>
+                          <td style={S.td}>₹{Number(row.spend_inr).toLocaleString("en-IN")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Panel>
+
+              <Panel title="Daily performance (last 30 days)">
+                {(dashboard?.byDay ?? []).length === 0 ? (
+                  <p style={S.sub}>No daily data yet.</p>
+                ) : (
+                  <table style={S.table}>
+                    <thead>
+                      <tr>
+                        <th style={S.th}>Date</th>
+                        <th style={S.th}>Impressions</th>
+                        <th style={S.th}>Clicks</th>
+                        <th style={S.th}>Spend</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dashboard!.byDay.map((row) => (
+                        <tr key={row.day}>
+                          <td style={S.td}>{fmtDate(row.day)}</td>
+                          <td style={S.td}>{Number(row.impressions).toLocaleString("en-IN")}</td>
+                          <td style={S.td}>{Number(row.clicks).toLocaleString("en-IN")}</td>
+                          <td style={S.td}>₹{Number(row.spend_inr).toLocaleString("en-IN")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Panel>
+
+              <AdFormatsCatalog
+                formats={pricing?.adFormats ?? []}
+                onSelect={(id) => { setSelectedAdFormatId(id); setNav("ads"); }}
+              />
+
+              <Panel title="Billing rates">
                 <ul style={S.list}>
-                  <li><strong>Home feed:</strong> Sponsored card every {pricing?.feedAdEveryVideos ?? 2} videos — app install, shopping, image ads</li>
-                  <li><strong>Video watch:</strong> 30s non-skippable + 60s skippable pre-roll; mid-roll on long videos</li>
-                  <li><strong>Admin review:</strong> Har ad Videh team approve karegi — tabhi public hoga</li>
-                  <li><strong>CPM</strong> ₹{pricing?.feedCpmInr}/1k impressions · <strong>CPC</strong> ₹{pricing?.feedCpcInr}/click · <strong>CPI</strong> ₹{pricing?.appInstallCpiInr}/store tap</li>
+                  <li><strong>CPM</strong> ₹{pricing?.feedCpmInr}/1,000 impressions (feed & bumper)</li>
+                  <li><strong>CPC</strong> ₹{pricing?.feedCpcInr}/click (shopping, discovery, overlay)</li>
+                  <li><strong>CPI</strong> ₹{pricing?.appInstallCpiInr}/app store tap</li>
+                  <li><strong>CPV</strong> ₹{pricing?.videoCpvInr}/completed video view (pre-roll, mid-roll, shorts)</li>
+                  <li>Har ad <strong>Videh admin approve</strong> ke baad hi public hota hai</li>
                 </ul>
               </Panel>
             </>
@@ -393,6 +575,12 @@ export default function App() {
                   <Field label="Total budget (₹)">
                     <input style={S.input} type="number" value={totalBudget} onChange={(e) => setTotalBudget(e.target.value)} />
                   </Field>
+                  <Field label="Start date">
+                    <input style={S.input} type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                  </Field>
+                  <Field label="End date">
+                    <input style={S.input} type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                  </Field>
                 </div>
                 <button type="button" style={{ ...S.primary, width: "auto", marginTop: 12 }} onClick={() => void createCampaign()}>Create campaign</button>
               </Panel>
@@ -406,6 +594,7 @@ export default function App() {
                         <th style={S.th}>Name</th>
                         <th style={S.th}>Objective</th>
                         <th style={S.th}>Bid</th>
+                        <th style={S.th}>Schedule</th>
                         <th style={S.th}>Spent / Budget</th>
                         <th style={S.th}>Status</th>
                       </tr>
@@ -417,6 +606,7 @@ export default function App() {
                           <td style={S.td}>{c.name}</td>
                           <td style={S.td}>{OBJECTIVE_LABELS[c.objective ?? ""] ?? c.objective}</td>
                           <td style={S.td}>₹{c.bid_amount_inr} {c.bid_model?.toUpperCase()}</td>
+                          <td style={S.td}>{fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : "—"}</td>
                           <td style={S.td}>₹{c.spent_inr} / ₹{c.total_budget_inr}</td>
                           <td style={S.td}>{c.status}</td>
                         </tr>
@@ -436,6 +626,8 @@ export default function App() {
                   <thead>
                     <tr>
                       <th style={S.th}>Title</th>
+                      <th style={S.th}>Format</th>
+                      <th style={S.th}>Placement</th>
                       <th style={S.th}>Campaign</th>
                       <th style={S.th}>Status</th>
                       <th style={S.th}>Impressions</th>
@@ -445,6 +637,8 @@ export default function App() {
                     {creatives.map((cr) => (
                       <tr key={cr.id}>
                         <td style={S.td}>{cr.title}</td>
+                        <td style={S.td}>{cr.format}</td>
+                        <td style={S.td}>{cr.placement}</td>
                         <td style={S.td}>{cr.campaign_name}</td>
                         <td style={S.td}>
                           <StatusBadge status={cr.moderation_status} reason={cr.moderation_reason} />
@@ -461,14 +655,18 @@ export default function App() {
                 <p style={S.err}>Pay and add funds before publishing ads.</p>
               ) : null}
               {successMsg ? <p style={{ color: "#188038", fontSize: 14 }}>{successMsg}</p> : null}
-              <div style={S.formatTabs}>
-                {(["shopping", "app_install", "image", "video"] as const).map((f) => (
-                  <button key={f} type="button" style={adFormat === f ? S.formatOn : S.formatTab}
-                    onClick={() => setAdFormat(f)}>
-                    {f === "shopping" ? "Shopping" : f === "app_install" ? "App install" : f === "image" ? "Image" : "Video"}
-                  </button>
-                ))}
-              </div>
+              <p style={{ ...S.sub, marginBottom: 10 }}>Ad format choose karo — professional video platform jaisi saari placements available hain.</p>
+              <AdFormatsCatalog
+                formats={pricing?.adFormats ?? []}
+                compact
+                selectedId={selectedAdFormatId}
+                onSelect={setSelectedAdFormatId}
+              />
+              {pricing?.adFormats?.find((f) => f.id === selectedAdFormatId && !f.live) ? (
+                <p style={{ color: "#e37400", fontSize: 13, margin: "10px 0" }}>
+                  Ye format catalog mein hai — player support jald aa raha hai. Abhi bhi submit kar sakte ho (admin review).
+                </p>
+              ) : null}
 
               <select style={S.input} value={selectedCampaign ?? ""} onChange={(e) => setSelectedCampaign(Number(e.target.value) || null)}>
                 <option value="">Select campaign</option>
@@ -481,23 +679,30 @@ export default function App() {
               </div>
               <Field label="Description"><textarea style={{ ...S.input, minHeight: 72 }} value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
 
-              {adFormat === "video" ? (
+              {["video", "bumper", "shorts_video"].includes(adFormat) ? (
                 <>
-                  <Field label="Video URL (MP4)"><input style={S.input} value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="https://..." /></Field>
-                  <Field label="Placement">
-                    <select style={S.input} value={placement} onChange={(e) => setPlacement(e.target.value)}>
-                      <option value="pre_roll">Pre-roll (before video)</option>
-                      <option value="mid_roll">Mid-roll (during video)</option>
-                      <option value="feed_instream">Home feed</option>
-                    </select>
+                  <Field label={`Video URL (MP4) — max ${durationSeconds}s`}>
+                    <input style={S.input} value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="https://..." />
+                  </Field>
+                  <Field label="Duration (seconds)">
+                    <input style={S.input} type="number" min={adFormat === "bumper" ? 6 : 5} max={durationSeconds} value={durationSeconds} onChange={(e) => setDurationSeconds(Number(e.target.value))} />
                   </Field>
                 </>
-              ) : (
-                <Field label="Image URL"><input style={S.input} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." /></Field>
-              )}
+              ) : null}
 
-              {adFormat === "shopping" && (
+              {!["video", "bumper", "shorts_video"].includes(adFormat) ? (
+                <Field label="Image URL"><input style={S.input} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." /></Field>
+              ) : null}
+
+              {adFormat === "video" && placement === "feed_instream" ? (
+                <Field label="Thumbnail image (optional)"><input style={S.input} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." /></Field>
+              ) : null}
+
+              {(adFormat === "shopping" || adFormat === "carousel") && (
                 <Field label="Shop URL (Shop Now button)"><input style={S.input} value={destinationUrl} onChange={(e) => setDestinationUrl(e.target.value)} /></Field>
+              )}
+              {adFormat === "lead_form" && (
+                <Field label="Lead / signup URL"><input style={S.input} value={destinationUrl} onChange={(e) => setDestinationUrl(e.target.value)} placeholder="https://yoursite.com/signup" /></Field>
               )}
 
               {adFormat === "app_install" && (
@@ -508,7 +713,7 @@ export default function App() {
                 </div>
               )}
 
-              {adFormat === "image" && (
+              {(adFormat === "image" || placement === "search_promoted" || placement === "channel_banner" || placement === "video_overlay") && (
                 <Field label="Landing page URL"><input style={S.input} value={destinationUrl} onChange={(e) => setDestinationUrl(e.target.value)} /></Field>
               )}
 
@@ -605,6 +810,67 @@ export default function App() {
   );
 }
 
+function AdFormatsCatalog({
+  formats,
+  onSelect,
+  compact,
+  selectedId,
+}: {
+  formats: AdFormatSpec[];
+  onSelect: (id: string) => void;
+  compact?: boolean;
+  selectedId?: string;
+}) {
+  const categories = ["video_watch", "home_feed", "shorts", "display"] as const;
+  return (
+    <Panel title={compact ? "Ad format" : "All ad formats on Videh"}>
+      {categories.map((cat) => {
+        const items = formats.filter((f) => f.category === cat);
+        if (!items.length) return null;
+        return (
+          <div key={cat} style={{ marginBottom: compact ? 12 : 20 }}>
+            {!compact ? <h4 style={{ margin: "0 0 10px", fontSize: 14, color: "#3c4043" }}>{CATEGORY_LABELS[cat]}</h4> : null}
+            <div style={compact ? S.formatGridCompact : S.formatGrid}>
+              {items.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  style={{
+                    ...(compact ? S.formatCardCompact : S.formatCard),
+                    ...(selectedId === f.id ? S.formatCardOn : {}),
+                  }}
+                  onClick={() => onSelect(f.id)}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
+                    <strong style={{ fontSize: compact ? 13 : 14 }}>{f.label}</strong>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                      background: f.live ? "#e6f4ea" : "#fef7e0", color: f.live ? "#137333" : "#b06000",
+                    }}>
+                      {f.live ? "LIVE" : "SOON"}
+                    </span>
+                  </div>
+                  {!compact ? <p style={{ margin: "6px 0 0", fontSize: 12, color: "#5f6368", textAlign: "left" }}>{f.description}</p> : null}
+                  <p style={{ margin: "6px 0 0", fontSize: 11, color: "#80868b", textAlign: "left" }}>
+                    {f.where} · {BID_MODEL_LABELS[f.bidModel] ?? f.bidModel}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </Panel>
+  );
+}
+
+function fmtDate(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso.includes("T") ? iso : `${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
 function Stat({ label, value }: { label: string; value: string }) {
   return <div style={S.stat}><div style={S.statL}>{label}</div><div style={S.statV}>{value}</div></div>;
 }
@@ -649,7 +915,6 @@ const S: Record<string, React.CSSProperties> = {
   authWrap: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 },
   authCard: { width: "100%", maxWidth: 440, background: "#fff", borderRadius: 12, padding: 28, boxShadow: "0 1px 3px rgba(0,0,0,.12)" },
   logoRow: { display: "flex", alignItems: "center", gap: 12 },
-  logoMark: { width: 36, height: 36, borderRadius: 8, background: "#00A884", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 },
   h1: { margin: 0, fontSize: 22 },
   sub: { margin: "4px 0 0", color: "#5f6368", fontSize: 14 },
   tabRow: { display: "flex", gap: 8, margin: "16px 0" },
@@ -673,9 +938,11 @@ const S: Record<string, React.CSSProperties> = {
   th: { textAlign: "left", padding: "8px 6px", borderBottom: "1px solid #e8eaed", color: "#5f6368", fontWeight: 500 },
   td: { padding: "10px 6px", borderBottom: "1px solid #f1f3f4" },
   list: { margin: 0, paddingLeft: 20, lineHeight: 1.7, color: "#3c4043" },
-  formatTabs: { display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" },
-  formatTab: { padding: "8px 14px", border: "1px solid #dadce0", background: "#fff", borderRadius: 20, cursor: "pointer", fontSize: 13 },
-  formatOn: { padding: "8px 14px", border: "1px solid #00A884", background: "#e8f5f0", borderRadius: 20, cursor: "pointer", fontSize: 13, fontWeight: 600 },
+  formatGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 10 },
+  formatGridCompact: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 8 },
+  formatCard: { textAlign: "left", padding: 14, border: "1px solid #dadce0", background: "#fff", borderRadius: 10, cursor: "pointer" },
+  formatCardCompact: { textAlign: "left", padding: 10, border: "1px solid #dadce0", background: "#fff", borderRadius: 8, cursor: "pointer" },
+  formatCardOn: { border: "2px solid #00A884", background: "#e8f5f0" },
   preview: { margin: "16px 0", padding: 14, background: "#f8f9fa", borderRadius: 10 },
   previewLabel: { fontSize: 11, color: "#80868b", marginBottom: 8, textTransform: "uppercase", fontWeight: 600 },
   previewCard: { background: "#fff", borderRadius: 10, overflow: "hidden", border: "1px solid #e8eaed", maxWidth: 360 },

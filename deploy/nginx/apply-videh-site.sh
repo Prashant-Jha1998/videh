@@ -221,7 +221,9 @@ fi
 
 if [ -f "${ICON_SRC}" ]; then
   sudo cp "${ICON_SRC}" "${WEB_ROOT}/videh-logo.png" 2>/dev/null || true
-  echo "Copied videh-logo.png to web.videh.co.in"
+  sudo cp "${ICON_SRC}" "${ADS_ROOT}/videh-logo.png" 2>/dev/null || true
+  sudo cp "${ICON_SRC}" "${ADS_ROOT}/videh_icon_foreground.png" 2>/dev/null || true
+  echo "Copied videh-logo.png to web.videh.co.in and ads.videh.co.in"
 fi
 
 if write_ssl_server "${WEB_CONF}" "web.videh.co.in" "${WEB_ROOT}" "true"; then

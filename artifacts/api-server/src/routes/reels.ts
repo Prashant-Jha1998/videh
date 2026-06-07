@@ -38,6 +38,7 @@ import {
   mapPublicReelsComment,
   redactPhoneNumbersInText,
 } from "../lib/reelsPrivacy";
+import { resolveViewerGeoFromRequest } from "../lib/adsGeo";
 import { pickFeedAds, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
 
 const router = Router();
@@ -1221,11 +1222,15 @@ router.post("/ads/click", async (req: Request, res: Response) => {
     ? (body.clickTarget as "cta" | "play_store" | "app_store" | "destination")
     : "cta";
   try {
+    const geo = await resolveViewerGeoFromRequest(req);
     const result = await recordReelsAdClick({
       creativeId,
       viewerUserId: userId,
       placement: String(body.placement ?? "feed_instream"),
       clickTarget,
+      viewerCity: geo.city,
+      viewerState: geo.state,
+      viewerCountry: geo.country,
     });
     res.json(result);
   } catch (err) {
@@ -1246,20 +1251,25 @@ router.post("/ads/impression", async (req: Request, res: Response) => {
   };
   const creativeId = Number(body.creativeId);
   const contentVideoId = Number(body.contentVideoId);
-  if (!creativeId || !contentVideoId) {
+  const placement = String(body.placement ?? "pre_roll");
+  if (!creativeId || (placement !== "feed_instream" && !contentVideoId)) {
     res.status(400).json({ success: false });
     return;
   }
   const userId = Number(body.userId) || getAuthUserId(req) || 0;
   try {
+    const geo = await resolveViewerGeoFromRequest(req);
     await recordReelsAdImpression({
       creativeId,
       contentVideoId,
       viewerUserId: userId,
-      placement: String(body.placement ?? "pre_roll"),
+      placement,
       watchedSeconds: Math.max(0, Number(body.watchedSeconds) || 0),
       skipped: Boolean(body.skipped),
       completed: Boolean(body.completed),
+      viewerCity: geo.city,
+      viewerState: geo.state,
+      viewerCountry: geo.country,
     });
     res.json({ success: true });
   } catch (err) {
