@@ -4,6 +4,7 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useCallback, useEffect, useRef } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { ReelsAdBreakItem } from "@/lib/reelsApi";
+import { reelsWatchPlayerSize } from "@/lib/reelsWatchLayout";
 
 const YT_AD_YELLOW = "#F2C94C";
 
@@ -151,7 +152,7 @@ export function ReelsAdPlayer({ ad, onFinished }: Props) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: "relative", backgroundColor: "#000", width: "100%", aspectRatio: 16 / 9 },
+  wrap: { position: "relative", backgroundColor: "#000", ...reelsWatchPlayerSize },
   player: { width: "100%", height: "100%" },
   overlay: {
     ...StyleSheet.absoluteFillObject,

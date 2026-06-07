@@ -54,6 +54,7 @@ import {
   saveVideoQualityPref,
   type ReelsVideoQuality,
 } from "@/lib/reelsVideoQuality";
+import { reelsWatchPlayerSize, reelsWatchTopInset } from "@/lib/reelsWatchLayout";
 
 const SCREEN_W = Dimensions.get("window").width;
 const THUMB_H = Math.round((SCREEN_W * 9) / 16);
@@ -409,8 +410,10 @@ export default function ReelsWatchScreen() {
   const showMidRoll = playAllowed && watchPhase === "mid-roll" && activeMidRoll;
   const showContent = playAllowed && playbackUrl && watchPhase === "content";
 
+  const watchTopPad = reelsWatchTopInset(insets);
+
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: watchTopPad }]}>
       <View style={styles.playerWrap}>
         {showPreRoll ? (
           <ReelsAdPlayer
@@ -735,7 +738,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   playerWrap: { position: "relative", backgroundColor: "#000" },
-  player: { width: "100%", aspectRatio: 16 / 9 },
+  player: reelsWatchPlayerSize,
   playerLoadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",

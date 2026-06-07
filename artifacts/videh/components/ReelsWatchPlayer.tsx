@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { reelsWatchPlayerSize } from "@/lib/reelsWatchLayout";
 import { formatDuration } from "@/lib/reelsApi";
 import {
   applyQualityToPlaybackUrl,
@@ -281,7 +282,7 @@ function ReelsVideoPlayerSurface({
 
       {showOverlay ? (
         <View style={styles.controlsLayer} pointerEvents="box-none">
-          <View style={[styles.topBar, { paddingTop: Math.max(insets.top, 8) }]} pointerEvents="box-none">
+          <View style={[styles.topBar, { paddingTop: 8 }]} pointerEvents="box-none">
             {onBack ? (
               <TouchableOpacity style={styles.topIconBtn} onPress={onBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                 <Ionicons name="chevron-down" size={28} color="#fff" />
@@ -466,7 +467,7 @@ export const ReelsWatchPlayer = React.memo(ReelsWatchPlayerInner);
 
 const styles = StyleSheet.create({
   wrap: { position: "relative", backgroundColor: "#000" },
-  player: { width: "100%", aspectRatio: 16 / 9 },
+  player: reelsWatchPlayerSize,
   tapLayer: {
     ...StyleSheet.absoluteFillObject,
     flexDirection: "row",

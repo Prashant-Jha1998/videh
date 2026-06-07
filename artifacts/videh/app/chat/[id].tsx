@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
@@ -10,7 +10,7 @@ import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import {
-  KeyboardStickyView,
+  KeyboardAvoidingView,
   useGenericKeyboardHandler,
   useResizeMode,
 } from "react-native-keyboard-controller";
@@ -90,6 +90,7 @@ import { GroupWelcomeCard } from "@/components/GroupWelcomeCard";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
 import { formatChatBubbleTime } from "@/utils/time";
 import {
+  isChatNearBottom,
   isChatScrolledUp,
   isCompactChatText,
   isInvertedChatNearBottom,
@@ -131,6 +132,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Svg, { Path } from "react-native-svg";
 
 const BASE_URL = getApiUrl();
+
+const ChatKeyboardShell = Platform.OS === "ios" ? KeyboardAvoidingView : View;
 const { width: W } = Dimensions.get("window");
 const REACTION_EMOJIS = ["\u2764\uFE0F", "\uD83D\uDC4D", "\uD83D\uDE02", "\uD83D\uDE2E", "\uD83D\uDE22", "\uD83D\uDE4F"];
 const REPLY_SWIPE_ACTION_W = 56;
@@ -1095,6 +1098,7 @@ export default function ChatScreen() {
       if (!chatId) return;
       pendingScrollToEndRef.current = true;
       userScrolledUpRef.current = false;
+      setReadingHistory(false);
       lastNearBottomRef.current = true;
       setShowJumpToLatest((p) => (p ? false : p));
       setUnreadBelowCount((p) => (p > 0 ? 0 : p));
@@ -1221,12 +1225,13 @@ export default function ChatScreen() {
   const listRowsInverted = useMemo(() => messagesWithDateRowsInverted(messages), [messages]);
   const chatListData = searching ? listRows : listRowsInverted;
   const [composerHeight, setComposerHeight] = useState(56);
+  const [readingHistory, setReadingHistory] = useState(false);
   const chatContactName = name ?? chat?.name ?? "Chat";
 
   const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
   const listExtraData = useMemo(
-    () => `${selectedIds.length}|${flashMessageId ?? ""}|${allMessages.length}`,
-    [selectedIds.length, flashMessageId, allMessages.length],
+    () => `${selectedIds.length}|${flashMessageId ?? ""}|${allMessages.length}|${readingHistory ? 1 : 0}`,
+    [selectedIds.length, flashMessageId, allMessages.length, readingHistory],
   );
   const flashAnim = useRef(new Animated.Value(0)).current;
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1511,6 +1516,7 @@ export default function ChatScreen() {
   const scheduleOpenChatPin = useCallback(() => {
     cancelOpenChatPin();
     userScrolledUpRef.current = false;
+    setReadingHistory(false);
     lastNearBottomRef.current = true;
     setShowJumpToLatest((p) => (p ? false : p));
     setUnreadBelowCount((p) => (p > 0 ? 0 : p));
@@ -1531,6 +1537,7 @@ export default function ChatScreen() {
     userScrolledUpRef.current = true;
     lastNearBottomRef.current = false;
     frozenMessageCountRef.current = messages.length;
+    setReadingHistory(true);
     const showFab = messages.length > 6;
     setShowJumpToLatest((p) => (p === showFab ? p : showFab));
   }, [cancelOpenChatPin, cancelPinToBottom, messages.length]);
@@ -1550,6 +1557,7 @@ export default function ChatScreen() {
       cancelOpenChatPin();
       cancelPinToBottom();
       userScrolledUpRef.current = false;
+      setReadingHistory(false);
       lastNearBottomRef.current = true;
       setShowJumpToLatest((p) => (p ? false : p));
       setUnreadBelowCount((p) => (p > 0 ? 0 : p));
@@ -1570,18 +1578,28 @@ export default function ChatScreen() {
       lastNearBottomRef.current = searching
         ? !away
         : isInvertedChatNearBottom(contentOffsetY);
-      if (away === userScrolledUpRef.current) return;
-      if (away) {
+      if (away && !userScrolledUpRef.current) {
         markUserScrolledUp();
-        return;
       }
+    },
+    [markUserScrolledUp, searching],
+  );
+  const tryClearReadingHistory = useCallback(
+    (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
+      if (!userScrolledUpRef.current) return;
+      const nearBottom = searching
+        ? isChatNearBottom(contentOffsetY, contentHeight, layoutHeight)
+        : isInvertedChatNearBottom(contentOffsetY);
+      if (!nearBottom) return;
       cancelOpenChatPin();
       userScrolledUpRef.current = false;
+      setReadingHistory(false);
+      lastNearBottomRef.current = true;
       frozenMessageCountRef.current = messages.length;
       setShowJumpToLatest((p) => (p ? false : p));
       setUnreadBelowCount((p) => (p > 0 ? 0 : p));
     },
-    [messages.length, markUserScrolledUp, cancelOpenChatPin, searching],
+    [messages.length, cancelOpenChatPin, searching],
   );
   const tryLoadOlderMessages = useCallback(async () => {
     if (loadingOlderRef.current || !hasMoreOlderRef.current || searching || !chatId) return;
@@ -1622,6 +1640,7 @@ export default function ChatScreen() {
     cancelOpenChatPin();
     pendingScrollToEndRef.current = true;
     userScrolledUpRef.current = false;
+    setReadingHistory(false);
     lastNearBottomRef.current = true;
     setShowJumpToLatest((p) => (p ? false : p));
     setUnreadBelowCount((p) => (p > 0 ? 0 : p));
@@ -1655,7 +1674,7 @@ export default function ChatScreen() {
   }, []);
   const onKeyboardAnimEnd = useCallback(() => {
     keyboardAnimatingRef.current = false;
-    schedulePinToBottom(true);
+    if (!userScrolledUpRef.current) schedulePinToBottom(true);
   }, [schedulePinToBottom]);
 
   /** WhatsApp: pin once when keyboard finishes opening — not on every frame while it animates. */
@@ -1679,10 +1698,10 @@ export default function ChatScreen() {
   useEffect(() => {
     keyboardVisibleRef.current = keyboardVisible;
     if (!keyboardVisible) keyboardAnimatingRef.current = false;
-    if (keyboardVisible && !searching && !userScrolledUpRef.current) {
+    if (keyboardVisible && !searching && !readingHistory && !userScrolledUpRef.current) {
       schedulePinToBottom(true);
     }
-  }, [keyboardVisible, searching, schedulePinToBottom]);
+  }, [keyboardVisible, readingHistory, searching, schedulePinToBottom]);
 
   useEffect(() => {
     messagesReadyRef.current = messagesReady;
@@ -1709,13 +1728,8 @@ export default function ChatScreen() {
     prevMessageCountRef.current = count;
   }, [messages.length, messagesReady, searching, scrollToLatest, scheduleOpenChatPin]);
 
-  /** Inverted list: paddingTop = visual bottom (above composer), paddingBottom = visual top. */
-  const listVisualBottomPad = useMemo(() => {
-    if (searching) return 8;
-    // iOS: KeyboardStickyView overlays the list — reserve composer height at the visual bottom.
-    if (Platform.OS === "ios") return Math.max(12, composerHeight + 8);
-    return 12;
-  }, [searching, composerHeight]);
+  /** Inverted list: paddingTop = visual bottom gap; composer sits in layout below the list. */
+  const listVisualBottomPad = useMemo(() => (searching ? 8 : 10), [searching]);
   const listTopPadding = 12;
   const jumpFabBottom = useMemo(
     () => Math.max(12, composerHeight + 16),
@@ -1741,14 +1755,14 @@ export default function ChatScreen() {
 
   /** Composer grew (reply / link preview) — debounced pin only if user is already at bottom. */
   useEffect(() => {
-    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current) return;
+    if (readingHistory || !shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current) return;
     if (!lastNearBottomRef.current) return;
     if (composerPinTimerRef.current) clearTimeout(composerPinTimerRef.current);
     composerPinTimerRef.current = setTimeout(() => scrollToLatest(false), 120);
     return () => {
       if (composerPinTimerRef.current) clearTimeout(composerPinTimerRef.current);
     };
-  }, [composerHeight, searching, scrollToLatest]);
+  }, [composerHeight, readingHistory, searching, scrollToLatest]);
 
   useEffect(() => {
     if (searching) return;
@@ -3608,7 +3622,12 @@ export default function ChatScreen() {
         </View>
       )}
 
-      <View style={styles.chatKeyboardAvoid}>
+      <ChatKeyboardShell
+        style={styles.chatKeyboardAvoid}
+        {...(Platform.OS === "ios"
+          ? { behavior: "padding" as const, enabled: !selectionActive }
+          : {})}
+      >
         <View style={styles.chatBody}>
           <FlatList
             style={styles.messageList}
@@ -3707,11 +3726,9 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS !== "web"}
           maintainVisibleContentPosition={
-            searching
+            searching || readingHistory
               ? undefined
-              : showJumpToLatest
-                ? { minIndexForVisible: 1, autoscrollToTopThreshold: 24 }
-                : { minIndexForVisible: 0, autoscrollToTopThreshold: 20 }
+              : { minIndexForVisible: 0, autoscrollToTopThreshold: 20 }
           }
           initialNumToRender={12}
           maxToRenderPerBatch={8}
@@ -3738,11 +3755,21 @@ export default function ChatScreen() {
               contentSize.height,
               layoutMeasurement.height,
             );
+            tryClearReadingHistory(
+              contentOffset.y,
+              contentSize.height,
+              layoutMeasurement.height,
+            );
           }}
           onMomentumScrollEnd={(e) => {
             userDraggingRef.current = false;
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
             syncScrollAwayFromBottom(
+              contentOffset.y,
+              contentSize.height,
+              layoutMeasurement.height,
+            );
+            tryClearReadingHistory(
               contentOffset.y,
               contentSize.height,
               layoutMeasurement.height,
@@ -3755,7 +3782,7 @@ export default function ChatScreen() {
           }}
           scrollEventThrottle={96}
           onContentSizeChange={() => {
-            if (userScrolledUpRef.current) return;
+            if (readingHistory || userScrolledUpRef.current) return;
             if (userDraggingRef.current || scrollLockRef.current || searching) return;
             if (!lastNearBottomRef.current) return;
             scrollToLatest(keyboardVisible);
@@ -3821,15 +3848,10 @@ export default function ChatScreen() {
         ) : null}
 
         </View>
-        <KeyboardStickyView
-          enabled={Platform.OS === "ios" && !selectionActive}
-          offset={{ closed: 0, opened: 0 }}
-        >
-          <View onLayout={onComposerLayout}>
-            {composerFooter}
-          </View>
-        </KeyboardStickyView>
-      </View>
+        <View style={styles.composerWrap} onLayout={onComposerLayout}>
+          {composerFooter}
+        </View>
+      </ChatKeyboardShell>
 
 
       {/* Attach menu â€” Videh-style bottom sheet (coloured circles + grid) */}
@@ -4215,7 +4237,8 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   chatKeyboardAvoid: { flex: 1, minHeight: 0, flexDirection: "column" },
-  chatBody: { flex: 1, flexDirection: "column", minHeight: 0 },
+  chatBody: { flex: 1, flexDirection: "column", minHeight: 0, position: "relative" },
+  composerWrap: { flexShrink: 0 },
   messageList: { flex: 1, minHeight: 0 },
   messageListContent: { paddingHorizontal: 10, paddingTop: 8 },
   scrollToBottomFab: {
