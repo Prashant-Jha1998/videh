@@ -3,6 +3,14 @@ import { adminApi, fmtDate } from "../adminApi";
 
 const MIN_PREVIEW_SEC = 5;
 
+function formatCompactStat(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (abs >= 10_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  return n.toLocaleString();
+}
+
 function requiredPreviewSeconds(durationSeconds: number): number {
   const d = Math.max(0, durationSeconds);
   if (d > 0 && d < MIN_PREVIEW_SEC) return Math.max(2, Math.ceil(d * 0.8));
@@ -290,11 +298,15 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
             <div className="stat-label">Subscriptions</div>
           </div>
           <div className="stat-card">
-            <div className="stat-val">{Number(stats.total_views).toLocaleString()}</div>
+            <div className="stat-val" title={Number(stats.total_views).toLocaleString()}>
+              {formatCompactStat(Number(stats.total_views))}
+            </div>
             <div className="stat-label">Total views</div>
           </div>
           <div className="stat-card">
-            <div className="stat-val">{Number(stats.total_view_hours).toLocaleString()}h</div>
+            <div className="stat-val" title={`${Math.round(Number(stats.total_view_hours)).toLocaleString()}h`}>
+              {formatCompactStat(Math.round(Number(stats.total_view_hours)))}h
+            </div>
             <div className="stat-label">Watch hours</div>
           </div>
           <div className={`stat-card${stats.fraud_events_7d > 0 ? " stat-card--warn" : ""}`}>

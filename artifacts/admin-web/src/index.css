@@ -35,6 +35,8 @@ textarea {
 .layout {
   display: flex;
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
 }
 .sidebar {
   width: 248px;
@@ -127,6 +129,7 @@ textarea {
 }
 main {
   flex: 1;
+  min-width: 0;
   padding: 28px 32px 40px;
   overflow: auto;
   background:
@@ -134,7 +137,9 @@ main {
     var(--bg);
 }
 .admin-page {
+  width: 100%;
   max-width: 1240px;
+  min-width: 0;
 }
 .admin-page__header {
   margin-bottom: 22px;
@@ -154,16 +159,20 @@ main {
 }
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 148px), 1fr));
   gap: 14px;
   margin-bottom: 22px;
+  width: 100%;
+  max-width: 100%;
 }
 .stat-card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 16px 18px;
-  transition: border-color 0.15s, transform 0.15s;
+  padding: 14px 16px;
+  min-width: 0;
+  overflow: hidden;
+  transition: border-color 0.15s;
 }
 .stat-card:hover {
   border-color: rgba(0, 168, 132, 0.35);
@@ -173,21 +182,26 @@ main {
   background: rgba(233, 162, 59, 0.06);
 }
 .stat-val {
-  font-size: 1.65rem;
+  font-size: clamp(1.15rem, 2.2vw, 1.55rem);
   font-weight: 700;
   color: var(--accent);
-  line-height: 1.1;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .stat-card--warn .stat-val {
   color: var(--warn);
 }
 .stat-label {
   margin-top: 6px;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   color: var(--muted);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   font-weight: 600;
+  line-height: 1.3;
+  word-break: break-word;
 }
 .admin-toolbar {
   display: flex;
@@ -200,6 +214,10 @@ main {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .admin-segment {
   display: inline-flex;
@@ -209,6 +227,9 @@ main {
   border: 1px solid var(--border);
   gap: 2px;
   flex-wrap: wrap;
+  flex: 1 1 280px;
+  min-width: 0;
+  max-width: 100%;
 }
 .admin-segment button {
   width: auto;
