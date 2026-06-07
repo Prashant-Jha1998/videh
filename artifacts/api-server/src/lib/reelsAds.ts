@@ -179,6 +179,11 @@ async function pickCreative(
   return (r.rows[0] as CreativeRow | undefined) ?? null;
 }
 
+export type ReelsFeedAdPlacement = {
+  insertAfterIndex: number;
+  ad: ReelsFeedAdItem;
+};
+
 export async function pickFeedAds(count: number): Promise<ReelsFeedAdItem[]> {
   await ensureReelsAdsTables();
   const cfg = await getReelsPlatformConfig();
@@ -192,6 +197,47 @@ export async function pickFeedAds(count: number): Promise<ReelsFeedAdItem[]> {
     out.push(mapFeedAd(row));
   }
   return out;
+}
+
+/** YouTube-style: ads appear after a random number of videos within [minGap, maxGap]. */
+export function planFeedAdPlacements(
+  videoCount: number,
+  ads: ReelsFeedAdItem[],
+  minGap: number,
+  maxGap: number,
+): ReelsFeedAdPlacement[] {
+  if (videoCount <= 0 || ads.length === 0) return [];
+  const min = Math.max(1, minGap);
+  const max = Math.max(min, maxGap);
+  const placements: ReelsFeedAdPlacement[] = [];
+  let adIdx = 0;
+  let videosSinceAd = 0;
+  let nextGap = min + Math.floor(Math.random() * (max - min + 1));
+
+  for (let i = 0; i < videoCount && adIdx < ads.length; i++) {
+    videosSinceAd++;
+    if (videosSinceAd >= nextGap) {
+      placements.push({ insertAfterIndex: i, ad: ads[adIdx++] });
+      videosSinceAd = 0;
+      nextGap = min + Math.floor(Math.random() * (max - min + 1));
+    }
+  }
+  return placements;
+}
+
+export async function pickFeedAdPlacementsForBatch(
+  videoCount: number,
+  minGap: number,
+  maxGap: number,
+): Promise<ReelsFeedAdPlacement[]> {
+  await ensureReelsAdsTables();
+  const cfg = await getReelsPlatformConfig();
+  if (!cfg.ads.enabled || !cfg.ads.feedAdsEnabled || videoCount <= 0) return [];
+
+  const min = Math.max(1, minGap);
+  const maxAds = Math.max(1, Math.ceil(videoCount / min));
+  const ads = await pickFeedAds(maxAds);
+  return planFeedAdPlacements(videoCount, ads, minGap, maxGap);
 }
 
 async function chargeAdvertiser(opts: {

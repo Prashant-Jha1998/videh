@@ -29,6 +29,7 @@ import { StoryRingAvatar } from "@/components/StoryRing";
 import { formatTypingLabel } from "@/lib/typingIndicator";
 import { interpolate } from "@/lib/i18n";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
+import { headerTopInset } from "@/lib/headerInset";
 
 interface BroadcastListRow {
   id: number;
@@ -340,7 +341,7 @@ export default function ChatsScreen() {
     router.push({ pathname: "/status/view", params: { ids } });
   };
 
-  const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+  const topPad = headerTopInset(insets, Platform.OS === "web" ? 67 : 0);
 
   const menuItems = [
     { label: "New group", icon: "people-outline", onPress: () => router.push("/new-group") },

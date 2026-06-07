@@ -73,7 +73,12 @@ export type ReelsAdsRules = {
   fallbackSkippableUrl: string;
   fallbackMidRollUrl: string;
   feedAdsEnabled: boolean;
+  /** @deprecated Use feedAdMinGap — kept for admin backward compatibility */
   feedAdEveryVideos: number;
+  /** Min videos between home-feed ads (YouTube-style variable spacing). */
+  feedAdMinGap: number;
+  /** Max videos between home-feed ads. */
+  feedAdMaxGap: number;
   /** Default rates (INR) — advertisers can set custom bids on campaigns. */
   feedCpmInr: number;
   feedCpcInr: number;
@@ -187,6 +192,8 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
     fallbackMidRollUrl: "https://videos.pexels.com/video-files/854424/854424-uhd_2560_1440_25fps.mp4",
     feedAdsEnabled: true,
     feedAdEveryVideos: 2,
+    feedAdMinGap: 2,
+    feedAdMaxGap: 7,
     feedCpmInr: 120,
     feedCpcInr: 15,
     appInstallCpiInr: 45,
@@ -195,7 +202,7 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
     summary: [
       "Pre-roll: 6s bumper, 30s non-skippable, 60s skippable (skip after 5s)",
       "Mid-roll: 30s ads during long videos (8+ min)",
-      "Home feed: image, video, shopping, app install, carousel, lead form cards every 2 videos",
+      "Home feed: sponsored cards between videos at natural random spacing (like YouTube)",
       "Shorts: vertical video ads in swipe feed",
       "Display: search promoted, channel banner, video overlay (rolling out)",
       "Billing: CPM · CPC · CPI · CPV — wallet charged automatically",

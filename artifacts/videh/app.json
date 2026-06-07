@@ -37,7 +37,12 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 66,
+      "versionCode": 67,
+      "androidStatusBar": {
+        "backgroundColor": "#00A884",
+        "barStyle": "light-content",
+        "translucent": true
+      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/videh_icon_foreground.png",
         "backgroundColor": "#0B141A"

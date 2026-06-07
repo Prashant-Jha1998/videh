@@ -280,6 +280,11 @@ export type ReelsFeedAd = {
   sponsoredLabel: string;
 };
 
+export type ReelsFeedAdPlacement = {
+  insertAfterIndex: number;
+  ad: ReelsFeedAd;
+};
+
 export async function fetchReelsFeed(
   userId: number,
   cursor?: ReelsFeedCursor | null,
@@ -293,8 +298,9 @@ export async function fetchReelsFeed(
     videos: ReelsVideo[];
     trending?: ReelsVideo[];
     nextCursor: ReelsFeedCursor | null;
-    feedAds?: ReelsFeedAd[];
-    feedAdEvery?: number;
+    feedAdPlacements?: ReelsFeedAdPlacement[];
+    feedAdMinGap?: number;
+    feedAdMaxGap?: number;
   }>(
     `/feed?userId=${userId}&limit=15${c}`,
     { sessionToken },

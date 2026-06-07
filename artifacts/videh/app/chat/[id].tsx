@@ -1514,13 +1514,14 @@ export default function ChatScreen() {
     lastNearBottomRef.current = true;
     setShowJumpToLatest((p) => (p ? false : p));
     setUnreadBelowCount((p) => (p > 0 ? 0 : p));
-    for (const delay of OPEN_CHAT_PIN_DELAYS_MS) {
+    OPEN_CHAT_PIN_DELAYS_MS.forEach((delay, index) => {
+      const animated = index === OPEN_CHAT_PIN_DELAYS_MS.length - 1;
       const t = setTimeout(() => {
         if (userScrolledUpRef.current) return;
-        forceScrollToLatest(false);
+        forceScrollToLatest(animated);
       }, delay);
       openPinTimersRef.current.push(t);
-    }
+    });
   }, [cancelOpenChatPin, forceScrollToLatest]);
   const markUserScrolledUp = useCallback(() => {
     if (userScrolledUpRef.current) return;
@@ -1678,7 +1679,10 @@ export default function ChatScreen() {
   useEffect(() => {
     keyboardVisibleRef.current = keyboardVisible;
     if (!keyboardVisible) keyboardAnimatingRef.current = false;
-  }, [keyboardVisible]);
+    if (keyboardVisible && !searching && !userScrolledUpRef.current) {
+      schedulePinToBottom(true);
+    }
+  }, [keyboardVisible, searching, schedulePinToBottom]);
 
   useEffect(() => {
     messagesReadyRef.current = messagesReady;
@@ -1705,10 +1709,23 @@ export default function ChatScreen() {
     prevMessageCountRef.current = count;
   }, [messages.length, messagesReady, searching, scrollToLatest, scheduleOpenChatPin]);
 
-  /** Composer is a sibling below the list — only a small content gap is needed. */
-  const listBottomPadding = 12;
+  /** Inverted list: paddingTop = visual bottom (above composer), paddingBottom = visual top. */
+  const listVisualBottomPad = useMemo(() => {
+    if (searching) return 8;
+    // iOS: KeyboardStickyView overlays the list — reserve composer height at the visual bottom.
+    if (Platform.OS === "ios") return Math.max(12, composerHeight + 8);
+    return 12;
+  }, [searching, composerHeight]);
+  const listTopPadding = 12;
   const jumpFabBottom = useMemo(
     () => Math.max(12, composerHeight + 16),
+    [composerHeight],
+  );
+  const onComposerLayout = useCallback(
+    (e: { nativeEvent: { layout: { height: number } } }) => {
+      const h = Math.ceil(e.nativeEvent.layout.height);
+      if (h > 0 && h !== composerHeight) setComposerHeight(h);
+    },
     [composerHeight],
   );
 
@@ -3674,7 +3691,8 @@ export default function ChatScreen() {
           contentContainerStyle={[
             styles.messageListContent,
             {
-              paddingBottom: listBottomPadding,
+              paddingTop: listVisualBottomPad,
+              paddingBottom: listTopPadding,
               flexGrow: 1,
               justifyContent: searching
                 ? "flex-start"
@@ -3689,11 +3707,11 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS !== "web"}
           maintainVisibleContentPosition={
-            searching || keyboardVisible
+            searching
               ? undefined
               : showJumpToLatest
                 ? { minIndexForVisible: 1, autoscrollToTopThreshold: 24 }
-                : undefined
+                : { minIndexForVisible: 0, autoscrollToTopThreshold: 20 }
           }
           initialNumToRender={12}
           maxToRenderPerBatch={8}
@@ -3737,10 +3755,10 @@ export default function ChatScreen() {
           }}
           scrollEventThrottle={96}
           onContentSizeChange={() => {
-            if (keyboardAnimatingRef.current || userScrolledUpRef.current) return;
+            if (userScrolledUpRef.current) return;
             if (userDraggingRef.current || scrollLockRef.current || searching) return;
             if (!lastNearBottomRef.current) return;
-            scrollToLatest(false);
+            scrollToLatest(keyboardVisible);
           }}
           onScrollToIndexFailed={(info) => {
             listRef.current?.scrollToOffset({
@@ -3803,13 +3821,11 @@ export default function ChatScreen() {
         ) : null}
 
         </View>
-        <KeyboardStickyView enabled={!selectionActive}>
-          <View
-            onLayout={(e) => {
-              const h = Math.ceil(e.nativeEvent.layout.height);
-              if (h > 0 && h !== composerHeight) setComposerHeight(h);
-            }}
-          >
+        <KeyboardStickyView
+          enabled={Platform.OS === "ios" && !selectionActive}
+          offset={{ closed: 0, opened: 0 }}
+        >
+          <View onLayout={onComposerLayout}>
             {composerFooter}
           </View>
         </KeyboardStickyView>

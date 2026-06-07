@@ -16,6 +16,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
+import { ManualImageCropModal } from "@/components/ManualImageCropModal";
+import { cropImageRect } from "@/lib/imageEdit";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
@@ -44,6 +46,7 @@ export default function ReelsUploadScreen() {
   const [videoMime, setVideoMime] = useState("video/mp4");
   const [durationSec, setDurationSec] = useState(0);
   const [thumbUri, setThumbUri] = useState<string | null>(null);
+  const [thumbCropUri, setThumbCropUri] = useState<string | null>(null);
   const [thumbPreparing, setThumbPreparing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -107,16 +110,28 @@ export default function ReelsUploadScreen() {
   };
 
   const pickThumb = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission", "Allow access to your photos.");
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [16, 9],
+      allowsEditing: false,
       quality: 1,
     });
     if (result.canceled || !result.assets[0]) return;
+    setThumbCropUri(result.assets[0].uri);
+  };
+
+  const onThumbCropDone = async (rect: { originX: number; originY: number; width: number; height: number }) => {
+    const src = thumbCropUri;
+    setThumbCropUri(null);
+    if (!src) return;
     setThumbPreparing(true);
     try {
-      const prepared = await prepareReelsThumbnail(result.assets[0].uri);
+      const cropped = await cropImageRect(src, "high", rect);
+      const prepared = await prepareReelsThumbnail(cropped);
       setThumbUri(prepared);
     } catch {
       Alert.alert("Thumbnail", "Could not prepare image. Try another photo.");
@@ -295,6 +310,16 @@ export default function ReelsUploadScreen() {
           <Text style={styles.postText}>Post video</Text>
         )}
       </TouchableOpacity>
+
+      <ManualImageCropModal
+        visible={Boolean(thumbCropUri)}
+        imageUri={thumbCropUri ?? ""}
+        aspectRatio={REELS_THUMB_ASPECT}
+        title="Thumbnail"
+        hint="Drag to position · 16:9 YouTube-style frame"
+        onCancel={() => setThumbCropUri(null)}
+        onDone={(rect) => void onThumbCropDone(rect)}
+      />
     </KeyboardAwareScrollViewCompat>
   );
 }

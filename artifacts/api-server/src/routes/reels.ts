@@ -39,7 +39,7 @@ import {
   redactPhoneNumbersInText,
 } from "../lib/reelsPrivacy";
 import { resolveViewerGeoFromRequest } from "../lib/adsGeo";
-import { pickFeedAds, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
+import { pickFeedAdPlacementsForBatch, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -639,11 +639,20 @@ router.get("/feed", async (req: Request, res: Response) => {
     const videos = rows.map((r) => mapVideoRow(r, req));
     const trending = trendingRows.map((r) => mapVideoRow(r, req));
     const cfg = await getReelsPlatformConfig();
-    const adSlots = cfg.ads.feedAdsEnabled
-      ? Math.max(1, Math.floor(videos.length / Math.max(1, cfg.ads.feedAdEveryVideos)))
-      : 0;
-    const feedAds = adSlots > 0 ? await pickFeedAds(adSlots) : [];
-    res.json({ success: true, videos, trending, nextCursor, feedAds, feedAdEvery: cfg.ads.feedAdEveryVideos });
+    const feedAdMinGap = cfg.ads.feedAdMinGap ?? cfg.ads.feedAdEveryVideos ?? 2;
+    const feedAdMaxGap = cfg.ads.feedAdMaxGap ?? Math.max(feedAdMinGap + 3, 7);
+    const feedAdPlacements = cfg.ads.feedAdsEnabled && videos.length > 0
+      ? await pickFeedAdPlacementsForBatch(videos.length, feedAdMinGap, feedAdMaxGap)
+      : [];
+    res.json({
+      success: true,
+      videos,
+      trending,
+      nextCursor,
+      feedAdPlacements,
+      feedAdMinGap,
+      feedAdMaxGap,
+    });
   } catch (err) {
     req.log.error({ err }, "reels feed");
     res.status(500).json({ success: false, message: "Server error" });

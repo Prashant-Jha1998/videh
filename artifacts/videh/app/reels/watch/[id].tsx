@@ -437,7 +437,11 @@ export default function ReelsWatchScreen() {
               baseUrl={playbackUrl}
               quality={videoQuality}
               qualities={qualityOptions}
+              durationSeconds={video.durationSeconds}
               paused={switchingVideo || metaRefreshing}
+              onBack={() => router.back()}
+              hasNext={related.length > 0}
+              onNext={() => related[0] && openRelated(related[0])}
               onQualityChange={handleQualityChange}
               onPlaybackError={handlePlaybackError}
               onContentProgress={handleContentProgress}
@@ -464,13 +468,6 @@ export default function ReelsWatchScreen() {
             <ActivityIndicator color="#fff" size="large" />
           </View>
         ) : null}
-        <TouchableOpacity
-          style={[styles.playerBack, { top: insets.top + 6 }]}
-          onPress={() => router.back()}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -739,13 +736,6 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   playerWrap: { position: "relative", backgroundColor: "#000" },
   player: { width: "100%", aspectRatio: 16 / 9 },
-  playerBack: {
-    position: "absolute",
-    left: 10,
-    padding: 8,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    borderRadius: 20,
-  },
   playerLoadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",

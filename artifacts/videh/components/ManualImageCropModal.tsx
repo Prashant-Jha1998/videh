@@ -12,7 +12,7 @@ import {
   type LayoutRectangle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { computeDisplayBounds } from "@/lib/imageDisplayLayout";
+import { aspectCropInBounds, computeDisplayBounds } from "@/lib/imageDisplayLayout";
 import { clampCropRect, getImageDimensions, type CropRect } from "@/lib/imageEdit";
 
 const MIN_CROP_PX = 72;
@@ -35,7 +35,8 @@ function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
-function fullCrop(bounds: DisplayBounds): DisplayCrop {
+function fullCrop(bounds: DisplayBounds, aspectRatio?: number): DisplayCrop {
+  if (aspectRatio && aspectRatio > 0) return aspectCropInBounds(bounds, aspectRatio);
   return { x: 0, y: 0, w: bounds.w, h: bounds.h };
 }
 
@@ -161,11 +162,23 @@ function hitTestHandle(
 type Props = {
   visible: boolean;
   imageUri: string;
+  /** Lock crop frame to width/height (e.g. 16/9). When set, user can only drag to reposition. */
+  aspectRatio?: number;
+  title?: string;
+  hint?: string;
   onCancel: () => void;
   onDone: (rect: CropRect) => void;
 };
 
-export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Props) {
+export function ManualImageCropModal({
+  visible,
+  imageUri,
+  aspectRatio,
+  title = "Crop",
+  hint,
+  onCancel,
+  onDone,
+}: Props) {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
@@ -177,7 +190,9 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
   const cropInitializedRef = useRef(false);
   const onCancelRef = useRef(onCancel);
   const displayBoundsRef = useRef<DisplayBounds | null>(null);
+  const aspectRatioRef = useRef(aspectRatio);
   cropRef.current = crop;
+  aspectRatioRef.current = aspectRatio;
 
   const displayBounds = useMemo(() => {
     if (!container || !imageSize) return null;
@@ -211,8 +226,8 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
   useEffect(() => {
     if (!visible || !displayBounds || cropInitializedRef.current) return;
     cropInitializedRef.current = true;
-    setCrop(fullCrop(displayBounds));
-  }, [visible, displayBounds]);
+    setCrop(fullCrop(displayBounds, aspectRatio));
+  }, [visible, displayBounds, aspectRatio]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -223,12 +238,14 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
         const c = cropRef.current;
         const bounds = displayBoundsRef.current;
         if (!c || !bounds) return;
-        activeHandleRef.current = hitTestHandle(
-          evt.nativeEvent.locationX,
-          evt.nativeEvent.locationY,
-          c,
-          bounds,
-        );
+        activeHandleRef.current = aspectRatioRef.current
+          ? "move"
+          : hitTestHandle(
+            evt.nativeEvent.locationX,
+            evt.nativeEvent.locationY,
+            c,
+            bounds,
+          );
         startCropRef.current = c;
       },
       onPanResponderMove: (_, gesture) => {
@@ -266,7 +283,7 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
           <TouchableOpacity onPress={onCancel} hitSlop={12}>
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.title}>Crop</Text>
+          <Text style={styles.title}>{title}</Text>
           <TouchableOpacity onPress={handleDone} disabled={loading || !crop} hitSlop={12}>
             <Text style={[styles.done, (loading || !crop) && styles.doneDisabled]}>Done</Text>
           </TouchableOpacity>
@@ -340,14 +357,25 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
                         />
                       </React.Fragment>
                     ))}
-                    <View style={[styles.corner, styles.cornerTL]} />
-                    <View style={[styles.corner, styles.cornerTR]} />
-                    <View style={[styles.corner, styles.cornerBL]} />
-                    <View style={[styles.corner, styles.cornerBR]} />
-                    <View style={[styles.edgeBar, styles.edgeT]} />
-                    <View style={[styles.edgeBar, styles.edgeB]} />
-                    <View style={[styles.edgeBar, styles.edgeL]} />
-                    <View style={[styles.edgeBar, styles.edgeR]} />
+                    {!aspectRatio ? (
+                      <>
+                        <View style={[styles.corner, styles.cornerTL]} />
+                        <View style={[styles.corner, styles.cornerTR]} />
+                        <View style={[styles.corner, styles.cornerBL]} />
+                        <View style={[styles.corner, styles.cornerBR]} />
+                        <View style={[styles.edgeBar, styles.edgeT]} />
+                        <View style={[styles.edgeBar, styles.edgeB]} />
+                        <View style={[styles.edgeBar, styles.edgeL]} />
+                        <View style={[styles.edgeBar, styles.edgeR]} />
+                      </>
+                    ) : (
+                      <>
+                        <View style={[styles.corner, styles.cornerTL]} />
+                        <View style={[styles.corner, styles.cornerTR]} />
+                        <View style={[styles.corner, styles.cornerBL]} />
+                        <View style={[styles.corner, styles.cornerBR]} />
+                      </>
+                    )}
                   </View>
                 </>
               ) : null}
@@ -355,7 +383,11 @@ export function ManualImageCropModal({ visible, imageUri, onCancel, onDone }: Pr
           )}
         </View>
 
-        <Text style={styles.hint}>Drag inside to move · Drag corners or edges to resize</Text>
+        <Text style={styles.hint}>
+          {hint ?? (aspectRatio
+            ? "Drag to position · 16:9 thumbnail frame"
+            : "Drag inside to move · Drag corners or edges to resize")}
+        </Text>
       </View>
     </Modal>
   );
@@ -368,10 +400,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12,
+    backgroundColor: "#1a1a1a",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.14)",
+    zIndex: 20,
+    elevation: 8,
   },
-  title: { color: "#fff", fontSize: 17, fontWeight: "600" },
-  done: { color: "#00a884", fontSize: 17, fontWeight: "700" },
+  title: { color: "#fff", fontSize: 17, fontFamily: "Inter_600SemiBold" },
+  done: { color: "#00a884", fontSize: 17, fontFamily: "Inter_700Bold" },
   doneDisabled: { opacity: 0.4 },
   canvas: { flex: 1, backgroundColor: "#000" },
   dim: { position: "absolute", backgroundColor: "rgba(0,0,0,0.55)" },

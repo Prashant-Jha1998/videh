@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -23,26 +23,27 @@ import {
   formatDuration,
   formatTimeAgo,
   formatViewCount,
-  type ReelsFeedAd,
+  type ReelsFeedAdPlacement,
   type ReelsFeedCursor,
   type ReelsVideo,
 } from "@/lib/reelsApi";
+import { headerTopInset } from "@/lib/headerInset";
 
 type FeedRow =
   | { kind: "video"; key: string; video: ReelsVideo }
-  | { kind: "ad"; key: string; ad: ReelsFeedAd };
+  | { kind: "ad"; key: string; ad: ReelsFeedAdPlacement["ad"] };
 
-function buildFeedRows(videos: ReelsVideo[], ads: ReelsFeedAd[], every: number): FeedRow[] {
+function buildFeedRows(videos: ReelsVideo[], placements: ReelsFeedAdPlacement[]): FeedRow[] {
+  const adAfter = new Map<number, ReelsFeedAdPlacement["ad"]>();
+  for (const p of placements) {
+    adAfter.set(p.insertAfterIndex, p.ad);
+  }
   const rows: FeedRow[] = [];
-  let adIdx = 0;
-  const interval = Math.max(1, every);
   for (let i = 0; i < videos.length; i++) {
     const v = videos[i];
     rows.push({ kind: "video", key: `v-${v.id}`, video: v });
-    if ((i + 1) % interval === 0 && adIdx < ads.length) {
-      const ad = ads[adIdx++];
-      rows.push({ kind: "ad", key: `ad-${ad.id}-${i}`, ad });
-    }
+    const ad = adAfter.get(i);
+    if (ad) rows.push({ kind: "ad", key: `ad-${ad.id}-${i}`, ad });
   }
   return rows;
 }
@@ -58,8 +59,8 @@ export default function VideoTabScreen() {
   const router = useRouter();
   const { user } = useApp();
   const [videos, setVideos] = useState<ReelsVideo[]>([]);
-  const [feedAds, setFeedAds] = useState<ReelsFeedAd[]>([]);
-  const [feedAdEvery, setFeedAdEvery] = useState(2);
+  const [adPlacements, setAdPlacements] = useState<ReelsFeedAdPlacement[]>([]);
+  const videoCountRef = useRef(0);
   const [trending, setTrending] = useState<ReelsVideo[]>([]);
   const [nextCursor, setNextCursor] = useState<ReelsFeedCursor | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,8 +75,7 @@ export default function VideoTabScreen() {
     setHasChannel(Boolean(ch.channel));
     const feed = await fetchReelsFeed(user.dbId, null, user.sessionToken);
     setVideos(feed.videos ?? []);
-    setFeedAds(feed.feedAds ?? []);
-    setFeedAdEvery(feed.feedAdEvery ?? 2);
+    setAdPlacements(feed.feedAdPlacements ?? []);
     setTrending(feed.trending ?? []);
     setNextCursor(feed.nextCursor ?? null);
     setLoading(false);
@@ -94,8 +94,16 @@ export default function VideoTabScreen() {
           return [...prev, ...incoming.filter((v) => !seen.has(v.id))];
         });
       }
-      if ((feed.feedAds ?? []).length > 0) {
-        setFeedAds((prev) => [...prev, ...(feed.feedAds ?? [])]);
+      const batchPlacements = feed.feedAdPlacements ?? [];
+      if (batchPlacements.length > 0) {
+        const offset = videoCountRef.current;
+        setAdPlacements((prev) => [
+          ...prev,
+          ...batchPlacements.map((p) => ({
+            insertAfterIndex: offset + p.insertAfterIndex,
+            ad: p.ad,
+          })),
+        ]);
       }
       setNextCursor(feed.nextCursor ?? null);
     } finally {
@@ -185,9 +193,13 @@ export default function VideoTabScreen() {
     </TouchableOpacity>
   );
 
+  useEffect(() => {
+    videoCountRef.current = videos.length;
+  }, [videos.length]);
+
   const feedRows = useMemo(
-    () => buildFeedRows(videos, feedAds, feedAdEvery),
-    [videos, feedAds, feedAdEvery],
+    () => buildFeedRows(videos, adPlacements),
+    [videos, adPlacements],
   );
 
   const renderItem = ({ item }: { item: FeedRow }) =>
@@ -242,7 +254,7 @@ export default function VideoTabScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.headerBg ?? colors.primary }]}>
+      <View style={[styles.header, { paddingTop: headerTopInset(insets) + 8, backgroundColor: colors.headerBg ?? colors.primary }]}>
         <Text style={styles.headerTitle}>Video</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity onPress={() => router.push("/reels/search")} style={styles.iconBtn}>

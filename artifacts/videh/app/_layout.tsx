@@ -9,7 +9,7 @@ import { AppState, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { StatusBar } from "expo-status-bar";
+import { AppStatusBar } from "@/components/AppStatusBar";
 import { AppProvider, useApp } from "@/context/AppContext";
 import { AssistantProvider } from "@/context/AssistantContext";
 import { CallSessionProvider, useCallSession } from "@/context/CallSessionContext";
@@ -22,7 +22,6 @@ import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
 import { fetchIncomingCallDetails } from "@/lib/fetchIncomingCallDetails";
 import { IncomingCallOverlay, type IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { webrtcAuthHeaders, webrtcFetch } from "@/lib/webrtcApi";
-import { useColors } from "@/hooks/useColors";
 import {
   ensureVidehNotificationSetup,
   NOTIFICATION_ACTION_ACCEPT_CALL,
@@ -118,7 +117,6 @@ const queryClient = new QueryClient({
 
 function RootLayoutNav() {
   const { isAuthenticated, isInitialized, user, chats, markAsRead, muteChat, sendMessage, loadMessages } = useApp();
-  const colors = useColors();
   const router = useRouter();
   const {
     session: activeCallSession,
@@ -739,7 +737,7 @@ function RootLayoutNav() {
 
   return (
     <>
-      <StatusBar style="light" backgroundColor={colors.headerBg} translucent={false} />
+      <AppStatusBar />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="auth/phone" options={{ headerShown: false }} />
