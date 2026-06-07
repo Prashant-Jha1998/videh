@@ -1,0 +1,6 @@
+build/
+dist-export/
+expo-go-qr.png
+android/
+ios/
+.git/

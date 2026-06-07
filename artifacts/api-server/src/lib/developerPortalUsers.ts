@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { query } from "./db";
 import { hashAdminPassword, verifyAdminPassword } from "./adminPassword";
 
@@ -6,6 +7,8 @@ export type DeveloperPortalUserRow = {
   email: string;
   password_hash: string;
   full_name: string | null;
+  google_sub: string | null;
+  auth_provider: string | null;
   created_at: string;
   last_login_at: string | null;
 };
@@ -32,7 +35,19 @@ export async function ensureDeveloperPortalUsersTable(): Promise<void> {
   } catch {
     /* ignore */
   }
+  try {
+    await query(`ALTER TABLE developer_portal_users ADD COLUMN IF NOT EXISTS google_sub TEXT`);
+    await query(`ALTER TABLE developer_portal_users ADD COLUMN IF NOT EXISTS auth_provider TEXT DEFAULT 'password'`);
+    await query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_developer_portal_users_google_sub
+        ON developer_portal_users (google_sub) WHERE google_sub IS NOT NULL
+    `);
+  } catch {
+    /* ignore */
+  }
 }
+
+const portalUserSelect = `id, email, password_hash, full_name, google_sub, auth_provider, created_at, last_login_at`;
 
 export function normalizePortalEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -41,7 +56,7 @@ export function normalizePortalEmail(email: string): string {
 export async function findPortalUserByEmail(email: string): Promise<DeveloperPortalUserRow | null> {
   await ensureDeveloperPortalUsersTable();
   const r = await query(
-    `SELECT id, email, password_hash, full_name, created_at, last_login_at
+    `SELECT ${portalUserSelect}
      FROM developer_portal_users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
     [normalizePortalEmail(email)],
   );
@@ -51,7 +66,7 @@ export async function findPortalUserByEmail(email: string): Promise<DeveloperPor
 export async function findPortalUserById(id: number): Promise<DeveloperPortalUserRow | null> {
   await ensureDeveloperPortalUsersTable();
   const r = await query(
-    `SELECT id, email, password_hash, full_name, created_at, last_login_at
+    `SELECT ${portalUserSelect}
      FROM developer_portal_users WHERE id = $1`,
     [id],
   );
@@ -67,12 +82,63 @@ export async function createPortalUser(input: {
   const email = normalizePortalEmail(input.email);
   const password_hash = await hashAdminPassword(input.password);
   const r = await query(
-    `INSERT INTO developer_portal_users (email, password_hash, full_name)
-     VALUES ($1, $2, $3)
-     RETURNING id, email, password_hash, full_name, created_at, last_login_at`,
+    `INSERT INTO developer_portal_users (email, password_hash, full_name, auth_provider)
+     VALUES ($1, $2, $3, 'password')
+     RETURNING ${portalUserSelect}`,
     [email, password_hash, input.fullName?.trim() || null],
   );
   return r.rows[0] as DeveloperPortalUserRow;
+}
+
+export async function findPortalUserByGoogleSub(googleSub: string): Promise<DeveloperPortalUserRow | null> {
+  await ensureDeveloperPortalUsersTable();
+  const r = await query(
+    `SELECT ${portalUserSelect}
+     FROM developer_portal_users WHERE google_sub = $1 LIMIT 1`,
+    [googleSub],
+  );
+  return (r.rows[0] as DeveloperPortalUserRow | undefined) ?? null;
+}
+
+export async function createPortalUserFromGoogle(input: {
+  email: string;
+  googleSub: string;
+  fullName?: string | null;
+}): Promise<DeveloperPortalUserRow> {
+  await ensureDeveloperPortalUsersTable();
+  const email = normalizePortalEmail(input.email);
+  const password_hash = await hashAdminPassword(crypto.randomBytes(32).toString("hex"));
+  const r = await query(
+    `INSERT INTO developer_portal_users (email, password_hash, full_name, google_sub, auth_provider)
+     VALUES ($1, $2, $3, $4, 'google')
+     RETURNING ${portalUserSelect}`,
+    [email, password_hash, input.fullName?.trim() || null, input.googleSub],
+  );
+  return r.rows[0] as DeveloperPortalUserRow;
+}
+
+export async function linkPortalUserGoogle(
+  userId: number,
+  googleSub: string,
+  fullName?: string | null,
+): Promise<DeveloperPortalUserRow | null> {
+  await ensureDeveloperPortalUsersTable();
+  const r = await query(
+    `UPDATE developer_portal_users
+     SET google_sub = $2,
+         auth_provider = 'google',
+         full_name = COALESCE(NULLIF(full_name, ''), $3),
+         last_login_at = NOW(),
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING ${portalUserSelect}`,
+    [userId, googleSub, fullName?.trim() || null],
+  );
+  return (r.rows[0] as DeveloperPortalUserRow | undefined) ?? null;
+}
+
+export async function touchPortalUserLogin(userId: number): Promise<void> {
+  await query(`UPDATE developer_portal_users SET last_login_at = NOW(), updated_at = NOW() WHERE id = $1`, [userId]);
 }
 
 export async function verifyPortalUserPassword(

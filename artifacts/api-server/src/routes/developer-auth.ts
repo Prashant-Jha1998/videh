@@ -11,12 +11,17 @@ import {
 } from "../lib/developerPortalSession";
 import {
   createPortalUser,
+  createPortalUserFromGoogle,
   findPortalUserByEmail,
+  findPortalUserByGoogleSub,
   getActiveLeadForPortalUser,
+  linkPortalUserGoogle,
   normalizePortalEmail,
+  touchPortalUserLogin,
   updatePortalUserPassword,
   verifyPortalUserPassword,
 } from "../lib/developerPortalUsers";
+import { resolveGoogleOAuthClientId, verifyGoogleIdToken } from "../lib/googleIdTokenVerify";
 import { stateDelete, stateGetJson, stateSetJson } from "../lib/sharedState";
 
 const router = Router();
@@ -28,6 +33,15 @@ router.get("/password-rules", (_req, res) => {
     success: true,
     minLength: 10,
     rules: passwordChecks("").map((c) => ({ id: c.id, label: c.label })),
+  });
+});
+
+router.get("/config", (_req, res) => {
+  const googleClientId = resolveGoogleOAuthClientId();
+  res.json({
+    success: true,
+    googleSignInEnabled: Boolean(googleClientId),
+    googleClientId: googleClientId ?? undefined,
   });
 });
 
@@ -98,6 +112,76 @@ router.post("/register", async (req: Request, res: Response) => {
   } catch (err) {
     logger.error({ err }, "developer register");
     res.status(500).json({ success: false, message: "Registration failed" });
+  }
+});
+
+router.post("/google", async (req: Request, res: Response) => {
+  if (!developerPortalSessionConfigured()) {
+    res.status(503).json({ success: false, message: "Developer sign-in is not configured." });
+    return;
+  }
+
+  const clientId = resolveGoogleOAuthClientId();
+  if (!clientId) {
+    res.status(503).json({
+      success: false,
+      message: "Google sign-in is not configured (set DEVELOPER_GOOGLE_CLIENT_ID).",
+    });
+    return;
+  }
+
+  const credential = String((req.body as { credential?: string }).credential ?? "").trim();
+  if (!credential) {
+    res.status(400).json({ success: false, message: "Google credential is required" });
+    return;
+  }
+
+  try {
+    const profile = await verifyGoogleIdToken(credential, clientId);
+    if (!profile) {
+      res.status(401).json({ success: false, message: "Invalid or expired Google sign-in. Try again." });
+      return;
+    }
+
+    let user = await findPortalUserByGoogleSub(profile.sub);
+    let isNewUser = false;
+    if (!user) {
+      const byEmail = await findPortalUserByEmail(profile.email);
+      if (byEmail) {
+        user = await linkPortalUserGoogle(byEmail.id, profile.sub, profile.name ?? byEmail.full_name);
+      } else {
+        user = await createPortalUserFromGoogle({
+          email: profile.email,
+          googleSub: profile.sub,
+          fullName: profile.name,
+        });
+        isNewUser = true;
+      }
+    } else {
+      await touchPortalUserLogin(user.id);
+    }
+
+    if (!user) {
+      res.status(500).json({ success: false, message: "Could not create developer account" });
+      return;
+    }
+
+    const token = issueDeveloperPortalToken({ userId: user.id, email: user.email });
+    if (!token) {
+      res.status(500).json({ success: false, message: "Could not create session" });
+      return;
+    }
+    setDeveloperPortalCookie(res, token);
+    const activeLead = await getActiveLeadForPortalUser(user.id, user.email);
+    res.json({
+      success: true,
+      user: { id: user.id, email: user.email, fullName: user.full_name },
+      activeLead,
+      isNewUser,
+    });
+  } catch (err) {
+    logger.error({ err }, "developer google auth");
+    res.status(500).json({ success: false, message: "Google sign-in failed" });
   }
 });
 

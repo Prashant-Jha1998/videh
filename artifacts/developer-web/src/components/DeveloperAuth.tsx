@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Loader2, Lock, Mail, User } from "lucide-react";
 import { devFetch } from "../lib/devFetch";
 import { isPasswordValid } from "../lib/passwordPolicy";
 import { PasswordRequirements } from "./PasswordRequirements";
+import { GoogleSignInButton } from "./GoogleSignInButton";
 
 export type AuthMode = "login" | "signup" | "forgot" | "reset";
 
@@ -30,6 +31,28 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
     if (mode === "reset") return "Reset password";
     return "Sign in";
   }, [mode]);
+
+  const finishGoogle = useCallback(
+    async (credential: string) => {
+      setBusy(true);
+      setError("");
+      try {
+        const r = await devFetch("/api/developer-auth/google", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ credential }),
+        });
+        const d = (await r.json()) as { success?: boolean; message?: string };
+        if (!r.ok || !d.success) throw new Error(d.message ?? "Google sign-in failed");
+        onSuccess();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Google sign-in failed");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onSuccess],
+  );
 
   const submit = async () => {
     setBusy(true);
@@ -110,14 +133,21 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
 
   const showPasswordFields = mode === "signup" || mode === "login" || mode === "reset";
   const showConfirm = mode === "signup" || mode === "reset";
+  const showGoogle = mode === "login" || mode === "signup";
+  const inputClass =
+    "w-full rounded-xl border border-gray-200 bg-white pl-10 pr-4 py-3 text-sm text-[#111b21] placeholder:text-[#8696a0] focus:outline-none focus:ring-2 focus:ring-[#00a884]/35 focus:border-[#00a884]";
 
   return (
-    <div className="fixed inset-0 z-[60] bg-[#0b141a]/90 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-gray-200 p-6 md:p-8 my-8">
-        <div className="flex justify-between items-start mb-6">
-          <div>
+    <div className="fixed inset-0 z-[60] bg-[#0b141a]/92 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-gray-200/80 p-6 md:p-8 my-4 max-h-[calc(100vh-2rem)] overflow-y-auto">
+        <div className="flex justify-between items-start gap-3 mb-6">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-2">
+              <img src="/videh_icon_foreground.png" alt="" className="h-8 w-8 rounded-lg" />
+              <span className="text-xs font-semibold uppercase tracking-wide text-[#00a884]">Videh Business API</span>
+            </div>
             <h2 className="text-2xl font-bold text-[#111b21]">{title}</h2>
-            <p className="text-sm text-[#667781] mt-1">
+            <p className="text-sm text-[#667781] mt-1 leading-relaxed">
               {mode === "signup"
                 ? "Create your account before applying for the Business API."
                 : mode === "login"
@@ -127,30 +157,50 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
                     : "Enter the code and choose a new password."}
             </p>
           </div>
-          <button type="button" onClick={onClose} className="text-[#667781] hover:text-[#111b21] text-sm font-medium">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[#667781] hover:text-[#111b21] text-sm font-medium shrink-0 px-2 py-1 rounded-lg hover:bg-gray-100"
+          >
             Close
           </button>
         </div>
 
-        {error ? <p className="mb-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p> : null}
-        {info ? <p className="mb-4 text-sm text-[#00a884] bg-[#00a884]/10 border border-[#00a884]/20 rounded-lg px-3 py-2">{info}</p> : null}
+        {error ? (
+          <p className="mb-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>
+        ) : null}
+        {info ? (
+          <p className="mb-4 text-sm text-[#00a884] bg-[#00a884]/10 border border-[#00a884]/20 rounded-lg px-3 py-2">{info}</p>
+        ) : null}
         {devOtpHint ? (
           <p className="mb-4 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
             Dev reset code: <strong className="font-mono">{devOtpHint}</strong>
           </p>
         ) : null}
 
-        <div className="space-y-3">
+        {showGoogle ? (
+          <div className="mb-5">
+            <GoogleSignInButton mode={mode} disabled={busy} onCredential={finishGoogle} />
+            <div className="flex items-center gap-3 my-5">
+              <div className="h-px flex-1 bg-gray-200" />
+              <span className="text-xs font-medium text-[#667781] uppercase tracking-wide">or use email</span>
+              <div className="h-px flex-1 bg-gray-200" />
+            </div>
+          </div>
+        ) : null}
+
+        <div className="space-y-4">
           {mode === "signup" ? (
             <label className="block">
               <span className="text-xs font-medium text-[#667781]">Full name (optional)</span>
-              <div className="relative mt-1">
+              <div className="relative mt-1.5">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#667781]" />
                 <input
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 pl-10 pr-4 py-2.5 text-sm"
+                  className={inputClass}
                   placeholder="Your name"
+                  autoComplete="name"
                 />
               </div>
             </label>
@@ -158,14 +208,14 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
 
           <label className="block">
             <span className="text-xs font-medium text-[#667781]">Email *</span>
-            <div className="relative mt-1">
+            <div className="relative mt-1.5">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#667781]" />
               <input
                 type="email"
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl border border-gray-200 pl-10 pr-4 py-2.5 text-sm"
+                className={inputClass}
                 placeholder="you@company.com"
               />
             </div>
@@ -177,8 +227,9 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
               <input
                 value={otp}
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                className="w-full mt-1 rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-mono tracking-widest"
+                className="w-full mt-1.5 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-[#00a884]/35 focus:border-[#00a884]"
                 placeholder="000000"
+                inputMode="numeric"
               />
             </label>
           ) : null}
@@ -186,14 +237,14 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
           {showPasswordFields ? (
             <label className="block">
               <span className="text-xs font-medium text-[#667781]">{mode === "reset" ? "New password *" : "Password *"}</span>
-              <div className="relative mt-1">
+              <div className="relative mt-1.5">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#667781]" />
                 <input
                   type="password"
                   autoComplete={mode === "signup" || mode === "reset" ? "new-password" : "current-password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 pl-10 pr-4 py-2.5 text-sm"
+                  className={inputClass}
                 />
               </div>
             </label>
@@ -202,14 +253,14 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
           {showConfirm ? (
             <label className="block">
               <span className="text-xs font-medium text-[#667781]">Confirm password *</span>
-              <div className="relative mt-1">
+              <div className="relative mt-1.5">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#667781]" />
                 <input
                   type="password"
                   autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 pl-10 pr-4 py-2.5 text-sm"
+                  className={inputClass}
                 />
               </div>
             </label>
@@ -222,7 +273,7 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
           type="button"
           disabled={busy}
           onClick={() => void submit()}
-          className="mt-6 w-full bg-[#00a884] text-white font-semibold py-3 rounded-xl disabled:opacity-60 flex items-center justify-center gap-2"
+          className="mt-6 w-full bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold py-3 rounded-xl disabled:opacity-60 flex items-center justify-center gap-2 transition-colors"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           {mode === "signup" ? "Create account" : mode === "login" ? "Sign in" : mode === "forgot" ? "Send reset code" : "Update password"}

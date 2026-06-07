@@ -47,3 +47,10 @@ body {
   font-size: 0.8rem;
   line-height: 1.6;
 }
+
+/* Google Identity Services button — full width inside auth modal */
+.google-signin-host > div {
+  width: 100% !important;
+  display: flex;
+  justify-content: center;
+}

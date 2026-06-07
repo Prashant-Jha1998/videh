@@ -323,7 +323,10 @@ export default function App() {
             setAuthMode(null);
           }}
           onSuccess={onAuthSuccess}
-          onSwitchMode={setAuthHash}
+          onSwitchMode={(mode) => {
+            setAuthHash(mode);
+            setAuthMode(mode);
+          }}
         />
       ) : null}
       {wizardOpen ? <OnboardingWizard onClose={closeWizard} onNeedAuth={needAuthForWizard} /> : null}
