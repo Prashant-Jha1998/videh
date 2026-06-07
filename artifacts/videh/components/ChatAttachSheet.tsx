@@ -23,6 +23,7 @@ import {
   type GalleryAlbum,
   type GalleryAsset,
 } from "@/lib/galleryPicker";
+import { MAX_CHAT_IMAGES_BATCH } from "@/lib/chatMediaPolicy";
 
 const SCREEN_H = Dimensions.get("window").height;
 const SCREEN_W = Dimensions.get("window").width;
@@ -74,14 +75,17 @@ type Props = {
   insets: EdgeInsets;
   onClose: () => void;
   onAction: (type: AttachSheetAction) => void;
-  onPickAsset: (asset: GalleryAsset) => void;
+  /** WhatsApp-style: send one or many gallery picks (ordered). */
+  onPickAssets: (assets: GalleryAsset[]) => void;
 };
 
-export function ChatAttachSheet({ visible, colors, insets, onClose, onAction, onPickAsset }: Props) {
+export function ChatAttachSheet({ visible, colors, insets, onClose, onAction, onPickAssets }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [albums, setAlbums] = useState<GalleryAlbum[]>([]);
   const [selectedAlbum, setSelectedAlbum] = useState<GalleryAlbum | null>(null);
   const [assets, setAssets] = useState<GalleryAsset[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<string[]>([]);
+  const assetMapRef = useRef<Map<string, GalleryAsset>>(new Map());
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [endCursor, setEndCursor] = useState<string | undefined>();
@@ -154,10 +158,16 @@ export function ChatAttachSheet({ visible, colors, insets, onClose, onAction, on
     setAssets([]);
     setAlbums([]);
     setSelectedAlbum(null);
+    setSelectedOrder([]);
+    assetMapRef.current.clear();
     setEndCursor(undefined);
     setHasNextPage(false);
     sheetHeight.setValue(collapsedH);
   }, [collapsedH, sheetHeight]);
+
+  useEffect(() => {
+    for (const a of assets) assetMapRef.current.set(a.id, a);
+  }, [assets]);
 
   useEffect(() => {
     if (!visible) {
@@ -188,6 +198,7 @@ export function ChatAttachSheet({ visible, colors, insets, onClose, onAction, on
   const loadAlbum = useCallback(async (album: GalleryAlbum) => {
     setSelectedAlbum(album);
     setAlbumMenuOpen(false);
+    setSelectedOrder([]);
     setLoading(true);
     setAssets([]);
     setEndCursor(undefined);
@@ -228,25 +239,56 @@ export function ChatAttachSheet({ visible, colors, insets, onClose, onAction, on
     if (!expandedRef.current && e.nativeEvent.contentOffset.y > 8) snapExpand();
   }, [snapExpand]);
 
-  const pickAsset = useCallback((item: GalleryAsset) => {
-    onPickAsset(item);
-  }, [onPickAsset]);
+  const toggleSelect = useCallback((item: GalleryAsset) => {
+    assetMapRef.current.set(item.id, item);
+    setSelectedOrder((prev) => {
+      const idx = prev.indexOf(item.id);
+      if (idx >= 0) return prev.filter((id) => id !== item.id);
+      if (prev.length >= MAX_CHAT_IMAGES_BATCH) return prev;
+      const hasVideo = prev.some((id) => assetMapRef.current.get(id)?.kind === "video");
+      if (hasVideo || item.kind === "video") {
+        return [item.id];
+      }
+      return [...prev, item.id];
+    });
+  }, []);
 
-  const renderCell = useCallback(({ item }: { item: GalleryAsset }) => (
-    <TouchableOpacity
-      style={[styles.cell, { width: CELL, height: CELL }]}
-      activeOpacity={0.85}
-      onPress={() => pickAsset(item)}
-    >
-      <Image source={{ uri: item.uri }} style={styles.thumb} contentFit="cover" cachePolicy="memory-disk" />
-      {item.kind === "video" ? (
-        <View style={styles.videoBadge} pointerEvents="none">
-          <Ionicons name="videocam" size={11} color="#fff" />
-          <Text style={styles.videoDur}>{formatVideoDur(item.durationMs)}</Text>
-        </View>
-      ) : null}
-    </TouchableOpacity>
-  ), [pickAsset]);
+  const confirmSelection = useCallback(() => {
+    if (selectedOrder.length === 0) return;
+    const picked = selectedOrder
+      .map((id) => assetMapRef.current.get(id))
+      .filter((a): a is GalleryAsset => Boolean(a));
+    if (picked.length === 0) return;
+    onPickAssets(picked);
+  }, [onPickAssets, selectedOrder]);
+
+  const renderCell = useCallback(({ item }: { item: GalleryAsset }) => {
+    const orderIndex = selectedOrder.indexOf(item.id);
+    const isSelected = orderIndex >= 0;
+    const hasSelection = selectedOrder.length > 0;
+    return (
+      <TouchableOpacity
+        style={[styles.cell, { width: CELL, height: CELL }]}
+        activeOpacity={0.85}
+        onPress={() => toggleSelect(item)}
+      >
+        <Image source={{ uri: item.uri }} style={styles.thumb} contentFit="cover" cachePolicy="memory-disk" />
+        {isSelected ? (
+          <View style={styles.selectBadge} pointerEvents="none">
+            <Text style={styles.selectBadgeText}>{orderIndex + 1}</Text>
+          </View>
+        ) : hasSelection ? (
+          <View style={styles.selectRing} pointerEvents="none" />
+        ) : null}
+        {item.kind === "video" ? (
+          <View style={styles.videoBadge} pointerEvents="none">
+            <Ionicons name="videocam" size={11} color="#fff" />
+            <Text style={styles.videoDur}>{formatVideoDur(item.durationMs)}</Text>
+          </View>
+        ) : null}
+      </TouchableOpacity>
+    );
+  }, [selectedOrder, toggleSelect]);
 
   const listHeader = useMemo(() => {
     if (expanded) return null;
@@ -319,14 +361,34 @@ export function ChatAttachSheet({ visible, colors, insets, onClose, onAction, on
                 </Text>
                 <Ionicons name="chevron-down" size={18} color={colors.isDark ? "#E9EDEF" : "#111B21"} />
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.toolbarBtn}
-                onPress={() => onAction("gallery")}
-                hitSlop={8}
-              >
-                <Ionicons name="folder-open-outline" size={22} color={colors.isDark ? "#E9EDEF" : "#111B21"} />
-              </TouchableOpacity>
+              {selectedOrder.length > 0 ? (
+                <TouchableOpacity style={styles.sendBtn} onPress={confirmSelection} hitSlop={8}>
+                  <Ionicons name="send" size={20} color="#fff" />
+                  {selectedOrder.length > 1 ? (
+                    <View style={styles.sendCountPill}>
+                      <Text style={styles.sendCountText}>{selectedOrder.length}</Text>
+                    </View>
+                  ) : null}
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={styles.toolbarBtn}
+                  onPress={() => onAction("gallery")}
+                  hitSlop={8}
+                >
+                  <Ionicons name="folder-open-outline" size={22} color={colors.isDark ? "#E9EDEF" : "#111B21"} />
+                </TouchableOpacity>
+              )}
             </View>
+          ) : null}
+
+          {!expanded && selectedOrder.length > 0 ? (
+            <TouchableOpacity style={styles.collapsedSendBar} onPress={confirmSelection} activeOpacity={0.88}>
+              <Ionicons name="send" size={18} color="#fff" />
+              <Text style={styles.collapsedSendText}>
+                Send {selectedOrder.length} {selectedOrder.length === 1 ? "item" : "items"}
+              </Text>
+            </TouchableOpacity>
           ) : null}
 
           {Platform.OS === "web" ? (
@@ -467,6 +529,66 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   videoDur: { color: "#fff", fontSize: 10, fontFamily: "Inter_600SemiBold" },
+  selectBadge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    minWidth: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#00A884",
+    borderWidth: 2,
+    borderColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  selectBadgeText: { color: "#fff", fontSize: 12, fontFamily: "Inter_700Bold" },
+  selectRing: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.95)",
+    backgroundColor: "rgba(0,0,0,0.25)",
+  },
+  sendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#00A884",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  sendCountPill: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  sendCountText: { color: "#00A884", fontSize: 10, fontFamily: "Inter_700Bold" },
+  collapsedSendBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginHorizontal: 12,
+    marginBottom: 8,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "#00A884",
+  },
+  collapsedSendText: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   empty: { textAlign: "center", fontSize: 13, paddingVertical: 24, paddingHorizontal: 20 },
   expandHint: {
     flexDirection: "row",

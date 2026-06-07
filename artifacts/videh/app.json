@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 69,
+      "versionCode": 70,
       "androidStatusBar": {
         "backgroundColor": "#00A884",
         "barStyle": "light-content",
@@ -199,13 +199,13 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "prashantjha1998",
+    "owner": "prashantjha112",
     "extra": {
       "router": {
         "origin": "https://replit.com/"
       },
       "eas": {
-        "projectId": "3b724974-b378-405a-806e-c6d62df1c768"
+        "projectId": "72d49bc8-c465-47d0-ba9d-6aa765d6e315"
       }
     }
   }

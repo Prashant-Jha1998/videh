@@ -25,8 +25,10 @@ import {
   fetchMyReelsChannel,
   prepareChannelAvatar,
   prepareChannelCover,
+  updateChannelLinks,
   updateChannelProfile,
 } from "@/lib/reelsApi";
+import type { ReelsChannelLink } from "@/lib/reelsApi";
 
 export default function ReelsChannelEditScreen() {
   const colors = useColors();
@@ -44,6 +46,8 @@ export default function ReelsChannelEditScreen() {
   const [saving, setSaving] = useState(false);
   const [preparingAvatar, setPreparingAvatar] = useState(false);
   const [preparingCover, setPreparingCover] = useState(false);
+  const [links, setLinks] = useState<{ title: string; url: string }[]>([]);
+  const [savingLinks, setSavingLinks] = useState(false);
 
   useEffect(() => {
     if (!user?.dbId) return;
@@ -61,6 +65,7 @@ export default function ReelsChannelEditScreen() {
       setBio(res.channel.bio ?? "");
       setExistingAvatar(res.channel.avatarUrl);
       setExistingCover(res.channel.coverUrl ?? null);
+      setLinks((res.links ?? []).map((l: ReelsChannelLink) => ({ title: l.title, url: l.url })));
       setLoading(false);
     });
   }, [user?.dbId, user?.sessionToken, router]);
@@ -121,6 +126,42 @@ export default function ReelsChannelEditScreen() {
       Alert.alert("Error", "Channel update nahi ho paya.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const addLink = () => {
+    if (links.length >= 20) {
+      Alert.alert("Links", "Maximum 20 links allowed.");
+      return;
+    }
+    setLinks([...links, { title: "", url: "" }]);
+  };
+
+  const updateLink = (index: number, field: "title" | "url", value: string) => {
+    setLinks(links.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
+  };
+
+  const removeLink = (index: number) => {
+    setLinks(links.filter((_, i) => i !== index));
+  };
+
+  const saveLinks = async () => {
+    if (!user?.dbId) return;
+    const cleaned = links
+      .map((l) => ({ title: l.title.trim(), url: l.url.trim() }))
+      .filter((l) => l.title && l.url);
+    setSavingLinks(true);
+    try {
+      const res = await updateChannelLinks(user.dbId, cleaned, user.sessionToken);
+      if (!res.success) {
+        Alert.alert("Links save nahi hue", res.message ?? "Phir se try karein.");
+        return;
+      }
+      Alert.alert("Saved", "Channel links update ho gaye.");
+    } catch {
+      Alert.alert("Error", "Links save nahi ho paye.");
+    } finally {
+      setSavingLinks(false);
     }
   };
 
@@ -229,6 +270,53 @@ export default function ReelsChannelEditScreen() {
         maxLength={500}
       />
 
+      <Text style={[styles.label, { color: colors.foreground }]}>Links</Text>
+      <Text style={[styles.hint, { color: colors.mutedForeground }]}>
+        App, website, social media — viewers ko About section me dikhenge (YouTube jaisa)
+      </Text>
+      {links.map((link, index) => (
+        <View key={index} style={[styles.linkCard, { borderColor: colors.border }]}>
+          <View style={styles.linkCardHeader}>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Link {index + 1}</Text>
+            <TouchableOpacity onPress={() => removeLink(index)}>
+              <Ionicons name="trash-outline" size={18} color="#e53935" />
+            </TouchableOpacity>
+          </View>
+          <TextInput
+            style={[styles.input, { color: colors.foreground, borderColor: colors.border, marginTop: 8 }]}
+            placeholder="Title (e.g. Instagram)"
+            placeholderTextColor={colors.mutedForeground}
+            value={link.title}
+            onChangeText={(v) => updateLink(index, "title", v)}
+            maxLength={120}
+          />
+          <TextInput
+            style={[styles.input, { color: colors.foreground, borderColor: colors.border, marginTop: 8 }]}
+            placeholder="URL (e.g. instagram.com/...)"
+            placeholderTextColor={colors.mutedForeground}
+            value={link.url}
+            onChangeText={(v) => updateLink(index, "url", v)}
+            autoCapitalize="none"
+            keyboardType="url"
+          />
+        </View>
+      ))}
+      <TouchableOpacity style={styles.addLinkBtn} onPress={addLink}>
+        <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+        <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>Add link</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.saveLinksBtn, { borderColor: colors.border, opacity: savingLinks ? 0.6 : 1 }]}
+        onPress={() => void saveLinks()}
+        disabled={savingLinks}
+      >
+        {savingLinks ? (
+          <ActivityIndicator color={colors.primary} />
+        ) : (
+          <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>Save links</Text>
+        )}
+      </TouchableOpacity>
+
       <TouchableOpacity
         style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: busy ? 0.6 : 1 }]}
         onPress={save}
@@ -276,6 +364,16 @@ const styles = StyleSheet.create({
   },
   input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
   area: { minHeight: 90, textAlignVertical: "top" },
+  linkCard: { borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 10 },
+  linkCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  addLinkBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4, marginBottom: 8 },
+  saveLinksBtn: {
+    borderWidth: 1,
+    borderRadius: 24,
+    paddingVertical: 10,
+    alignItems: "center",
+    marginBottom: 8,
+  },
   saveBtn: { marginTop: 28, paddingVertical: 14, borderRadius: 28, alignItems: "center" },
   saveText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 16 },
 });

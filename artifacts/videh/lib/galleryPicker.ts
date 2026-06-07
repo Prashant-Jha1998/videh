@@ -2,6 +2,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import { Alert, Platform } from "react-native";
 import {
+  MAX_CHAT_IMAGES_BATCH,
   MAX_CHAT_IMAGE_BYTES,
   MAX_CHAT_VIDEO_BYTES,
   MAX_CHAT_VIDEO_DURATION_MS,
@@ -187,6 +188,15 @@ export async function validateGalleryAsset(item: GalleryAsset): Promise<PickedCh
     width: item.width || undefined,
     height: item.height || undefined,
   };
+}
+
+export async function validateGalleryAssets(items: GalleryAsset[]): Promise<PickedChatMedia[]> {
+  const out: PickedChatMedia[] = [];
+  for (const item of items.slice(0, MAX_CHAT_IMAGES_BATCH)) {
+    const picked = await validateGalleryAsset(item);
+    if (picked) out.push(picked);
+  }
+  return out;
 }
 
 /** @deprecated use galleryPicker APIs */

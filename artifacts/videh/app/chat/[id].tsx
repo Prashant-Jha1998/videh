@@ -10,9 +10,10 @@ import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import {
-  KeyboardAvoidingView,
+  AndroidSoftInputModes,
+  KeyboardController,
+  KeyboardStickyView,
   useGenericKeyboardHandler,
-  useResizeMode,
 } from "react-native-keyboard-controller";
 import { useChatKeyboard } from "@/hooks/useChatKeyboard";
 import { onChatMessageSignal } from "@/lib/chatMessageEvents";
@@ -54,7 +55,7 @@ import {
   validatePickedMedia,
   validatePickedAssets,
 } from "@/lib/chatMediaPolicy";
-import { validateGalleryAsset } from "@/lib/galleryPicker";
+import { validateGalleryAssets, type GalleryAsset } from "@/lib/galleryPicker";
 import { ChatAttachSheet } from "@/components/ChatAttachSheet";
 import { VidehVoiceMic } from "@/components/VidehVoiceMic";
 import { ChatEmojiPanel } from "@/components/ChatEmojiPanel";
@@ -96,7 +97,7 @@ import {
   isInvertedChatNearBottom,
   isInvertedChatScrolledUp,
   OPEN_CHAT_PIN_DELAYS_MS,
-  shouldWhatsAppAutoPin,
+  shouldLiveChatAutoPin,
   WHATSAPP_KEYBOARD_PIN_DELAYS_MS,
   WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS,
 } from "@/lib/whatsappChatScroll";
@@ -133,7 +134,6 @@ import Svg, { Path } from "react-native-svg";
 
 const BASE_URL = getApiUrl();
 
-const ChatKeyboardShell = Platform.OS === "ios" ? KeyboardAvoidingView : View;
 const { width: W } = Dimensions.get("window");
 const REACTION_EMOJIS = ["\u2764\uFE0F", "\uD83D\uDC4D", "\uD83D\uDE02", "\uD83D\uDE2E", "\uD83D\uDE22", "\uD83D\uDE4F"];
 const REPLY_SWIPE_ACTION_W = 56;
@@ -1159,6 +1159,7 @@ export default function ChatScreen() {
       const unsubMsgSignal = onChatMessageSignal((signal) => {
         if (String(signal.chatId) !== String(chatId)) return;
         if (userScrolledUpRef.current) return;
+        if (!keyboardVisibleRef.current) return;
         pendingScrollToEndRef.current = true;
         schedulePinToBottomRef.current();
       });
@@ -1508,11 +1509,12 @@ export default function ChatScreen() {
       }
     });
   }, [searching]);
-  const scrollToLatest = useCallback((animated = false) => {
+  const scrollToLatestLive = useCallback((animated = false) => {
     if (scrollLockRef.current || userDraggingRef.current) return;
-    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
+    if (!shouldLiveChatAutoPin(userScrolledUpRef.current, searching, keyboardVisibleRef.current)) return;
     forceScrollToLatest(animated);
   }, [searching, forceScrollToLatest]);
+  const scrollToLatest = scrollToLatestLive;
   const scheduleOpenChatPin = useCallback(() => {
     cancelOpenChatPin();
     userScrolledUpRef.current = false;
@@ -1543,15 +1545,15 @@ export default function ChatScreen() {
   }, [cancelOpenChatPin, cancelPinToBottom, messages.length]);
   /** WhatsApp: pin to latest — single quiet scroll unless keyboard is settling. */
   const schedulePinToBottom = useCallback((keyboardSettling = false) => {
-    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
+    if (!shouldLiveChatAutoPin(userScrolledUpRef.current, searching, keyboardVisibleRef.current)) return;
     for (const t of pinToBottomTimersRef.current) clearTimeout(t);
     pinToBottomTimersRef.current = [];
     const delays = keyboardSettling ? WHATSAPP_KEYBOARD_PIN_DELAYS_MS : WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS;
     for (const delay of delays) {
-      const t = setTimeout(() => scrollToLatest(delay >= 150), delay);
+      const t = setTimeout(() => scrollToLatestLive(delay >= 150), delay);
       pinToBottomTimersRef.current.push(t);
     }
-  }, [searching, scrollToLatest]);
+  }, [searching, scrollToLatestLive]);
   const pinChatToBottom = useCallback(
     (animated = false) => {
       cancelOpenChatPin();
@@ -1674,10 +1676,9 @@ export default function ChatScreen() {
   }, []);
   const onKeyboardAnimEnd = useCallback(() => {
     keyboardAnimatingRef.current = false;
-    if (!userScrolledUpRef.current) schedulePinToBottom(true);
-  }, [schedulePinToBottom]);
+  }, []);
 
-  /** WhatsApp: pin once when keyboard finishes opening — not on every frame while it animates. */
+  /** WhatsApp: track keyboard animation without forcing scroll (composer uses KeyboardStickyView). */
   useGenericKeyboardHandler(
     {
       onStart: () => {
@@ -1692,16 +1693,20 @@ export default function ChatScreen() {
     [onKeyboardAnimStart, onKeyboardAnimEnd],
   );
 
-  useResizeMode();
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    KeyboardController.setInputMode(AndroidSoftInputModes.SOFT_INPUT_ADJUST_NOTHING);
+    return () => {
+      KeyboardController.setDefaultMode();
+    };
+  }, []);
+
   const { keyboardVisible } = useChatKeyboard();
 
   useEffect(() => {
     keyboardVisibleRef.current = keyboardVisible;
     if (!keyboardVisible) keyboardAnimatingRef.current = false;
-    if (keyboardVisible && !searching && !readingHistory && !userScrolledUpRef.current) {
-      schedulePinToBottom(true);
-    }
-  }, [keyboardVisible, readingHistory, searching, schedulePinToBottom]);
+  }, [keyboardVisible]);
 
   useEffect(() => {
     messagesReadyRef.current = messagesReady;
@@ -1721,15 +1726,18 @@ export default function ChatScreen() {
       return;
     }
     const count = messages.length;
-    if (count > prevMessageCountRef.current && !userScrolledUpRef.current) {
+    if (count > prevMessageCountRef.current && keyboardVisibleRef.current && !userScrolledUpRef.current) {
       const animated = count - prevMessageCountRef.current <= 2;
-      scrollToLatest(animated);
+      scrollToLatestLive(animated);
     }
     prevMessageCountRef.current = count;
-  }, [messages.length, messagesReady, searching, scrollToLatest, scheduleOpenChatPin]);
+  }, [messages.length, messagesReady, searching, scrollToLatestLive, scheduleOpenChatPin]);
 
-  /** Inverted list: paddingTop = visual bottom gap; composer sits in layout below the list. */
-  const listVisualBottomPad = useMemo(() => (searching ? 8 : 10), [searching]);
+  /** Inverted list: reserve space above sticky composer at the visual bottom. */
+  const listVisualBottomPad = useMemo(() => {
+    if (searching) return 8;
+    return Math.max(10, composerHeight + 8);
+  }, [searching, composerHeight]);
   const listTopPadding = 12;
   const jumpFabBottom = useMemo(
     () => Math.max(12, composerHeight + 16),
@@ -1753,25 +1761,26 @@ export default function ChatScreen() {
     };
   }, [cancelOpenChatPin]);
 
-  /** Composer grew (reply / link preview) — debounced pin only if user is already at bottom. */
+  /** Composer grew (reply / link preview) — pin only while keyboard is open at bottom. */
   useEffect(() => {
-    if (readingHistory || !shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current) return;
+    if (!keyboardVisibleRef.current) return;
+    if (readingHistory || !shouldLiveChatAutoPin(userScrolledUpRef.current, searching, true) || userDraggingRef.current) return;
     if (!lastNearBottomRef.current) return;
     if (composerPinTimerRef.current) clearTimeout(composerPinTimerRef.current);
-    composerPinTimerRef.current = setTimeout(() => scrollToLatest(false), 120);
+    composerPinTimerRef.current = setTimeout(() => scrollToLatestLive(false), 120);
     return () => {
       if (composerPinTimerRef.current) clearTimeout(composerPinTimerRef.current);
     };
-  }, [composerHeight, readingHistory, searching, scrollToLatest]);
+  }, [composerHeight, readingHistory, searching, scrollToLatestLive]);
 
   useEffect(() => {
-    if (searching) return;
+    if (searching || !keyboardVisibleRef.current) return;
     const hasTyping = remoteTypingNames.length > 0;
     if (hasTyping && !hadRemoteTypingRef.current && !userScrolledUpRef.current) {
-      scrollToLatest(true);
+      scrollToLatestLive(true);
     }
     hadRemoteTypingRef.current = hasTyping;
-  }, [remoteTypingNames.length, searching, scrollToLatest]);
+  }, [remoteTypingNames.length, searching, scrollToLatestLive, keyboardVisible]);
 
   // @mentions state
   const [groupMembers, setGroupMembers] = useState<{ id: number; name: string }[]>([]);
@@ -2238,11 +2247,27 @@ export default function ChatScreen() {
 
   const [attachVisible, setAttachVisible] = useState(false);
 
-  const handleAttachGalleryPick = useCallback(async (item: Parameters<typeof validateGalleryAsset>[0]) => {
+  const handleAttachGalleryPicks = useCallback(async (items: GalleryAsset[]) => {
     setAttachVisible(false);
-    const picked = await validateGalleryAsset(item);
-    if (picked) goToMediaCompose(picked, false);
-  }, [goToMediaCompose]);
+    if (items.length === 0) return;
+    const picked = await validateGalleryAssets(items);
+    if (picked.length === 0) return;
+    const videos = picked.filter((p) => p.kind === "video");
+    const images = picked.filter((p) => p.kind === "image");
+    if (videos.length > 0 && picked.length > 1) {
+      Alert.alert("One video at a time", "Select a single video, or choose photos only.");
+      return;
+    }
+    if (videos.length === 1) {
+      goToMediaCompose(videos[0], false);
+      return;
+    }
+    if (images.length === 1) {
+      goToMediaCompose(images[0], false);
+      return;
+    }
+    void goToMediaComposeBatch(images, false);
+  }, [goToMediaCompose, goToMediaComposeBatch]);
 
   useWebKeyboardShortcuts({
     enabled: Platform.OS === "web" && !selectionActive && !attachVisible,
@@ -3359,10 +3384,6 @@ export default function ChatScreen() {
                   onFocus={() => {
                     setEmojiPanelOpen(false);
                     setAssistantChatInputFocused(true);
-                    if (!userScrolledUpRef.current) {
-                      pendingScrollToEndRef.current = true;
-                      schedulePinToBottom(true);
-                    }
                     if (chatId && inputVal.length > 0) setTyping(chatId);
                   }}
                   onBlur={() => {
@@ -3622,12 +3643,7 @@ export default function ChatScreen() {
         </View>
       )}
 
-      <ChatKeyboardShell
-        style={styles.chatKeyboardAvoid}
-        {...(Platform.OS === "ios"
-          ? { behavior: "padding" as const, enabled: !selectionActive }
-          : {})}
-      >
+      <View style={styles.chatKeyboardAvoid}>
         <View style={styles.chatBody}>
           <FlatList
             style={styles.messageList}
@@ -3726,7 +3742,7 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS !== "web"}
           maintainVisibleContentPosition={
-            searching || readingHistory
+            searching || readingHistory || !keyboardVisible
               ? undefined
               : { minIndexForVisible: 0, autoscrollToTopThreshold: 20 }
           }
@@ -3782,10 +3798,10 @@ export default function ChatScreen() {
           }}
           scrollEventThrottle={96}
           onContentSizeChange={() => {
-            if (readingHistory || userScrolledUpRef.current) return;
+            if (readingHistory || userScrolledUpRef.current || !keyboardVisibleRef.current) return;
             if (userDraggingRef.current || scrollLockRef.current || searching) return;
             if (!lastNearBottomRef.current) return;
-            scrollToLatest(keyboardVisible);
+            scrollToLatestLive(false);
           }}
           onScrollToIndexFailed={(info) => {
             listRef.current?.scrollToOffset({
@@ -3848,10 +3864,15 @@ export default function ChatScreen() {
         ) : null}
 
         </View>
-        <View style={styles.composerWrap} onLayout={onComposerLayout}>
-          {composerFooter}
-        </View>
-      </ChatKeyboardShell>
+        <KeyboardStickyView
+          enabled={!selectionActive}
+          offset={{ closed: 0, opened: 0 }}
+        >
+          <View style={styles.composerWrap} onLayout={onComposerLayout}>
+            {composerFooter}
+          </View>
+        </KeyboardStickyView>
+      </View>
 
 
       {/* Attach menu â€” Videh-style bottom sheet (coloured circles + grid) */}
@@ -3898,7 +3919,7 @@ export default function ChatScreen() {
           setAttachVisible(false);
           void sendMediaMessage(type);
         }}
-        onPickAsset={(item) => void handleAttachGalleryPick(item)}
+        onPickAssets={(items) => void handleAttachGalleryPicks(items)}
       />
 
       <ContactSharePickerModal
@@ -4237,7 +4258,7 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   chatKeyboardAvoid: { flex: 1, minHeight: 0, flexDirection: "column" },
-  chatBody: { flex: 1, flexDirection: "column", minHeight: 0, position: "relative" },
+  chatBody: { flex: 1, minHeight: 0, position: "relative" },
   composerWrap: { flexShrink: 0 },
   messageList: { flex: 1, minHeight: 0 },
   messageListContent: { paddingHorizontal: 10, paddingTop: 8 },

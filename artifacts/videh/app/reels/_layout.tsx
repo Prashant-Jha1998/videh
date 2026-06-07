@@ -10,6 +10,7 @@ export default function ReelsLayout() {
       <Stack.Screen name="watch/[id]" />
       <Stack.Screen name="channel/[handle]" />
       <Stack.Screen name="channel/edit" />
+      <Stack.Screen name="channel/playlist/[id]" />
     </Stack>
   );
 }

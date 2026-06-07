@@ -73,6 +73,7 @@ export async function ensureReelsTables(): Promise<void> {
   await ensureReelsAdminColumns();
   await ensureReelsModerationColumns();
   await ensureReelsChannelBrandingColumns();
+  await ensureReelsChannelLinksPlaylists();
   const { ensureReelsAdsTables } = await import("./reelsAdsSchema");
   await ensureReelsAdsTables();
   ensured = true;
@@ -167,6 +168,53 @@ export async function ensureReelsChannelBrandingColumns(): Promise<void> {
 }
 
 const HANDLE_RE = /^[a-zA-Z][a-zA-Z0-9_]{2,29}$/;
+
+let linksPlaylistsEnsured = false;
+
+export async function ensureReelsChannelLinksPlaylists(): Promise<void> {
+  if (linksPlaylistsEnsured) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS reels_channel_links (
+      id SERIAL PRIMARY KEY,
+      channel_id INTEGER NOT NULL REFERENCES reels_channels(id) ON DELETE CASCADE,
+      title VARCHAR(120) NOT NULL,
+      url TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_reels_channel_links_channel
+    ON reels_channel_links (channel_id, sort_order)
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS reels_playlists (
+      id SERIAL PRIMARY KEY,
+      channel_id INTEGER NOT NULL REFERENCES reels_channels(id) ON DELETE CASCADE,
+      title VARCHAR(200) NOT NULL,
+      description TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_reels_playlists_channel
+    ON reels_playlists (channel_id, created_at DESC)
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS reels_playlist_items (
+      playlist_id INTEGER NOT NULL REFERENCES reels_playlists(id) ON DELETE CASCADE,
+      video_id INTEGER NOT NULL REFERENCES reels_videos(id) ON DELETE CASCADE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (playlist_id, video_id)
+    )
+  `);
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_reels_playlist_items_playlist
+    ON reels_playlist_items (playlist_id, sort_order)
+  `);
+  linksPlaylistsEnsured = true;
+}
 
 export function normalizeReelsHandle(raw: string): string | null {
   const trimmed = String(raw ?? "").trim().replace(/^@+/, "");

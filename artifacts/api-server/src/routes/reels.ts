@@ -202,6 +202,91 @@ function mapPublicChannelResponse(
   return ch;
 }
 
+type ChannelLinkInput = { title?: string; url?: string };
+
+function normalizeChannelLinkUrl(raw: string): string | null {
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return null;
+  const withProto = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const u = new URL(withProto);
+    if (!["http:", "https:"].includes(u.protocol)) return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+function mapChannelLinkRow(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: row.id,
+    title: String(row.title ?? ""),
+    url: String(row.url ?? ""),
+    sortOrder: Number(row.sort_order ?? 0),
+  };
+}
+
+async function fetchChannelLinks(channelId: number): Promise<Record<string, unknown>[]> {
+  const res = await query(
+    `SELECT id, title, url, sort_order
+     FROM reels_channel_links
+     WHERE channel_id = $1
+     ORDER BY sort_order ASC, id ASC`,
+    [channelId],
+  );
+  return res.rows.map((r) => mapChannelLinkRow(r as Record<string, unknown>));
+}
+
+async function fetchChannelPlaylists(
+  channelId: number,
+  isOwner: boolean,
+): Promise<Record<string, unknown>[]> {
+  const pl = await query(
+    `SELECT p.id, p.title, p.description, p.created_at, p.updated_at,
+            COUNT(pi.video_id)::int AS video_count,
+            (
+              SELECT v.thumbnail_url
+              FROM reels_playlist_items pi2
+              JOIN reels_videos v ON v.id = pi2.video_id
+              WHERE pi2.playlist_id = p.id
+                AND ($2::boolean OR (v.status = 'published' AND v.play_enabled = TRUE))
+              ORDER BY pi2.sort_order ASC, pi2.video_id ASC
+              LIMIT 1
+            ) AS thumbnail_url
+     FROM reels_playlists p
+     LEFT JOIN reels_playlist_items pi ON pi.playlist_id = p.id
+     LEFT JOIN reels_videos v ON v.id = pi.video_id
+       AND ($2::boolean OR (v.status = 'published' AND v.play_enabled = TRUE))
+     WHERE p.channel_id = $1
+     GROUP BY p.id
+     HAVING COUNT(pi.video_id) FILTER (
+       WHERE $2::boolean OR (v.status = 'published' AND v.play_enabled = TRUE)
+     ) > 0 OR $2::boolean
+     ORDER BY p.updated_at DESC`,
+    [channelId, isOwner],
+  );
+  return pl.rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    description: row.description ?? null,
+    videoCount: Number(row.video_count ?? 0),
+    thumbnailUrl: row.thumbnail_url ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+async function fetchChannelVideoCount(channelId: number, isOwner: boolean): Promise<number> {
+  const res = await query(
+    `SELECT COUNT(*)::int AS cnt
+     FROM reels_videos v
+     WHERE v.channel_id = $1
+       AND ($2::boolean OR (v.status = 'published' AND v.play_enabled = TRUE))`,
+    [channelId, isOwner],
+  );
+  return Number(res.rows[0]?.cnt ?? 0);
+}
+
 async function serveChannelBrandingAsset(
   req: Request,
   res: Response,
@@ -504,11 +589,19 @@ router.get("/channel/me", async (req: Request, res: Response) => {
       return;
     }
     const channelRow = result.rows[0] as Record<string, unknown>;
-    const monetization = await evaluateChannelMonetization(Number(channelRow.id));
+    const channelId = Number(channelRow.id);
+    const monetization = await evaluateChannelMonetization(channelId);
     const config = await getReelsPlatformConfig();
+    const [links, playlists, videoCount] = await Promise.all([
+      fetchChannelLinks(channelId),
+      fetchChannelPlaylists(channelId, true),
+      fetchChannelVideoCount(channelId, true),
+    ]);
     res.json({
       success: true,
-      channel: mapPublicChannelResponse(req, channelRow, userId),
+      channel: { ...mapPublicChannelResponse(req, channelRow, userId), videoCount },
+      links,
+      playlists,
       monetization,
       rules: publicReelsRules(config),
     });
@@ -575,6 +668,190 @@ router.patch("/channel/me", runChannelBrandingUpload, async (req: Request, res: 
   }
 });
 
+router.put("/channel/me/links", async (req: Request, res: Response) => {
+  const userId = Number((req.body as { userId?: number }).userId);
+  const rawLinks = (req.body as { links?: ChannelLinkInput[] }).links;
+  if (!userId) {
+    res.status(400).json({ success: false, message: "userId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  if (!Array.isArray(rawLinks)) {
+    res.status(400).json({ success: false, message: "links array required" });
+    return;
+  }
+  if (rawLinks.length > 20) {
+    res.status(400).json({ success: false, message: "Maximum 20 links allowed." });
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    const existing = await query("SELECT id FROM reels_channels WHERE user_id = $1", [userId]);
+    if (!existing.rows.length) {
+      res.status(404).json({ success: false, message: "Create your channel first." });
+      return;
+    }
+    const channelId = Number(existing.rows[0].id);
+    const normalized: { title: string; url: string }[] = [];
+    for (const item of rawLinks) {
+      const title = String(item.title ?? "").trim().slice(0, 120);
+      const url = normalizeChannelLinkUrl(String(item.url ?? ""));
+      if (!title || !url) continue;
+      normalized.push({ title, url });
+    }
+    await query("DELETE FROM reels_channel_links WHERE channel_id = $1", [channelId]);
+    for (let i = 0; i < normalized.length; i++) {
+      const link = normalized[i];
+      await query(
+        `INSERT INTO reels_channel_links (channel_id, title, url, sort_order)
+         VALUES ($1, $2, $3, $4)`,
+        [channelId, link.title, link.url, i],
+      );
+    }
+    const links = await fetchChannelLinks(channelId);
+    res.json({ success: true, links });
+  } catch (err) {
+    req.log.error({ err }, "reels update channel links");
+    res.status(500).json({ success: false, message: "Could not update links." });
+  }
+});
+
+router.post("/channel/me/playlists", async (req: Request, res: Response) => {
+  const userId = Number((req.body as { userId?: number }).userId);
+  const title = String((req.body as { title?: string }).title ?? "").trim().slice(0, 200);
+  const description = String((req.body as { description?: string }).description ?? "").trim().slice(0, 2000);
+  const videoIds = (req.body as { videoIds?: number[] }).videoIds ?? [];
+  if (!userId) {
+    res.status(400).json({ success: false, message: "userId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  if (title.length < 1) {
+    res.status(400).json({ success: false, message: "Playlist title required." });
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    const ch = await query("SELECT id FROM reels_channels WHERE user_id = $1", [userId]);
+    if (!ch.rows.length) {
+      res.status(404).json({ success: false, message: "Create your channel first." });
+      return;
+    }
+    const channelId = Number(ch.rows[0].id);
+    const inserted = await query(
+      `INSERT INTO reels_playlists (channel_id, title, description)
+       VALUES ($1, $2, $3)
+       RETURNING id`,
+      [channelId, title, description || null],
+    );
+    const playlistId = Number(inserted.rows[0].id);
+    const uniqueVideoIds = [...new Set(videoIds.filter((id) => Number.isFinite(id) && id > 0))].slice(0, 100);
+    if (uniqueVideoIds.length > 0) {
+      const owned = await query(
+        `SELECT id FROM reels_videos
+         WHERE channel_id = $1 AND id = ANY($2::int[])`,
+        [channelId, uniqueVideoIds],
+      );
+      let order = 0;
+      for (const vid of owned.rows) {
+        await query(
+          `INSERT INTO reels_playlist_items (playlist_id, video_id, sort_order)
+           VALUES ($1, $2, $3)
+           ON CONFLICT DO NOTHING`,
+          [playlistId, vid.id, order++],
+        );
+      }
+    }
+    const playlists = await fetchChannelPlaylists(channelId, true);
+    res.json({ success: true, playlists });
+  } catch (err) {
+    req.log.error({ err }, "reels create playlist");
+    res.status(500).json({ success: false, message: "Could not create playlist." });
+  }
+});
+
+router.delete("/channel/me/playlists/:playlistId", async (req: Request, res: Response) => {
+  const userId = Number((req.body as { userId?: number }).userId ?? req.query.userId);
+  const playlistId = Number(req.params.playlistId);
+  if (!userId) {
+    res.status(400).json({ success: false, message: "userId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    await ensureReelsTables();
+    const row = await query(
+      `SELECT p.id, p.channel_id
+       FROM reels_playlists p
+       JOIN reels_channels c ON c.id = p.channel_id
+       WHERE p.id = $1 AND c.user_id = $2`,
+      [playlistId, userId],
+    );
+    if (!row.rows.length) {
+      res.status(404).json({ success: false, message: "Playlist not found." });
+      return;
+    }
+    const channelId = Number(row.rows[0].channel_id);
+    await query("DELETE FROM reels_playlists WHERE id = $1", [playlistId]);
+    const playlists = await fetchChannelPlaylists(channelId, true);
+    res.json({ success: true, playlists });
+  } catch (err) {
+    req.log.error({ err }, "reels delete playlist");
+    res.status(500).json({ success: false, message: "Could not delete playlist." });
+  }
+});
+
+router.get("/channel/:handle/playlists/:playlistId", async (req: Request, res: Response) => {
+  const handle = normalizeReelsHandle(String(req.params.handle ?? ""));
+  const playlistId = Number(req.params.playlistId);
+  const viewerId = Number(req.query.userId) || getAuthUserId(req) || 0;
+  if (!handle || !playlistId) {
+    res.status(400).json({ success: false, message: "Invalid request" });
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    const pl = await query(
+      `SELECT p.*, c.handle, c.user_id
+       FROM reels_playlists p
+       JOIN reels_channels c ON c.id = p.channel_id
+       WHERE p.id = $1 AND LOWER(c.handle) = $2`,
+      [playlistId, handle],
+    );
+    if (!pl.rows.length) {
+      res.status(404).json({ success: false, message: "Playlist not found" });
+      return;
+    }
+    const playlistRow = pl.rows[0] as Record<string, unknown>;
+    const isOwner = viewerId > 0 && Number(playlistRow.user_id) === viewerId;
+    const videos = await query(
+      `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
+              c.avatar_url AS channel_avatar_url, c.updated_at AS channel_updated_at
+       FROM reels_playlist_items pi
+       JOIN reels_videos v ON v.id = pi.video_id
+       JOIN reels_channels c ON c.id = v.channel_id
+       WHERE pi.playlist_id = $1
+         AND ($2::boolean OR (v.status = 'published' AND v.play_enabled = TRUE))
+       ORDER BY pi.sort_order ASC, pi.video_id ASC`,
+      [playlistId, isOwner],
+    );
+    res.json({
+      success: true,
+      playlist: {
+        id: playlistRow.id,
+        title: playlistRow.title,
+        description: playlistRow.description ?? null,
+        videoCount: videos.rows.length,
+        createdAt: playlistRow.created_at,
+      },
+      videos: videos.rows.map((r) => mapVideoRow(r as Record<string, unknown>, req)),
+    });
+  } catch (err) {
+    req.log.error({ err }, "reels playlist detail");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 router.get("/channel/:handle", async (req: Request, res: Response) => {
   const handle = normalizeReelsHandle(req.params.handle);
   const viewerId = Number(req.query.userId) || getAuthUserId(req) || 0;
@@ -600,21 +877,29 @@ router.get("/channel/:handle", async (req: Request, res: Response) => {
     }
     const channelRow = ch.rows[0] as Record<string, unknown>;
     const isOwner = viewerId > 0 && Number(channelRow.user_id) === viewerId;
-    const videos = await query(
-      `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
-              c.avatar_url AS channel_avatar_url, c.updated_at AS channel_updated_at
-       FROM reels_videos v JOIN reels_channels c ON c.id = v.channel_id
-       WHERE v.channel_id = $1
-         AND ($2::boolean OR (v.status = 'published' AND v.play_enabled = TRUE))
-       ORDER BY v.created_at DESC LIMIT 100`,
-      [channelRow.id, isOwner],
-    );
+    const channelId = Number(channelRow.id);
+    const [videos, links, playlists, videoCount] = await Promise.all([
+      query(
+        `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
+                c.avatar_url AS channel_avatar_url, c.updated_at AS channel_updated_at
+         FROM reels_videos v JOIN reels_channels c ON c.id = v.channel_id
+         WHERE v.channel_id = $1
+           AND ($2::boolean OR (v.status = 'published' AND v.play_enabled = TRUE))
+         ORDER BY v.created_at DESC LIMIT 100`,
+        [channelId, isOwner],
+      ),
+      fetchChannelLinks(channelId),
+      fetchChannelPlaylists(channelId, isOwner),
+      fetchChannelVideoCount(channelId, isOwner),
+    ]);
     const config = await getReelsPlatformConfig();
-    const monetization = await evaluateChannelMonetization(Number(channelRow.id));
+    const monetization = await evaluateChannelMonetization(channelId);
     res.json({
       success: true,
-      channel: mapPublicChannelResponse(req, channelRow, viewerId),
+      channel: { ...mapPublicChannelResponse(req, channelRow, viewerId), videoCount },
       videos: videos.rows.map((r) => mapVideoRow(r as Record<string, unknown>, req)),
+      links,
+      playlists,
       monetization,
       rules: publicReelsRules(config),
     });

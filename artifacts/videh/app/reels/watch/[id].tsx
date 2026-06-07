@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import * as SystemUI from "expo-system-ui";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
 import * as Sharing from "expo-sharing";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -10,6 +12,7 @@ import {
   Dimensions,
   FlatList,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -82,6 +85,24 @@ export default function ReelsWatchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const watchStatusBarStyle = colors.isDark ? "light" : "dark";
+
+  useFocusEffect(
+    useCallback(() => {
+      void SystemUI.setBackgroundColorAsync(colors.background);
+      return () => {
+        void SystemUI.setBackgroundColorAsync(colors.headerBg ?? colors.primary);
+      };
+    }, [colors.background, colors.headerBg, colors.primary]),
+  );
+
+  const watchStatusBar = (
+    <StatusBar
+      style={watchStatusBarStyle}
+      backgroundColor={colors.background}
+      translucent={Platform.OS === "android"}
+    />
+  );
   const router = useRouter();
   const { user } = useApp();
   const [video, setVideo] = useState<ReelsVideo | null>(null);
@@ -391,17 +412,23 @@ export default function ReelsWatchScreen() {
 
   if (initialLoading && !video) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.primary} />
-      </View>
+      <>
+        {watchStatusBar}
+        <View style={[styles.center, { backgroundColor: colors.background }]}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      </>
     );
   }
 
   if (!video) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.mutedForeground }}>Video not found</Text>
-      </View>
+      <>
+        {watchStatusBar}
+        <View style={[styles.center, { backgroundColor: colors.background }]}>
+          <Text style={{ color: colors.mutedForeground }}>Video not found</Text>
+        </View>
+      </>
     );
   }
 
@@ -413,7 +440,9 @@ export default function ReelsWatchScreen() {
   const watchTopPad = reelsWatchTopInset(insets);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: watchTopPad }]}>
+    <>
+      {watchStatusBar}
+      <View style={[styles.container, { backgroundColor: colors.background, paddingTop: watchTopPad }]}>
       <View style={styles.playerWrap}>
         {showPreRoll ? (
           <ReelsAdPlayer
@@ -731,6 +760,7 @@ export default function ReelsWatchScreen() {
         </View>
       </DismissibleModal>
     </View>
+    </>
   );
 }
 

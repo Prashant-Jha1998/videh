@@ -26,6 +26,25 @@ export type ReelsChannel = {
   monetizationStatus?: string;
   isSubscribed?: boolean;
   isOwner?: boolean;
+  createdAt?: string;
+  videoCount?: number;
+};
+
+export type ReelsChannelLink = {
+  id: number;
+  title: string;
+  url: string;
+  sortOrder?: number;
+};
+
+export type ReelsPlaylist = {
+  id: number;
+  title: string;
+  description?: string | null;
+  videoCount: number;
+  thumbnailUrl?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type ReelsPublicRules = {
@@ -176,6 +195,13 @@ function normalizeReelsChannel(ch: ReelsChannel): ReelsChannel {
   };
 }
 
+function normalizeReelsPlaylist(pl: ReelsPlaylist): ReelsPlaylist {
+  return {
+    ...pl,
+    thumbnailUrl: normalizeReelsMediaUrl(pl.thumbnailUrl ?? null),
+  };
+}
+
 function normalizeReelsVideo(v: ReelsVideo): ReelsVideo {
   return {
     ...v,
@@ -233,6 +259,8 @@ export async function fetchMyReelsChannel(userId: number, sessionToken?: string 
   const res = await reelsJson<{
     success: boolean;
     channel: ReelsChannel | null;
+    links?: ReelsChannelLink[];
+    playlists?: ReelsPlaylist[];
     monetization?: ReelsMonetizationStatus;
     rules?: ReelsPublicRules;
   }>(
@@ -240,6 +268,7 @@ export async function fetchMyReelsChannel(userId: number, sessionToken?: string 
     { sessionToken },
   );
   if (res.channel) res.channel = normalizeReelsChannel(res.channel);
+  if (res.playlists) res.playlists = res.playlists.map(normalizeReelsPlaylist);
   return res;
 }
 
@@ -249,6 +278,8 @@ export async function fetchReelsChannel(handle: string, userId?: number, session
     success: boolean;
     channel: ReelsChannel;
     videos: ReelsVideo[];
+    links?: ReelsChannelLink[];
+    playlists?: ReelsPlaylist[];
     monetization?: ReelsMonetizationStatus;
     rules?: ReelsPublicRules;
     message?: string;
@@ -258,6 +289,7 @@ export async function fetchReelsChannel(handle: string, userId?: number, session
   );
   if (res.channel) res.channel = normalizeReelsChannel(res.channel);
   if (res.videos) res.videos = res.videos.map(normalizeReelsVideo);
+  if (res.playlists) res.playlists = res.playlists.map(normalizeReelsPlaylist);
   return res;
 }
 
@@ -706,4 +738,62 @@ export function updateChannelProfile(opts: {
     }
     xhr.send(form);
   });
+}
+
+export async function updateChannelLinks(
+  userId: number,
+  links: { title: string; url: string }[],
+  sessionToken?: string | null,
+) {
+  return reelsJson<{ success: boolean; links?: ReelsChannelLink[]; message?: string }>(
+    "/channel/me/links",
+    { method: "PUT", body: { userId, links }, sessionToken },
+  );
+}
+
+export async function createReelsPlaylist(
+  userId: number,
+  opts: { title: string; description?: string; videoIds?: number[] },
+  sessionToken?: string | null,
+) {
+  const res = await reelsJson<{ success: boolean; playlists?: ReelsPlaylist[]; message?: string }>(
+    "/channel/me/playlists",
+    { method: "POST", body: { userId, ...opts }, sessionToken },
+  );
+  if (res.playlists) res.playlists = res.playlists.map(normalizeReelsPlaylist);
+  return res;
+}
+
+export async function deleteReelsPlaylist(
+  userId: number,
+  playlistId: number,
+  sessionToken?: string | null,
+) {
+  const res = await reelsJson<{ success: boolean; playlists?: ReelsPlaylist[]; message?: string }>(
+    `/channel/me/playlists/${playlistId}?userId=${userId}`,
+    { method: "DELETE", body: { userId }, sessionToken },
+  );
+  if (res.playlists) res.playlists = res.playlists.map(normalizeReelsPlaylist);
+  return res;
+}
+
+export async function fetchReelsPlaylist(
+  handle: string,
+  playlistId: number,
+  userId?: number,
+  sessionToken?: string | null,
+) {
+  const q = userId ? `?userId=${userId}` : "";
+  const res = await reelsJson<{
+    success: boolean;
+    playlist: ReelsPlaylist;
+    videos: ReelsVideo[];
+    message?: string;
+  }>(
+    `/channel/${encodeURIComponent(handle.replace(/^@/, ""))}/playlists/${playlistId}${q}`,
+    { sessionToken },
+  );
+  if (res.videos) res.videos = res.videos.map(normalizeReelsVideo);
+  if (res.playlist) res.playlist = normalizeReelsPlaylist(res.playlist);
+  return res;
 }

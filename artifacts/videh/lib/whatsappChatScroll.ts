@@ -16,7 +16,7 @@ export const WHATSAPP_CHAT_BACK_TO_BOTTOM_PX = 48;
 
 export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0] as const;
 export const WHATSAPP_KEYBOARD_PIN_DELAYS_MS = [0, 80] as const;
-export const OPEN_CHAT_PIN_DELAYS_MS = [0, 120, 320] as const;
+export const OPEN_CHAT_PIN_DELAYS_MS = [0, 80] as const;
 
 /** Inverted list: offset 0 = visual bottom (latest). */
 export function isInvertedChatNearBottom(
@@ -65,6 +65,15 @@ export function isChatScrolledUp(
 
 export function shouldWhatsAppAutoPin(userScrolledUp: boolean, searching: boolean): boolean {
   return !searching && !userScrolledUp;
+}
+
+/** Live tail-follow: only while keyboard is open and user has not scrolled up. */
+export function shouldLiveChatAutoPin(
+  userScrolledUp: boolean,
+  searching: boolean,
+  keyboardVisible: boolean,
+): boolean {
+  return shouldWhatsAppAutoPin(userScrolledUp, searching) && keyboardVisible;
 }
 
 export function isCompactChatText(text: string, maxLen = 52): boolean {
