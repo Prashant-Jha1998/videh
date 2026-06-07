@@ -163,6 +163,7 @@ async function pickCreative(
      JOIN reels_ad_campaigns camp ON camp.id = cr.campaign_id
      JOIN reels_advertisers adv ON adv.id = camp.advertiser_id
      WHERE cr.is_active = TRUE
+       AND cr.moderation_status = 'approved'
        AND camp.status = 'active'
        AND adv.status = 'active'
        AND adv.balance_inr > 0

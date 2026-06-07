@@ -337,6 +337,25 @@ router.post("/campaigns", async (req, res) => {
   }
 });
 
+router.get("/creatives", async (req, res) => {
+  const user = requireAdsUser(req, res);
+  if (!user) return;
+  try {
+    const r = await query(
+      `SELECT cr.id, cr.title, cr.format, cr.placement, cr.moderation_status, cr.moderation_reason,
+              cr.impressions, cr.clicks, cr.created_at, camp.name AS campaign_name
+       FROM reels_ad_creatives cr
+       JOIN reels_ad_campaigns camp ON camp.id = cr.campaign_id
+       WHERE camp.advertiser_id = $1
+       ORDER BY cr.created_at DESC`,
+      [user.advertiserId],
+    );
+    res.json({ success: true, creatives: r.rows });
+  } catch {
+    res.status(500).json({ success: false });
+  }
+});
+
 router.get("/campaigns/:campaignId/creatives", async (req, res) => {
   const user = requireAdsUser(req, res);
   if (!user) return;
@@ -428,8 +447,8 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
         `INSERT INTO reels_ad_creatives
           (campaign_id, title, format, video_url, image_url, headline, description,
            duration_seconds, skip_after_seconds, placement, ad_type, cta_type,
-           destination_url, play_store_url, app_store_url, app_name)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+           destination_url, play_store_url, app_store_url, app_name, moderation_status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'pending_review') RETURNING *`,
         [
           campaignId,
           title,
@@ -449,7 +468,11 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
           body.appName?.trim() || null,
         ],
       );
-      res.json({ success: true, creative: r.rows[0] });
+      res.json({
+        success: true,
+        creative: r.rows[0],
+        message: "Ad submitted for Videh admin review. It will go live after approval.",
+      });
     } catch {
       res.status(500).json({ success: false });
     }

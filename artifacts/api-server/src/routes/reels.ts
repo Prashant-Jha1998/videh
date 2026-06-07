@@ -1169,7 +1169,7 @@ router.delete("/subscribe/:channelId", async (req: Request, res: Response) => {
   }
 });
 
-/** YouTube-style ad breaks before / during video playback. */
+/** Video ad breaks before / during playback. */
 router.get("/videos/:videoId/ad-breaks", async (req: Request, res: Response) => {
   const videoId = Number(req.params.videoId);
   const viewerId = Number(req.query.userId) || getAuthUserId(req) || 0;

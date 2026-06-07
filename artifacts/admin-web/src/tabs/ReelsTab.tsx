@@ -82,6 +82,27 @@ type ReelsConfig = {
   };
 };
 
+type AdReviewCreative = {
+  id: number;
+  title: string;
+  format: string;
+  placement: string;
+  headline?: string;
+  description?: string;
+  image_url?: string | null;
+  video_url?: string | null;
+  cta_type?: string;
+  destination_url?: string;
+  play_store_url?: string;
+  app_store_url?: string;
+  app_name?: string;
+  campaign_name?: string;
+  company_name?: string;
+  advertiser_email?: string;
+  moderation_status: string;
+  created_at: string;
+};
+
 type ModerationVideo = {
   id: number;
   title: string;
@@ -108,7 +129,8 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [moderationQueue, setModerationQueue] = useState<ModerationVideo[]>([]);
-  const [subTab, setSubTab] = useState<"channels" | "rules" | "fraud" | "moderation">("channels");
+  const [subTab, setSubTab] = useState<"channels" | "rules" | "fraud" | "moderation" | "ads">("channels");
+  const [adReviewQueue, setAdReviewQueue] = useState<AdReviewCreative[]>([]);
   const [previewVideo, setPreviewVideo] = useState<ModerationVideo | null>(null);
   const [previewReadyIds, setPreviewReadyIds] = useState<Set<number>>(new Set());
   const [previewProgress, setPreviewProgress] = useState(0);
@@ -121,7 +143,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
 
   const load = useCallback(async () => {
     onErr(null);
-    const [st, ch, fe, cfg, mq] = await Promise.all([
+    const [st, ch, fe, cfg, mq, aq] = await Promise.all([
       adminApi<{ success: boolean; stats: ReelsStats }>("/admin/reels/stats"),
       adminApi<{ success: boolean; channels: ReelsChannel[] }>(
         `/admin/reels/channels?limit=100${search ? `&q=${encodeURIComponent(search)}` : ""}`,
@@ -129,12 +151,14 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
       adminApi<{ success: boolean; events: FraudEvent[] }>("/admin/reels/fraud-events?limit=50"),
       adminApi<{ success: boolean; config: ReelsConfig }>("/admin/reels/config"),
       adminApi<{ success: boolean; videos: ModerationVideo[] }>("/admin/reels/moderation-queue?limit=80"),
+      adminApi<{ success: boolean; creatives: AdReviewCreative[] }>("/admin/reels/ads/review-queue?limit=80"),
     ]);
     setStats(st.stats);
     setChannels(ch.channels ?? []);
     setFraudEvents(fe.events ?? []);
     setConfig(cfg.config);
     setModerationQueue(mq.videos ?? []);
+    setAdReviewQueue(aq.creatives ?? []);
   }, [search, onErr]);
 
   useEffect(() => {
@@ -254,6 +278,29 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
     }
   };
 
+  const approveAd = async (id: number, title: string) => {
+    if (!confirm(`Approve ad "${title}" for public display?`)) return;
+    try {
+      await adminApi(`/admin/reels/ads/${id}/approve`, { method: "POST" });
+      alert("Ad approved — now live on Videh.");
+      await load();
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : "Approve failed");
+    }
+  };
+
+  const rejectAd = async (id: number) => {
+    const reason = prompt("Rejection reason (shown to advertiser):", "Policy violation");
+    if (reason === null) return;
+    try {
+      await adminApi(`/admin/reels/ads/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) });
+      alert("Ad rejected.");
+      await load();
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : "Reject failed");
+    }
+  };
+
   const saveConfig = async () => {
     if (!config) return;
     setBusy(true);
@@ -279,7 +326,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
       <header className="admin-page__header">
         <h2 className="admin-page__title">Video / Reels Platform</h2>
         <p className="admin-page__sub">
-          YouTube-style channels, monetization rules, fraud detection, NSFW moderation, and subscriber notifications.
+          Videh Video channels, monetization rules, fraud detection, NSFW moderation, advertiser ads, and notifications.
         </p>
       </header>
 
@@ -319,6 +366,12 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
               <div className="stat-label">Pending NSFW review</div>
             </div>
           ) : null}
+          {adReviewQueue.length > 0 ? (
+            <div className="stat-card stat-card--warn">
+              <div className="stat-val">{adReviewQueue.length}</div>
+              <div className="stat-label">Pending ad review</div>
+            </div>
+          ) : null}
         </div>
       ) : (
         <p className="muted">Loading platform stats…</p>
@@ -337,6 +390,9 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
           </button>
           <button type="button" className={subTab === "moderation" ? "active" : ""} onClick={() => setSubTab("moderation")}>
             NSFW queue{moderationQueue.length > 0 ? ` (${moderationQueue.length})` : ""}
+          </button>
+          <button type="button" className={subTab === "ads" ? "active" : ""} onClick={() => setSubTab("ads")}>
+            Ad review{adReviewQueue.length > 0 ? ` (${adReviewQueue.length})` : ""}
           </button>
         </div>
         <div className="admin-toolbar__actions">
@@ -409,7 +465,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
 
       {subTab === "rules" && config ? (
         <div className="admin-card admin-rules" style={{ padding: "18px 20px" }}>
-          <h3>Monetization (YouTube Partner style)</h3>
+          <h3>Monetization (creator partner program)</h3>
           <label>
             Min subscribers
             <input
@@ -656,6 +712,79 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
               </div>
             </div>
           ) : null}
+        </>
+      ) : null}
+
+      {subTab === "ads" ? (
+        <>
+          <div className="admin-alert">
+            <strong>Advertiser ads — review before public</strong>
+            <p>
+              Dekho creative (image/video/links), policy check karo, phir <strong>Approve</strong> karo.
+              Approve ke baad hi ad home feed aur video player par dikhega.
+            </p>
+          </div>
+          <div className="admin-card">
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Ad</th>
+                    <th>Advertiser</th>
+                    <th>Format</th>
+                    <th>Preview</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adReviewQueue.map((ad) => (
+                    <tr key={ad.id}>
+                      <td>
+                        <strong>{ad.headline || ad.title}</strong>
+                        <div className="muted">{ad.campaign_name} · #{ad.id}</div>
+                        {ad.description ? <div className="muted" style={{ maxWidth: 280 }}>{ad.description}</div> : null}
+                      </td>
+                      <td>
+                        <div>{ad.company_name}</div>
+                        <div className="muted">{ad.advertiser_email}</div>
+                      </td>
+                      <td>
+                        <span className="badge-pill badge-pill--muted">{ad.format}</span>
+                        <div className="muted">{ad.placement}</div>
+                      </td>
+                      <td>
+                        {ad.image_url ? (
+                          <a href={ad.image_url} target="_blank" rel="noreferrer">
+                            <img src={ad.image_url} alt="" style={{ width: 120, height: 68, objectFit: "cover", borderRadius: 6 }} />
+                          </a>
+                        ) : ad.video_url ? (
+                          <a href={ad.video_url} target="_blank" rel="noreferrer" className="btn-sm">Open video</a>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                        {ad.destination_url ? <div className="muted" style={{ fontSize: 11 }}>{ad.destination_url}</div> : null}
+                        {ad.play_store_url ? <div className="muted" style={{ fontSize: 11 }}>Play Store</div> : null}
+                        {ad.app_store_url ? <div className="muted" style={{ fontSize: 11 }}>App Store</div> : null}
+                      </td>
+                      <td>
+                        <div className="action-btns">
+                          <button type="button" className="btn-sm btn-sm-primary" onClick={() => void approveAd(ad.id, ad.title)}>
+                            Approve
+                          </button>
+                          <button type="button" className="btn-sm btn-sm-danger" onClick={() => void rejectAd(ad.id)}>
+                            Reject
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {adReviewQueue.length === 0 ? (
+                <p className="admin-empty">Koi pending advertiser ad nahi.</p>
+              ) : null}
+            </div>
+          </div>
         </>
       ) : null}
 

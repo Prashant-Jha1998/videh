@@ -16,6 +16,18 @@ type Pricing = {
   objectives: Array<{ id: string; label: string; bidModel: string; defaultBid: number }>;
 };
 type Nav = "overview" | "campaigns" | "ads" | "billing";
+type AdCreative = {
+  id: number;
+  title: string;
+  format: string;
+  placement: string;
+  moderation_status: string;
+  moderation_reason?: string | null;
+  impressions: string;
+  clicks: string;
+  campaign_name: string;
+  created_at: string;
+};
 type WalletConfig = {
   razorpayConfigured: boolean;
   razorpayKeyId: string | null;
@@ -94,23 +106,27 @@ export default function App() {
   const [walletConfig, setWalletConfig] = useState<WalletConfig | null>(null);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [paying, setPaying] = useState(false);
+  const [creatives, setCreatives] = useState<AdCreative[]>([]);
+  const [successMsg, setSuccessMsg] = useState("");
 
   const loadDash = useCallback(async () => {
     const me = await api<{ success: boolean; advertiser?: Advertiser }>("/me");
     if (!me.success || !me.advertiser) { setScreen("auth"); return; }
     setAdvertiser(me.advertiser);
-    const [c, s, p, w, pay] = await Promise.all([
+    const [c, s, p, w, pay, cr] = await Promise.all([
       api<{ success: boolean; campaigns: Campaign[] }>("/campaigns"),
       api<{ success: boolean; stats: Stats }>("/stats"),
       api<{ success: boolean; pricing: Pricing }>("/pricing"),
       api<{ success: boolean } & WalletConfig>("/wallet/config"),
       api<{ success: boolean; payments: PaymentRow[] }>("/wallet/payments"),
+      api<{ success: boolean; creatives: AdCreative[] }>("/creatives"),
     ]);
     if (c.success) setCampaigns(c.campaigns);
     if (s.success) setStats(s.stats);
     if (p.success) setPricing(p.pricing);
     if (w.success) setWalletConfig(w);
     if (pay.success) setPayments(pay.payments ?? []);
+    if (cr.success) setCreatives(cr.creatives ?? []);
     setScreen("dash");
   }, []);
 
@@ -189,6 +205,7 @@ export default function App() {
       if (res.code === "PAYMENT_REQUIRED") setNav("billing");
       return;
     }
+    setSuccessMsg(res.message ?? "Ad submitted for Videh admin review.");
     setCreativeTitle(""); setHeadline(""); setDescription("");
     setImageUrl(""); setVideoUrl(""); setDestinationUrl("");
     await loadDash();
@@ -268,7 +285,7 @@ export default function App() {
             <div style={S.logoMark}>V</div>
             <div>
               <h1 style={S.h1}>Videh Ads</h1>
-              <p style={S.sub}>Google Ads-style campaigns for Videh Video</p>
+              <p style={S.sub}>Professional ad campaigns for Videh Video</p>
             </div>
           </div>
           <div style={S.tabRow}>
@@ -314,7 +331,7 @@ export default function App() {
         <header style={S.topBar}>
           <div>
             <h2 style={{ margin: 0, fontSize: 20 }}>{advertiser?.company_name}</h2>
-            <p style={S.sub}>Run ads on Videh home feed & video player — YouTube-style</p>
+            <p style={S.sub}>Run ads on Videh home feed and video player</p>
           </div>
         </header>
 
@@ -337,10 +354,11 @@ export default function App() {
                 <Stat label="Completed views" value={stats?.completions ?? "0"} />
                 <Stat label="Spend" value={`₹${Number(stats?.spent_inr ?? 0).toFixed(0)}`} />
               </div>
-              <Panel title="How Videh Ads work (like Google Ads)">
+              <Panel title="How Videh Ads work">
                 <ul style={S.list}>
                   <li><strong>Home feed:</strong> Sponsored card every {pricing?.feedAdEveryVideos ?? 2} videos — app install, shopping, image ads</li>
                   <li><strong>Video watch:</strong> 30s non-skippable + 60s skippable pre-roll; mid-roll on long videos</li>
+                  <li><strong>Admin review:</strong> Har ad Videh team approve karegi — tabhi public hoga</li>
                   <li><strong>CPM</strong> ₹{pricing?.feedCpmInr}/1k impressions · <strong>CPC</strong> ₹{pricing?.feedCpcInr}/click · <strong>CPI</strong> ₹{pricing?.appInstallCpiInr}/store tap</li>
                 </ul>
               </Panel>
@@ -411,10 +429,38 @@ export default function App() {
           )}
 
           {nav === "ads" && (
+            <>
+            <Panel title="Your ads">
+              {creatives.length === 0 ? <p style={S.sub}>No ads yet.</p> : (
+                <table style={S.table}>
+                  <thead>
+                    <tr>
+                      <th style={S.th}>Title</th>
+                      <th style={S.th}>Campaign</th>
+                      <th style={S.th}>Status</th>
+                      <th style={S.th}>Impressions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {creatives.map((cr) => (
+                      <tr key={cr.id}>
+                        <td style={S.td}>{cr.title}</td>
+                        <td style={S.td}>{cr.campaign_name}</td>
+                        <td style={S.td}>
+                          <StatusBadge status={cr.moderation_status} reason={cr.moderation_reason} />
+                        </td>
+                        <td style={S.td}>{cr.impressions}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Panel>
             <Panel title="Create ad">
               {!canPublish ? (
                 <p style={S.err}>Pay and add funds before publishing ads.</p>
               ) : null}
+              {successMsg ? <p style={{ color: "#188038", fontSize: 14 }}>{successMsg}</p> : null}
               <div style={S.formatTabs}>
                 {(["shopping", "app_install", "image", "video"] as const).map((f) => (
                   <button key={f} type="button" style={adFormat === f ? S.formatOn : S.formatTab}
@@ -485,8 +531,12 @@ export default function App() {
                 </div>
               </div>
 
-              <button type="button" style={S.primary} disabled={!canPublish} onClick={() => void createCreative()}>Publish ad</button>
+              <button type="button" style={S.primary} disabled={!canPublish} onClick={() => void createCreative()}>Submit for review</button>
+              <p style={{ fontSize: 12, color: "#80868b", marginTop: 10 }}>
+                Ad public tab tak nahi dikhega jab tak Videh admin approve na kare.
+              </p>
             </Panel>
+            </>
           )}
 
           {nav === "billing" && (
@@ -565,6 +615,24 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label style={S.field}><span style={S.fieldL}>{label}</span>{children}</label>;
+}
+
+function StatusBadge({ status, reason }: { status: string; reason?: string | null }) {
+  const colors: Record<string, string> = {
+    pending_review: "#e37400",
+    approved: "#188038",
+    rejected: "#d93025",
+  };
+  const labels: Record<string, string> = {
+    pending_review: "Pending review",
+    approved: "Live",
+    rejected: "Rejected",
+  };
+  return (
+    <span title={reason ?? undefined} style={{ color: colors[status] ?? "#5f6368", fontWeight: 600, fontSize: 13 }}>
+      {labels[status] ?? status}
+    </span>
+  );
 }
 
 const S: Record<string, React.CSSProperties> = {

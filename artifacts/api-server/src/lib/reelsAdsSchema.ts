@@ -114,4 +114,8 @@ async function ensureReelsAdsV2Columns(): Promise<void> {
   await query(`ALTER TABLE reels_ad_creatives ALTER COLUMN video_url DROP NOT NULL`);
   await query(`ALTER TABLE reels_ad_impressions ADD COLUMN IF NOT EXISTS clicked BOOLEAN NOT NULL DEFAULT FALSE`);
   await query(`ALTER TABLE reels_ad_impressions ADD COLUMN IF NOT EXISTS cost_inr NUMERIC(10, 4) NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS moderation_status VARCHAR(24) NOT NULL DEFAULT 'pending_review'`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS moderation_reason TEXT`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(120)`);
 }

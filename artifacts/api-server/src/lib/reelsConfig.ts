@@ -60,7 +60,7 @@ export type ReelsPrivacyRules = {
   summary: string[];
 };
 
-/** YouTube-style pre-roll + mid-roll + home feed ads (Google Ads billing). */
+/** Videh video ads: pre-roll, mid-roll, and home feed placements with wallet billing. */
 export type ReelsAdsRules = {
   enabled: boolean;
   preRollNonSkipSeconds: number;
@@ -198,6 +198,7 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
       "Home feed: sponsored cards every 2 videos (app install, shopping, image)",
       "Billing: CPM impressions · CPC clicks · CPI app-store taps · CPV video completions",
       "Creators watching their own uploads do not see ads",
+      "All advertiser ads require Videh admin approval before going public",
       "Advertisers manage campaigns at ads.videh.co.in",
     ],
   },

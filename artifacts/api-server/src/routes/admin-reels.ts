@@ -25,6 +25,7 @@ import type { AdminIdentity } from "../lib/adminSession";
 import { processPendingReelsModeration } from "../lib/reelsModerationQueue";
 import { notifySubscribersNewVideo } from "../lib/reelsNotifications";
 import { ensureReelsModerationColumns, ensureReelsTables } from "../lib/reelsSchema";
+import { ensureReelsAdsTables } from "../lib/reelsAdsSchema";
 import { requireAnyPermission, requirePermission, type RequireAdmin } from "./admin-rbac";
 
 const adminRoutesDir = path.dirname(fileURLToPath(import.meta.url));
@@ -321,6 +322,93 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
       await logAdminAction({ action: "reels_video_reject", entityType: "reels_video", entityId: videoId, metadata: { reason } }, req);
       res.json({ success: true });
     } catch (err) {
+      res.status(500).json({ success: false, message: "Reject failed" });
+    }
+  });
+
+  router.get("/reels/ads/review-queue", requireAdmin, requireAnyPermission("reels.read", "moderation.read"), async (req, res) => {
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    try {
+      await ensureReelsAdsTables();
+      const r = await query(
+        `SELECT cr.id, cr.title, cr.format, cr.placement, cr.headline, cr.description,
+                cr.image_url, cr.video_url, cr.cta_type, cr.destination_url,
+                cr.play_store_url, cr.app_store_url, cr.app_name, cr.ad_type,
+                cr.moderation_status, cr.moderation_reason, cr.created_at,
+                camp.name AS campaign_name, adv.company_name, adv.email AS advertiser_email
+         FROM reels_ad_creatives cr
+         JOIN reels_ad_campaigns camp ON camp.id = cr.campaign_id
+         JOIN reels_advertisers adv ON adv.id = camp.advertiser_id
+         WHERE cr.moderation_status = 'pending_review'
+         ORDER BY cr.created_at ASC
+         LIMIT $1`,
+        [limit],
+      );
+      const creatives = r.rows.map((row) => {
+        const rec = row as Record<string, unknown>;
+        return {
+          ...rec,
+          image_url: rec.image_url ? resolveStoredMediaUrl(req, rec.image_url) : null,
+          video_url: rec.video_url ? resolveStoredMediaUrl(req, rec.video_url) : null,
+        };
+      });
+      res.json({ success: true, creatives });
+    } catch {
+      res.status(500).json({ success: false, message: "Failed to load ad review queue" });
+    }
+  });
+
+  router.post("/reels/ads/:creativeId/approve", requireAdmin, requireAnyPermission("reels.manage", "moderation.manage"), async (req, res) => {
+    const creativeId = Number(req.params.creativeId);
+    const admin = req.admin as AdminIdentity;
+    try {
+      await ensureReelsAdsTables();
+      const r = await query(
+        `UPDATE reels_ad_creatives
+         SET moderation_status = 'approved', moderation_reason = NULL,
+             reviewed_at = NOW(), reviewed_by = $2
+         WHERE id = $1 AND moderation_status = 'pending_review'
+         RETURNING id, title`,
+        [creativeId, admin.email || `admin_${admin.adminId}`],
+      );
+      if (!r.rows.length) {
+        res.status(404).json({ success: false, message: "Ad not found or already reviewed" });
+        return;
+      }
+      await logAdminAction({ action: "reels_ad_approve", entityType: "reels_ad_creative", entityId: creativeId }, req);
+      res.json({ success: true, creative: r.rows[0] });
+    } catch {
+      res.status(500).json({ success: false, message: "Approve failed" });
+    }
+  });
+
+  router.post("/reels/ads/:creativeId/reject", requireAdmin, requireAnyPermission("reels.manage", "moderation.manage"), async (req, res) => {
+    const creativeId = Number(req.params.creativeId);
+    const admin = req.admin as AdminIdentity;
+    const reason = String((req.body as { reason?: string }).reason ?? "").trim()
+      || "Rejected by Videh admin — policy violation";
+    try {
+      await ensureReelsAdsTables();
+      const r = await query(
+        `UPDATE reels_ad_creatives
+         SET moderation_status = 'rejected', moderation_reason = $3, is_active = FALSE,
+             reviewed_at = NOW(), reviewed_by = $2
+         WHERE id = $1 AND moderation_status IN ('pending_review', 'approved')
+         RETURNING id, title`,
+        [creativeId, admin.email || `admin_${admin.adminId}`, reason],
+      );
+      if (!r.rows.length) {
+        res.status(404).json({ success: false, message: "Ad not found" });
+        return;
+      }
+      await logAdminAction({
+        action: "reels_ad_reject",
+        entityType: "reels_ad_creative",
+        entityId: creativeId,
+        metadata: { reason },
+      }, req);
+      res.json({ success: true, creative: r.rows[0] });
+    } catch {
       res.status(500).json({ success: false, message: "Reject failed" });
     }
   });
