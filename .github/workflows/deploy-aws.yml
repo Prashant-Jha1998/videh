@@ -46,6 +46,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm --filter @workspace/api-server run build:api
           BASE_PATH=/ pnpm --filter @workspace/admin-web build
+          BASE_PATH=/ pnpm --filter @workspace/ads-web build
           BASE_PATH=/ pnpm --filter @workspace/videh-web build
           BASE_PATH=/ pnpm --filter @workspace/developer-web build
 
