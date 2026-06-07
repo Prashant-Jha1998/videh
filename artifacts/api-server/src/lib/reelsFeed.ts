@@ -10,6 +10,7 @@ const FEED_BASE_SELECT = `
          c.handle AS channel_handle,
          c.display_name AS channel_display_name,
          c.avatar_url AS channel_avatar_url,
+         c.updated_at AS channel_updated_at,
          r.reaction AS my_reaction
   FROM reels_videos v
   JOIN reels_channels c ON c.id = v.channel_id
@@ -102,6 +103,7 @@ export async function fetchRankedReelsFeed(
               c.handle AS channel_handle,
               c.display_name AS channel_display_name,
               c.avatar_url AS channel_avatar_url,
+              c.updated_at AS channel_updated_at,
               c.fraud_score AS channel_fraud_score,
               r.reaction AS my_reaction,
               EXISTS(

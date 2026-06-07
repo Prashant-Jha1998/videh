@@ -256,7 +256,11 @@ export default function ReelsChannelScreen() {
             </View>
             <View style={styles.infoRow}>
               {channel.avatarUrl ? (
-                <Image source={{ uri: channel.avatarUrl }} style={styles.smallAvatar} />
+                <Image
+                  source={{ uri: channel.avatarUrl }}
+                  style={styles.smallAvatar}
+                  cacheKey={`avatar-${channel.id}-${channel.avatarUrl}`}
+                />
               ) : (
                 <View style={[styles.smallAvatar, { backgroundColor: colors.primary }]} />
               )}

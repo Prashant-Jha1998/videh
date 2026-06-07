@@ -133,7 +133,12 @@ export default function VideoTabScreen() {
             onPress={() => item.channelHandle && router.push({ pathname: "/reels/channel/[handle]", params: { handle: item.channelHandle } })}
           >
             {item.channelAvatarUrl ? (
-              <Image source={{ uri: item.channelAvatarUrl }} style={styles.channelAvatar} contentFit="cover" />
+              <Image
+                source={{ uri: item.channelAvatarUrl }}
+                style={styles.channelAvatar}
+                contentFit="cover"
+                cacheKey={`ch-avatar-${item.channelId}-${item.channelAvatarUrl}`}
+              />
             ) : (
               <View style={[styles.channelAvatar, { backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }]}>
                 <Text style={{ color: "#fff", fontFamily: "Inter_700Bold" }}>{(item.channelHandle ?? "?")[0]?.toUpperCase()}</Text>

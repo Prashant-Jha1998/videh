@@ -160,7 +160,7 @@ function mapVideoRow(row: Record<string, unknown>, req?: Request) {
     channelHandle: row.channel_handle ?? null,
     channelDisplayName: channelLabel,
     channelAvatarUrl: req && row.channel_id
-      ? resolveChannelBrandingPublicUrl(req, Number(row.channel_id), avatar, "avatar", row.updated_at)
+      ? resolveChannelBrandingPublicUrl(req, Number(row.channel_id), avatar, "avatar", row.channel_updated_at ?? row.updated_at)
       : (avatar ?? null),
     myReaction: row.my_reaction ?? null,
     createdAt: row.created_at,
@@ -586,7 +586,7 @@ router.get("/channel/:handle", async (req: Request, res: Response) => {
     const isOwner = viewerId > 0 && Number(channelRow.user_id) === viewerId;
     const videos = await query(
       `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
-              c.avatar_url AS channel_avatar_url
+              c.avatar_url AS channel_avatar_url, c.updated_at AS channel_updated_at
        FROM reels_videos v JOIN reels_channels c ON c.id = v.channel_id
        WHERE v.channel_id = $1
          AND ($2::boolean OR (v.status = 'published' AND v.play_enabled = TRUE))
@@ -654,7 +654,7 @@ router.get("/search", async (req: Request, res: Response) => {
       ),
       query(
         `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
-                c.avatar_url AS channel_avatar_url
+                c.avatar_url AS channel_avatar_url, c.updated_at AS channel_updated_at
          FROM reels_videos v JOIN reels_channels c ON c.id = v.channel_id
          WHERE v.status = 'published' AND v.play_enabled = TRUE
            AND (LOWER(v.title) LIKE $1
@@ -742,7 +742,7 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
     );
     const row = inserted.rows[0] as Record<string, unknown>;
     const videoId = Number(row.id);
-    const channel = await query("SELECT handle, avatar_url FROM reels_channels WHERE id = $1", [row.channel_id]);
+    const channel = await query("SELECT handle, avatar_url, updated_at FROM reels_channels WHERE id = $1", [row.channel_id]);
     const chRow = channel.rows[0] as Record<string, unknown> | undefined;
     const channelId = Number(row.channel_id);
     const handle = String(chRow?.handle ?? "");
@@ -784,6 +784,7 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
         ...finalRow,
         channel_handle: chRow?.handle,
         channel_avatar_url: chRow?.avatar_url,
+        channel_updated_at: chRow?.updated_at,
       }, req),
     });
   } catch (err) {
@@ -803,7 +804,8 @@ router.get("/videos/:videoId", async (req: Request, res: Response) => {
     await ensureReelsTables();
     const result = await query(
       `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
-              c.avatar_url AS channel_avatar_url, c.user_id AS channel_owner_id, r.reaction AS my_reaction
+              c.avatar_url AS channel_avatar_url, c.updated_at AS channel_updated_at,
+              c.user_id AS channel_owner_id, r.reaction AS my_reaction
        FROM reels_videos v
        JOIN reels_channels c ON c.id = v.channel_id
        LEFT JOIN reels_video_reactions r ON r.video_id = v.id AND r.user_id = $2

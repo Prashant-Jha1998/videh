@@ -25,7 +25,6 @@ import { DismissibleModal } from "@/components/DismissibleModal";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
-  deleteReelsVideo,
   fetchReelsChannel,
   fetchReelsComments,
   fetchReelsFeed,
@@ -163,35 +162,6 @@ export default function ReelsWatchScreen() {
     void load();
   };
 
-  const confirmDeleteVideo = () => {
-    if (!user?.dbId || !video || !channel?.isOwner) return;
-    Alert.alert(
-      "Delete video permanently?",
-      `"${video.title}" hamesha ke liye delete ho jayega. Undo nahi hoga.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              const res = await deleteReelsVideo(video.id, user.dbId!, user.sessionToken);
-              if (!res.success) {
-                Alert.alert("Delete failed", res.message ?? "Phir se try karein.");
-                return;
-              }
-              if (video.channelHandle) {
-                router.replace({ pathname: "/reels/channel/[handle]", params: { handle: video.channelHandle } });
-              } else {
-                router.replace("/(tabs)/video");
-              }
-            })();
-          },
-        },
-      ],
-    );
-  };
-
   const sendComment = async () => {
     if (!user?.dbId || !commentText.trim() || !id) return;
     await postReelsComment(Number(id), user.dbId, commentText.trim(), user.sessionToken);
@@ -246,7 +216,12 @@ export default function ReelsWatchScreen() {
       </View>
       <View style={styles.infoRow}>
         {item.channelAvatarUrl ? (
-          <Image source={{ uri: item.channelAvatarUrl }} style={styles.channelAvatar} contentFit="cover" />
+          <Image
+            source={{ uri: item.channelAvatarUrl }}
+            style={styles.channelAvatar}
+            contentFit="cover"
+            cacheKey={`ch-avatar-${item.channelId}-${item.channelAvatarUrl}`}
+          />
         ) : (
           <View style={[styles.channelAvatar, { backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }]}>
             <Text style={{ color: "#fff", fontFamily: "Inter_700Bold", fontSize: 12 }}>
@@ -286,6 +261,7 @@ export default function ReelsWatchScreen() {
             player={player}
             contentFit="contain"
             nativeControls
+            fullscreenOptions={{ enable: true, orientation: "landscape" }}
           />
         ) : (
           <View style={[styles.player, styles.blockedPlayer]}>
@@ -296,12 +272,6 @@ export default function ReelsWatchScreen() {
             <Text style={styles.blockedText}>
               {video.moderationReason ?? playBlockReasons.join(" · ") ?? "This video is not public yet."}
             </Text>
-            {channel?.isOwner ? (
-              <TouchableOpacity style={styles.deleteOwnBtn} onPress={confirmDeleteVideo}>
-                <Ionicons name="trash-outline" size={18} color="#fff" />
-                <Text style={styles.deleteOwnBtnText}>Delete video</Text>
-              </TouchableOpacity>
-            ) : null}
           </View>
         )}
         <TouchableOpacity
@@ -333,7 +303,11 @@ export default function ReelsWatchScreen() {
                 onPress={() => video.channelHandle && router.push({ pathname: "/reels/channel/[handle]", params: { handle: video.channelHandle } })}
               >
                 {video.channelAvatarUrl ? (
-                  <Image source={{ uri: video.channelAvatarUrl }} style={styles.chipAvatar} />
+                  <Image
+                    source={{ uri: video.channelAvatarUrl }}
+                    style={styles.chipAvatar}
+                    cacheKey={`ch-avatar-${video.channelId}-${video.channelAvatarUrl}`}
+                  />
                 ) : (
                   <View style={[styles.chipAvatar, { backgroundColor: colors.primary }]} />
                 )}
@@ -382,16 +356,6 @@ export default function ReelsWatchScreen() {
                 <Ionicons name="share-outline" size={16} color={colors.foreground} />
                 <Text style={[styles.chipText, { color: colors.foreground }]}>Share</Text>
               </TouchableOpacity>
-
-              {channel?.isOwner ? (
-                <TouchableOpacity
-                  style={[styles.chip, { backgroundColor: colors.card, borderColor: "#e53935" }]}
-                  onPress={confirmDeleteVideo}
-                >
-                  <Ionicons name="trash-outline" size={16} color="#e53935" />
-                  <Text style={[styles.chipText, { color: "#e53935" }]}>Delete</Text>
-                </TouchableOpacity>
-              ) : null}
             </ScrollView>
 
             {video.description ? (
@@ -586,18 +550,6 @@ const styles = StyleSheet.create({
   blockedPlayer: { alignItems: "center", justifyContent: "center", padding: 20 },
   blockedTitle: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 16, marginTop: 12 },
   blockedText: { color: "#ccc", textAlign: "center", marginTop: 8, fontSize: 13 },
-  deleteOwnBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.5)",
-  },
-  deleteOwnBtnText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 14 },
   headerBlock: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 },
   vTitle: { fontSize: 16, fontFamily: "Inter_700Bold", lineHeight: 22 },
   metaLine: { fontSize: 13, marginTop: 6 },
