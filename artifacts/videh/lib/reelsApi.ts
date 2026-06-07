@@ -155,10 +155,13 @@ export async function autoThumbnailFromVideo(videoUri: string, durationSeconds =
 export function normalizeReelsMediaUrl(url?: string | null): string | null {
   const raw = String(url ?? "").trim();
   if (!raw) return null;
+  if (/^https?:\/\//i.test(raw) || raw.startsWith("data:")) return raw;
+  const base = getApiUrl().replace(/\/$/, "");
+  if (raw.startsWith("/api/")) return `${base}${raw}`;
   const uploadsPath = raw.match(/\/uploads\/[^\s?#]+/)?.[0]
     ?? (raw.startsWith("uploads/") ? `/${raw.split(/[?#]/)[0]}` : null);
   if (uploadsPath) {
-    return `${getApiUrl().replace(/\/$/, "")}${uploadsPath}`;
+    return `${base}${uploadsPath}`;
   }
   return resolvePublicAssetUrl(raw) ?? raw;
 }

@@ -8,7 +8,13 @@ import { query } from "../lib/db";
 import { assertSameUser, getAuthUserId } from "../lib/auth";
 import { ensureVideoThumbnail } from "../lib/reelsAutoThumbnail";
 import { permanentlyDeleteReelsVideo } from "../lib/reelsDeleteVideo";
-import { localPathForUploadsRel, publicMediaUrl, resolveStoredMediaUrl, uploadsRelPathFromStoredUrl } from "../lib/mediaStorage";
+import {
+  detectImageMimeType,
+  localPathForUploadsRel,
+  publicMediaUrl,
+  resolveStoredMediaUrl,
+  uploadsRelPathFromStoredUrl,
+} from "../lib/mediaStorage";
 import {
   ensureReelsTables,
   MAX_REELS_VIDEO_SECONDS,
@@ -42,9 +48,19 @@ const reelsUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, reelsUploadsDir),
     filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname || "") || ".mp4";
-      const safeExt = ext.replace(/[^.\w]/g, "") || ".mp4";
-      cb(null, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${safeExt}`);
+      const isImageField =
+        file.fieldname === "avatar"
+        || file.fieldname === "cover"
+        || file.fieldname === "thumbnail"
+        || /^image\//.test(file.mimetype);
+      const fallbackExt = isImageField ? ".jpg" : ".mp4";
+      const ext = path.extname(file.originalname || "") || fallbackExt;
+      const safeExt = ext.replace(/[^.\w]/g, "") || fallbackExt;
+      const prefix = file.fieldname === "avatar" ? "avatar"
+        : file.fieldname === "cover" ? "cover"
+          : file.fieldname === "thumbnail" ? "thumb"
+            : "media";
+      cb(null, `${prefix}_${Date.now()}_${crypto.randomBytes(6).toString("hex")}${safeExt}`);
     },
   }),
   limits: { fileSize: 2 * 1024 * 1024 * 1024 },
@@ -143,10 +159,27 @@ function mapVideoRow(row: Record<string, unknown>, req?: Request) {
     moderationReason: row.moderation_reason ?? null,
     channelHandle: row.channel_handle ?? null,
     channelDisplayName: channelLabel,
-    channelAvatarUrl: req ? proxyReelsImageUrl(req, avatar) : (avatar ?? null),
+    channelAvatarUrl: req && row.channel_id
+      ? resolveChannelBrandingPublicUrl(req, Number(row.channel_id), avatar, "avatar", row.updated_at)
+      : (avatar ?? null),
     myReaction: row.my_reaction ?? null,
     createdAt: row.created_at,
   };
+}
+
+function resolveChannelBrandingPublicUrl(
+  req: Request,
+  channelId: number,
+  storedUrl: unknown,
+  kind: "avatar" | "cover",
+  cacheVersion?: unknown,
+): string | null {
+  const raw = String(storedUrl ?? "").trim();
+  if (!raw) return null;
+  if (needsReelsImageProxy(raw)) return proxyReelsImageUrl(req, raw);
+  const v = cacheVersion != null ? encodeURIComponent(String(cacheVersion)) : "";
+  const q = v ? `?v=${v}` : "";
+  return publicMediaUrl(req, `/api/reels/channels/${channelId}/${kind}${q}`);
 }
 
 function mapPublicChannelResponse(
@@ -155,9 +188,52 @@ function mapPublicChannelResponse(
   viewerId?: number,
 ): Record<string, unknown> {
   const ch = mapPublicReelsChannel(row, viewerId);
-  if (ch.avatarUrl) ch.avatarUrl = proxyReelsImageUrl(req, ch.avatarUrl);
-  if (ch.coverUrl) ch.coverUrl = proxyReelsImageUrl(req, ch.coverUrl);
+  const channelId = Number(row.id);
+  const version = row.updated_at ?? row.created_at;
+  if (ch.avatarUrl) {
+    ch.avatarUrl = resolveChannelBrandingPublicUrl(req, channelId, row.avatar_url, "avatar", version);
+  }
+  if (ch.coverUrl) {
+    ch.coverUrl = resolveChannelBrandingPublicUrl(req, channelId, row.cover_url, "cover", version);
+  }
   return ch;
+}
+
+async function serveChannelBrandingAsset(
+  req: Request,
+  res: Response,
+  kind: "avatar" | "cover",
+): Promise<void> {
+  const channelId = Number(req.params.channelId);
+  if (!channelId) {
+    res.status(400).end();
+    return;
+  }
+  const column = kind === "avatar" ? "avatar_url" : "cover_url";
+  try {
+    const row = await query(`SELECT ${column} AS asset_url FROM reels_channels WHERE id = $1`, [channelId]);
+    if (!row.rows.length) {
+      res.status(404).end();
+      return;
+    }
+    const stored = String(row.rows[0].asset_url ?? "").trim();
+    if (!stored) {
+      res.status(404).end();
+      return;
+    }
+    const uploadsRoot = path.join(apiServerDir, "uploads");
+    const filePath = localPathForUploadsRel(stored, uploadsRoot);
+    if (!filePath || !fs.existsSync(filePath)) {
+      res.status(404).end();
+      return;
+    }
+    res.type(detectImageMimeType(filePath));
+    res.setHeader("Cache-Control", "public, max-age=600");
+    res.sendFile(filePath);
+  } catch (err) {
+    req.log.error({ err, channelId, kind }, "reels channel branding asset");
+    res.status(500).end();
+  }
 }
 
 function runChannelBrandingUpload(req: Request, res: Response, next: NextFunction): void {
@@ -270,6 +346,14 @@ router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
     req.log.error({ err, videoId }, "reels video thumbnail");
     res.status(500).end();
   }
+});
+
+router.get("/channels/:channelId/avatar", async (req: Request, res: Response) => {
+  await serveChannelBrandingAsset(req, res, "avatar");
+});
+
+router.get("/channels/:channelId/cover", async (req: Request, res: Response) => {
+  await serveChannelBrandingAsset(req, res, "cover");
 });
 
 router.get("/rules", async (_req: Request, res: Response) => {

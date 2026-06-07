@@ -38,6 +38,26 @@ export function storedUploadFileExists(url: unknown, uploadsRootDir: string): bo
   return Boolean(local && fs.existsSync(local));
 }
 
+/** Detect JPEG/PNG/WebP from file header (works even when extension is wrong, e.g. .mp4). */
+export function detectImageMimeType(filePath: string): string {
+  try {
+    const fd = fs.openSync(filePath, "r");
+    const buf = Buffer.alloc(12);
+    fs.readSync(fd, buf, 0, 12, 0);
+    fs.closeSync(fd);
+    if (buf[0] === 0xff && buf[1] === 0xd8) return "image/jpeg";
+    if (buf[0] === 0x89 && buf[1] === 0x50) return "image/png";
+    if (buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+  } catch {
+    /* fall through */
+  }
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  return "image/jpeg";
+}
+
 export function publicMediaUrl(req: Request, relPath: string): string {
   const cdnBase = (process.env["MEDIA_PUBLIC_BASE_URL"] || process.env["CDN_BASE_URL"] || "").replace(/\/+$/, "");
   if (cdnBase) return `${cdnBase}${relPath}`;

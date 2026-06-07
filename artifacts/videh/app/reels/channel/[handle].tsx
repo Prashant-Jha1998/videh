@@ -126,7 +126,12 @@ export default function ReelsChannelScreen() {
           <>
             <View style={styles.coverWrap}>
               {channel.coverUrl ? (
-                <Image source={{ uri: channel.coverUrl }} style={styles.cover} contentFit="cover" />
+                <Image
+                  source={{ uri: channel.coverUrl }}
+                  style={styles.cover}
+                  contentFit="cover"
+                  cacheKey={`cover-${channel.id}-${channel.coverUrl}`}
+                />
               ) : (
                 <View style={[styles.cover, { backgroundColor: colors.primary }]} />
               )}
@@ -145,7 +150,11 @@ export default function ReelsChannelScreen() {
             <View style={styles.profile}>
               <View style={styles.avatarOverlap}>
                 {channel.avatarUrl ? (
-                  <Image source={{ uri: channel.avatarUrl }} style={styles.avatar} />
+                  <Image
+                    source={{ uri: channel.avatarUrl }}
+                    style={styles.avatar}
+                    cacheKey={`avatar-${channel.id}-${channel.avatarUrl}`}
+                  />
                 ) : (
                   <View style={[styles.avatar, { backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }]}>
                     <Text style={{ color: "#fff", fontSize: 28, fontFamily: "Inter_700Bold" }}>@</Text>
