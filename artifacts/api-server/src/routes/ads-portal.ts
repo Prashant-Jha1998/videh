@@ -29,6 +29,7 @@ import { getReelsPlatformConfig } from "../lib/reelsConfig";
 import { AD_FORMATS_CATALOG, findAdFormat } from "../lib/adFormatsCatalog";
 import { getAdvertiserDashboard } from "../lib/adsAnalytics";
 import { getRazorpayConfig } from "../lib/razorpay";
+import { resolveGoogleOAuthClientId, verifyGoogleIdToken } from "../lib/googleIdTokenVerify";
 
 const router = Router();
 const adsUploadsDir = path.join(process.cwd(), "uploads", "reels", "ads");
@@ -67,6 +68,15 @@ function requireAdsUser(req: Request, res: Response) {
   }
   return user;
 }
+
+router.get("/config", (_req, res) => {
+  const googleClientId = resolveGoogleOAuthClientId();
+  res.json({
+    success: true,
+    googleSignInEnabled: Boolean(googleClientId),
+    googleClientId: googleClientId ?? undefined,
+  });
+});
 
 router.get("/me", async (req, res) => {
   const user = getAdsPortalUser(req);
@@ -123,6 +133,115 @@ router.post("/register", async (req, res) => {
   } catch (err: unknown) {
     const msg = String((err as { code?: string })?.code) === "23505" ? "Email already registered" : "Registration failed";
     res.status(400).json({ success: false, message: msg });
+  }
+});
+
+router.post("/google", async (req, res) => {
+  if (!adsPortalSessionConfigured()) {
+    res.status(503).json({ success: false, message: "Ads portal not configured (set SESSION_SECRET)." });
+    return;
+  }
+  const clientId = resolveGoogleOAuthClientId();
+  if (!clientId) {
+    res.status(503).json({ success: false, message: "Google sign-in is not configured (set DEVELOPER_GOOGLE_CLIENT_ID)." });
+    return;
+  }
+  const credential = String((req.body as { credential?: string }).credential ?? "").trim();
+  if (!credential) {
+    res.status(400).json({ success: false, message: "Google credential is required" });
+    return;
+  }
+  try {
+    const profile = await verifyGoogleIdToken(credential, clientId);
+    if (!profile) {
+      res.status(401).json({ success: false, message: "Invalid or expired Google sign-in. Try again." });
+      return;
+    }
+    await ensureReelsAdsTables();
+    const email = profile.email.trim().toLowerCase();
+
+    let row = await query(
+      `SELECT id, email, company_name, status, balance_inr
+       FROM reels_advertisers WHERE google_sub = $1 LIMIT 1`,
+      [profile.sub],
+    ).then((r) => r.rows[0] as {
+      id: number;
+      email: string;
+      company_name: string;
+      status: string;
+      balance_inr: string;
+    } | undefined);
+
+    if (!row) {
+      const byEmail = await query(
+        `SELECT id, email, company_name, status, balance_inr, google_sub
+         FROM reels_advertisers WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+        [email],
+      ).then((r) => r.rows[0] as {
+        id: number;
+        email: string;
+        company_name: string;
+        status: string;
+        balance_inr: string;
+        google_sub: string | null;
+      } | undefined);
+
+      if (byEmail) {
+        if (byEmail.status !== "active") {
+          res.status(403).json({ success: false, message: "Account is not active" });
+          return;
+        }
+        const linked = await query(
+          `UPDATE reels_advertisers
+           SET google_sub = $2, auth_provider = 'google', contact_name = COALESCE(contact_name, $3), updated_at = NOW()
+           WHERE id = $1
+           RETURNING id, email, company_name, status, balance_inr`,
+          [byEmail.id, profile.sub, profile.name?.trim() || null],
+        );
+        row = linked.rows[0] as typeof row;
+      } else {
+        const companyName = profile.name?.trim() || email.split("@")[0] || "Advertiser";
+        const starterBalance = isAdsDemoEmail(email) ? 1000 : 0;
+        const ins = await query(
+          `INSERT INTO reels_advertisers (email, password_hash, company_name, contact_name, status, balance_inr, google_sub, auth_provider)
+           VALUES ($1, $2, $3, $4, 'active', $5, $6, 'google')
+           RETURNING id, email, company_name, status, balance_inr`,
+          [
+            email,
+            hashAdsPassword(crypto.randomBytes(32).toString("hex")),
+            companyName.slice(0, 120),
+            profile.name?.trim() || null,
+            starterBalance,
+            profile.sub,
+          ],
+        );
+        row = ins.rows[0] as typeof row;
+      }
+    } else if (row.status !== "active") {
+      res.status(403).json({ success: false, message: "Account is not active" });
+      return;
+    } else {
+      await query(`UPDATE reels_advertisers SET updated_at = NOW() WHERE id = $1`, [row.id]);
+    }
+
+    if (!row) {
+      res.status(500).json({ success: false, message: "Could not sign in with Google" });
+      return;
+    }
+
+    const token = issueAdsPortalToken({
+      advertiserId: row.id,
+      email: row.email,
+      companyName: row.company_name,
+    });
+    setAdsPortalCookie(res, token);
+    res.json({
+      success: true,
+      token,
+      advertiser: { id: row.id, email: row.email, company_name: row.company_name, balance_inr: row.balance_inr },
+    });
+  } catch {
+    res.status(500).json({ success: false, message: "Google sign-in failed" });
   }
 });
 

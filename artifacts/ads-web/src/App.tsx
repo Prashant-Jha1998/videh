@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { GoogleSignInButton } from "./components/GoogleSignInButton";
 import { VidehLogo } from "./components/VidehLogo";
 import { BID_MODEL_LABELS, CATEGORY_LABELS, type AdFormatSpec } from "./lib/adFormats";
 import { openAdsRazorpayCheckout } from "./lib/razorpayCheckout";
@@ -137,6 +138,7 @@ export default function App() {
   const [paying, setPaying] = useState(false);
   const [creatives, setCreatives] = useState<AdCreative[]>([]);
   const [successMsg, setSuccessMsg] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
 
   const loadDash = useCallback(async () => {
     const me = await api<{ success: boolean; advertiser?: Advertiser }>("/me");
@@ -197,6 +199,25 @@ export default function App() {
     if (res.token) localStorage.setItem("videh_ads_token", res.token);
     await loadDash();
   };
+
+  const handleGoogleAuth = useCallback(async (credential: string) => {
+    setAuthBusy(true);
+    setError("");
+    try {
+      const res = await api<{ success: boolean; message?: string; token?: string }>("/google", {
+        method: "POST",
+        body: JSON.stringify({ credential }),
+      });
+      if (!res.success) {
+        setError(res.message ?? "Google sign-in failed");
+        return;
+      }
+      if (res.token) localStorage.setItem("videh_ads_token", res.token);
+      await loadDash();
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [loadDash]);
 
   const createCampaign = async () => {
     if (!newCampaign.trim()) return;
@@ -341,11 +362,21 @@ export default function App() {
             <button type="button" style={authMode === "login" ? S.tabOn : S.tab} onClick={() => setAuthMode("login")}>Sign in</button>
             <button type="button" style={authMode === "register" ? S.tabOn : S.tab} onClick={() => setAuthMode("register")}>Create account</button>
           </div>
+          <GoogleSignInButton
+            mode={authMode}
+            disabled={authBusy}
+            onCredential={handleGoogleAuth}
+          />
+          <div style={S.authDivider}>
+            <span style={S.authDividerLine} />
+            <span style={S.authDividerText}>or use email</span>
+            <span style={S.authDividerLine} />
+          </div>
           {authMode === "register" && <input style={S.input} placeholder="Company name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />}
           <input style={S.input} placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
           <input style={S.input} type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
           {error && <p style={S.err}>{error}</p>}
-          <button type="button" style={S.primary} onClick={() => void handleAuth()}>{authMode === "login" ? "Sign in" : "Register"}</button>
+          <button type="button" style={S.primary} disabled={authBusy} onClick={() => void handleAuth()}>{authMode === "login" ? "Sign in" : "Register"}</button>
         </div>
       </div>
     );
@@ -920,6 +951,9 @@ const S: Record<string, React.CSSProperties> = {
   tabRow: { display: "flex", gap: 8, margin: "16px 0" },
   tab: { flex: 1, padding: "10px", border: "1px solid #dadce0", background: "#fff", borderRadius: 8, cursor: "pointer" },
   tabOn: { flex: 1, padding: "10px", border: "1px solid #00A884", background: "#e8f5f0", borderRadius: 8, cursor: "pointer", fontWeight: 600 },
+  authDivider: { display: "flex", alignItems: "center", gap: 10, margin: "4px 0 14px" },
+  authDividerLine: { flex: 1, height: 1, background: "#e8eaed" },
+  authDividerText: { fontSize: 11, fontWeight: 600, color: "#80868b", textTransform: "uppercase", letterSpacing: "0.04em" },
   input: { width: "100%", padding: "10px 12px", marginBottom: 10, borderRadius: 8, border: "1px solid #dadce0", fontSize: 14 },
   primary: { padding: "11px 20px", background: "#00A884", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer", width: "100%" },
   ghost: { padding: "8px", background: "transparent", border: "1px solid #dadce0", borderRadius: 8, cursor: "pointer" },
