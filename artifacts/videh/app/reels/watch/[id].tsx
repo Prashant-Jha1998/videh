@@ -463,9 +463,18 @@ export default function ReelsWatchScreen() {
               </Text>
 
               {video.hashtags && video.hashtags.length > 0 ? (
-                <Text style={{ color: colors.primary, marginTop: 12, fontSize: 14 }}>
-                  {video.hashtags.map((t) => `#${t}`).join(" ")}
-                </Text>
+                <View style={styles.hashtagRow}>
+                  {video.hashtags.map((t) => (
+                    <TouchableOpacity
+                      key={t}
+                      onPress={() => router.push({ pathname: "/reels/hashtag/[tag]", params: { tag: t } })}
+                    >
+                      <Text style={{ color: colors.primary, fontSize: 14, fontFamily: "Inter_600SemiBold" }}>
+                        #{t}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               ) : null}
 
               <View style={[styles.detailRow, { borderTopColor: colors.border }]}>
@@ -634,6 +643,7 @@ const styles = StyleSheet.create({
   },
   sheetChannelAvatar: { width: 44, height: 44, borderRadius: 22 },
   sheetSubBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
+  hashtagRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12 },
   detailRow: {
     flexDirection: "row",
     alignItems: "center",

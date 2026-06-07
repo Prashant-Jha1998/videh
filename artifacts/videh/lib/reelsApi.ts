@@ -293,6 +293,58 @@ export async function searchReels(q: string, userId: number, sessionToken?: stri
   return res;
 }
 
+export type ReelsHashtagStat = {
+  tag: string;
+  videoCount: number;
+  viewCount: number;
+};
+
+/** Last partial hashtag being typed (after comma or space). */
+export function activeHashtagQuery(raw: string): string {
+  const lastComma = raw.lastIndexOf(",");
+  const segment = lastComma >= 0 ? raw.slice(lastComma + 1) : raw;
+  const parts = segment.trim().split(/\s+/);
+  return (parts[parts.length - 1] ?? "").replace(/^#/, "").trim().toLowerCase();
+}
+
+/** Insert a suggested hashtag into the upload field. */
+export function applyHashtagSuggestion(raw: string, tag: string): string {
+  const lastComma = raw.lastIndexOf(",");
+  const head = lastComma >= 0 ? `${raw.slice(0, lastComma + 1)} ` : "";
+  const segment = lastComma >= 0 ? raw.slice(lastComma + 1) : raw;
+  const parts = segment.trim().split(/\s+/);
+  parts.pop();
+  const existing = parts.map((t) => t.replace(/^#/, "").trim()).filter(Boolean);
+  const joined = [...existing, tag].join(", ");
+  return `${head}${joined}, `;
+}
+
+export async function suggestReelsHashtags(
+  q: string,
+  sessionToken?: string | null,
+  limit = 8,
+) {
+  return reelsJson<{ success: boolean; hashtags?: ReelsHashtagStat[] }>(
+    `/hashtags/suggest?q=${encodeURIComponent(q)}&limit=${limit}`,
+    { sessionToken },
+  );
+}
+
+export async function fetchHashtagReels(
+  tag: string,
+  userId: number,
+  sessionToken?: string | null,
+) {
+  const enc = encodeURIComponent(tag.replace(/^#/, ""));
+  const res = await reelsJson<{
+    success: boolean;
+    hashtag?: ReelsHashtagStat;
+    videos?: ReelsVideo[];
+  }>(`/hashtags/${enc}?userId=${userId}`, { sessionToken });
+  if (res.videos) res.videos = res.videos.map(normalizeReelsVideo);
+  return res;
+}
+
 export async function fetchReelsVideo(videoId: number, userId: number, sessionToken?: string | null) {
   const res = await reelsJson<{
     success: boolean;

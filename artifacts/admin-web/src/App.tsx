@@ -510,14 +510,16 @@ export default function App() {
           <img src="/videh-logo.png" alt="Videh" />
           <h1>Videh Admin</h1>
         </div>
+        <span className="nav-section-label">Dashboard</span>
         {nav("overview", "Overview")}
+        {nav("analytics", "Analytics")}
+        {nav("audit", "Audit")}
+        <span className="nav-section-label">Trust &amp; Platform</span>
         {nav("trust", "Trust & Safety")}
         {nav("compliance", "Compliance")}
         {nav("developer-api", "Developer API", stats?.pending_developer_templates)}
         {nav("reels", "Video / Reels")}
-        {nav("analytics", "Analytics")}
-        {nav("audit", "Audit")}
-        {adminRole === "super_admin" ? nav("admins", "Admins") : null}
+        <span className="nav-section-label">Users &amp; Content</span>
         {nav("users", "Users")}
         {nav("chats", "Chats")}
         {nav("group-create", "Create Group")}
@@ -526,7 +528,13 @@ export default function App() {
         {nav("scheduled", "Scheduled")}
         {nav("broadcasts", "Broadcasts")}
         {nav("calls", "Calls")}
-        <button type="button" className="nav-btn" style={{ marginTop: 24 }} onClick={() => void onLogout()}>
+        {adminRole === "super_admin" ? (
+          <>
+            <span className="nav-section-label">Administration</span>
+            {nav("admins", "Admins")}
+          </>
+        ) : null}
+        <button type="button" className="nav-btn nav-btn--logout" onClick={() => void onLogout()}>
           Log out
         </button>
       </aside>
@@ -535,8 +543,10 @@ export default function App() {
 
         {tab === "overview" && (
           <>
-            <h2 style={{ marginTop: 0 }}>Overview</h2>
-            <p className="muted">Live counts from your Videh database.</p>
+            <header className="admin-page__header">
+              <h2 className="admin-page__title">Overview</h2>
+              <p className="admin-page__sub">Live counts from your Videh database.</p>
+            </header>
             {stats ? (
               <div className="grid-stats">
                 <div className="stat">

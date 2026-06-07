@@ -260,43 +260,98 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
     }
   };
 
+  const monetizationBadge = (status: string, eligible: boolean) => {
+    if (eligible || status === "eligible") return <span className="badge-pill badge-pill--ok">{status}</span>;
+    if (status === "pending") return <span className="badge-pill badge-pill--warn">{status}</span>;
+    return <span className="badge-pill badge-pill--muted">{status}</span>;
+  };
+
   return (
-    <div className="tab-panel">
-      <h2>Video / Reels Platform</h2>
-      <p className="muted">YouTube-style channels, monetization rules, fraud detection, and subscriber notifications.</p>
+    <div className="admin-page">
+      <header className="admin-page__header">
+        <h2 className="admin-page__title">Video / Reels Platform</h2>
+        <p className="admin-page__sub">
+          YouTube-style channels, monetization rules, fraud detection, NSFW moderation, and subscriber notifications.
+        </p>
+      </header>
 
       {stats ? (
-        <div className="stats-grid" style={{ marginBottom: 20 }}>
-          <div className="stat-card"><div className="stat-val">{stats.channels}</div><div className="stat-label">Channels</div></div>
-          <div className="stat-card"><div className="stat-val">{stats.videos}</div><div className="stat-label">Videos</div></div>
-          <div className="stat-card"><div className="stat-val">{stats.subscriptions}</div><div className="stat-label">Subscriptions</div></div>
-          <div className="stat-card"><div className="stat-val">{Number(stats.total_views).toLocaleString()}</div><div className="stat-label">Total views</div></div>
-          <div className="stat-card"><div className="stat-val">{Number(stats.total_view_hours).toFixed(0)}h</div><div className="stat-label">Watch hours</div></div>
-          <div className="stat-card"><div className="stat-val">{stats.fraud_events_7d}</div><div className="stat-label">Fraud signals (7d)</div></div>
+        <div className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-val">{stats.channels}</div>
+            <div className="stat-label">Channels</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-val">{stats.videos}</div>
+            <div className="stat-label">Videos</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-val">{stats.subscriptions}</div>
+            <div className="stat-label">Subscriptions</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-val">{Number(stats.total_views).toLocaleString()}</div>
+            <div className="stat-label">Total views</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-val">{Number(stats.total_view_hours).toLocaleString()}h</div>
+            <div className="stat-label">Watch hours</div>
+          </div>
+          <div className={`stat-card${stats.fraud_events_7d > 0 ? " stat-card--warn" : ""}`}>
+            <div className="stat-val">{stats.fraud_events_7d}</div>
+            <div className="stat-label">Fraud signals (7d)</div>
+          </div>
+          {moderationQueue.length > 0 ? (
+            <div className="stat-card stat-card--warn">
+              <div className="stat-val">{moderationQueue.length}</div>
+              <div className="stat-label">Pending NSFW review</div>
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      ) : (
+        <p className="muted">Loading platform stats…</p>
+      )}
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        <button type="button" className={subTab === "channels" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("channels")}>Channels</button>
-        <button type="button" className={subTab === "rules" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("rules")}>Rules</button>
-        <button type="button" className={subTab === "fraud" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("fraud")}>Fraud</button>
-        <button type="button" className={subTab === "moderation" ? "nav-btn active" : "nav-btn"} onClick={() => setSubTab("moderation")}>
-          NSFW queue{moderationQueue.length > 0 ? ` (${moderationQueue.length})` : ""}
-        </button>
-        <button type="button" className="primary-btn" disabled={busy} onClick={runFraudScan}>Run fraud scan</button>
-        <button type="button" className="primary-btn" disabled={busy} onClick={runModerationScan}>Run NSFW scan</button>
+      <div className="admin-toolbar">
+        <div className="admin-segment">
+          <button type="button" className={subTab === "channels" ? "active" : ""} onClick={() => setSubTab("channels")}>
+            Channels
+          </button>
+          <button type="button" className={subTab === "rules" ? "active" : ""} onClick={() => setSubTab("rules")}>
+            Rules
+          </button>
+          <button type="button" className={subTab === "fraud" ? "active" : ""} onClick={() => setSubTab("fraud")}>
+            Fraud
+          </button>
+          <button type="button" className={subTab === "moderation" ? "active" : ""} onClick={() => setSubTab("moderation")}>
+            NSFW queue{moderationQueue.length > 0 ? ` (${moderationQueue.length})` : ""}
+          </button>
+        </div>
+        <div className="admin-toolbar__actions">
+          <button type="button" className="btn-sm" disabled={busy} onClick={runFraudScan}>
+            Run fraud scan
+          </button>
+          <button type="button" className="btn-sm btn-sm-primary" disabled={busy} onClick={runModerationScan}>
+            Run NSFW scan
+          </button>
+        </div>
       </div>
 
       {subTab === "channels" ? (
-        <>
-          <input
-            className="search-input"
-            placeholder="Search handle, user id, name..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && void load()}
-            style={{ marginBottom: 12, width: "100%", maxWidth: 400 }}
-          />
+        <div className="admin-card">
+          <div className="admin-card__toolbar">
+            <input
+              className="search-input"
+              placeholder="Search handle, user id, owner name…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void load()}
+            />
+            <button type="button" className="btn-sm btn-sm-primary" onClick={() => void load()}>
+              Search
+            </button>
+            <span className="dev-count">{channels.length} channels</span>
+          </div>
           <div className="table-wrap">
             <table className="data-table">
               <thead>
@@ -317,143 +372,224 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
               <tbody>
                 {channels.map((c) => (
                   <tr key={c.id}>
-                    <td>
+                    <td className="channel-cell">
                       <strong>@{c.handle}</strong>
-                      <div className="muted" style={{ fontSize: 12 }}>{c.owner_name ?? "—"}</div>
+                      <div className="muted">{c.owner_name ?? "—"}</div>
                     </td>
                     <td>{c.user_id}</td>
-                    <td>{c.subscriber_count}</td>
+                    <td>{c.subscriber_count.toLocaleString()}</td>
                     <td>{Number(c.total_views).toLocaleString()}</td>
                     <td>{Number(c.total_view_hours).toFixed(1)}</td>
                     <td>{Number(c.total_likes).toLocaleString()}</td>
                     <td>{Number(c.total_comments).toLocaleString()}</td>
                     <td>{Number(c.total_shares).toLocaleString()}</td>
                     <td>{Number(c.fraud_score).toFixed(1)}</td>
-                    <td>{c.monetization_status}</td>
+                    <td>{monetizationBadge(c.monetization_status, c.monetization_eligible)}</td>
                     <td>{c.video_count}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {channels.length === 0 ? <p className="admin-empty">No channels match your search.</p> : null}
           </div>
-        </>
+        </div>
       ) : null}
 
       {subTab === "rules" && config ? (
-        <div style={{ maxWidth: 720 }}>
+        <div className="admin-card admin-rules" style={{ padding: "18px 20px" }}>
           <h3>Monetization (YouTube Partner style)</h3>
-          <label>Min subscribers <input type="number" value={config.monetization.minSubscribers} onChange={(e) => setConfig({ ...config, monetization: { ...config.monetization, minSubscribers: Number(e.target.value) } })} /></label>
-          <label style={{ display: "block", marginTop: 8 }}>Min watch hours <input type="number" value={config.monetization.minWatchHours} onChange={(e) => setConfig({ ...config, monetization: { ...config.monetization, minWatchHours: Number(e.target.value) } })} /></label>
-          <label style={{ display: "block", marginTop: 8 }}>Revenue share % <input type="number" value={config.monetization.revenueSharePercent} onChange={(e) => setConfig({ ...config, monetization: { ...config.monetization, revenueSharePercent: Number(e.target.value) } })} /></label>
+          <label>
+            Min subscribers
+            <input
+              type="number"
+              value={config.monetization.minSubscribers}
+              onChange={(e) => setConfig({ ...config, monetization: { ...config.monetization, minSubscribers: Number(e.target.value) } })}
+            />
+          </label>
+          <label style={{ marginTop: 10 }}>
+            Min watch hours
+            <input
+              type="number"
+              value={config.monetization.minWatchHours}
+              onChange={(e) => setConfig({ ...config, monetization: { ...config.monetization, minWatchHours: Number(e.target.value) } })}
+            />
+          </label>
+          <label style={{ marginTop: 10 }}>
+            Revenue share %
+            <input
+              type="number"
+              value={config.monetization.revenueSharePercent}
+              onChange={(e) => setConfig({ ...config, monetization: { ...config.monetization, revenueSharePercent: Number(e.target.value) } })}
+            />
+          </label>
 
-          <h3 style={{ marginTop: 24 }}>Play button / view counting</h3>
-          <label>Min seconds to count a view <input type="number" value={config.playButton.minWatchSecondsToCountView} onChange={(e) => setConfig({ ...config, playButton: { ...config.playButton, minWatchSecondsToCountView: Number(e.target.value) } })} /></label>
-          <label style={{ display: "block", marginTop: 8 }}>Max fraud score for play <input type="number" value={config.playButton.maxFraudScoreForPlay} onChange={(e) => setConfig({ ...config, playButton: { ...config.playButton, maxFraudScoreForPlay: Number(e.target.value) } })} /></label>
+          <h3>Play button / view counting</h3>
+          <label>
+            Min seconds to count a view
+            <input
+              type="number"
+              value={config.playButton.minWatchSecondsToCountView}
+              onChange={(e) => setConfig({ ...config, playButton: { ...config.playButton, minWatchSecondsToCountView: Number(e.target.value) } })}
+            />
+          </label>
+          <label style={{ marginTop: 10 }}>
+            Max fraud score for play
+            <input
+              type="number"
+              value={config.playButton.maxFraudScoreForPlay}
+              onChange={(e) => setConfig({ ...config, playButton: { ...config.playButton, maxFraudScoreForPlay: Number(e.target.value) } })}
+            />
+          </label>
 
-          <h3 style={{ marginTop: 24 }}>NSFW / content safety</h3>
-          <label><input type="checkbox" checked={config.contentModeration?.enabled ?? true} onChange={(e) => setConfig({ ...config, contentModeration: { ...config.contentModeration!, enabled: e.target.checked, nsfwBlockThreshold: config.contentModeration?.nsfwBlockThreshold ?? 0.55, requireThumbnail: config.contentModeration?.requireThumbnail ?? true, summary: config.contentModeration?.summary ?? [] } })} /> Auto-scan videos before publish</label>
-          <label style={{ display: "block", marginTop: 8 }}>Block threshold (0–1) <input type="number" step="0.05" min="0" max="1" value={config.contentModeration?.nsfwBlockThreshold ?? 0.55} onChange={(e) => setConfig({ ...config, contentModeration: { ...config.contentModeration!, enabled: config.contentModeration?.enabled ?? true, nsfwBlockThreshold: Number(e.target.value), requireThumbnail: config.contentModeration?.requireThumbnail ?? true, summary: config.contentModeration?.summary ?? [] } })} /></label>
-          <p className="muted" style={{ marginTop: 8 }}>Set GOOGLE_VISION_API_KEY and/or SIGHTENGINE_API_USER + SIGHTENGINE_API_SECRET on the API server for AI vision scans.</p>
+          <h3>NSFW / content safety</h3>
+          <label>
+            <input
+              type="checkbox"
+              checked={config.contentModeration?.enabled ?? true}
+              onChange={(e) => setConfig({
+                ...config,
+                contentModeration: {
+                  ...config.contentModeration!,
+                  enabled: e.target.checked,
+                  nsfwBlockThreshold: config.contentModeration?.nsfwBlockThreshold ?? 0.55,
+                  requireThumbnail: config.contentModeration?.requireThumbnail ?? true,
+                  summary: config.contentModeration?.summary ?? [],
+                },
+              })}
+            />
+            Auto-scan videos before publish
+          </label>
+          <label style={{ marginTop: 10 }}>
+            Block threshold (0–1)
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={config.contentModeration?.nsfwBlockThreshold ?? 0.55}
+              onChange={(e) => setConfig({
+                ...config,
+                contentModeration: {
+                  ...config.contentModeration!,
+                  enabled: config.contentModeration?.enabled ?? true,
+                  nsfwBlockThreshold: Number(e.target.value),
+                  requireThumbnail: config.contentModeration?.requireThumbnail ?? true,
+                  summary: config.contentModeration?.summary ?? [],
+                },
+              })}
+            />
+          </label>
+          <p className="muted" style={{ marginTop: 10 }}>
+            Set GOOGLE_VISION_API_KEY and/or SIGHTENGINE credentials on the API server for AI vision scans.
+          </p>
 
-          <h3 style={{ marginTop: 24 }}>Notifications</h3>
-          <label><input type="checkbox" checked={config.notifications.notifySubscribersOnNewVideo} onChange={(e) => setConfig({ ...config, notifications: { ...config.notifications, notifySubscribersOnNewVideo: e.target.checked } })} /> Notify subscribers on new video</label>
-          <label style={{ display: "block", marginTop: 8 }}><input type="checkbox" checked={config.notifications.subscribersNotifiedFirst} onChange={(e) => setConfig({ ...config, notifications: { ...config.notifications, subscribersNotifiedFirst: e.target.checked } })} /> Subscribers see new videos first in feed</label>
+          <h3>Notifications</h3>
+          <label>
+            <input
+              type="checkbox"
+              checked={config.notifications.notifySubscribersOnNewVideo}
+              onChange={(e) => setConfig({ ...config, notifications: { ...config.notifications, notifySubscribersOnNewVideo: e.target.checked } })}
+            />
+            Notify subscribers on new video
+          </label>
+          <label style={{ marginTop: 10 }}>
+            <input
+              type="checkbox"
+              checked={config.notifications.subscribersNotifiedFirst}
+              onChange={(e) => setConfig({ ...config, notifications: { ...config.notifications, subscribersNotifiedFirst: e.target.checked } })}
+            />
+            Subscribers see new videos first in feed
+          </label>
 
-          <button type="button" className="primary-btn" style={{ marginTop: 20 }} disabled={busy} onClick={saveConfig}>Save rules</button>
-          <p className="muted" style={{ marginTop: 12 }}>These rules are shown on creator profiles in the mobile app.</p>
+          <div style={{ marginTop: 22, display: "flex", gap: 10, alignItems: "center" }}>
+            <button type="button" className="primary-btn" disabled={busy} onClick={saveConfig}>
+              Save rules
+            </button>
+            <span className="muted">Shown on creator profiles in the mobile app.</span>
+          </div>
         </div>
       ) : null}
 
       {subTab === "moderation" ? (
         <>
-          <div className="muted" style={{ marginBottom: 12, padding: 12, background: "#f0f7f4", borderRadius: 8, border: "1px solid #c8e6d4" }}>
+          <div className="admin-alert">
             <strong>Manual approval — pehle video dekho, phir approve</strong>
-            <p style={{ margin: "6px 0 0" }}>
-              Har pending video par <strong>▶ Preview</strong> dabao, video play karke kam se kam {MIN_PREVIEW_SEC}s dekho.
-              Uske baad hi <strong>Approve</strong> button active hoga.
+            <p>
+              Har pending video par <strong>Preview</strong> dabao, kam se kam {MIN_PREVIEW_SEC}s dekho.
+              Uske baad hi <strong>Approve</strong> active hoga.
             </p>
           </div>
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr><th>Video</th><th>Channel</th><th>Duration</th><th>Status</th><th>Reason</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
-              {moderationQueue.map((v) => (
-                <tr key={v.id}>
-                  <td><strong>{v.title}</strong><div className="muted" style={{ fontSize: 12 }}>#{v.id}</div></td>
-                  <td>@{v.channel_handle}</td>
-                  <td>{v.duration_seconds ? `${v.duration_seconds}s` : "—"}</td>
-                  <td>{v.moderation_status || v.status}</td>
-                  <td style={{ maxWidth: 200 }}>{v.moderation_reason ?? "—"}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    <button type="button" className="nav-btn" onClick={() => openPreview(v)}>▶ Preview</button>{" "}
-                    <button
-                      type="button"
-                      className="primary-btn"
-                      disabled={!previewReadyIds.has(v.id)}
-                      title={previewReadyIds.has(v.id) ? "Approve & publish" : "Pehle Preview se video dekhein"}
-                      onClick={() => void approveVideo(v.id, v.title)}
-                    >
-                      Approve
-                    </button>{" "}
-                    <button type="button" className="nav-btn" onClick={() => void rejectVideo(v.id)}>Reject</button>
-                    {previewReadyIds.has(v.id) ? (
-                      <span style={{ color: "#0a7", fontSize: 11, marginLeft: 6 }}>✓ previewed</span>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {moderationQueue.length === 0 ? (
-            <p className="muted" style={{ padding: 16 }}>Koi pending video nahi — sab approved ya queue khali hai.</p>
-          ) : null}
-        </div>
+          <div className="admin-card">
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Video</th>
+                    <th>Channel</th>
+                    <th>Duration</th>
+                    <th>Status</th>
+                    <th>Reason</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {moderationQueue.map((v) => (
+                    <tr key={v.id}>
+                      <td>
+                        <strong>{v.title}</strong>
+                        <div className="muted">#{v.id}</div>
+                      </td>
+                      <td>@{v.channel_handle}</td>
+                      <td>{v.duration_seconds ? `${v.duration_seconds}s` : "—"}</td>
+                      <td><span className="badge-pill badge-pill--warn">{v.moderation_status || v.status}</span></td>
+                      <td style={{ maxWidth: 220 }}>{v.moderation_reason ?? "—"}</td>
+                      <td>
+                        <div className="action-btns">
+                          <button type="button" className="btn-sm" onClick={() => openPreview(v)}>Preview</button>
+                          <button
+                            type="button"
+                            className="btn-sm btn-sm-primary"
+                            disabled={!previewReadyIds.has(v.id)}
+                            title={previewReadyIds.has(v.id) ? "Approve & publish" : "Pehle Preview se video dekhein"}
+                            onClick={() => void approveVideo(v.id, v.title)}
+                          >
+                            Approve
+                          </button>
+                          <button type="button" className="btn-sm btn-sm-danger" onClick={() => void rejectVideo(v.id)}>
+                            Reject
+                          </button>
+                          {previewReadyIds.has(v.id) ? <span className="preview-ready">✓ previewed</span> : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {moderationQueue.length === 0 ? (
+                <p className="admin-empty">Koi pending video nahi — queue khali hai.</p>
+              ) : null}
+            </div>
+          </div>
           {previewVideo ? (
-            <div
-              role="dialog"
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(0,0,0,0.65)",
-                zIndex: 1000,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: 20,
-              }}
-              onClick={closePreview}
-            >
-              <div
-                style={{
-                  background: "#fff",
-                  borderRadius: 12,
-                  maxWidth: 900,
-                  width: "100%",
-                  maxHeight: "90vh",
-                  overflow: "auto",
-                  padding: 20,
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={closePreview}>
+              <div className="modal-card story-preview-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-head">
                   <div>
-                    <h3 style={{ margin: 0 }}>{previewVideo.title}</h3>
-                    <p className="muted" style={{ margin: "4px 0 0" }}>@{previewVideo.channel_handle} · #{previewVideo.id}</p>
+                    <h3>{previewVideo.title}</h3>
+                    <p className="muted">@{previewVideo.channel_handle} · #{previewVideo.id}</p>
                   </div>
-                  <button type="button" className="nav-btn" onClick={closePreview}>✕ Close</button>
+                  <button type="button" className="btn btn-ghost modal-close" onClick={closePreview}>
+                    Close
+                  </button>
                 </div>
                 {previewPlaybackUrl(previewVideo) ? (
                   <>
-                    <p style={{ marginTop: 12, fontSize: 13, color: "#444" }}>
-                      <strong>Step 1:</strong> Neeche video player par <strong>▶ Play</strong> dabayein.
-                      {" "}<strong>Step 2:</strong> Kam se kam <strong>{previewRequired}s</strong> dekhein — tabhi Approve khulega.
+                    <p className="muted" style={{ marginTop: 0 }}>
+                      Step 1: Play the video below. Step 2: Watch at least <strong>{previewRequired}s</strong> to unlock Approve.
                     </p>
                     {previewVideo.file_on_server === false ? (
-                      <p style={{ color: "#b45309", marginTop: 8, fontSize: 13 }}>
-                        ⚠ Video file server par nahi mili (server restart ke baad upload gayab ho sakta hai).
-                        User se dubara upload karwayein, ya Reject karein.
+                      <p className="err" style={{ marginTop: 8 }}>
+                        Video file missing on server — ask user to re-upload or reject.
                       </p>
                     ) : null}
                     <video
@@ -463,48 +599,47 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
                       controls
                       playsInline
                       preload="metadata"
-                      style={{ width: "100%", marginTop: 12, borderRadius: 8, background: "#000", maxHeight: 420 }}
+                      className="story-preview-media"
                       onTimeUpdate={onVideoTimeUpdate}
                       onEnded={onVideoEnded}
                       onError={() => {
-                        setPreviewPlayError(
-                          "Video load nahi hui — API redeploy karein, ya file server par missing hai. "
-                          + "Neeche Open link try karein.",
-                        );
+                        setPreviewPlayError("Video load failed — redeploy API or check file on disk.");
                       }}
                       poster={previewVideo.thumbnail_url}
                     />
-                    {previewPlayError ? (
-                      <p style={{ color: "#c00", marginTop: 8, fontSize: 13 }}>{previewPlayError}</p>
-                    ) : null}
+                    {previewPlayError ? <p className="err" style={{ marginTop: 8 }}>{previewPlayError}</p> : null}
                     {previewVideo.video_url ? (
                       <p style={{ marginTop: 8, fontSize: 12 }}>
                         <a href={previewPlaybackUrl(previewVideo)} target="_blank" rel="noreferrer">
-                          Video nayi tab mein kholein
+                          Open video in new tab
                         </a>
                       </p>
                     ) : null}
                   </>
                 ) : (
-                  <p style={{ color: "#c00", marginTop: 16 }}>Video URL missing — server se file check karein.</p>
+                  <p className="err" style={{ marginTop: 16 }}>Video URL missing.</p>
                 )}
-                <p style={{ marginTop: 12, fontSize: 14 }}>
-                  Watch progress: <strong>{previewProgress.toFixed(1)}s</strong> / {previewRequired}s required
-                  {previewReadyIds.has(previewVideo.id) ? " — ✓ Ready to approve" : previewLogging ? " — saving…" : ""}
+                <p style={{ marginTop: 12 }}>
+                  Progress: <strong>{previewProgress.toFixed(1)}s</strong> / {previewRequired}s
+                  {previewReadyIds.has(previewVideo.id) ? " — ready to approve" : previewLogging ? " — saving…" : ""}
                 </p>
                 {previewVideo.description ? (
-                  <p className="muted" style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{previewVideo.description}</p>
+                  <p className="muted" style={{ whiteSpace: "pre-wrap" }}>{previewVideo.description}</p>
                 ) : null}
-                <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    className="primary-btn"
-                    disabled={!previewReadyIds.has(previewVideo.id)}
-                    onClick={() => void approveVideo(previewVideo.id, previewVideo.title)}
-                  >
-                    Approve after preview
-                  </button>
-                  <button type="button" className="nav-btn" onClick={() => void rejectVideo(previewVideo.id)}>Reject</button>
+                <div className="dev-actions" style={{ padding: 0, background: "transparent", marginTop: 16 }}>
+                  <div className="dev-actions__group">
+                    <button
+                      type="button"
+                      className="btn-sm btn-sm-primary"
+                      disabled={!previewReadyIds.has(previewVideo.id)}
+                      onClick={() => void approveVideo(previewVideo.id, previewVideo.title)}
+                    >
+                      Approve after preview
+                    </button>
+                    <button type="button" className="btn-sm btn-sm-danger" onClick={() => void rejectVideo(previewVideo.id)}>
+                      Reject
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -513,22 +648,30 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
       ) : null}
 
       {subTab === "fraud" ? (
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr><th>Time</th><th>Entity</th><th>Signal</th><th>Score +</th></tr>
-            </thead>
-            <tbody>
-              {fraudEvents.map((e) => (
-                <tr key={e.id}>
-                  <td>{fmtDate(e.created_at)}</td>
-                  <td>{e.entity_type} #{e.entity_id}</td>
-                  <td>{e.signal_type}</td>
-                  <td>+{e.score_delta}</td>
+        <div className="admin-card">
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Entity</th>
+                  <th>Signal</th>
+                  <th>Score +</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {fraudEvents.map((e) => (
+                  <tr key={e.id}>
+                    <td>{fmtDate(e.created_at)}</td>
+                    <td>{e.entity_type} #{e.entity_id}</td>
+                    <td>{e.signal_type}</td>
+                    <td>+{e.score_delta}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {fraudEvents.length === 0 ? <p className="admin-empty">No fraud events in the last 7 days.</p> : null}
+          </div>
         </div>
       ) : null}
     </div>

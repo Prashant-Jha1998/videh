@@ -24,6 +24,7 @@ import {
 import { getReelsPlatformConfig, publicReelsRules } from "../lib/reelsConfig";
 import { checkCommentFraud, checkSubscribeFraud, checkViewFraud, recordViewSession } from "../lib/reelsFraud";
 import { fetchLatestReelsFeed, fetchTrendingReels, type FeedCursor } from "../lib/reelsFeed";
+import { fetchHashtagStats, fetchHashtagSuggestions } from "../lib/reelsHashtags";
 import { canPlayVideo, evaluateChannelMonetization } from "../lib/reelsMonetization";
 import { notifySubscribersNewVideo } from "../lib/reelsNotifications";
 import {
@@ -625,6 +626,54 @@ router.get("/feed", async (req: Request, res: Response) => {
     res.json({ success: true, videos, trending, nextCursor });
   } catch (err) {
     req.log.error({ err }, "reels feed");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.get("/hashtags/suggest", async (req: Request, res: Response) => {
+  const q = String(req.query.q ?? "").trim();
+  const limit = Math.min(20, Math.max(1, Number(req.query.limit) || 10));
+  try {
+    await ensureReelsTables();
+    const hashtags = await fetchHashtagSuggestions(q, limit);
+    res.json({ success: true, hashtags });
+  } catch (err) {
+    req.log.error({ err }, "reels hashtag suggest");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.get("/hashtags/:tag", async (req: Request, res: Response) => {
+  const tag = String(req.params.tag ?? "").trim();
+  const viewerId = Number(req.query.userId) || 0;
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 30));
+  if (!tag || tag.length < 1) {
+    res.status(400).json({ success: false, message: "Invalid hashtag" });
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    const normalized = tag.toLowerCase().replace(/^#/, "");
+    const stats = await fetchHashtagStats(normalized);
+    const videos = await query(
+      `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
+              c.avatar_url AS channel_avatar_url, c.updated_at AS channel_updated_at
+       FROM reels_videos v JOIN reels_channels c ON c.id = v.channel_id
+       WHERE v.status = 'published' AND v.play_enabled = TRUE
+         AND EXISTS (
+           SELECT 1 FROM unnest(v.hashtags) h WHERE LOWER(BTRIM(h)) = $1
+         )
+       ORDER BY v.view_count DESC, v.created_at DESC
+       LIMIT $2`,
+      [normalized, limit],
+    );
+    res.json({
+      success: true,
+      hashtag: stats,
+      videos: videos.rows.map((r) => mapVideoRow(r as Record<string, unknown>, req)),
+    });
+  } catch (err) {
+    req.log.error({ err }, "reels hashtag feed");
     res.status(500).json({ success: false, message: "Server error" });
   }
 });

@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,12 +19,17 @@ import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollV
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
+  activeHashtagQuery,
+  applyHashtagSuggestion,
   autoThumbnailFromVideo,
+  formatViewCount,
   MAX_REELS_VIDEO_SECONDS,
   prepareReelsThumbnail,
   REELS_THUMB_ASPECT,
   REELS_THUMB_HINT,
+  suggestReelsHashtags,
   uploadReelsVideo,
+  type ReelsHashtagStat,
 } from "@/lib/reelsApi";
 
 export default function ReelsUploadScreen() {
@@ -42,6 +47,34 @@ export default function ReelsUploadScreen() {
   const [thumbPreparing, setThumbPreparing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [hashtagFocused, setHashtagFocused] = useState(false);
+  const [hashtagSuggestions, setHashtagSuggestions] = useState<ReelsHashtagStat[]>([]);
+  const [hashtagSuggestLoading, setHashtagSuggestLoading] = useState(false);
+  const suggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!hashtagFocused) {
+      setHashtagSuggestions([]);
+      return;
+    }
+    const query = activeHashtagQuery(hashtags);
+    if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
+    suggestTimerRef.current = setTimeout(() => {
+      setHashtagSuggestLoading(true);
+      void suggestReelsHashtags(query, user?.sessionToken, 8)
+        .then((res) => {
+          if (res.success) setHashtagSuggestions(res.hashtags ?? []);
+        })
+        .finally(() => setHashtagSuggestLoading(false));
+    }, query.length > 0 ? 250 : 0);
+    return () => {
+      if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
+    };
+  }, [hashtags, hashtagFocused, user?.sessionToken]);
+
+  const pickHashtagSuggestion = (tag: string) => {
+    setHashtags(applyHashtagSuggestion(hashtags, tag));
+  };
 
   const pickVideo = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -209,13 +242,44 @@ export default function ReelsUploadScreen() {
         multiline
         maxLength={5000}
       />
+      <Text style={[styles.sectionLabel, { color: colors.foreground, marginTop: 4 }]}>Hashtags</Text>
+      <Text style={[styles.thumbHint, { color: colors.mutedForeground, marginBottom: 8 }]}>
+        Type karein — suggestions mein kitne videos aur views hain woh dikhega (max 20 tags).
+      </Text>
       <TextInput
-        style={[styles.input, { color: colors.foreground, borderColor: colors.border }]}
-        placeholder="Hashtags (e.g. travel, music)"
+        style={[styles.input, { color: colors.foreground, borderColor: colors.border, marginBottom: 0 }]}
+        placeholder="e.g. travel, music, vlog"
         placeholderTextColor={colors.mutedForeground}
         value={hashtags}
         onChangeText={setHashtags}
+        onFocus={() => setHashtagFocused(true)}
+        onBlur={() => setTimeout(() => setHashtagFocused(false), 200)}
+        autoCapitalize="none"
+        autoCorrect={false}
       />
+      {hashtagFocused && (hashtagSuggestLoading || hashtagSuggestions.length > 0) ? (
+        <View style={[styles.suggestBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.suggestHeading, { color: colors.mutedForeground }]}>
+            {activeHashtagQuery(hashtags).length > 0 ? "Suggestions" : "Popular hashtags"}
+          </Text>
+          {hashtagSuggestLoading ? (
+            <ActivityIndicator color={colors.primary} style={{ marginVertical: 10 }} />
+          ) : (
+            hashtagSuggestions.map((item) => (
+              <TouchableOpacity
+                key={item.tag}
+                style={[styles.suggestRow, { borderBottomColor: colors.border }]}
+                onPress={() => pickHashtagSuggestion(item.tag)}
+              >
+                <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>#{item.tag}</Text>
+                <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+                  {item.videoCount} {item.videoCount === 1 ? "video" : "videos"} · {formatViewCount(item.viewCount)} views
+                </Text>
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
+      ) : null}
 
       <TouchableOpacity
         style={[styles.postBtn, { backgroundColor: colors.primary, opacity: videoUri && title.trim() && !uploading && !thumbPreparing ? 1 : 0.5 }]}
@@ -273,6 +337,27 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   area: { minHeight: 100, textAlignVertical: "top" },
+  suggestBox: {
+    borderWidth: 1,
+    borderRadius: 10,
+    marginTop: 8,
+    marginBottom: 12,
+    overflow: "hidden",
+  },
+  suggestHeading: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  suggestRow: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   postBtn: { flexDirection: "row", justifyContent: "center", gap: 10, paddingVertical: 16, borderRadius: 28, marginTop: 8 },
   postText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 16 },
 });
