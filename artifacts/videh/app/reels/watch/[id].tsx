@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DismissibleModal } from "@/components/DismissibleModal";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ReelsWatchPlayer } from "@/components/ReelsWatchPlayer";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
@@ -41,6 +42,7 @@ import {
   type ReelsVideo,
 } from "@/lib/reelsApi";
 import {
+  clearVideoQualityPref,
   loadVideoQualityPref,
   qualitiesForVideo,
   saveVideoQualityPref,
@@ -54,6 +56,19 @@ const DESC_PREVIEW_LEN = 90;
 function formatUploadDate(iso: string | null | undefined): string {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+function WatchPlayerErrorFallback({ resetError }: { resetError: () => void }) {
+  return (
+    <View style={[styles.player, styles.blockedPlayer]}>
+      <Ionicons name="alert-circle-outline" size={40} color="#fff" />
+      <Text style={styles.blockedTitle}>Playback error</Text>
+      <Text style={styles.blockedText}>Switched to Auto quality. Tap retry to continue.</Text>
+      <TouchableOpacity style={styles.playerRetryBtn} onPress={resetError} activeOpacity={0.85}>
+        <Text style={styles.playerRetryText}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
 }
 
 export default function ReelsWatchScreen() {
@@ -93,11 +108,25 @@ export default function ReelsWatchScreen() {
     void loadVideoQualityPref(video.id, opts).then(setVideoQuality);
   }, [video?.id, video?.sourceHeight, video?.videoUrl]);
 
+  const resetVideoQuality = useCallback((videoId: number) => {
+    setVideoQuality("auto");
+    void clearVideoQualityPref(videoId);
+  }, []);
+
   const handleQualityChange = useCallback((q: ReelsVideoQuality) => {
     if (!video?.id) return;
     setVideoQuality(q);
     void saveVideoQualityPref(video.id, q);
   }, [video?.id]);
+
+  const handlePlaybackError = useCallback(() => {
+    if (!video?.id) return;
+    resetVideoQuality(video.id);
+    Alert.alert(
+      "Quality not available",
+      "This video could not play at the selected quality. Switched back to Auto.",
+    );
+  }, [video?.id, resetVideoQuality]);
 
   useEffect(() => {
     void Audio.setAudioModeAsync({
@@ -294,14 +323,23 @@ export default function ReelsWatchScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.playerWrap}>
         {playAllowed && playbackUrl ? (
-          <ReelsWatchPlayer
-            videoId={video.id}
-            baseUrl={playbackUrl}
-            quality={videoQuality}
-            qualities={qualityOptions}
-            paused={switchingVideo || metaRefreshing}
-            onQualityChange={handleQualityChange}
-          />
+          <ErrorBoundary
+            key={`watch-player-${video.id}-${videoQuality}`}
+            FallbackComponent={WatchPlayerErrorFallback}
+            onError={() => {
+              resetVideoQuality(video.id);
+            }}
+          >
+            <ReelsWatchPlayer
+              videoId={video.id}
+              baseUrl={playbackUrl}
+              quality={videoQuality}
+              qualities={qualityOptions}
+              paused={switchingVideo || metaRefreshing}
+              onQualityChange={handleQualityChange}
+              onPlaybackError={handlePlaybackError}
+            />
+          </ErrorBoundary>
         ) : (
           <View style={[styles.player, styles.blockedPlayer]}>
             <Ionicons name="shield-checkmark-outline" size={40} color="#fff" />
@@ -609,6 +647,14 @@ const styles = StyleSheet.create({
   blockedPlayer: { alignItems: "center", justifyContent: "center", padding: 20 },
   blockedTitle: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 16, marginTop: 12 },
   blockedText: { color: "#ccc", textAlign: "center", marginTop: 8, fontSize: 13 },
+  playerRetryBtn: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: "#00A884",
+  },
+  playerRetryText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 14 },
   headerBlock: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 },
   vTitle: { fontSize: 16, fontFamily: "Inter_700Bold", lineHeight: 22 },
   metaLine: { fontSize: 13, marginTop: 6 },

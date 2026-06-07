@@ -81,3 +81,9 @@ export async function saveVideoQualityPref(
 ): Promise<void> {
   await AsyncStorage.setItem(perVideoKey(videoId), String(quality));
 }
+
+export async function clearVideoQualityPref(videoId: number): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(perVideoKey(videoId));
+  } catch { /* ignore */ }
+}

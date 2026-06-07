@@ -90,11 +90,12 @@ import { GroupWelcomeCard } from "@/components/GroupWelcomeCard";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
 import { formatChatBubbleTime } from "@/utils/time";
 import {
-  isChatNearBottom,
+  chatDistanceFromBottom,
   isChatScrolledUp,
   isCompactChatText,
   OPEN_CHAT_PIN_DELAYS_MS,
   shouldWhatsAppAutoPin,
+  WHATSAPP_CHAT_NEAR_BOTTOM_PX,
   WHATSAPP_KEYBOARD_PIN_DELAYS_MS,
   WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS,
 } from "@/lib/whatsappChatScroll";
@@ -969,6 +970,7 @@ export default function ChatScreen() {
   const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
   const [initializing, setInitializing] = useState(rawId?.startsWith("new_") ?? false);
   const [messagesReady, setMessagesReady] = useState(false);
+  const [disappearAfterSeconds, setDisappearAfterSeconds] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [peerPresence, setPeerPresence] = useState<PresenceView | null>(null);
 
@@ -1062,6 +1064,10 @@ export default function ChatScreen() {
   }, [chatId, chats]);
 
   const remoteTypingNames = chatId ? (typingByChatId[chatId] ?? []) : [];
+  const scheduleOpenChatPinRef = useRef<() => void>(() => {});
+  const schedulePinToBottomRef = useRef<(keyboardSettling?: boolean) => void>(() => {});
+  const messagesReadyRef = useRef(false);
+  const messagesLenRef = useRef(0);
 
   // Live messages: 1s poll + push/SSE signal + AppContext backup (WhatsApp-style instant)
   useFocusEffect(
@@ -1070,8 +1076,36 @@ export default function ChatScreen() {
       if (!chatId) return;
       pendingScrollToEndRef.current = true;
       userScrolledUpRef.current = false;
+      lastNearBottomRef.current = true;
+      setShowJumpToLatest((p) => (p ? false : p));
+      setUnreadBelowCount((p) => (p > 0 ? 0 : p));
       setActiveChatId(chatId);
-      void loadMessages(chatId);
+      const tryOpenPin = () => {
+        if (
+          !userScrolledUpRef.current
+          && messagesLenRef.current > 0
+          && messagesReadyRef.current
+          && pendingScrollToEndRef.current
+        ) {
+          pendingScrollToEndRef.current = false;
+          scheduleOpenChatPinRef.current();
+        }
+      };
+      void loadMessages(chatId).finally(tryOpenPin);
+      tryOpenPin();
+      const syncDisappearTimer = async () => {
+        try {
+          const res = await fetch(`${BASE_URL}/api/chats/${chatId}/details`);
+          const data = await res.json() as {
+            success?: boolean;
+            chat?: { disappear_after_seconds?: number | null };
+          };
+          if (data.success && data.chat) {
+            setDisappearAfterSeconds(data.chat.disappear_after_seconds ?? null);
+          }
+        } catch { /* ignore */ }
+      };
+      void syncDisappearTimer();
       const typingAuthHeaders: Record<string, string> = {};
       if (user?.sessionToken) typingAuthHeaders.Authorization = `Bearer ${user.sessionToken}`;
       const pollTyping = async () => {
@@ -1103,7 +1137,7 @@ export default function ChatScreen() {
         if (String(signal.chatId) !== String(chatId)) return;
         if (userScrolledUpRef.current) return;
         pendingScrollToEndRef.current = true;
-        schedulePinToBottom();
+        schedulePinToBottomRef.current();
       });
       const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
       const loadPresence = async () => {
@@ -1135,12 +1169,16 @@ export default function ChatScreen() {
         clearInterval(typingTimer);
         if (presenceTimer) clearInterval(presenceTimer);
       };
-    }, [chatId, user?.dbId, user?.sessionToken, setActiveChatId, loadMessages, schedulePinToBottom, clearTyping, reportRemoteTyping])
+    }, [chatId, user?.dbId, user?.sessionToken, setActiveChatId, loadMessages, clearTyping, reportRemoteTyping])
   );
 
   const enterSendActive = enterIsSend;
 
   const chat = chats.find((c) => c.id === chatId);
+  useEffect(() => {
+    setDisappearAfterSeconds(chat?.disappearAfterSeconds ?? null);
+  }, [chat?.disappearAfterSeconds, chatId]);
+  const disappearingOn = (disappearAfterSeconds ?? 0) > 0;
   const allMessages = chat?.messages ?? [];
   const selectionActive = selectedIds.length > 0;
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -1427,42 +1465,48 @@ export default function ChatScreen() {
     for (const t of openPinTimersRef.current) clearTimeout(t);
     openPinTimersRef.current = [];
   }, []);
-  const scrollToLatest = useCallback((animated = false) => {
-    if (scrollLockRef.current || userDraggingRef.current) {
-      return;
-    }
-    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
+  const cancelPinToBottom = useCallback(() => {
+    for (const t of pinToBottomTimersRef.current) clearTimeout(t);
+    pinToBottomTimersRef.current = [];
+  }, []);
+  const forceScrollToLatest = useCallback((animated = false) => {
+    if (userDraggingRef.current) return;
     if (scrollCoalesceRef.current != null) cancelAnimationFrame(scrollCoalesceRef.current);
     scrollCoalesceRef.current = requestAnimationFrame(() => {
       scrollCoalesceRef.current = null;
       listRef.current?.scrollToEnd({ animated });
     });
-  }, [searching]);
+  }, []);
+  const scrollToLatest = useCallback((animated = false) => {
+    if (scrollLockRef.current || userDraggingRef.current) return;
+    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
+    forceScrollToLatest(animated);
+  }, [searching, forceScrollToLatest]);
   const scheduleOpenChatPin = useCallback(() => {
     cancelOpenChatPin();
     userScrolledUpRef.current = false;
     lastNearBottomRef.current = true;
-    setShowJumpToLatest(false);
-    setUnreadBelowCount(0);
+    setShowJumpToLatest((p) => (p ? false : p));
+    setUnreadBelowCount((p) => (p > 0 ? 0 : p));
     for (const delay of OPEN_CHAT_PIN_DELAYS_MS) {
       const t = setTimeout(() => {
         if (userScrolledUpRef.current) return;
-        scrollToLatest(false);
+        forceScrollToLatest(false);
       }, delay);
       openPinTimersRef.current.push(t);
     }
-  }, [cancelOpenChatPin, scrollToLatest]);
+  }, [cancelOpenChatPin, forceScrollToLatest]);
   const markUserScrolledUp = useCallback(() => {
     if (userScrolledUpRef.current) return;
     cancelOpenChatPin();
-    for (const t of pinToBottomTimersRef.current) clearTimeout(t);
-    pinToBottomTimersRef.current = [];
+    cancelPinToBottom();
     pendingScrollToEndRef.current = false;
     userScrolledUpRef.current = true;
     lastNearBottomRef.current = false;
     frozenMessageCountRef.current = messages.length;
-    setShowJumpToLatest(listRows.length > 6);
-  }, [cancelOpenChatPin, listRows.length, messages.length]);
+    const showFab = listRows.length > 6;
+    setShowJumpToLatest((p) => (p === showFab ? p : showFab));
+  }, [cancelOpenChatPin, cancelPinToBottom, listRows.length, messages.length]);
   /** WhatsApp: pin to latest — single quiet scroll unless keyboard is settling. */
   const schedulePinToBottom = useCallback((keyboardSettling = false) => {
     if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
@@ -1476,16 +1520,21 @@ export default function ChatScreen() {
   }, [searching, scrollToLatest]);
   const pinChatToBottom = useCallback(
     (animated = false) => {
+      cancelOpenChatPin();
+      cancelPinToBottom();
       userScrolledUpRef.current = false;
-      setShowJumpToLatest(false);
-      setUnreadBelowCount(0);
+      lastNearBottomRef.current = true;
+      setShowJumpToLatest((p) => (p ? false : p));
+      setUnreadBelowCount((p) => (p > 0 ? 0 : p));
       frozenMessageCountRef.current = messages.length;
-      pendingScrollToEndRef.current = true;
-      if (animated) scrollToLatest(true);
+      pendingScrollToEndRef.current = false;
+      if (animated) forceScrollToLatest(true);
       else schedulePinToBottom();
     },
-    [messages.length, schedulePinToBottom, scrollToLatest],
+    [messages.length, cancelOpenChatPin, cancelPinToBottom, schedulePinToBottom, forceScrollToLatest],
   );
+  scheduleOpenChatPinRef.current = scheduleOpenChatPin;
+  schedulePinToBottomRef.current = schedulePinToBottom;
   const syncScrollAwayFromBottom = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
       const away = isChatScrolledUp(
@@ -1503,8 +1552,8 @@ export default function ChatScreen() {
       cancelOpenChatPin();
       userScrolledUpRef.current = false;
       frozenMessageCountRef.current = messages.length;
-      setShowJumpToLatest(false);
-      setUnreadBelowCount(0);
+      setShowJumpToLatest((p) => (p ? false : p));
+      setUnreadBelowCount((p) => (p > 0 ? 0 : p));
     },
     [messages.length, markUserScrolledUp, cancelOpenChatPin],
   );
@@ -1522,6 +1571,24 @@ export default function ChatScreen() {
       setLoadingOlder(false);
     }
   }, [chatId, loadOlderMessages, messages, searching]);
+  const handleListScroll = useCallback(
+    (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
+      lastNearBottomRef.current = chatDistanceFromBottom(contentOffsetY, contentHeight, layoutHeight)
+        <= WHATSAPP_CHAT_NEAR_BOTTOM_PX;
+      if (userDraggingRef.current || scrollLockRef.current) {
+        syncScrollAwayFromBottom(contentOffsetY, contentHeight, layoutHeight);
+      }
+      if (
+        contentOffsetY < 140
+        && hasMoreOlderRef.current
+        && Date.now() - lastOlderLoadAtRef.current > 700
+      ) {
+        lastOlderLoadAtRef.current = Date.now();
+        void tryLoadOlderMessages();
+      }
+    },
+    [syncScrollAwayFromBottom, tryLoadOlderMessages],
+  );
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevMessageCountRef = useRef(0);
 
@@ -1530,8 +1597,8 @@ export default function ChatScreen() {
     pendingScrollToEndRef.current = true;
     userScrolledUpRef.current = false;
     lastNearBottomRef.current = true;
-    setShowJumpToLatest(false);
-    setUnreadBelowCount(0);
+    setShowJumpToLatest((p) => (p ? false : p));
+    setUnreadBelowCount((p) => (p > 0 ? 0 : p));
     frozenMessageCountRef.current = 0;
     hasMoreOlderRef.current = true;
     prevMessageCountRef.current = 0;
@@ -1589,9 +1656,17 @@ export default function ChatScreen() {
   }, [keyboardVisible]);
 
   useEffect(() => {
-    if (searching) return;
+    messagesReadyRef.current = messagesReady;
+    messagesLenRef.current = messages.length;
+  });
+
+  useEffect(() => {
+    if (searching || !messagesReady) return;
     if (pendingScrollToEndRef.current) {
-      if (messages.length === 0) return;
+      if (messages.length === 0) {
+        pendingScrollToEndRef.current = false;
+        return;
+      }
       pendingScrollToEndRef.current = false;
       scheduleOpenChatPin();
       prevMessageCountRef.current = messages.length;
@@ -1603,7 +1678,7 @@ export default function ChatScreen() {
       scrollToLatest(animated);
     }
     prevMessageCountRef.current = count;
-  }, [messages.length, searching, scrollToLatest, scheduleOpenChatPin]);
+  }, [messages.length, messagesReady, searching, scrollToLatest, scheduleOpenChatPin]);
 
   /** Composer is a sibling below the list — only a small content gap is needed. */
   const listBottomPadding = 12;
@@ -3418,7 +3493,7 @@ export default function ChatScreen() {
                 <Text style={styles.headerAvatarText}>{initials}</Text>
               </View>
             )}
-            {(chat?.disappearAfterSeconds ?? 0) > 0 ? <DisappearTimerBadge size={15} /> : null}
+            {disappearingOn ? <DisappearTimerBadge size={16} variant="header" /> : null}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -3600,6 +3675,7 @@ export default function ChatScreen() {
             scrollLockRef.current = true;
             userDraggingRef.current = true;
             cancelOpenChatPin();
+            cancelPinToBottom();
           }}
           onScrollEndDrag={(e) => {
             scrollLockRef.current = false;
@@ -3621,37 +3697,15 @@ export default function ChatScreen() {
             );
           }}
           onScroll={(e) => {
+            if (searching) return;
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-            if (!searching) {
-              lastNearBottomRef.current = isChatNearBottom(
-                contentOffset.y,
-                contentSize.height,
-                layoutMeasurement.height,
-              );
-              if (
-                contentOffset.y < 140
-                && hasMoreOlderRef.current
-                && Date.now() - lastOlderLoadAtRef.current > 700
-              ) {
-                lastOlderLoadAtRef.current = Date.now();
-                void tryLoadOlderMessages();
-              }
-            }
+            handleListScroll(contentOffset.y, contentSize.height, layoutMeasurement.height);
           }}
-          scrollEventThrottle={64}
+          scrollEventThrottle={96}
           onContentSizeChange={() => {
-            if (keyboardAnimatingRef.current) return;
-            if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current || scrollLockRef.current) {
-              return;
-            }
+            if (keyboardAnimatingRef.current || userScrolledUpRef.current) return;
+            if (userDraggingRef.current || scrollLockRef.current || searching) return;
             if (!lastNearBottomRef.current) return;
-            scrollToLatest(false);
-          }}
-          onLayout={() => {
-            if (!pendingScrollToEndRef.current) return;
-            if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current) return;
-            if (!lastNearBottomRef.current) return;
-            pendingScrollToEndRef.current = false;
             scrollToLatest(false);
           }}
           onScrollToIndexFailed={(info) => {
@@ -4152,9 +4206,9 @@ const styles = StyleSheet.create({
   selectionHeader: {},
   selectionHeaderActions: { flexWrap: "wrap", justifyContent: "flex-end", flexShrink: 0 },
   backBtn: { padding: 6 },
-  headerAvatarShell: { width: 38, height: 38, position: "relative" },
+  headerAvatarShell: { width: 38, height: 38, position: "relative", overflow: "visible" },
   headerAvatarWrap: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", overflow: "hidden" },
-  headerAvatarImg: { width: 38, height: 38 },
+  headerAvatarImg: { width: 38, height: 38, borderRadius: 19 },
   headerAvatarText: { color: "#fff", fontSize: 14, fontFamily: "Inter_700Bold" },
   headerInfo: { flex: 1 },
   headerNameRow: { flexDirection: "row", alignItems: "center", maxWidth: "100%" },

@@ -30,17 +30,17 @@ type Props = {
   qualities: ReelsVideoQuality[];
   paused?: boolean;
   onQualityChange: (q: ReelsVideoQuality) => void;
+  onPlaybackError?: () => void;
 };
 
-function ReelsWatchPlayerInner({
-  videoId,
-  baseUrl,
-  quality,
-  qualities,
-  paused = false,
-  onQualityChange,
-}: Props) {
-  const playbackUrl = applyQualityToPlaybackUrl(baseUrl, quality);
+type SurfaceProps = {
+  playbackUrl: string;
+  paused: boolean;
+  onPlaybackError?: () => void;
+};
+
+/** Remounts cleanly when playbackUrl changes (quality switch). */
+function ReelsVideoPlayerSurface({ playbackUrl, paused, onPlaybackError }: SurfaceProps) {
   const player = useVideoPlayer(playbackUrl, (p) => {
     p.loop = false;
     p.muted = false;
@@ -48,27 +48,37 @@ function ReelsWatchPlayerInner({
   });
   const { status } = useEvent(player, "statusChange", { status: player.status });
   const autoPlayedRef = useRef(false);
+  const errorHandledRef = useRef(false);
   const lastTapRef = useRef<{ side: "left" | "right"; at: number } | null>(null);
   const [skipHint, setSkipHint] = useState<{ side: "left" | "right"; seconds: number } | null>(null);
-  const [qualityOpen, setQualityOpen] = useState(false);
   const hintOpacity = useRef(new Animated.Value(0)).current;
   const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const insets = useSafeAreaInsets();
-
-  useEffect(() => {
-    autoPlayedRef.current = false;
-  }, [videoId, playbackUrl]);
 
   useFocusEffect(
     useCallback(() => () => {
-      player.pause();
+      try {
+        player.pause();
+      } catch { /* player may already be released */ }
     }, [player]),
   );
 
   useEffect(() => () => {
-    player.pause();
+    try {
+      player.pause();
+    } catch { /* ignore */ }
     if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
   }, [player]);
+
+  useEffect(() => {
+    autoPlayedRef.current = false;
+    errorHandledRef.current = false;
+  }, [playbackUrl]);
+
+  useEffect(() => {
+    if (status !== "error" || errorHandledRef.current) return;
+    errorHandledRef.current = true;
+    onPlaybackError?.();
+  }, [status, onPlaybackError]);
 
   useEffect(() => {
     if (paused) {
@@ -106,12 +116,9 @@ function ReelsWatchPlayerInner({
     }, DOUBLE_TAP_MS + 40);
   }, [player, flashSkipHint]);
 
-  const activeQualityLabel = quality === "auto" ? "Auto" : qualityLabel(quality);
-
   return (
-    <View style={styles.wrap}>
+    <>
       <VideoView
-        key={`watch-player-${videoId}-${quality}`}
         style={styles.player}
         player={player}
         contentFit="contain"
@@ -142,6 +149,37 @@ function ReelsWatchPlayerInner({
           <Text style={styles.skipHintText}>{skipHint.seconds} sec</Text>
         </Animated.View>
       ) : null}
+    </>
+  );
+}
+
+function ReelsWatchPlayerInner({
+  videoId,
+  baseUrl,
+  quality,
+  qualities,
+  paused = false,
+  onQualityChange,
+  onPlaybackError,
+}: Props) {
+  const playbackUrl = applyQualityToPlaybackUrl(baseUrl, quality);
+  const [qualityOpen, setQualityOpen] = useState(false);
+  const insets = useSafeAreaInsets();
+
+  const handlePlaybackError = useCallback(() => {
+    onPlaybackError?.();
+  }, [onPlaybackError]);
+
+  const activeQualityLabel = quality === "auto" ? "Auto" : qualityLabel(quality);
+
+  return (
+    <View style={styles.wrap}>
+      <ReelsVideoPlayerSurface
+        key={`${videoId}-${quality}`}
+        playbackUrl={playbackUrl}
+        paused={paused}
+        onPlaybackError={handlePlaybackError}
+      />
 
       <TouchableOpacity
         style={[styles.qualityBtn, { top: insets.top + 6 }]}

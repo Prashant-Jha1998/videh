@@ -691,7 +691,7 @@ export default function ChatInfoScreen() {
                 <Text style={styles.bigAvatarText}>{initials}</Text>
               </View>
             )}
-            {(disappearing ?? 0) > 0 ? <DisappearTimerBadge size={22} /> : null}
+            {(disappearing ?? 0) > 0 ? <DisappearTimerBadge size={22} variant="profile" /> : null}
           </TouchableOpacity>
           <Text style={[styles.contactName, { color: colors.foreground }]}>{name ?? chat?.name}</Text>
           {!isGroup && (
