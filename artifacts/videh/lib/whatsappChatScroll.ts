@@ -67,8 +67,30 @@ export function isChatScrolledUp(
   return dist > WHATSAPP_CHAT_SCROLL_AWAY_PX;
 }
 
-export function shouldWhatsAppAutoPin(userScrolledUp: boolean, searching: boolean): boolean {
-  return !searching && !userScrolledUp;
+/** True when automatic scroll-to-latest is allowed (FAB / open / quote are exempt). */
+export function shouldWhatsAppAutoPin(
+  userScrolledUp: boolean,
+  readingHistory: boolean,
+  searching: boolean,
+): boolean {
+  return !searching && !userScrolledUp && !readingHistory;
+}
+
+/** Inverted list: user manually returned to the tail (stricter than near-bottom). */
+export function isInvertedChatBackAtBottom(
+  contentOffsetY: number,
+  threshold = WHATSAPP_CHAT_BACK_TO_BOTTOM_PX,
+): boolean {
+  return contentOffsetY <= threshold;
+}
+
+export function isChatBackAtBottom(
+  contentOffsetY: number,
+  contentHeight: number,
+  layoutHeight: number,
+  threshold = WHATSAPP_CHAT_BACK_TO_BOTTOM_PX,
+): boolean {
+  return chatDistanceFromBottom(contentOffsetY, contentHeight, layoutHeight) <= threshold;
 }
 
 /** Smooth scroll for small deltas; quiet pin during keyboard animation or bursts. */
