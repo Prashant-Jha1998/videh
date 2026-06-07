@@ -61,5 +61,25 @@ export async function ensureReelsAdsTables(): Promise<void> {
     )
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_reels_ad_creatives_active ON reels_ad_creatives (is_active, placement)`);
+  await ensureReelsAdsV2Columns();
   adsEnsured = true;
+}
+
+async function ensureReelsAdsV2Columns(): Promise<void> {
+  await query(`ALTER TABLE reels_ad_campaigns ADD COLUMN IF NOT EXISTS objective VARCHAR(24) NOT NULL DEFAULT 'brand_awareness'`);
+  await query(`ALTER TABLE reels_ad_campaigns ADD COLUMN IF NOT EXISTS bid_model VARCHAR(12) NOT NULL DEFAULT 'cpm'`);
+  await query(`ALTER TABLE reels_ad_campaigns ADD COLUMN IF NOT EXISTS bid_amount_inr NUMERIC(10, 2) NOT NULL DEFAULT 120`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS format VARCHAR(20) NOT NULL DEFAULT 'video'`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS image_url TEXT`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS headline VARCHAR(120)`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS description TEXT`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS cta_type VARCHAR(20) NOT NULL DEFAULT 'learn_more'`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS destination_url TEXT`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS play_store_url TEXT`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS app_store_url TEXT`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS app_name VARCHAR(80)`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS clicks BIGINT NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE reels_ad_creatives ALTER COLUMN video_url DROP NOT NULL`);
+  await query(`ALTER TABLE reels_ad_impressions ADD COLUMN IF NOT EXISTS clicked BOOLEAN NOT NULL DEFAULT FALSE`);
+  await query(`ALTER TABLE reels_ad_impressions ADD COLUMN IF NOT EXISTS cost_inr NUMERIC(10, 4) NOT NULL DEFAULT 0`);
 }

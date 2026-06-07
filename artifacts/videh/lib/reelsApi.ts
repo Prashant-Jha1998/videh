@@ -263,6 +263,23 @@ export async function fetchReelsChannel(handle: string, userId?: number, session
 
 export type ReelsFeedCursor = { at: string; id: number };
 
+export type ReelsFeedAd = {
+  id: number;
+  format: "video" | "image" | "app_install" | "shopping";
+  title: string;
+  headline: string;
+  description: string;
+  imageUrl: string | null;
+  videoUrl: string | null;
+  ctaType: string;
+  destinationUrl: string | null;
+  playStoreUrl: string | null;
+  appStoreUrl: string | null;
+  appName: string | null;
+  advertiserName: string;
+  sponsoredLabel: string;
+};
+
 export async function fetchReelsFeed(
   userId: number,
   cursor?: ReelsFeedCursor | null,
@@ -276,6 +293,8 @@ export async function fetchReelsFeed(
     videos: ReelsVideo[];
     trending?: ReelsVideo[];
     nextCursor: ReelsFeedCursor | null;
+    feedAds?: ReelsFeedAd[];
+    feedAdEvery?: number;
   }>(
     `/feed?userId=${userId}&limit=15${c}`,
     { sessionToken },
@@ -406,6 +425,22 @@ export async function fetchReelsAdBreaks(
     `/videos/${videoId}/ad-breaks?userId=${userId}`,
     { sessionToken },
   );
+}
+
+export async function recordReelsAdClick(
+  opts: {
+    creativeId: number;
+    userId: number;
+    placement: string;
+    clickTarget: "cta" | "play_store" | "app_store" | "destination";
+  },
+  sessionToken?: string | null,
+) {
+  return reelsJson<{ success: boolean }>("/ads/click", {
+    method: "POST",
+    body: opts,
+    sessionToken,
+  });
 }
 
 export async function recordReelsAdImpression(

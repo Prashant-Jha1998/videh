@@ -1,7 +1,8 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-  background: #f8fafb;
+  font-family: "Google Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: #f1f3f4;
   color: #202124;
 }
+button, input, select, textarea { font: inherit; }

@@ -60,7 +60,7 @@ export type ReelsPrivacyRules = {
   summary: string[];
 };
 
-/** YouTube-style pre-roll + mid-roll ads on Video watch. */
+/** YouTube-style pre-roll + mid-roll + home feed ads (Google Ads billing). */
 export type ReelsAdsRules = {
   enabled: boolean;
   preRollNonSkipSeconds: number;
@@ -72,6 +72,14 @@ export type ReelsAdsRules = {
   fallbackNonSkipUrl: string;
   fallbackSkippableUrl: string;
   fallbackMidRollUrl: string;
+  feedAdsEnabled: boolean;
+  feedAdEveryVideos: number;
+  /** Default rates (INR) — advertisers can set custom bids on campaigns. */
+  feedCpmInr: number;
+  feedCpcInr: number;
+  appInstallCpiInr: number;
+  videoCpvInr: number;
+  minTopUpInr: number;
   summary: string[];
 };
 
@@ -177,9 +185,18 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
     fallbackNonSkipUrl: "https://videos.pexels.com/video-files/3571264/3571264-uhd_2560_1440_25fps.mp4",
     fallbackSkippableUrl: "https://videos.pexels.com/video-files/3195394/3195394-uhd_2560_1440_25fps.mp4",
     fallbackMidRollUrl: "https://videos.pexels.com/video-files/854424/854424-uhd_2560_1440_25fps.mp4",
+    feedAdsEnabled: true,
+    feedAdEveryVideos: 2,
+    feedCpmInr: 120,
+    feedCpcInr: 15,
+    appInstallCpiInr: 45,
+    videoCpvInr: 0.35,
+    minTopUpInr: 500,
     summary: [
       "Before the video: 30-second non-skippable ad, then up to 60-second skippable ad",
       "During long videos: non-skippable mid-roll ads every 8 minutes",
+      "Home feed: sponsored cards every 2 videos (app install, shopping, image)",
+      "Billing: CPM impressions · CPC clicks · CPI app-store taps · CPV video completions",
       "Creators watching their own uploads do not see ads",
       "Advertisers manage campaigns at ads.videh.co.in",
     ],

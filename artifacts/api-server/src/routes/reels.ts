@@ -38,7 +38,7 @@ import {
   mapPublicReelsComment,
   redactPhoneNumbersInText,
 } from "../lib/reelsPrivacy";
-import { recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
+import { pickFeedAds, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -637,7 +637,12 @@ router.get("/feed", async (req: Request, res: Response) => {
     const { videos: rows, nextCursor } = await fetchLatestReelsFeed(viewerId, limit, cursor);
     const videos = rows.map((r) => mapVideoRow(r, req));
     const trending = trendingRows.map((r) => mapVideoRow(r, req));
-    res.json({ success: true, videos, trending, nextCursor });
+    const cfg = await getReelsPlatformConfig();
+    const adSlots = cfg.ads.feedAdsEnabled
+      ? Math.max(1, Math.floor(videos.length / Math.max(1, cfg.ads.feedAdEveryVideos)))
+      : 0;
+    const feedAds = adSlots > 0 ? await pickFeedAds(adSlots) : [];
+    res.json({ success: true, videos, trending, nextCursor, feedAds, feedAdEvery: cfg.ads.feedAdEveryVideos });
   } catch (err) {
     req.log.error({ err }, "reels feed");
     res.status(500).json({ success: false, message: "Server error" });
@@ -1195,6 +1200,36 @@ router.get("/videos/:videoId/ad-breaks", async (req: Request, res: Response) => 
     res.json({ success: true, ...breaks });
   } catch (err) {
     req.log.error({ err, videoId }, "reels ad-breaks");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/ads/click", async (req: Request, res: Response) => {
+  const body = req.body as {
+    creativeId?: number;
+    userId?: number;
+    placement?: string;
+    clickTarget?: string;
+  };
+  const creativeId = Number(body.creativeId);
+  if (!creativeId) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  const userId = Number(body.userId) || getAuthUserId(req) || 0;
+  const clickTarget = ["cta", "play_store", "app_store", "destination"].includes(String(body.clickTarget))
+    ? (body.clickTarget as "cta" | "play_store" | "app_store" | "destination")
+    : "cta";
+  try {
+    const result = await recordReelsAdClick({
+      creativeId,
+      viewerUserId: userId,
+      placement: String(body.placement ?? "feed_instream"),
+      clickTarget,
+    });
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "reels ad click");
     res.status(500).json({ success: false });
   }
 });

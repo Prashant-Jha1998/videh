@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -16,15 +16,36 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { ReelsFeedAdCard } from "@/components/ReelsFeedAdCard";
 import {
   fetchMyReelsChannel,
   fetchReelsFeed,
   formatDuration,
   formatTimeAgo,
   formatViewCount,
+  type ReelsFeedAd,
   type ReelsFeedCursor,
   type ReelsVideo,
 } from "@/lib/reelsApi";
+
+type FeedRow =
+  | { kind: "video"; key: string; video: ReelsVideo }
+  | { kind: "ad"; key: string; ad: ReelsFeedAd };
+
+function buildFeedRows(videos: ReelsVideo[], ads: ReelsFeedAd[], every: number): FeedRow[] {
+  const rows: FeedRow[] = [];
+  let adIdx = 0;
+  const interval = Math.max(1, every);
+  for (let i = 0; i < videos.length; i++) {
+    const v = videos[i];
+    rows.push({ kind: "video", key: `v-${v.id}`, video: v });
+    if ((i + 1) % interval === 0 && adIdx < ads.length) {
+      const ad = ads[adIdx++];
+      rows.push({ kind: "ad", key: `ad-${ad.id}-${i}`, ad });
+    }
+  }
+  return rows;
+}
 
 const SCREEN_W = Dimensions.get("window").width;
 const THUMB_H = Math.round((SCREEN_W * 9) / 16);
@@ -37,6 +58,8 @@ export default function VideoTabScreen() {
   const router = useRouter();
   const { user } = useApp();
   const [videos, setVideos] = useState<ReelsVideo[]>([]);
+  const [feedAds, setFeedAds] = useState<ReelsFeedAd[]>([]);
+  const [feedAdEvery, setFeedAdEvery] = useState(2);
   const [trending, setTrending] = useState<ReelsVideo[]>([]);
   const [nextCursor, setNextCursor] = useState<ReelsFeedCursor | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,6 +74,8 @@ export default function VideoTabScreen() {
     setHasChannel(Boolean(ch.channel));
     const feed = await fetchReelsFeed(user.dbId, null, user.sessionToken);
     setVideos(feed.videos ?? []);
+    setFeedAds(feed.feedAds ?? []);
+    setFeedAdEvery(feed.feedAdEvery ?? 2);
     setTrending(feed.trending ?? []);
     setNextCursor(feed.nextCursor ?? null);
     setLoading(false);
@@ -68,6 +93,9 @@ export default function VideoTabScreen() {
           const seen = new Set(prev.map((v) => v.id));
           return [...prev, ...incoming.filter((v) => !seen.has(v.id))];
         });
+      }
+      if ((feed.feedAds ?? []).length > 0) {
+        setFeedAds((prev) => [...prev, ...(feed.feedAds ?? [])]);
       }
       setNextCursor(feed.nextCursor ?? null);
     } finally {
@@ -157,7 +185,13 @@ export default function VideoTabScreen() {
     </TouchableOpacity>
   );
 
-  const renderItem = ({ item }: { item: ReelsVideo }) => renderVideoCard(item);
+  const feedRows = useMemo(
+    () => buildFeedRows(videos, feedAds, feedAdEvery),
+    [videos, feedAds, feedAdEvery],
+  );
+
+  const renderItem = ({ item }: { item: FeedRow }) =>
+    item.kind === "ad" ? <ReelsFeedAdCard ad={item.ad} /> : renderVideoCard(item.video);
 
   const listHeader = (
     <>
@@ -230,8 +264,8 @@ export default function VideoTabScreen() {
       </View>
 
       <FlatList
-        data={videos}
-        keyExtractor={(v) => String(v.id)}
+        data={feedRows}
+        keyExtractor={(row) => row.key}
         renderItem={renderItem}
         contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
