@@ -465,7 +465,7 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
     const adTypeRaw = specFromId?.adType ?? String(body.adType ?? "non_skippable");
     const adType = ["skippable", "bumper"].includes(adTypeRaw) ? adTypeRaw : "non_skippable";
     const skipAfter = adType === "skippable"
-      ? (specFromId?.skipAfterSeconds ?? Number(body.skipAfterSeconds) || 5)
+      ? (specFromId?.skipAfterSeconds ?? (Number(body.skipAfterSeconds) || 5))
       : null;
     const maxDur = specFromId?.maxDurationSeconds;
     const ctaType = String(body.ctaType ?? (
