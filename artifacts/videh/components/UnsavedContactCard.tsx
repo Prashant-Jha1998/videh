@@ -105,7 +105,7 @@ export function UnsavedContactCard({
 }
 
 const styles = StyleSheet.create({
-  encryptWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
+  encryptWrap: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6 },
   encryptPill: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -113,23 +113,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF9C4",
     borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 9,
   },
-  encryptText: { flex: 1, fontSize: 12.5, lineHeight: 18, color: "#54656F", fontFamily: "Inter_400Regular" },
+  encryptText: { flex: 1, fontSize: 12.5, lineHeight: 17, color: "#54656F", fontFamily: "Inter_400Regular" },
   encryptLink: { color: "#00A884", fontFamily: "Inter_500Medium" },
-  wrap: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 12 },
+  wrap: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 10 },
   card: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 12,
+    borderRadius: 14,
     alignItems: "center",
-    paddingTop: 28,
+    paddingTop: 24,
     paddingBottom: 0,
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     elevation: 1,
     shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
   },
   cardDark: { backgroundColor: "#1F2C34" },
   avatar: {

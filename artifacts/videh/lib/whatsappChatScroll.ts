@@ -11,7 +11,7 @@
  *
  * Parity checklist (see app/chat/[id].tsx):
  * - stackFromEnd: flexGrow + justifyContent flex-end
- * - composer below list on native (not overlay); resize / KAV handle keyboard
+ * - composer below list; KeyboardStickyView pins it above the keyboard
  * - pin after keyboard onEnd (not on every content-size / composer tick)
  * - no auto-pin when user scrolled up (near-bottom threshold)
  * - jump-to-latest FAB when scrolled up (with unread count badge)
@@ -56,9 +56,9 @@ export function isChatScrolledUp(
 
 /** One immediate pin; keyboard end may schedule a second post-layout pin. */
 export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0] as const;
-export const WHATSAPP_KEYBOARD_PIN_DELAYS_MS = [0, 180] as const;
+export const WHATSAPP_KEYBOARD_PIN_DELAYS_MS = [0] as const;
 /** Pin after opening a chat (media cells resize after first layout). */
-export const OPEN_CHAT_PIN_DELAYS_MS = [0, 60, 180, 400, 800] as const;
+export const OPEN_CHAT_PIN_DELAYS_MS = [0, 180] as const;
 
 export function shouldWhatsAppAutoPin(userScrolledUp: boolean, searching: boolean): boolean {
   return !searching && !userScrolledUp;

@@ -1386,7 +1386,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const cid = activeChatIdRef.current;
       if (!cid) return;
       void loadMessages(cid);
-    }, 800);
+    }, 12000);
     const statusTimer = setInterval(runStatuses, 12000);
     const callTimer = setInterval(runCalls, 30000);
     return () => {
@@ -1999,9 +1999,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Typing indicator
+  const typingPostAtRef = useRef<Record<string, number>>({});
   const setTyping = useCallback((chatId: string) => {
     const u = userRef.current;
     if (!u?.dbId) return;
+    const now = Date.now();
+    const key = String(chatId);
+    if (now - (typingPostAtRef.current[key] ?? 0) < 1500) return;
+    typingPostAtRef.current[key] = now;
     void fetch(`${BASE_URL}/api/chats/${chatId}/typing`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),

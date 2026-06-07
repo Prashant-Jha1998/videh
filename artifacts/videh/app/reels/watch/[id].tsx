@@ -1,9 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEvent } from "expo";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Audio } from "expo-av";
-import { useVideoPlayer, VideoView } from "expo-video";
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
 import * as Sharing from "expo-sharing";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -22,6 +20,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DismissibleModal } from "@/components/DismissibleModal";
+import { ReelsWatchPlayer } from "@/components/ReelsWatchPlayer";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
@@ -41,6 +40,12 @@ import {
   type ReelsChannel,
   type ReelsVideo,
 } from "@/lib/reelsApi";
+import {
+  loadVideoQualityPref,
+  qualitiesForVideo,
+  saveVideoQualityPref,
+  type ReelsVideoQuality,
+} from "@/lib/reelsVideoQuality";
 
 const SCREEN_W = Dimensions.get("window").width;
 const THUMB_H = Math.round((SCREEN_W * 9) / 16);
@@ -63,27 +68,36 @@ export default function ReelsWatchScreen() {
   const [related, setRelated] = useState<ReelsVideo[]>([]);
   const [comments, setComments] = useState<{ id: number; content: string; displayName: string; createdAt: string }[]>([]);
   const [commentText, setCommentText] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [metaRefreshing, setMetaRefreshing] = useState(false);
   const [playAllowed, setPlayAllowed] = useState(true);
   const [playBlockReasons, setPlayBlockReasons] = useState<string[]>([]);
   const [descOpen, setDescOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [videoQuality, setVideoQuality] = useState<ReelsVideoQuality>("auto");
   const watchedRef = useRef(0);
   const viewSentRef = useRef(false);
+  const watchTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const playbackUrl = video?.videoUrl ?? null;
-  const player = useVideoPlayer(playbackUrl, (p) => {
-    p.loop = false;
-    p.muted = false;
-    p.volume = 1;
-  });
+  const switchingVideo = Boolean(video && id && String(video.id) !== String(id));
+
+  const qualityOptions = useMemo(
+    () => qualitiesForVideo(video?.sourceHeight, video?.videoUrl),
+    [video?.sourceHeight, video?.videoUrl],
+  );
 
   useEffect(() => {
-    if (!playbackUrl) return;
-    void player.replaceAsync(playbackUrl).then(() => {
-      player.play();
-    }).catch(() => {});
-  }, [playbackUrl, player]);
+    if (!video?.id) return;
+    const opts = qualitiesForVideo(video.sourceHeight, video.videoUrl);
+    void loadVideoQualityPref(video.id, opts).then(setVideoQuality);
+  }, [video?.id, video?.sourceHeight, video?.videoUrl]);
+
+  const handleQualityChange = useCallback((q: ReelsVideoQuality) => {
+    if (!video?.id) return;
+    setVideoQuality(q);
+    void saveVideoQualityPref(video.id, q);
+  }, [video?.id]);
 
   useEffect(() => {
     void Audio.setAudioModeAsync({
@@ -92,14 +106,13 @@ export default function ReelsWatchScreen() {
       staysActiveInBackground: false,
       shouldDuckAndroid: true,
       playThroughEarpieceAndroid: false,
+      interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+      interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
     });
   }, []);
 
-  useEvent(player, "statusChange", { status: player.status });
-
   const load = useCallback(async () => {
     if (!user?.dbId || !id) return;
-    setLoading(true);
     viewSentRef.current = false;
     watchedRef.current = 0;
 
@@ -126,28 +139,47 @@ export default function ReelsWatchScreen() {
 
     const cm = await fetchReelsComments(Number(id), user.sessionToken);
     if (cm.success) setComments(cm.comments ?? []);
-    setLoading(false);
+    setInitialLoading(false);
+    setMetaRefreshing(false);
   }, [id, user?.dbId, user?.sessionToken]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    setMetaRefreshing(true);
+    void load();
+  }, [load]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (player.playing) watchedRef.current += 1;
+    if (watchTickRef.current) clearInterval(watchTickRef.current);
+    watchTickRef.current = setInterval(() => {
+      if (!switchingVideo && video && String(video.id) === String(id)) {
+        watchedRef.current += 1;
+      }
     }, 1000);
     return () => {
-      clearInterval(interval);
+      if (watchTickRef.current) clearInterval(watchTickRef.current);
       if (!viewSentRef.current && user?.dbId && id && watchedRef.current > 2) {
         viewSentRef.current = true;
         void recordReelsView(Number(id), user.dbId, watchedRef.current, user.sessionToken);
       }
     };
-  }, [player, id, user?.dbId, user?.sessionToken]);
+  }, [id, user?.dbId, user?.sessionToken, switchingVideo, video]);
+
+  const refreshVideoMeta = useCallback(async () => {
+    if (!user?.dbId || !id) return;
+    setMetaRefreshing(true);
+    const res = await fetchReelsVideo(Number(id), user.dbId, user.sessionToken);
+    if (res.success && res.video) {
+      setVideo(res.video);
+      setPlayAllowed(res.playAllowed !== false);
+      setPlayBlockReasons(res.playBlockReasons ?? []);
+    }
+    setMetaRefreshing(false);
+  }, [id, user?.dbId, user?.sessionToken]);
 
   const toggleReaction = async (reaction: "like" | "dislike") => {
     if (!user?.dbId || !video) return;
     await reactReelsVideo(video.id, user.dbId, reaction, user.sessionToken);
-    void load();
+    void refreshVideoMeta();
   };
 
   const toggleSubscribe = async () => {
@@ -159,7 +191,6 @@ export default function ReelsWatchScreen() {
       await subscribeReelsChannel(video.channelId, user.dbId, user.sessionToken);
       setSubscribed(true);
     }
-    void load();
   };
 
   const sendComment = async () => {
@@ -241,10 +272,18 @@ export default function ReelsWatchScreen() {
     </TouchableOpacity>
   );
 
-  if (loading || !video) {
+  if (initialLoading && !video) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
         <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (!video) {
+    return (
+      <View style={[styles.center, { backgroundColor: colors.background }]}>
+        <Text style={{ color: colors.mutedForeground }}>Video not found</Text>
       </View>
     );
   }
@@ -254,14 +293,14 @@ export default function ReelsWatchScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.playerWrap}>
-        {playAllowed ? (
-          <VideoView
-            key={`watch-${video.id}-${playbackUrl}`}
-            style={styles.player}
-            player={player}
-            contentFit="contain"
-            nativeControls
-            fullscreenOptions={{ enable: true, orientation: "landscape" }}
+        {playAllowed && playbackUrl ? (
+          <ReelsWatchPlayer
+            videoId={video.id}
+            baseUrl={playbackUrl}
+            quality={videoQuality}
+            qualities={qualityOptions}
+            paused={switchingVideo || metaRefreshing}
+            onQualityChange={handleQualityChange}
           />
         ) : (
           <View style={[styles.player, styles.blockedPlayer]}>
@@ -274,6 +313,11 @@ export default function ReelsWatchScreen() {
             </Text>
           </View>
         )}
+        {(switchingVideo || metaRefreshing) ? (
+          <View style={styles.playerLoadingOverlay}>
+            <ActivityIndicator color="#fff" size="large" />
+          </View>
+        ) : null}
         <TouchableOpacity
           style={[styles.playerBack, { top: insets.top + 6 }]}
           onPress={() => router.back()}
@@ -555,6 +599,12 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: "rgba(0,0,0,0.45)",
     borderRadius: 20,
+  },
+  playerLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.35)",
   },
   blockedPlayer: { alignItems: "center", justifyContent: "center", padding: 20 },
   blockedTitle: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 16, marginTop: 12 },

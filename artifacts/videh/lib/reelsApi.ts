@@ -66,6 +66,8 @@ export type ReelsVideo = {
   channelAvatarUrl: string | null;
   myReaction?: "like" | "dislike" | null;
   createdAt?: string;
+  /** Native upload height in px; drives per-video quality menu. */
+  sourceHeight?: number | null;
 };
 
 export const REELS_HANDLE_RE = /^[a-zA-Z][a-zA-Z0-9_]{2,29}$/;

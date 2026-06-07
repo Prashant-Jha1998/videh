@@ -10,7 +10,7 @@ import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import {
-  KeyboardAvoidingView,
+  KeyboardStickyView,
   useGenericKeyboardHandler,
   useResizeMode,
 } from "react-native-keyboard-controller";
@@ -25,7 +25,6 @@ import {
   Clipboard,
   Dimensions,
   FlatList,
-  useWindowDimensions,
   Linking,
   Modal,
   Image as NativeImage,
@@ -347,7 +346,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
   const loadSound = useCallback(async (source: NonNullable<typeof playbackSource>): Promise<Audio.Sound> => {
     const { sound: s } = await Audio.Sound.createAsync(
       source,
-      { shouldPlay: false, volume: 1, rate: 1, progressUpdateIntervalMillis: 200 },
+      { shouldPlay: false, volume: 1, rate: 1, progressUpdateIntervalMillis: 500 },
       (status) => {
         if (status.isLoaded) {
           setPosition((status.positionMillis ?? 0) / 1000);
@@ -1096,7 +1095,7 @@ export default function ChatScreen() {
         messagePollInFlightRef.current = true;
         loadMessages(chatId).finally(() => { messagePollInFlightRef.current = false; });
       };
-      const msgTimer = setInterval(() => pollMessages(false), 300);
+      const msgTimer = setInterval(() => pollMessages(false), 5000);
       void pollMessages(true);
       void pollTyping();
       const typingTimer = setInterval(pollTyping, 1500);
@@ -1144,6 +1143,7 @@ export default function ChatScreen() {
   const chat = chats.find((c) => c.id === chatId);
   const allMessages = chat?.messages ?? [];
   const selectionActive = selectedIds.length > 0;
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   const clearSelection = useCallback(() => {
     setSelectedIds([]);
@@ -1162,11 +1162,13 @@ export default function ChatScreen() {
 
   const listRows = useMemo(() => messagesWithDateRows(messages), [messages]);
   const [composerHeight, setComposerHeight] = useState(56);
-  const [keyboardLiftFallback, setKeyboardLiftFallback] = useState(0);
-  const keyboardHeightRef = useRef(0);
   const chatContactName = name ?? chat?.name ?? "Chat";
 
   const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
+  const listExtraData = useMemo(
+    () => `${selectedIds.length}|${flashMessageId ?? ""}|${allMessages.length}`,
+    [selectedIds.length, flashMessageId, allMessages.length],
+  );
   const flashAnim = useRef(new Animated.Value(0)).current;
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1492,15 +1494,6 @@ export default function ChatScreen() {
         layoutHeight,
         userScrolledUpRef.current,
       );
-      // adjustResize / keyboard animation shrinks the list before scroll catches up — pin only if user was already at bottom.
-      if (
-        away
-        && !userScrolledUpRef.current
-        && (keyboardVisibleRef.current || keyboardAnimatingRef.current)
-      ) {
-        schedulePinToBottom(true);
-        return;
-      }
       lastNearBottomRef.current = !away;
       if (away === userScrolledUpRef.current) return;
       if (away) {
@@ -1513,7 +1506,7 @@ export default function ChatScreen() {
       setShowJumpToLatest(false);
       setUnreadBelowCount(0);
     },
-    [messages.length, searching, schedulePinToBottom, markUserScrolledUp, cancelOpenChatPin],
+    [messages.length, markUserScrolledUp, cancelOpenChatPin],
   );
   const tryLoadOlderMessages = useCallback(async () => {
     if (loadingOlderRef.current || !hasMoreOlderRef.current || searching || !chatId) return;
@@ -1531,7 +1524,6 @@ export default function ChatScreen() {
   }, [chatId, loadOlderMessages, messages, searching]);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevMessageCountRef = useRef(0);
-  const keyboardScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     cancelOpenChatPin();
@@ -1589,52 +1581,12 @@ export default function ChatScreen() {
   );
 
   useResizeMode();
-  const { keyboardVisible, keyboardHeight } = useChatKeyboard();
-  const { height: windowHeight } = useWindowDimensions();
-  const windowHeightWhenKeyboardHiddenRef = useRef(windowHeight);
-  const effectiveKeyboardHeight = Math.max(keyboardHeight, keyboardLiftFallback);
-
-  useEffect(() => {
-    keyboardHeightRef.current = keyboardHeight;
-    if (keyboardHeight > 0) setKeyboardLiftFallback(0);
-  }, [keyboardHeight]);
-
-  useEffect(() => {
-    if (!keyboardVisible) {
-      windowHeightWhenKeyboardHiddenRef.current = windowHeight;
-      setKeyboardLiftFallback(0);
-    }
-  }, [keyboardVisible, windowHeight]);
-
-  /**
-   * adjustResize may only shrink the window partially on some devices/APKs.
-   * Lift only the gap the system did not already cover (full lift when adjustPan / no shrink).
-   */
-  const keyboardOpen = keyboardVisible || keyboardLiftFallback > 0;
-  const windowShrinkDelta = keyboardOpen
-    ? Math.max(0, windowHeightWhenKeyboardHiddenRef.current - windowHeight)
-    : 0;
-  const androidKeyboardLift =
-    Platform.OS === "android" && keyboardOpen && effectiveKeyboardHeight > 0
-      ? Math.max(0, effectiveKeyboardHeight - windowShrinkDelta)
-      : 0;
+  const { keyboardVisible } = useChatKeyboard();
 
   useEffect(() => {
     keyboardVisibleRef.current = keyboardVisible;
     if (!keyboardVisible) keyboardAnimatingRef.current = false;
   }, [keyboardVisible]);
-
-  useEffect(() => {
-    if (!keyboardVisible || keyboardHeight <= 0 || userScrolledUpRef.current) return;
-    pendingScrollToEndRef.current = true;
-    schedulePinToBottom(true);
-  }, [keyboardHeight, keyboardVisible, schedulePinToBottom]);
-
-  useEffect(() => {
-    if (androidKeyboardLift <= 0 || userScrolledUpRef.current) return;
-    pendingScrollToEndRef.current = true;
-    schedulePinToBottom(true);
-  }, [androidKeyboardLift, schedulePinToBottom]);
 
   useEffect(() => {
     if (searching) return;
@@ -1656,8 +1608,8 @@ export default function ChatScreen() {
   /** Composer is a sibling below the list — only a small content gap is needed. */
   const listBottomPadding = 12;
   const jumpFabBottom = useMemo(
-    () => Math.max(12, composerHeight + androidKeyboardLift + 16),
-    [composerHeight, androidKeyboardLift],
+    () => Math.max(12, composerHeight + 16),
+    [composerHeight],
   );
 
   useEffect(() => {
@@ -1670,16 +1622,6 @@ export default function ChatScreen() {
     };
   }, [cancelOpenChatPin]);
 
-  useEffect(() => {
-    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
-    if (!keyboardVisible) return;
-    if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
-    keyboardScrollTimerRef.current = setTimeout(() => schedulePinToBottom(true), 60);
-    return () => {
-      if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
-    };
-  }, [keyboardVisible, searching, schedulePinToBottom]);
-
   /** Composer grew (reply / link preview) — debounced pin only if user is already at bottom. */
   useEffect(() => {
     if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current) return;
@@ -1690,13 +1632,6 @@ export default function ChatScreen() {
       if (composerPinTimerRef.current) clearTimeout(composerPinTimerRef.current);
     };
   }, [composerHeight, searching, scrollToLatest]);
-
-  useEffect(() => {
-    if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
-    if (androidKeyboardLift <= 0) return;
-    pendingScrollToEndRef.current = true;
-    scrollToLatest(false);
-  }, [androidKeyboardLift, searching, scrollToLatest]);
 
   useEffect(() => {
     if (searching) return;
@@ -2347,7 +2282,7 @@ export default function ChatScreen() {
       </View>
     );
 
-    const isSelected = selectedIds.includes(item.id);
+    const isSelected = selectedIdSet.has(item.id);
     const isFlashing = flashMessageId === item.id;
     const flashTint = flashAnim.interpolate({
       inputRange: [0, 1],
@@ -2779,6 +2714,9 @@ export default function ChatScreen() {
     && !groupWelcomeDismissed
     && !!groupWelcomePreview
     && groupWelcomePreview.createdByUserId !== user?.dbId;
+  const hasIntroCards = showBusinessIntro || showUnsavedContactCard || showGroupWelcomeCard;
+  const isChatEmpty = messagesReady && !searching && listRows.length === 0;
+  const showEmptyStateLabel = isChatEmpty && !hasIntroCards;
 
   useFocusEffect(
     useCallback(() => {
@@ -3237,23 +3175,32 @@ export default function ChatScreen() {
           style={[
             styles.inputBar,
             {
-              backgroundColor: colors.isDark ? colors.background : "#F0F2F5",
+              backgroundColor: colors.isDark ? colors.background : "#FFFFFF",
               borderTopColor: colors.isDark ? colors.border : "rgba(0,0,0,0.06)",
               paddingBottom: inputBarBottomPad,
             },
           ]}
         >
           {voiceRecPhase !== "locked" && (
-            <View style={styles.inputBarMain}>
+            <View
+              style={[
+                styles.inputPill,
+                {
+                  backgroundColor: colors.isDark ? colors.card : "#FFFFFF",
+                  borderColor: colors.isDark ? colors.border : "rgba(0,0,0,0.08)",
+                },
+                voiceRecPhase === "holding" ? styles.inputPillHolding : null,
+              ]}
+            >
               {voiceRecPhase !== "holding" && (
                 <TouchableOpacity
-                  style={styles.inputIcon}
+                  style={styles.inputPillIcon}
                   onPress={toggleEmojiPanel}
                   disabled={!composerEnabled || !!editTarget}
                 >
                   <Ionicons
                     name={emojiPanelOpen ? "happy" : "happy-outline"}
-                    size={24}
+                    size={22}
                     color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"}
                   />
                 </TouchableOpacity>
@@ -3265,11 +3212,7 @@ export default function ChatScreen() {
                   ref={inputRef}
                   style={[
                     styles.inputField,
-                    {
-                      backgroundColor: colors.isDark ? colors.card : "#FFFFFF",
-                      color: colors.foreground,
-                      borderColor: colors.isDark ? colors.border : "rgba(0,0,0,0.06)",
-                    },
+                    { color: colors.foreground },
                   ]}
                   placeholder={editTarget ? t("chat.editPlaceholder") : t("chat.placeholder")}
                   placeholderTextColor={colors.mutedForeground}
@@ -3290,16 +3233,8 @@ export default function ChatScreen() {
                       schedulePinToBottom(true);
                     }
                     if (chatId && inputVal.length > 0) setTyping(chatId);
-                    if (Platform.OS === "android") {
-                      setTimeout(() => {
-                        if (keyboardHeightRef.current <= 0) {
-                          setKeyboardLiftFallback(Math.round(Dimensions.get("window").height * 0.38));
-                        }
-                      }, 120);
-                    }
                   }}
                   onBlur={() => {
-                    setKeyboardLiftFallback(0);
                     setAssistantChatInputFocused(false);
                     if (chatId) {
                       clearTyping(chatId);
@@ -3310,20 +3245,20 @@ export default function ChatScreen() {
               )}
               {!inputVal.trim() && voiceRecPhase !== "holding" && (
                 <TouchableOpacity
-                  style={styles.inputIcon}
+                  style={styles.inputPillIcon}
                   onPress={showAttachMenu}
                   disabled={!composerEnabled || !!editTarget}
                 >
-                  <Ionicons name="attach-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
+                  <Ionicons name="attach-outline" size={22} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
                 </TouchableOpacity>
               )}
               {!inputVal.trim() && voiceRecPhase !== "holding" && (
                 <TouchableOpacity
-                  style={styles.inputIcon}
+                  style={styles.inputPillIcon}
                   onPress={showCameraOptions}
                   disabled={!composerEnabled || !!editTarget}
                 >
-                  <Ionicons name="camera-outline" size={24} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
+                  <Ionicons name="camera-outline" size={22} color={composerEnabled && !editTarget ? colors.mutedForeground : colors.mutedForeground + "55"} />
                 </TouchableOpacity>
               )}
             </View>
@@ -3350,7 +3285,7 @@ export default function ChatScreen() {
 
       <ChatEmojiPanel
         visible={emojiPanelOpen && !selectionActive && voiceRecPhase === "idle"}
-        backgroundColor={colors.isDark ? colors.background : "#F0F2F5"}
+        backgroundColor={colors.isDark ? colors.background : "#FFFFFF"}
         borderColor={colors.isDark ? colors.border : "rgba(0,0,0,0.06)"}
         mutedColor={colors.mutedForeground}
         activeTabColor={colors.foreground}
@@ -3360,11 +3295,6 @@ export default function ChatScreen() {
       />
     </>
   );
-
-  const chatKeyboardShellStyle = [
-    styles.chatKeyboardAvoid,
-    androidKeyboardLift > 0 ? { paddingBottom: androidKeyboardLift } : null,
-  ];
 
   return (
     <View
@@ -3561,12 +3491,7 @@ export default function ChatScreen() {
         </View>
       )}
 
-      <KeyboardAvoidingView
-        style={chatKeyboardShellStyle}
-        behavior="padding"
-        enabled={Platform.OS === "ios" || androidKeyboardLift === 0}
-        keyboardVerticalOffset={Platform.OS === "ios" ? topPad + 52 : 0}
-      >
+      <View style={styles.chatKeyboardAvoid}>
         <View style={styles.chatBody}>
           <FlatList
             style={styles.messageList}
@@ -3650,23 +3575,27 @@ export default function ChatScreen() {
             {
               paddingBottom: listBottomPadding,
               flexGrow: 1,
-              justifyContent: searching ? "flex-start" : "flex-end",
+              justifyContent: searching
+                ? "flex-start"
+                : showEmptyStateLabel
+                  ? "center"
+                  : "flex-end",
             },
           ]}
-          extraData={`${selectedIds.join(",")}|${flashMessageId ?? ""}|${remoteTypingNames.join(",")}|${allMessages.length}|${showUnsavedContactCard ? "unsaved" : ""}|${showGroupWelcomeCard ? "groupWelcome" : ""}|${showBusinessIntro ? "business" : ""}`}
+          extraData={listExtraData}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          removeClippedSubviews={false}
+          removeClippedSubviews={Platform.OS !== "web"}
           maintainVisibleContentPosition={
-            searching || keyboardOpen || !showJumpToLatest
+            searching || keyboardVisible || !showJumpToLatest
               ? undefined
               : { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
           }
-          initialNumToRender={18}
-          maxToRenderPerBatch={12}
-          windowSize={9}
-          updateCellsBatchingPeriod={50}
+          initialNumToRender={12}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          updateCellsBatchingPeriod={100}
           onScrollBeginDrag={() => {
             scrollLockRef.current = true;
             userDraggingRef.current = true;
@@ -3699,11 +3628,6 @@ export default function ChatScreen() {
                 contentSize.height,
                 layoutMeasurement.height,
               );
-              syncScrollAwayFromBottom(
-                contentOffset.y,
-                contentSize.height,
-                layoutMeasurement.height,
-              );
               if (
                 contentOffset.y < 140
                 && hasMoreOlderRef.current
@@ -3714,8 +3638,9 @@ export default function ChatScreen() {
               }
             }
           }}
-          scrollEventThrottle={16}
+          scrollEventThrottle={64}
           onContentSizeChange={() => {
+            if (keyboardAnimatingRef.current) return;
             if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching) || userDraggingRef.current || scrollLockRef.current) {
               return;
             }
@@ -3758,13 +3683,13 @@ export default function ChatScreen() {
                   {t("chat.loadingMessages")}
                 </Text>
               </View>
-            ) : (
+            ) : showEmptyStateLabel ? (
               <View style={styles.initWrap}>
                 <Text style={[styles.initText, { color: colors.mutedForeground }]}>
                   {t("chats.noMessagesYet")}
                 </Text>
               </View>
-            )
+            ) : null
           }
         />
 
@@ -3789,6 +3714,8 @@ export default function ChatScreen() {
           </TouchableOpacity>
         ) : null}
 
+        </View>
+        <KeyboardStickyView enabled={!selectionActive}>
           <View
             onLayout={(e) => {
               const h = Math.ceil(e.nativeEvent.layout.height);
@@ -3797,8 +3724,8 @@ export default function ChatScreen() {
           >
             {composerFooter}
           </View>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardStickyView>
+      </View>
 
 
       {/* Attach menu â€” Videh-style bottom sheet (coloured circles + grid) */}
@@ -4183,7 +4110,7 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  chatKeyboardAvoid: { flex: 1, minHeight: 0 },
+  chatKeyboardAvoid: { flex: 1, minHeight: 0, flexDirection: "column" },
   chatBody: { flex: 1, flexDirection: "column", minHeight: 0 },
   messageList: { flex: 1, minHeight: 0 },
   messageListContent: { paddingHorizontal: 10, paddingTop: 8 },
@@ -4237,8 +4164,8 @@ const styles = StyleSheet.create({
   headerBtn: { padding: 6 },
   searchBar: { flexDirection: "row", alignItems: "center", margin: 8, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, gap: 8 },
   searchInput: { flex: 1, fontSize: 15, fontFamily: "Inter_400Regular" },
-  initWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 40, marginTop: 80 },
-  initText: { fontSize: 14, fontFamily: "Inter_400Regular" },
+  initWrap: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingVertical: 24 },
+  initText: { fontSize: 14, fontFamily: "Inter_400Regular", color: "#8696A0" },
   dateChipWrap: { alignItems: "center", paddingVertical: 10, paddingHorizontal: 16 },
   dateChipPill: {
     paddingHorizontal: 12,
@@ -4572,37 +4499,40 @@ const styles = StyleSheet.create({
   groupLockBannerText: { flex: 1, fontSize: 13, fontFamily: "Inter_500Medium", lineHeight: 18 },
   inputBar: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 8,
-    paddingTop: 8,
+    alignItems: "flex-end",
+    paddingHorizontal: 6,
+    paddingTop: 6,
     gap: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  inputBarMain: {
+  inputPill: {
     flex: 1,
     flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
+    alignItems: "flex-end",
     minHeight: 44,
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingLeft: 2,
+    paddingRight: 4,
   },
+  inputPillHolding: { alignItems: "center" },
   inputHoldingHint: { flex: 1, justifyContent: "center", paddingHorizontal: 8, minHeight: 44 },
-  inputIcon: {
-    width: 40,
+  inputPillIcon: {
+    width: 36,
     height: 44,
     alignItems: "center",
     justifyContent: "center",
   },
   inputField: {
     flex: 1,
-    borderRadius: 22,
-    paddingHorizontal: 14,
+    paddingHorizontal: 4,
     paddingTop: Platform.OS === "ios" ? 11 : 10,
     paddingBottom: Platform.OS === "ios" ? 11 : 10,
     fontSize: 15,
     fontFamily: "Inter_400Regular",
     minHeight: 44,
     maxHeight: 120,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: "transparent",
     ...(Platform.OS === "android" ? { textAlignVertical: "center" as const } : {}),
   },
   sendBtn: {

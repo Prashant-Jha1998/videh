@@ -382,6 +382,19 @@ router.get("/videos/:id/stream", async (req: Request, res: Response) => {
       return;
     }
     const uploadsRoot = path.join(apiServerDir, "uploads");
+    const { parseMaxHeightQuery, resolveReelsQualityVideoPath } = await import("../lib/reelsVideoVariants");
+    const maxHeight = parseMaxHeightQuery(req.query.maxHeight);
+    const localPath = await resolveReelsQualityVideoPath(
+      uploadsRoot,
+      stored.video_url,
+      videoId,
+      maxHeight,
+    );
+    if (localPath) {
+      const { serveLocalVideoWithRange } = await import("../lib/reelsVideoStream");
+      serveLocalVideoWithRange(req, res, localPath);
+      return;
+    }
     if (tryStreamStoredReelsVideo(req, res, stored.video_url, uploadsRoot)) return;
     const external = externalVideoRedirectTarget(req, stored.video_url);
     if (external) {
@@ -874,9 +887,12 @@ router.get("/videos/:videoId", async (req: Request, res: Response) => {
     }
     const config = await getReelsPlatformConfig();
     const play = canPlayVideo(row, config);
+    const uploadsRoot = path.join(apiServerDir, "uploads");
+    const { probeVideoSourceHeight } = await import("../lib/reelsVideoVariants");
+    const sourceHeight = await probeVideoSourceHeight(uploadsRoot, row.video_url);
     res.json({
       success: true,
-      video: mapVideoRow(row, req),
+      video: { ...mapVideoRow(row, req), sourceHeight },
       playAllowed: play.allowed,
       playBlockReasons: play.reasons,
     });
