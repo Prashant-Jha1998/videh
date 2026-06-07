@@ -60,6 +60,21 @@ export type ReelsPrivacyRules = {
   summary: string[];
 };
 
+/** YouTube-style pre-roll + mid-roll ads on Video watch. */
+export type ReelsAdsRules = {
+  enabled: boolean;
+  preRollNonSkipSeconds: number;
+  preRollSkippableSeconds: number;
+  preRollSkipAfterSeconds: number;
+  midRollSeconds: number;
+  midRollIntervalSeconds: number;
+  midRollMinContentSeconds: number;
+  fallbackNonSkipUrl: string;
+  fallbackSkippableUrl: string;
+  fallbackMidRollUrl: string;
+  summary: string[];
+};
+
 export type ReelsPlatformConfig = {
   monetization: ReelsMonetizationRules;
   playButton: ReelsPlayButtonRules;
@@ -68,6 +83,7 @@ export type ReelsPlatformConfig = {
   notifications: ReelsNotificationRules;
   contentModeration: ReelsContentModerationRules;
   privacy: ReelsPrivacyRules;
+  ads: ReelsAdsRules;
 };
 
 export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
@@ -150,6 +166,24 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
       "Messenger phone visibility follows your normal Videh privacy settings — separate from Video",
     ],
   },
+  ads: {
+    enabled: true,
+    preRollNonSkipSeconds: 30,
+    preRollSkippableSeconds: 60,
+    preRollSkipAfterSeconds: 5,
+    midRollSeconds: 30,
+    midRollIntervalSeconds: 480,
+    midRollMinContentSeconds: 600,
+    fallbackNonSkipUrl: "https://videos.pexels.com/video-files/3571264/3571264-uhd_2560_1440_25fps.mp4",
+    fallbackSkippableUrl: "https://videos.pexels.com/video-files/3195394/3195394-uhd_2560_1440_25fps.mp4",
+    fallbackMidRollUrl: "https://videos.pexels.com/video-files/854424/854424-uhd_2560_1440_25fps.mp4",
+    summary: [
+      "Before the video: 30-second non-skippable ad, then up to 60-second skippable ad",
+      "During long videos: non-skippable mid-roll ads every 8 minutes",
+      "Creators watching their own uploads do not see ads",
+      "Advertisers manage campaigns at ads.videh.co.in",
+    ],
+  },
 };
 
 let configEnsured = false;
@@ -179,6 +213,7 @@ function deepMergeConfig(partial: Partial<ReelsPlatformConfig>): ReelsPlatformCo
     notifications: { ...base.notifications, ...partial.notifications },
     contentModeration: { ...base.contentModeration, ...partial.contentModeration },
     privacy: { ...base.privacy, ...partial.privacy },
+    ads: { ...base.ads, ...partial.ads },
   };
 }
 
@@ -213,5 +248,6 @@ export function publicReelsRules(config: ReelsPlatformConfig) {
     feed: { rules: config.feed.summary },
     contentModeration: { rules: config.contentModeration.summary },
     privacy: { rules: config.privacy.summary },
+    ads: { rules: config.ads.summary, enabled: config.ads.enabled },
   };
 }

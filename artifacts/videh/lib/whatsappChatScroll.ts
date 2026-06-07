@@ -1,30 +1,40 @@
 /**
- * WhatsApp-style chat list scroll helpers (stack-from-end, pin to latest).
+ * WhatsApp-style chat scroll (inverted FlatList — same approach as WhatsApp on React Native).
  *
- * WhatsApp rules (do not fight the user):
- * 1. Normal list (not inverted): oldest at top, newest at bottom (`justifyContent: flex-end`).
- * 2. Auto-scroll to latest ONLY when the user is already near the bottom (~80px).
- * 3. User scrolls up → stop all auto-pin; show ↓ FAB + unread count below.
- * 4. User sends a message or taps ↓ → force pin once.
- * 5. Keyboard opens → at most one quiet pin if already at bottom (no loop on every layout).
- * 6. New incoming messages while scrolled up → do not move the viewport.
- *
- * Parity checklist (see app/chat/[id].tsx):
- * - stackFromEnd: flexGrow + justifyContent flex-end
- * - composer below list; KeyboardStickyView pins it above the keyboard
- * - pin after keyboard onEnd (not on every content-size / composer tick)
- * - no auto-pin when user scrolled up (near-bottom threshold)
- * - jump-to-latest FAB when scrolled up (with unread count badge)
- * - older messages pagination at scroll top + maintainVisibleContentPosition
+ * WhatsApp rules:
+ * 1. Inverted FlatList: index 0 = newest message at visual bottom; offset 0 = "at latest".
+ * 2. New messages while at offset 0 → list stays pinned automatically (no scrollToEnd race).
+ * 3. User scrolls up (offset grows) → stop all auto-pin; show ↓ FAB + unread count.
+ * 4. User sends or taps ↓ → scrollToOffset(0).
+ * 5. Keyboard opens → one quiet pin only if already near bottom.
+ * 6. Incoming messages while scrolled up → do not move viewport.
  */
 
 export const WHATSAPP_CHAT_NEAR_BOTTOM_PX = 80;
-/** User must scroll past this to leave the bottom zone (hysteresis). */
 export const WHATSAPP_CHAT_SCROLL_AWAY_PX = 110;
-/** User must return within this to re-enter the bottom zone (hysteresis). */
 export const WHATSAPP_CHAT_BACK_TO_BOTTOM_PX = 48;
 
-/** Distance from the visual bottom of a normal (non-inverted) message list. */
+export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0] as const;
+export const WHATSAPP_KEYBOARD_PIN_DELAYS_MS = [0] as const;
+export const OPEN_CHAT_PIN_DELAYS_MS = [0, 120, 320] as const;
+
+/** Inverted list: offset 0 = visual bottom (latest). */
+export function isInvertedChatNearBottom(
+  contentOffsetY: number,
+  threshold = WHATSAPP_CHAT_NEAR_BOTTOM_PX,
+): boolean {
+  return contentOffsetY <= threshold;
+}
+
+export function isInvertedChatScrolledUp(
+  contentOffsetY: number,
+  currentlyScrolledUp: boolean,
+): boolean {
+  if (currentlyScrolledUp) return contentOffsetY > WHATSAPP_CHAT_BACK_TO_BOTTOM_PX;
+  return contentOffsetY > WHATSAPP_CHAT_SCROLL_AWAY_PX;
+}
+
+/** Non-inverted search list helpers. */
 export function chatDistanceFromBottom(
   contentOffsetY: number,
   contentHeight: number,
@@ -42,7 +52,6 @@ export function isChatNearBottom(
   return chatDistanceFromBottom(contentOffsetY, contentHeight, layoutHeight) <= threshold;
 }
 
-/** Hysteresis avoids jitter when content height changes near the bottom threshold. */
 export function isChatScrolledUp(
   contentOffsetY: number,
   contentHeight: number,
@@ -54,17 +63,10 @@ export function isChatScrolledUp(
   return dist > WHATSAPP_CHAT_SCROLL_AWAY_PX;
 }
 
-/** One immediate pin; keyboard end may schedule a second post-layout pin. */
-export const WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS = [0] as const;
-export const WHATSAPP_KEYBOARD_PIN_DELAYS_MS = [0] as const;
-/** Pin after opening a chat — immediate + one post-layout (keeps parity, avoids triple scroll). */
-export const OPEN_CHAT_PIN_DELAYS_MS = [0, 280] as const;
-
 export function shouldWhatsAppAutoPin(userScrolledUp: boolean, searching: boolean): boolean {
   return !searching && !userScrolledUp;
 }
 
-/** Short single-line text → inline time + ticks (WhatsApp compact bubble). */
 export function isCompactChatText(text: string, maxLen = 52): boolean {
   const t = text.trim();
   if (!t || t.includes("\n")) return false;

@@ -375,6 +375,58 @@ export async function recordReelsView(
   });
 }
 
+export type ReelsAdBreakItem = {
+  id: number;
+  title: string;
+  videoUrl: string;
+  durationSeconds: number;
+  skipAfterSeconds: number | null;
+  adType: "non_skippable" | "skippable";
+  placement: "pre_roll" | "mid_roll";
+  advertiserName: string;
+};
+
+export type ReelsMidRollBreak = {
+  offsetSeconds: number;
+  ad: ReelsAdBreakItem;
+};
+
+export type ReelsAdBreaks = {
+  enabled: boolean;
+  preRoll: ReelsAdBreakItem[];
+  midRoll: ReelsMidRollBreak[];
+};
+
+export async function fetchReelsAdBreaks(
+  videoId: number,
+  userId: number,
+  sessionToken?: string | null,
+) {
+  return reelsJson<ReelsAdBreaks & { success: boolean }>(
+    `/videos/${videoId}/ad-breaks?userId=${userId}`,
+    { sessionToken },
+  );
+}
+
+export async function recordReelsAdImpression(
+  opts: {
+    creativeId: number;
+    contentVideoId: number;
+    userId: number;
+    placement: string;
+    watchedSeconds: number;
+    skipped: boolean;
+    completed: boolean;
+  },
+  sessionToken?: string | null,
+) {
+  return reelsJson<{ success: boolean }>("/ads/impression", {
+    method: "POST",
+    body: opts,
+    sessionToken,
+  });
+}
+
 export async function reactReelsVideo(
   videoId: number,
   userId: number,

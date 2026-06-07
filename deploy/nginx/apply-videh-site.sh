@@ -7,6 +7,7 @@ MAIN_CONF="/etc/nginx/conf.d/videh-main.conf"
 ADMIN_CONF="/etc/nginx/conf.d/videh-admin.conf"
 WEB_CONF="/etc/nginx/conf.d/videh-web.conf"
 DEVELOPER_CONF="/etc/nginx/conf.d/videh-developer.conf"
+ADS_CONF="/etc/nginx/conf.d/videh-ads.conf"
 
 cert_dir_for() {
   local host="$1"
@@ -207,6 +208,7 @@ else
 fi
 
 ADMIN_ROOT="/var/www/videh/artifacts/admin-web/dist/public"
+ADS_ROOT="/var/www/videh/artifacts/ads-web/dist/public"
 WEB_ROOT="/var/www/videh/artifacts/videh-web/dist/public"
 DEVELOPER_ROOT="/var/www/videh/artifacts/developer-web/dist/public"
 
@@ -229,9 +231,17 @@ else
   echo "Configured HTTP for web.videh.co.in"
 fi
 
+if write_ssl_server "${ADS_CONF}" "ads.videh.co.in" "${ADS_ROOT}" "true"; then
+  echo "Configured HTTPS for ads.videh.co.in"
+else
+  write_http_server "${ADS_CONF}" "ads.videh.co.in" "${ADS_ROOT}" "true"
+  echo "Configured HTTP for ads.videh.co.in"
+fi
+
 write_http_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true"
 sudo nginx -t
 sudo systemctl reload nginx
+ensure_letsencrypt_cert "ads.videh.co.in" || true
 ensure_letsencrypt_cert "developer.videh.co.in" || true
 if write_ssl_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true" "cert_dir_for_host_only"; then
   echo "Configured HTTPS for developer.videh.co.in"

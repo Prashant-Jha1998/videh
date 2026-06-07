@@ -31,23 +31,36 @@ type Props = {
   paused?: boolean;
   onQualityChange: (q: ReelsVideoQuality) => void;
   onPlaybackError?: () => void;
+  onContentProgress?: (seconds: number) => void;
+  contentStartAt?: number;
 };
 
 type SurfaceProps = {
   playbackUrl: string;
   paused: boolean;
   onPlaybackError?: () => void;
+  onContentProgress?: (seconds: number) => void;
+  contentStartAt?: number;
 };
 
 /** Remounts cleanly when playbackUrl changes (quality switch). */
-function ReelsVideoPlayerSurface({ playbackUrl, paused, onPlaybackError }: SurfaceProps) {
+function ReelsVideoPlayerSurface({
+  playbackUrl,
+  paused,
+  onPlaybackError,
+  onContentProgress,
+  contentStartAt = 0,
+}: SurfaceProps) {
   const player = useVideoPlayer(playbackUrl, (p) => {
     p.loop = false;
     p.muted = false;
     p.volume = 1;
   });
   const { status } = useEvent(player, "statusChange", { status: player.status });
+  const timeEvent = useEvent(player, "timeUpdate", { currentTime: player.currentTime });
+  const currentTime = timeEvent.currentTime ?? 0;
   const autoPlayedRef = useRef(false);
+  const seekedStartRef = useRef(false);
   const errorHandledRef = useRef(false);
   const lastTapRef = useRef<{ side: "left" | "right"; at: number } | null>(null);
   const [skipHint, setSkipHint] = useState<{ side: "left" | "right"; seconds: number } | null>(null);
@@ -72,7 +85,20 @@ function ReelsVideoPlayerSurface({ playbackUrl, paused, onPlaybackError }: Surfa
   useEffect(() => {
     autoPlayedRef.current = false;
     errorHandledRef.current = false;
-  }, [playbackUrl]);
+    seekedStartRef.current = false;
+  }, [playbackUrl, contentStartAt]);
+
+  useEffect(() => {
+    if (onContentProgress) onContentProgress(currentTime);
+  }, [currentTime, onContentProgress]);
+
+  useEffect(() => {
+    if (contentStartAt <= 0 || seekedStartRef.current) return;
+    if (status === "readyToPlay") {
+      seekedStartRef.current = true;
+      player.currentTime = contentStartAt;
+    }
+  }, [status, contentStartAt, player]);
 
   useEffect(() => {
     if (status !== "error" || errorHandledRef.current) return;
@@ -161,6 +187,8 @@ function ReelsWatchPlayerInner({
   paused = false,
   onQualityChange,
   onPlaybackError,
+  onContentProgress,
+  contentStartAt,
 }: Props) {
   const playbackUrl = applyQualityToPlaybackUrl(baseUrl, quality);
   const [qualityOpen, setQualityOpen] = useState(false);
@@ -179,6 +207,8 @@ function ReelsWatchPlayerInner({
         playbackUrl={playbackUrl}
         paused={paused}
         onPlaybackError={handlePlaybackError}
+        onContentProgress={onContentProgress}
+        contentStartAt={contentStartAt}
       />
 
       <TouchableOpacity

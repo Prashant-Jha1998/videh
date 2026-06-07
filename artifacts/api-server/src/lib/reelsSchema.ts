@@ -73,6 +73,8 @@ export async function ensureReelsTables(): Promise<void> {
   await ensureReelsAdminColumns();
   await ensureReelsModerationColumns();
   await ensureReelsChannelBrandingColumns();
+  const { ensureReelsAdsTables } = await import("./reelsAdsSchema");
+  await ensureReelsAdsTables();
   ensured = true;
 }
 

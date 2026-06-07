@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --env-file=.env --env-file=../../.env ./build.mjs && node --env-file=.env --env-file=../../.env --enable-source-maps ./dist/index.mjs",
-    "build": "node ./build.mjs && pnpm --dir ../videh-web run build && pnpm --dir ../admin-web run build && pnpm --dir ../developer-web run build",
+    "build": "node ./build.mjs && pnpm --dir ../videh-web run build && pnpm --dir ../admin-web run build && pnpm --dir ../ads-web run build && pnpm --dir ../developer-web run build",
     "build:api": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",

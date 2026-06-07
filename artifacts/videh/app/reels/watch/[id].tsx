@@ -21,14 +21,17 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ReelsAdPlayer } from "@/components/ReelsAdPlayer";
 import { ReelsWatchPlayer } from "@/components/ReelsWatchPlayer";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
+  fetchReelsAdBreaks,
   fetchReelsChannel,
   fetchReelsComments,
   fetchReelsFeed,
   fetchReelsVideo,
+  recordReelsAdImpression,
   formatDuration,
   formatTimeAgo,
   formatViewCount,
@@ -38,7 +41,10 @@ import {
   shareReelsVideo,
   subscribeReelsChannel,
   unsubscribeReelsChannel,
+  type ReelsAdBreakItem,
+  type ReelsAdBreaks,
   type ReelsChannel,
+  type ReelsMidRollBreak,
   type ReelsVideo,
 } from "@/lib/reelsApi";
 import {
@@ -90,6 +96,13 @@ export default function ReelsWatchScreen() {
   const [descOpen, setDescOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [videoQuality, setVideoQuality] = useState<ReelsVideoQuality>("auto");
+  const [adBreaks, setAdBreaks] = useState<ReelsAdBreaks | null>(null);
+  const [watchPhase, setWatchPhase] = useState<"loading" | "pre-roll" | "content" | "mid-roll">("loading");
+  const [preRollIndex, setPreRollIndex] = useState(0);
+  const preRollIndexRef = useRef(0);
+  const [activeMidRoll, setActiveMidRoll] = useState<ReelsMidRollBreak | null>(null);
+  const [contentResumeAt, setContentResumeAt] = useState(0);
+  const triggeredMidRollsRef = useRef(new Set<number>());
   const watchedRef = useRef(0);
   const viewSentRef = useRef(false);
   const watchTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -140,10 +153,70 @@ export default function ReelsWatchScreen() {
     });
   }, []);
 
+  const reportAdResult = useCallback(async (
+    ad: ReelsAdBreakItem,
+    placement: string,
+    result: { watchedSeconds: number; skipped: boolean; completed: boolean },
+  ) => {
+    if (!user?.dbId || !id || ad.id <= 0) return;
+    await recordReelsAdImpression({
+      creativeId: ad.id,
+      contentVideoId: Number(id),
+      userId: user.dbId,
+      placement,
+      watchedSeconds: result.watchedSeconds,
+      skipped: result.skipped,
+      completed: result.completed,
+    }, user.sessionToken);
+  }, [id, user?.dbId, user?.sessionToken]);
+
+  const handlePreRollFinished = useCallback(async (
+    ad: ReelsAdBreakItem,
+    result: { watchedSeconds: number; skipped: boolean; completed: boolean },
+  ) => {
+    await reportAdResult(ad, "pre_roll", result);
+    const next = preRollIndexRef.current + 1;
+    if (adBreaks && next < adBreaks.preRoll.length) {
+      preRollIndexRef.current = next;
+      setPreRollIndex(next);
+      return;
+    }
+    setWatchPhase("content");
+  }, [adBreaks, reportAdResult]);
+
+  const handleMidRollFinished = useCallback(async (
+    ad: ReelsAdBreakItem,
+    result: { watchedSeconds: number; skipped: boolean; completed: boolean },
+  ) => {
+    await reportAdResult(ad, "mid_roll", result);
+    setActiveMidRoll(null);
+    setWatchPhase("content");
+  }, [reportAdResult]);
+
+  const handleContentProgress = useCallback((seconds: number) => {
+    if (!adBreaks?.enabled || watchPhase !== "content" || !adBreaks.midRoll.length) return;
+    for (const mid of adBreaks.midRoll) {
+      if (triggeredMidRollsRef.current.has(mid.offsetSeconds)) continue;
+      if (seconds >= mid.offsetSeconds) {
+        triggeredMidRollsRef.current.add(mid.offsetSeconds);
+        setContentResumeAt(seconds);
+        setActiveMidRoll(mid);
+        setWatchPhase("mid-roll");
+        break;
+      }
+    }
+  }, [adBreaks, watchPhase]);
+
   const load = useCallback(async () => {
     if (!user?.dbId || !id) return;
     viewSentRef.current = false;
     watchedRef.current = 0;
+    triggeredMidRollsRef.current.clear();
+    setPreRollIndex(0);
+    preRollIndexRef.current = 0;
+    setActiveMidRoll(null);
+    setContentResumeAt(0);
+    setWatchPhase("loading");
 
     const res = await fetchReelsVideo(Number(id), user.dbId, user.sessionToken);
     if (res.success && res.video) {
@@ -168,6 +241,20 @@ export default function ReelsWatchScreen() {
 
     const cm = await fetchReelsComments(Number(id), user.sessionToken);
     if (cm.success) setComments(cm.comments ?? []);
+
+    const ads = await fetchReelsAdBreaks(Number(id), user.dbId, user.sessionToken);
+    if (ads.success !== false) {
+      setAdBreaks(ads);
+      if (ads.enabled && ads.preRoll.length > 0) {
+        setWatchPhase("pre-roll");
+      } else {
+        setWatchPhase("content");
+      }
+    } else {
+      setAdBreaks({ enabled: false, preRoll: [], midRoll: [] });
+      setWatchPhase("content");
+    }
+
     setInitialLoading(false);
     setMetaRefreshing(false);
   }, [id, user?.dbId, user?.sessionToken]);
@@ -180,7 +267,7 @@ export default function ReelsWatchScreen() {
   useEffect(() => {
     if (watchTickRef.current) clearInterval(watchTickRef.current);
     watchTickRef.current = setInterval(() => {
-      if (!switchingVideo && video && String(video.id) === String(id)) {
+      if (watchPhase === "content" && !switchingVideo && video && String(video.id) === String(id)) {
         watchedRef.current += 1;
       }
     }, 1000);
@@ -191,7 +278,7 @@ export default function ReelsWatchScreen() {
         void recordReelsView(Number(id), user.dbId, watchedRef.current, user.sessionToken);
       }
     };
-  }, [id, user?.dbId, user?.sessionToken, switchingVideo, video]);
+  }, [id, user?.dbId, user?.sessionToken, switchingVideo, video, watchPhase]);
 
   const refreshVideoMeta = useCallback(async () => {
     if (!user?.dbId || !id) return;
@@ -318,13 +405,28 @@ export default function ReelsWatchScreen() {
   }
 
   const displayChannel = video.channelDisplayName ?? `@${video.channelHandle}`;
+  const showPreRoll = playAllowed && watchPhase === "pre-roll" && adBreaks?.preRoll[preRollIndex];
+  const showMidRoll = playAllowed && watchPhase === "mid-roll" && activeMidRoll;
+  const showContent = playAllowed && playbackUrl && watchPhase === "content";
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.playerWrap}>
-        {playAllowed && playbackUrl ? (
+        {showPreRoll ? (
+          <ReelsAdPlayer
+            key={`pre-${adBreaks!.preRoll[preRollIndex].id}-${preRollIndex}`}
+            ad={adBreaks!.preRoll[preRollIndex]}
+            onFinished={(result) => void handlePreRollFinished(adBreaks!.preRoll[preRollIndex], result)}
+          />
+        ) : showMidRoll ? (
+          <ReelsAdPlayer
+            key={`mid-${activeMidRoll!.ad.id}-${activeMidRoll!.offsetSeconds}`}
+            ad={activeMidRoll!.ad}
+            onFinished={(result) => void handleMidRollFinished(activeMidRoll!.ad, result)}
+          />
+        ) : showContent ? (
           <ErrorBoundary
-            key={`watch-player-${video.id}-${videoQuality}`}
+            key={`watch-player-${video.id}-${videoQuality}-${contentResumeAt}`}
             FallbackComponent={WatchPlayerErrorFallback}
             onError={() => {
               resetVideoQuality(video.id);
@@ -338,9 +440,15 @@ export default function ReelsWatchScreen() {
               paused={switchingVideo || metaRefreshing}
               onQualityChange={handleQualityChange}
               onPlaybackError={handlePlaybackError}
+              onContentProgress={handleContentProgress}
+              contentStartAt={contentResumeAt}
             />
           </ErrorBoundary>
-        ) : (
+        ) : playAllowed && playbackUrl && watchPhase === "loading" ? (
+          <View style={[styles.player, styles.blockedPlayer]}>
+            <ActivityIndicator color="#fff" size="large" />
+          </View>
+        ) : !playAllowed ? (
           <View style={[styles.player, styles.blockedPlayer]}>
             <Ionicons name="shield-checkmark-outline" size={40} color="#fff" />
             <Text style={styles.blockedTitle}>
@@ -350,8 +458,8 @@ export default function ReelsWatchScreen() {
               {video.moderationReason ?? playBlockReasons.join(" · ") ?? "This video is not public yet."}
             </Text>
           </View>
-        )}
-        {(switchingVideo || metaRefreshing) ? (
+        ) : null}
+        {(switchingVideo || metaRefreshing) && watchPhase === "content" ? (
           <View style={styles.playerLoadingOverlay}>
             <ActivityIndicator color="#fff" size="large" />
           </View>

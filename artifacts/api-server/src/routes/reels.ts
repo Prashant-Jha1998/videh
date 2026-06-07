@@ -38,6 +38,7 @@ import {
   mapPublicReelsComment,
   redactPhoneNumbersInText,
 } from "../lib/reelsPrivacy";
+import { recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -1160,6 +1161,75 @@ router.delete("/subscribe/:channelId", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "reels unsubscribe");
     res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+/** YouTube-style ad breaks before / during video playback. */
+router.get("/videos/:videoId/ad-breaks", async (req: Request, res: Response) => {
+  const videoId = Number(req.params.videoId);
+  const viewerId = Number(req.query.userId) || getAuthUserId(req) || 0;
+  if (!videoId) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    const row = await query(
+      `SELECT v.duration_seconds, c.user_id AS channel_owner_id
+       FROM reels_videos v
+       JOIN reels_channels c ON c.id = v.channel_id
+       WHERE v.id = $1`,
+      [videoId],
+    );
+    if (!row.rows.length) {
+      res.status(404).json({ success: false });
+      return;
+    }
+    const v = row.rows[0] as { duration_seconds?: number; channel_owner_id?: number };
+    const breaks = await resolveReelsAdBreaks({
+      contentVideoId: videoId,
+      contentDurationSeconds: Number(v.duration_seconds) || 0,
+      viewerUserId: viewerId,
+      channelOwnerUserId: Number(v.channel_owner_id) || null,
+    });
+    res.json({ success: true, ...breaks });
+  } catch (err) {
+    req.log.error({ err, videoId }, "reels ad-breaks");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/ads/impression", async (req: Request, res: Response) => {
+  const body = req.body as {
+    creativeId?: number;
+    contentVideoId?: number;
+    userId?: number;
+    placement?: string;
+    watchedSeconds?: number;
+    skipped?: boolean;
+    completed?: boolean;
+  };
+  const creativeId = Number(body.creativeId);
+  const contentVideoId = Number(body.contentVideoId);
+  if (!creativeId || !contentVideoId) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  const userId = Number(body.userId) || getAuthUserId(req) || 0;
+  try {
+    await recordReelsAdImpression({
+      creativeId,
+      contentVideoId,
+      viewerUserId: userId,
+      placement: String(body.placement ?? "pre_roll"),
+      watchedSeconds: Math.max(0, Number(body.watchedSeconds) || 0),
+      skipped: Boolean(body.skipped),
+      completed: Boolean(body.completed),
+    });
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "reels ad impression");
+    res.status(500).json({ success: false });
   }
 });
 

@@ -90,12 +90,12 @@ import { GroupWelcomeCard } from "@/components/GroupWelcomeCard";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
 import { formatChatBubbleTime } from "@/utils/time";
 import {
-  chatDistanceFromBottom,
   isChatScrolledUp,
   isCompactChatText,
+  isInvertedChatNearBottom,
+  isInvertedChatScrolledUp,
   OPEN_CHAT_PIN_DELAYS_MS,
   shouldWhatsAppAutoPin,
-  WHATSAPP_CHAT_NEAR_BOTTOM_PX,
   WHATSAPP_KEYBOARD_PIN_DELAYS_MS,
   WHATSAPP_PIN_TO_BOTTOM_DELAYS_MS,
 } from "@/lib/whatsappChatScroll";
@@ -183,6 +183,25 @@ function messagesWithDateRows(msgs: Message[]): ChatListRow[] {
       prevDay = day;
     }
     out.push({ rowType: "msg", message: m });
+  }
+  return out;
+}
+
+/** Inverted FlatList: index 0 = newest at visual bottom (WhatsApp RN pattern). */
+function messagesWithDateRowsInverted(msgs: Message[]): ChatListRow[] {
+  const out: ChatListRow[] = [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    out.push({ rowType: "msg", message: m });
+    const day = startOfLocalDay(m.timestamp);
+    const hasOlderSameDay = i > 0 && startOfLocalDay(msgs[i - 1].timestamp) === day;
+    if (!hasOlderSameDay) {
+      out.push({
+        rowType: "date",
+        id: `date-${day}`,
+        label: formatDateChipLabel(m.timestamp),
+      });
+    }
   }
   return out;
 }
@@ -1199,6 +1218,8 @@ export default function ChatScreen() {
     : allMessages;
 
   const listRows = useMemo(() => messagesWithDateRows(messages), [messages]);
+  const listRowsInverted = useMemo(() => messagesWithDateRowsInverted(messages), [messages]);
+  const chatListData = searching ? listRows : listRowsInverted;
   const [composerHeight, setComposerHeight] = useState(56);
   const chatContactName = name ?? chat?.name ?? "Chat";
 
@@ -1211,7 +1232,8 @@ export default function ChatScreen() {
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollToQuotedMessage = useCallback((quotedId: string) => {
-    const index = listRows.findIndex((r) => r.rowType === "msg" && r.message.id === quotedId);
+    const rows = searching ? listRows : listRowsInverted;
+    const index = rows.findIndex((r) => r.rowType === "msg" && r.message.id === quotedId);
     if (index < 0) {
       Alert.alert("Message not found", "This message is not loaded. Scroll up to load older messages.");
       return;
@@ -1226,7 +1248,7 @@ export default function ChatScreen() {
       Animated.timing(flashAnim, { toValue: 0, duration: 700, useNativeDriver: false }),
     ]).start();
     flashTimerRef.current = setTimeout(() => setFlashMessageId(null), 950);
-  }, [listRows, flashAnim]);
+  }, [listRows, listRowsInverted, searching, flashAnim]);
 
   const peerNameForVideo = name ?? chat?.name ?? "Chat";
 
@@ -1474,9 +1496,13 @@ export default function ChatScreen() {
     if (scrollCoalesceRef.current != null) cancelAnimationFrame(scrollCoalesceRef.current);
     scrollCoalesceRef.current = requestAnimationFrame(() => {
       scrollCoalesceRef.current = null;
-      listRef.current?.scrollToEnd({ animated });
+      if (searching) {
+        listRef.current?.scrollToEnd({ animated });
+      } else {
+        listRef.current?.scrollToOffset({ offset: 0, animated });
+      }
     });
-  }, []);
+  }, [searching]);
   const scrollToLatest = useCallback((animated = false) => {
     if (scrollLockRef.current || userDraggingRef.current) return;
     if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
@@ -1504,9 +1530,9 @@ export default function ChatScreen() {
     userScrolledUpRef.current = true;
     lastNearBottomRef.current = false;
     frozenMessageCountRef.current = messages.length;
-    const showFab = listRows.length > 6;
+    const showFab = messages.length > 6;
     setShowJumpToLatest((p) => (p === showFab ? p : showFab));
-  }, [cancelOpenChatPin, cancelPinToBottom, listRows.length, messages.length]);
+  }, [cancelOpenChatPin, cancelPinToBottom, messages.length]);
   /** WhatsApp: pin to latest — single quiet scroll unless keyboard is settling. */
   const schedulePinToBottom = useCallback((keyboardSettling = false) => {
     if (!shouldWhatsAppAutoPin(userScrolledUpRef.current, searching)) return;
@@ -1537,13 +1563,12 @@ export default function ChatScreen() {
   schedulePinToBottomRef.current = schedulePinToBottom;
   const syncScrollAwayFromBottom = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
-      const away = isChatScrolledUp(
-        contentOffsetY,
-        contentHeight,
-        layoutHeight,
-        userScrolledUpRef.current,
-      );
-      lastNearBottomRef.current = !away;
+      const away = searching
+        ? isChatScrolledUp(contentOffsetY, contentHeight, layoutHeight, userScrolledUpRef.current)
+        : isInvertedChatScrolledUp(contentOffsetY, userScrolledUpRef.current);
+      lastNearBottomRef.current = searching
+        ? !away
+        : isInvertedChatNearBottom(contentOffsetY);
       if (away === userScrolledUpRef.current) return;
       if (away) {
         markUserScrolledUp();
@@ -1555,7 +1580,7 @@ export default function ChatScreen() {
       setShowJumpToLatest((p) => (p ? false : p));
       setUnreadBelowCount((p) => (p > 0 ? 0 : p));
     },
-    [messages.length, markUserScrolledUp, cancelOpenChatPin],
+    [messages.length, markUserScrolledUp, cancelOpenChatPin, searching],
   );
   const tryLoadOlderMessages = useCallback(async () => {
     if (loadingOlderRef.current || !hasMoreOlderRef.current || searching || !chatId) return;
@@ -1573,21 +1598,21 @@ export default function ChatScreen() {
   }, [chatId, loadOlderMessages, messages, searching]);
   const handleListScroll = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
-      lastNearBottomRef.current = chatDistanceFromBottom(contentOffsetY, contentHeight, layoutHeight)
-        <= WHATSAPP_CHAT_NEAR_BOTTOM_PX;
-      if (userDraggingRef.current || scrollLockRef.current) {
-        syncScrollAwayFromBottom(contentOffsetY, contentHeight, layoutHeight);
-      }
+      syncScrollAwayFromBottom(contentOffsetY, contentHeight, layoutHeight);
+      const nearOlderEdge = searching
+        ? contentOffsetY < 140
+        : contentOffsetY + layoutHeight >= contentHeight - 140;
       if (
-        contentOffsetY < 140
+        nearOlderEdge
         && hasMoreOlderRef.current
+        && !searching
         && Date.now() - lastOlderLoadAtRef.current > 700
       ) {
         lastOlderLoadAtRef.current = Date.now();
         void tryLoadOlderMessages();
       }
     },
-    [syncScrollAwayFromBottom, tryLoadOlderMessages],
+    [syncScrollAwayFromBottom, tryLoadOlderMessages, searching],
   );
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevMessageCountRef = useRef(0);
@@ -3571,8 +3596,19 @@ export default function ChatScreen() {
           <FlatList
             style={styles.messageList}
             ref={listRef}
-          data={listRows}
+          inverted={!searching}
+          data={chatListData}
           ListHeaderComponent={
+            !searching && remoteTypingNames.length > 0 ? (
+              <TypingIndicator
+                bubbleColor={colors.chatBubbleReceived}
+                dotColor={colors.mutedForeground}
+                textColor={colors.mutedForeground}
+                label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
+              />
+            ) : null
+          }
+          ListFooterComponent={
             !searching ? (
               <>
                 {loadingOlder ? (
@@ -3629,16 +3665,6 @@ export default function ChatScreen() {
               </>
             ) : null
           }
-          ListFooterComponent={
-            !searching && remoteTypingNames.length > 0 ? (
-              <TypingIndicator
-                bubbleColor={colors.chatBubbleReceived}
-                dotColor={colors.mutedForeground}
-                textColor={colors.mutedForeground}
-                label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
-              />
-            ) : null
-          }
           keyExtractor={(row) => {
             if (row.rowType === "date") return row.id;
             const m = row.message;
@@ -3654,7 +3680,7 @@ export default function ChatScreen() {
                 ? "flex-start"
                 : showEmptyStateLabel
                   ? "center"
-                  : "flex-end",
+                  : undefined,
             },
           ]}
           extraData={listExtraData}
@@ -3663,19 +3689,27 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS !== "web"}
           maintainVisibleContentPosition={
-            searching || keyboardVisible || !showJumpToLatest
+            searching || keyboardVisible
               ? undefined
-              : { minIndexForVisible: 0, autoscrollToTopThreshold: 24 }
+              : showJumpToLatest
+                ? { minIndexForVisible: 1, autoscrollToTopThreshold: 24 }
+                : undefined
           }
           initialNumToRender={12}
           maxToRenderPerBatch={8}
           windowSize={7}
           updateCellsBatchingPeriod={100}
-          onScrollBeginDrag={() => {
+          onScrollBeginDrag={(e) => {
             scrollLockRef.current = true;
             userDraggingRef.current = true;
             cancelOpenChatPin();
             cancelPinToBottom();
+            if (!searching) {
+              const y = e.nativeEvent.contentOffset.y;
+              if (isInvertedChatScrolledUp(y, userScrolledUpRef.current)) {
+                markUserScrolledUp();
+              }
+            }
           }}
           onScrollEndDrag={(e) => {
             scrollLockRef.current = false;

@@ -22,6 +22,7 @@ import assistantRouter from "./assistant";
 import gifsRouter from "./gifs";
 import linkPreviewRouter from "./linkPreview";
 import reelsRouter from "./reels";
+import adsPortalRouter from "./ads-portal";
 
 const router: IRouter = Router();
 
@@ -48,5 +49,6 @@ router.use("/assistant", assistantRouter);
 router.use(gifsRouter);
 router.use(linkPreviewRouter);
 router.use("/reels", reelsRouter);
+router.use("/ads-portal", adsPortalRouter);
 
 export default router;
