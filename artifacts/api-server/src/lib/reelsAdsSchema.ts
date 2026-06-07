@@ -62,7 +62,39 @@ export async function ensureReelsAdsTables(): Promise<void> {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_reels_ad_creatives_active ON reels_ad_creatives (is_active, placement)`);
   await ensureReelsAdsV2Columns();
+  await ensureReelsAdsPaymentTables();
   adsEnsured = true;
+}
+
+let adsPaymentsEnsured = false;
+
+export async function ensureReelsAdsPaymentTables(): Promise<void> {
+  if (adsPaymentsEnsured) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS reels_ad_topup_orders (
+      id SERIAL PRIMARY KEY,
+      advertiser_id INTEGER NOT NULL REFERENCES reels_advertisers(id) ON DELETE CASCADE,
+      amount_inr NUMERIC(12, 2) NOT NULL,
+      razorpay_order_id VARCHAR(64) NOT NULL UNIQUE,
+      status VARCHAR(20) NOT NULL DEFAULT 'created',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      paid_at TIMESTAMPTZ
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS reels_ad_payments (
+      id SERIAL PRIMARY KEY,
+      advertiser_id INTEGER NOT NULL REFERENCES reels_advertisers(id) ON DELETE CASCADE,
+      order_id INTEGER REFERENCES reels_ad_topup_orders(id) ON DELETE SET NULL,
+      amount_inr NUMERIC(12, 2) NOT NULL,
+      razorpay_order_id VARCHAR(64) NOT NULL,
+      razorpay_payment_id VARCHAR(64) NOT NULL UNIQUE,
+      payment_method VARCHAR(32),
+      status VARCHAR(20) NOT NULL DEFAULT 'captured',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  adsPaymentsEnsured = true;
 }
 
 async function ensureReelsAdsV2Columns(): Promise<void> {

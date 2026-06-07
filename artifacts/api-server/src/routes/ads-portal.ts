@@ -12,6 +12,13 @@ import {
 } from "../lib/adsPortalSession";
 import { ensureReelsAdsTables } from "../lib/reelsAdsSchema";
 import {
+  createAdsWalletOrder,
+  getAdvertiserBalance,
+  isAdsDemoEmail,
+  listAdsPayments,
+  verifyAdsWalletPayment,
+} from "../lib/adsPortalBilling";
+import {
   defaultBidForObjective,
   hashAdsPassword,
   topUpAdvertiserBalance,
@@ -19,6 +26,7 @@ import {
   verifyAdsAdvertiser,
 } from "../lib/reelsAds";
 import { getReelsPlatformConfig } from "../lib/reelsConfig";
+import { getRazorpayConfig } from "../lib/razorpay";
 
 const router = Router();
 const adsUploadsDir = path.join(process.cwd(), "uploads", "reels", "ads");
@@ -96,10 +104,11 @@ router.post("/register", async (req, res) => {
   }
   try {
     await ensureReelsAdsTables();
+    const starterBalance = isAdsDemoEmail(email) ? 1000 : 0;
     const ins = await query(
       `INSERT INTO reels_advertisers (email, password_hash, company_name, contact_name, status, balance_inr)
-       VALUES ($1, $2, $3, $4, 'active', 1000) RETURNING id, email, company_name`,
-      [email, hashAdsPassword(password), companyName, body.contactName?.trim() || null],
+       VALUES ($1, $2, $3, $4, 'active', $5) RETURNING id, email, company_name`,
+      [email, hashAdsPassword(password), companyName, body.contactName?.trim() || null, starterBalance],
     );
     const row = ins.rows[0] as { id: number; email: string; company_name: string };
     const token = issueAdsPortalToken({
@@ -163,19 +172,92 @@ router.get("/pricing", async (_req, res) => {
   }
 });
 
-router.post("/wallet/topup", async (req, res) => {
+router.get("/wallet/config", async (req, res) => {
+  const user = getAdsPortalUser(req);
+  const { configured, keyId } = getRazorpayConfig();
+  const cfg = await getReelsPlatformConfig();
+  res.json({
+    success: true,
+    razorpayConfigured: configured,
+    razorpayKeyId: configured ? keyId : null,
+    minTopUpInr: cfg.ads.minTopUpInr,
+    isDemoAccount: user ? isAdsDemoEmail(user.email) : false,
+    paymentRequired: true,
+  });
+});
+
+router.get("/wallet/payments", async (req, res) => {
+  const user = requireAdsUser(req, res);
+  if (!user) return;
+  try {
+    const payments = await listAdsPayments(user.advertiserId);
+    res.json({ success: true, payments });
+  } catch {
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/wallet/create-order", async (req, res) => {
   const user = requireAdsUser(req, res);
   if (!user) return;
   const amount = Math.max(0, Number((req.body as { amountInr?: number }).amountInr) || 0);
   const cfg = await getReelsPlatformConfig();
   if (amount < cfg.ads.minTopUpInr) {
-    res.status(400).json({ success: false, message: `Minimum top-up is ₹${cfg.ads.minTopUpInr}` });
+    res.status(400).json({ success: false, message: `Minimum payment is ₹${cfg.ads.minTopUpInr}` });
+    return;
+  }
+  try {
+    const checkout = await createAdsWalletOrder(user.advertiserId, amount);
+    res.json({ success: true, checkout });
+  } catch (err) {
+    res.status(503).json({
+      success: false,
+      message: err instanceof Error ? err.message : "Could not start payment",
+    });
+  }
+});
+
+router.post("/wallet/verify-payment", async (req, res) => {
+  const user = requireAdsUser(req, res);
+  if (!user) return;
+  const body = req.body as {
+    razorpayOrderId?: string;
+    razorpayPaymentId?: string;
+    razorpaySignature?: string;
+  };
+  try {
+    const result = await verifyAdsWalletPayment({
+      advertiserId: user.advertiserId,
+      razorpayOrderId: String(body.razorpayOrderId ?? ""),
+      razorpayPaymentId: String(body.razorpayPaymentId ?? ""),
+      razorpaySignature: String(body.razorpaySignature ?? ""),
+    });
+    res.json({ success: true, balanceInr: result.balanceInr });
+  } catch (err) {
+    res.status(400).json({
+      success: false,
+      message: err instanceof Error ? err.message : "Payment verification failed",
+    });
+  }
+});
+
+/** Internal demo credit — only pjhawithu@gmail.com (ADS_DEMO_EMAIL). */
+router.post("/wallet/demo-topup", async (req, res) => {
+  const user = requireAdsUser(req, res);
+  if (!user) return;
+  if (!isAdsDemoEmail(user.email)) {
+    res.status(403).json({ success: false, message: "Demo top-up is not available for this account." });
+    return;
+  }
+  const amount = Math.max(0, Number((req.body as { amountInr?: number }).amountInr) || 0);
+  if (amount <= 0 || amount > 5000) {
+    res.status(400).json({ success: false, message: "Demo amount must be between ₹1 and ₹5000" });
     return;
   }
   try {
     await topUpAdvertiserBalance(user.advertiserId, amount);
-    const r = await query(`SELECT balance_inr FROM reels_advertisers WHERE id = $1`, [user.advertiserId]);
-    res.json({ success: true, balanceInr: r.rows[0]?.balance_inr });
+    const bal = await getAdvertiserBalance(user.advertiserId);
+    res.json({ success: true, balanceInr: bal, demo: true });
   } catch {
     res.status(500).json({ success: false });
   }
@@ -214,13 +296,22 @@ router.post("/campaigns", async (req, res) => {
     res.status(400).json({ success: false, message: "Campaign name required" });
     return;
   }
+  const cfg = await getReelsPlatformConfig();
+  const balance = await getAdvertiserBalance(user.advertiserId);
+  if (balance < cfg.ads.minTopUpInr && !isAdsDemoEmail(user.email)) {
+    res.status(402).json({
+      success: false,
+      message: `Add at least ₹${cfg.ads.minTopUpInr} to your wallet before creating campaigns.`,
+      code: "PAYMENT_REQUIRED",
+    });
+    return;
+  }
   const objectives: ReelsAdObjective[] = ["brand_awareness", "video_views", "app_promotion", "shopping"];
   const objective = objectives.includes(body.objective as ReelsAdObjective)
     ? (body.objective as ReelsAdObjective)
     : "brand_awareness";
   try {
     await ensureReelsAdsTables();
-    const cfg = await getReelsPlatformConfig();
     const defaults = defaultBidForObjective(objective, cfg.ads);
     const bidModel = ["cpm", "cpc", "cpv", "cpi"].includes(String(body.bidModel))
       ? String(body.bidModel)
@@ -277,6 +368,15 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
     const title = String(body.title ?? "").trim();
     if (!title) {
       res.status(400).json({ success: false, message: "Ad title required" });
+      return;
+    }
+    const balance = await getAdvertiserBalance(user.advertiserId);
+    if (balance <= 0 && !isAdsDemoEmail(user.email)) {
+      res.status(402).json({
+        success: false,
+        message: "Pay and add funds to your wallet before publishing ads.",
+        code: "PAYMENT_REQUIRED",
+      });
       return;
     }
     const format = ["video", "image", "app_install", "shopping"].includes(String(body.format))

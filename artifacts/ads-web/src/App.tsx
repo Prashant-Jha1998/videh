@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { openAdsRazorpayCheckout } from "./lib/razorpayCheckout";
 
 const API = "/api/ads-portal";
 
@@ -15,6 +16,20 @@ type Pricing = {
   objectives: Array<{ id: string; label: string; bidModel: string; defaultBid: number }>;
 };
 type Nav = "overview" | "campaigns" | "ads" | "billing";
+type WalletConfig = {
+  razorpayConfigured: boolean;
+  razorpayKeyId: string | null;
+  minTopUpInr: number;
+  isDemoAccount: boolean;
+  paymentRequired: boolean;
+};
+type PaymentRow = {
+  amount_inr: string;
+  razorpay_payment_id: string;
+  payment_method: string | null;
+  status: string;
+  created_at: string;
+};
 
 async function api<T>(path: string, opts?: RequestInit): Promise<T> {
   const token = localStorage.getItem("videh_ads_token");
@@ -76,19 +91,26 @@ export default function App() {
   const [appName, setAppName] = useState("");
   const [placement, setPlacement] = useState("feed_instream");
   const [topUpAmount, setTopUpAmount] = useState("1000");
+  const [walletConfig, setWalletConfig] = useState<WalletConfig | null>(null);
+  const [payments, setPayments] = useState<PaymentRow[]>([]);
+  const [paying, setPaying] = useState(false);
 
   const loadDash = useCallback(async () => {
     const me = await api<{ success: boolean; advertiser?: Advertiser }>("/me");
     if (!me.success || !me.advertiser) { setScreen("auth"); return; }
     setAdvertiser(me.advertiser);
-    const [c, s, p] = await Promise.all([
+    const [c, s, p, w, pay] = await Promise.all([
       api<{ success: boolean; campaigns: Campaign[] }>("/campaigns"),
       api<{ success: boolean; stats: Stats }>("/stats"),
       api<{ success: boolean; pricing: Pricing }>("/pricing"),
+      api<{ success: boolean } & WalletConfig>("/wallet/config"),
+      api<{ success: boolean; payments: PaymentRow[] }>("/wallet/payments"),
     ]);
     if (c.success) setCampaigns(c.campaigns);
     if (s.success) setStats(s.stats);
     if (p.success) setPricing(p.pricing);
+    if (w.success) setWalletConfig(w);
+    if (pay.success) setPayments(pay.payments ?? []);
     setScreen("dash");
   }, []);
 
@@ -118,8 +140,9 @@ export default function App() {
 
   const createCampaign = async () => {
     if (!newCampaign.trim()) return;
+    setError("");
     const obj = pricing?.objectives.find((o) => o.id === objective);
-    await api("/campaigns", {
+    const res = await api<{ success: boolean; message?: string; code?: string }>("/campaigns", {
       method: "POST",
       body: JSON.stringify({
         name: newCampaign.trim(),
@@ -130,6 +153,11 @@ export default function App() {
         totalBudgetInr: Number(totalBudget),
       }),
     });
+    if (!res.success) {
+      setError(res.message ?? "Could not create campaign");
+      if (res.code === "PAYMENT_REQUIRED") setNav("billing");
+      return;
+    }
     setNewCampaign("");
     await loadDash();
     setNav("campaigns");
@@ -137,7 +165,8 @@ export default function App() {
 
   const createCreative = async () => {
     if (!selectedCampaign || !creativeTitle.trim()) return;
-    await api(`/campaigns/${selectedCampaign}/creatives`, {
+    setError("");
+    const res = await api<{ success: boolean; message?: string; code?: string }>(`/campaigns/${selectedCampaign}/creatives`, {
       method: "POST",
       body: JSON.stringify({
         title: creativeTitle.trim(),
@@ -155,16 +184,79 @@ export default function App() {
         durationSeconds: adFormat === "video" ? 30 : 0,
       }),
     });
+    if (!res.success) {
+      setError(res.message ?? "Could not publish ad");
+      if (res.code === "PAYMENT_REQUIRED") setNav("billing");
+      return;
+    }
     setCreativeTitle(""); setHeadline(""); setDescription("");
     setImageUrl(""); setVideoUrl(""); setDestinationUrl("");
     await loadDash();
   };
 
-  const topUp = async () => {
-    const res = await api<{ success: boolean; message?: string }>("/wallet/topup", {
+  const payWithRazorpay = async () => {
+    setError("");
+    setPaying(true);
+    try {
+      const amount = Number(topUpAmount);
+      const orderRes = await api<{
+        success: boolean;
+        message?: string;
+        checkout?: {
+          orderId: string;
+          amountInr: number;
+          keyId: string;
+          logoUrl?: string;
+        };
+      }>("/wallet/create-order", {
+        method: "POST",
+        body: JSON.stringify({ amountInr: amount }),
+      });
+      if (!orderRes.success || !orderRes.checkout) {
+        throw new Error(orderRes.message ?? "Could not start payment");
+      }
+      const { checkout } = orderRes;
+      await new Promise<void>((resolve, reject) => {
+        openAdsRazorpayCheckout({
+          keyId: checkout.keyId,
+          orderId: checkout.orderId,
+          amountInr: checkout.amountInr,
+          logoUrl: checkout.logoUrl,
+          companyName: advertiser?.company_name ?? "Advertiser",
+          email: advertiser?.email ?? "",
+          onSuccess: async (response) => {
+            try {
+              const verify = await api<{ success: boolean; message?: string }>("/wallet/verify-payment", {
+                method: "POST",
+                body: JSON.stringify({
+                  razorpayOrderId: response.razorpay_order_id,
+                  razorpayPaymentId: response.razorpay_payment_id,
+                  razorpaySignature: response.razorpay_signature,
+                }),
+              });
+              if (!verify.success) throw new Error(verify.message ?? "Verification failed");
+              resolve();
+            } catch (e) {
+              reject(e);
+            }
+          },
+          onDismiss: () => reject(new Error("Payment cancelled")),
+        });
+      });
+      await loadDash();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Payment failed");
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const demoTopUp = async () => {
+    setError("");
+    const res = await api<{ success: boolean; message?: string }>("/wallet/demo-topup", {
       method: "POST", body: JSON.stringify({ amountInr: Number(topUpAmount) }),
     });
-    if (!res.success) { setError(res.message ?? "Top-up failed"); return; }
+    if (!res.success) { setError(res.message ?? "Demo top-up failed"); return; }
     await loadDash();
   };
 
@@ -194,6 +286,9 @@ export default function App() {
   }
 
   const balance = Number(advertiser?.balance_inr ?? 0);
+  const minPay = pricing?.minTopUpInr ?? walletConfig?.minTopUpInr ?? 500;
+  const isFunded = balance >= minPay || walletConfig?.isDemoAccount;
+  const canPublish = balance > 0 || walletConfig?.isDemoAccount;
 
   return (
     <div style={S.shell}>
@@ -224,6 +319,16 @@ export default function App() {
         </header>
 
         <main style={S.main}>
+          {!isFunded ? (
+            <div style={S.payBanner}>
+              <strong>Payment required</strong>
+              <p style={{ margin: "6px 0 10px", fontSize: 14 }}>
+                Add at least ₹{minPay.toLocaleString("en-IN")} via Razorpay (UPI / card / netbanking) before creating campaigns.
+              </p>
+              <button type="button" style={{ ...S.primary, width: "auto" }} onClick={() => setNav("billing")}>Go to Billing</button>
+            </div>
+          ) : null}
+
           {nav === "overview" && (
             <>
               <div style={S.statGrid}>
@@ -244,6 +349,11 @@ export default function App() {
 
           {nav === "campaigns" && (
             <>
+              {!isFunded ? (
+                <Panel title="Create campaign">
+                  <p style={S.sub}>Fund your wallet first (minimum ₹{minPay}).</p>
+                </Panel>
+              ) : (
               <Panel title="Create campaign">
                 <div style={S.grid2}>
                   <Field label="Campaign name">
@@ -268,6 +378,7 @@ export default function App() {
                 </div>
                 <button type="button" style={{ ...S.primary, width: "auto", marginTop: 12 }} onClick={() => void createCampaign()}>Create campaign</button>
               </Panel>
+              )}
 
               <Panel title="Campaigns">
                 {campaigns.length === 0 ? <p style={S.sub}>No campaigns yet.</p> : (
@@ -301,6 +412,9 @@ export default function App() {
 
           {nav === "ads" && (
             <Panel title="Create ad">
+              {!canPublish ? (
+                <p style={S.err}>Pay and add funds before publishing ads.</p>
+              ) : null}
               <div style={S.formatTabs}>
                 {(["shopping", "app_install", "image", "video"] as const).map((f) => (
                   <button key={f} type="button" style={adFormat === f ? S.formatOn : S.formatTab}
@@ -371,25 +485,68 @@ export default function App() {
                 </div>
               </div>
 
-              <button type="button" style={S.primary} onClick={() => void createCreative()}>Publish ad</button>
+              <button type="button" style={S.primary} disabled={!canPublish} onClick={() => void createCreative()}>Publish ad</button>
             </Panel>
           )}
 
           {nav === "billing" && (
             <Panel title="Billing & payments">
-              <p style={S.sub}>Balance is charged automatically: CPM on impressions, CPC/CPI on button clicks, CPV on completed video views.</p>
+              <p style={S.sub}>
+                Pay upfront via Razorpay. Your balance is charged automatically when ads run (CPM / CPC / CPI / CPV).
+              </p>
+              {!walletConfig?.razorpayConfigured ? (
+                <p style={S.err}>Payment gateway is not configured on the server. Contact support@videh.co.in.</p>
+              ) : null}
               <div style={S.statGrid}>
                 <Stat label="Available balance" value={`₹${balance.toLocaleString("en-IN")}`} />
                 <Stat label="Total spend" value={`₹${Number(stats?.spent_inr ?? 0).toFixed(0)}`} />
               </div>
-              <Field label={`Add funds (min ₹${pricing?.minTopUpInr ?? 500})`}>
+              <Field label={`Pay with Razorpay (min ₹${minPay})`}>
                 <div style={S.row}>
-                  <input style={{ ...S.input, flex: 1, marginBottom: 0 }} type="number" value={topUpAmount} onChange={(e) => setTopUpAmount(e.target.value)} />
-                  <button type="button" style={{ ...S.primary, width: "auto" }} onClick={() => void topUp()}>Add funds</button>
+                  <input style={{ ...S.input, flex: 1, marginBottom: 0 }} type="number" min={minPay} value={topUpAmount} onChange={(e) => setTopUpAmount(e.target.value)} />
+                  <button
+                    type="button"
+                    style={{ ...S.primary, width: "auto", opacity: paying ? 0.7 : 1 }}
+                    disabled={paying || !walletConfig?.razorpayConfigured}
+                    onClick={() => void payWithRazorpay()}
+                  >
+                    {paying ? "Processing…" : "Pay now"}
+                  </button>
                 </div>
               </Field>
+              {walletConfig?.isDemoAccount ? (
+                <Field label="Demo credit (internal test account only)">
+                  <div style={S.row}>
+                    <button type="button" style={S.ghost} onClick={() => void demoTopUp()}>Add demo ₹{topUpAmount}</button>
+                  </div>
+                </Field>
+              ) : null}
               {error && <p style={S.err}>{error}</p>}
-              <p style={{ fontSize: 12, color: "#80868b" }}>Payment gateway integration coming soon — demo top-up credits your account instantly.</p>
+              {payments.length > 0 ? (
+                <>
+                  <h4 style={{ margin: "16px 0 8px", fontSize: 14 }}>Payment history</h4>
+                  <table style={S.table}>
+                    <thead>
+                      <tr>
+                        <th style={S.th}>Date</th>
+                        <th style={S.th}>Amount</th>
+                        <th style={S.th}>Method</th>
+                        <th style={S.th}>Payment ID</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {payments.map((p) => (
+                        <tr key={p.razorpay_payment_id}>
+                          <td style={S.td}>{new Date(p.created_at).toLocaleString("en-IN")}</td>
+                          <td style={S.td}>₹{Number(p.amount_inr).toLocaleString("en-IN")}</td>
+                          <td style={S.td}>{p.payment_method ?? "—"}</td>
+                          <td style={S.td}><code style={{ fontSize: 11 }}>{p.razorpay_payment_id}</code></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              ) : null}
             </Panel>
           )}
         </main>
@@ -460,4 +617,5 @@ const S: Record<string, React.CSSProperties> = {
   fakeBtnTeal: { display: "inline-block", background: "#00A884", color: "#fff", padding: "8px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, marginTop: 8 },
   fakeBtnGreen: { display: "inline-block", background: "#01875f", color: "#fff", padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600 },
   fakeBtnBlack: { display: "inline-block", background: "#000", color: "#fff", padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600 },
+  payBanner: { background: "#fef7e0", border: "1px solid #f9e6b0", borderRadius: 10, padding: 16, marginBottom: 16 },
 };
