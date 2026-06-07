@@ -8,6 +8,7 @@ import { query } from "../lib/db";
 import { assertSameUser, getAuthUserId } from "../lib/auth";
 import { ensureVideoThumbnail } from "../lib/reelsAutoThumbnail";
 import { permanentlyDeleteReelsVideo } from "../lib/reelsDeleteVideo";
+import { externalVideoRedirectTarget, tryStreamStoredReelsVideo } from "../lib/reelsVideoStream";
 import {
   detectImageMimeType,
   localPathForUploadsRel,
@@ -113,24 +114,23 @@ function proxyReelsImageUrl(req: Request, url: unknown): string | null {
   return `${proxy}?url=${encodeURIComponent(u)}`;
 }
 
-/** Always return a loadable thumbnail — auto-generate endpoint if missing/broken. */
-function resolveVideoThumbnailUrl(req: Request, thumb: unknown, videoId: unknown): string {
-  const u = String(thumb ?? "").trim();
-  if (u) {
-    if (needsReelsImageProxy(u)) {
-      return proxyReelsImageUrl(req, u) ?? publicMediaUrl(req, `/api/reels/videos/${videoId}/thumbnail`);
-    }
-    const rel = uploadsRelPathFromStoredUrl(u);
-    if (rel) {
-      const local = localPathForUploadsRel(rel, path.join(apiServerDir, "uploads"));
-      if (local && fs.existsSync(local)) {
-        return resolveStoredMediaUrl(req, u) ?? publicMediaUrl(req, rel);
-      }
-    }
-    const resolved = resolveStoredMediaUrl(req, u);
-    if (resolved && !needsReelsImageProxy(resolved)) return resolved;
+/** Always return API thumbnail URL (handles wrong extensions, auto-frame, Pexels proxy). */
+function resolveVideoThumbnailUrl(req: Request, _thumb: unknown, videoId: unknown, cacheVersion?: unknown): string {
+  const v = cacheVersion != null ? encodeURIComponent(String(cacheVersion)) : "";
+  const q = v ? `?v=${v}` : "";
+  return publicMediaUrl(req, `/api/reels/videos/${videoId}/thumbnail${q}`);
+}
+
+/** Uploaded videos stream through API (Range support); external URLs pass through. */
+function resolveVideoPlaybackUrl(req: Request, storedUrl: unknown, videoId: unknown): string {
+  const raw = String(storedUrl ?? "").trim();
+  if (!raw) return "";
+  if (!uploadsRelPathFromStoredUrl(raw) && /^https?:\/\//i.test(raw)) return raw;
+  const external = resolveStoredMediaUrl(req, raw);
+  if (external && /^https?:\/\//i.test(external) && !uploadsRelPathFromStoredUrl(external)) {
+    return external;
   }
-  return publicMediaUrl(req, `/api/reels/videos/${videoId}/thumbnail`);
+  return publicMediaUrl(req, `/api/reels/videos/${videoId}/stream`);
 }
 
 function mapVideoRow(row: Record<string, unknown>, req?: Request) {
@@ -144,8 +144,8 @@ function mapVideoRow(row: Record<string, unknown>, req?: Request) {
     title: redactPhoneNumbersInText(String(row.title ?? "")),
     description: redactPhoneNumbersInText(String(row.description ?? "")),
     hashtags: row.hashtags ?? [],
-    videoUrl: row.video_url,
-    thumbnailUrl: req ? resolveVideoThumbnailUrl(req, thumb, row.id) : (thumb ?? null),
+    videoUrl: req ? resolveVideoPlaybackUrl(req, row.video_url, row.id) : String(row.video_url ?? ""),
+    thumbnailUrl: req ? resolveVideoThumbnailUrl(req, thumb, row.id, row.updated_at ?? row.created_at) : (thumb ?? null),
     durationSeconds: Number(row.duration_seconds ?? 0),
     viewCount: Number(row.view_count ?? 0),
     likeCount: Number(row.like_count ?? 0),
@@ -307,7 +307,7 @@ router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
       if (rel) {
         const filePath = localPathForUploadsRel(rel, uploadsRoot);
         if (filePath && fs.existsSync(filePath)) {
-          res.type("image/jpeg");
+          res.type(detectImageMimeType(filePath));
           res.setHeader("Cache-Control", "public, max-age=86400");
           res.sendFile(filePath);
           return;
@@ -335,7 +335,7 @@ router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
     if (generated) {
       const filePath = localPathForUploadsRel(generated, uploadsRoot);
       if (filePath && fs.existsSync(filePath)) {
-        res.type("image/jpeg");
+        res.type(detectImageMimeType(filePath));
         res.setHeader("Cache-Control", "public, max-age=3600");
         res.sendFile(filePath);
         return;
@@ -344,6 +344,52 @@ router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
     res.status(404).end();
   } catch (err) {
     req.log.error({ err, videoId }, "reels video thumbnail");
+    res.status(500).end();
+  }
+});
+
+/** Public video playback with HTTP Range (mobile players need this). */
+router.get("/videos/:id/stream", async (req: Request, res: Response) => {
+  const videoId = Number(req.params.id);
+  if (!videoId) {
+    res.status(400).end();
+    return;
+  }
+  try {
+    const viewerId = Number(req.query.userId) || getAuthUserId(req) || 0;
+    const row = await query(
+      `SELECT v.video_url, v.status, v.play_enabled, c.user_id AS channel_owner_id
+       FROM reels_videos v
+       JOIN reels_channels c ON c.id = v.channel_id
+       WHERE v.id = $1`,
+      [videoId],
+    );
+    if (!row.rows.length) {
+      res.status(404).end();
+      return;
+    }
+    const stored = row.rows[0] as {
+      video_url?: string | null;
+      status?: string | null;
+      play_enabled?: boolean | null;
+      channel_owner_id?: number | null;
+    };
+    const isOwner = viewerId > 0 && Number(stored.channel_owner_id) === viewerId;
+    const isPublic = stored.status === "published" && stored.play_enabled !== false;
+    if (!isPublic && !isOwner) {
+      res.status(403).end();
+      return;
+    }
+    const uploadsRoot = path.join(apiServerDir, "uploads");
+    if (tryStreamStoredReelsVideo(req, res, stored.video_url, uploadsRoot)) return;
+    const external = externalVideoRedirectTarget(req, stored.video_url);
+    if (external) {
+      res.redirect(external);
+      return;
+    }
+    res.status(404).end();
+  } catch (err) {
+    req.log.error({ err, videoId }, "reels video stream");
     res.status(500).end();
   }
 });

@@ -9,6 +9,7 @@ import {
   storedUploadFileExists,
   uploadsRelPathFromStoredUrl,
 } from "../lib/mediaStorage";
+import { externalVideoRedirectTarget, tryStreamStoredReelsVideo } from "../lib/reelsVideoStream";
 import { logAdminAction } from "../lib/adminAudit";
 import { getReelsPlatformConfig, saveReelsPlatformConfig, type ReelsPlatformConfig } from "../lib/reelsConfig";
 import { runChannelFraudRescan } from "../lib/reelsFraud";
@@ -205,30 +206,17 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
         return;
       }
       const storedUrl = r.rows[0].video_url;
+      if (tryStreamStoredReelsVideo(req, res, storedUrl, uploadsRootDir)) return;
       const rel = uploadsRelPathFromStoredUrl(storedUrl);
       if (rel) {
-        const filePath = localPathForUploadsRel(rel, uploadsRootDir);
-        if (!filePath || !fs.existsSync(filePath)) {
-          res.status(404).json({
-            success: false,
-            message: "Video file server par nahi mili — ho sakta hai server restart ke baad upload delete ho gaya. User se dubara upload karwayein.",
-          });
-          return;
-        }
-        const ext = path.extname(filePath).toLowerCase();
-        const mime: Record<string, string> = {
-          ".mp4": "video/mp4",
-          ".mov": "video/quicktime",
-          ".webm": "video/webm",
-          ".m4v": "video/mp4",
-          ".3gp": "video/3gpp",
-        };
-        res.type(mime[ext] ?? "application/octet-stream");
-        res.sendFile(filePath);
+        res.status(404).json({
+          success: false,
+          message: "Video file server par nahi mili — ho sakta hai server restart ke baad upload delete ho gaya. User se dubara upload karwayein.",
+        });
         return;
       }
-      const external = resolveStoredMediaUrl(req, storedUrl);
-      if (external && /^https?:\/\//i.test(external)) {
+      const external = externalVideoRedirectTarget(req, storedUrl);
+      if (external) {
         res.redirect(external);
         return;
       }

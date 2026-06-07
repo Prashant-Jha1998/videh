@@ -72,12 +72,19 @@ export default function ReelsWatchScreen() {
   const watchedRef = useRef(0);
   const viewSentRef = useRef(false);
 
-  const player = useVideoPlayer(video?.videoUrl ?? null, (p) => {
+  const playbackUrl = video?.videoUrl ?? null;
+  const player = useVideoPlayer(playbackUrl, (p) => {
     p.loop = false;
     p.muted = false;
     p.volume = 1;
-    p.play();
   });
+
+  useEffect(() => {
+    if (!playbackUrl) return;
+    void player.replaceAsync(playbackUrl).then(() => {
+      player.play();
+    }).catch(() => {});
+  }, [playbackUrl, player]);
 
   useEffect(() => {
     void Audio.setAudioModeAsync({
@@ -273,7 +280,13 @@ export default function ReelsWatchScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.playerWrap}>
         {playAllowed ? (
-          <VideoView style={styles.player} player={player} contentFit="contain" nativeControls />
+          <VideoView
+            key={`watch-${video.id}-${playbackUrl}`}
+            style={styles.player}
+            player={player}
+            contentFit="contain"
+            nativeControls
+          />
         ) : (
           <View style={[styles.player, styles.blockedPlayer]}>
             <Ionicons name="shield-checkmark-outline" size={40} color="#fff" />

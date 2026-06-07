@@ -108,7 +108,8 @@ export default function VideoTabScreen() {
             source={{ uri: item.thumbnailUrl }}
             style={compact ? styles.trendThumb : styles.thumb}
             contentFit="cover"
-            recyclingKey={String(item.id)}
+            recyclingKey={`thumb-${item.id}`}
+            cacheKey={`thumb-${item.id}-${item.thumbnailUrl}`}
           />
         ) : (
           <View
