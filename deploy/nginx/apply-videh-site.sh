@@ -231,17 +231,19 @@ else
   echo "Configured HTTP for web.videh.co.in"
 fi
 
-if write_ssl_server "${ADS_CONF}" "ads.videh.co.in" "${ADS_ROOT}" "true"; then
+write_http_server "${ADS_CONF}" "ads.videh.co.in" "${ADS_ROOT}" "true"
+sudo nginx -t
+sudo systemctl reload nginx
+ensure_letsencrypt_cert "ads.videh.co.in" || true
+if write_ssl_server "${ADS_CONF}" "ads.videh.co.in" "${ADS_ROOT}" "true" "cert_dir_for_host_only"; then
   echo "Configured HTTPS for ads.videh.co.in"
 else
-  write_http_server "${ADS_CONF}" "ads.videh.co.in" "${ADS_ROOT}" "true"
-  echo "Configured HTTP for ads.videh.co.in"
+  echo "Configured HTTP for ads.videh.co.in (no TLS cert yet — add DNS A record, then re-run this script)"
 fi
 
 write_http_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true"
 sudo nginx -t
 sudo systemctl reload nginx
-ensure_letsencrypt_cert "ads.videh.co.in" || true
 ensure_letsencrypt_cert "developer.videh.co.in" || true
 if write_ssl_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROOT}" "true" "cert_dir_for_host_only"; then
   echo "Configured HTTPS for developer.videh.co.in"
