@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 72,
+      "versionCode": 73,
       "androidStatusBar": {
         "backgroundColor": "#00A884",
         "barStyle": "light-content",

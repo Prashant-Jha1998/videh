@@ -17,7 +17,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -25,20 +24,18 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ReelsAdPlayer } from "@/components/ReelsAdPlayer";
+import { ReelsCommentsSheet } from "@/components/ReelsCommentsSheet";
 import { ReelsWatchPlayer } from "@/components/ReelsWatchPlayer";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
   fetchReelsAdBreaks,
   fetchReelsChannel,
-  fetchReelsComments,
   fetchReelsFeed,
   fetchReelsVideo,
   recordReelsAdImpression,
   formatDuration,
-  formatTimeAgo,
   formatViewCount,
-  postReelsComment,
   reactReelsVideo,
   recordReelsView,
   shareReelsVideo,
@@ -109,8 +106,6 @@ export default function ReelsWatchScreen() {
   const [channel, setChannel] = useState<ReelsChannel | null>(null);
   const [subscribed, setSubscribed] = useState(false);
   const [related, setRelated] = useState<ReelsVideo[]>([]);
-  const [comments, setComments] = useState<{ id: number; content: string; displayName: string; createdAt: string }[]>([]);
-  const [commentText, setCommentText] = useState("");
   const [initialLoading, setInitialLoading] = useState(true);
   const [metaRefreshing, setMetaRefreshing] = useState(false);
   const [playAllowed, setPlayAllowed] = useState(true);
@@ -261,9 +256,6 @@ export default function ReelsWatchScreen() {
     const other = list.filter((v) => v.channelId !== res.video?.channelId);
     setRelated([...sameChannel, ...other].slice(0, 20));
 
-    const cm = await fetchReelsComments(Number(id), user.sessionToken);
-    if (cm.success) setComments(cm.comments ?? []);
-
     const ads = await fetchReelsAdBreaks(Number(id), user.dbId, user.sessionToken);
     if (ads.success !== false) {
       setAdBreaks(ads);
@@ -329,15 +321,6 @@ export default function ReelsWatchScreen() {
       await subscribeReelsChannel(video.channelId, user.dbId, user.sessionToken);
       setSubscribed(true);
     }
-  };
-
-  const sendComment = async () => {
-    if (!user?.dbId || !commentText.trim() || !id) return;
-    await postReelsComment(Number(id), user.dbId, commentText.trim(), user.sessionToken);
-    setCommentText("");
-    const cm = await fetchReelsComments(Number(id), user.sessionToken);
-    if (cm.success) setComments(cm.comments ?? []);
-    if (video) setVideo({ ...video, commentCount: video.commentCount + 1 });
   };
 
   const shareVideo = async () => {
@@ -713,52 +696,20 @@ export default function ReelsWatchScreen() {
         </View>
       </Modal>
 
-      {/* Comments bottom sheet */}
-      <DismissibleModal visible={commentsOpen} onClose={() => setCommentsOpen(false)} animationType="slide">
-        <View style={styles.sheetRoot}>
-          <View style={[styles.sheet, { backgroundColor: colors.background, paddingBottom: insets.bottom + 8, marginTop: "auto" }]}>
-            <View style={styles.sheetHandle} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.foreground }]}>Comments</Text>
-              <TouchableOpacity onPress={() => setCommentsOpen(false)}>
-                <Ionicons name="close" size={26} color={colors.foreground} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={[styles.commentInputRow, { borderColor: colors.border }]}>
-              <TextInput
-                style={[styles.commentInput, { color: colors.foreground }]}
-                placeholder="Add a comment..."
-                placeholderTextColor={colors.mutedForeground}
-                value={commentText}
-                onChangeText={setCommentText}
-              />
-              <TouchableOpacity onPress={sendComment} disabled={!commentText.trim()}>
-                <Ionicons name="send" size={22} color={commentText.trim() ? colors.primary : colors.muted} />
-              </TouchableOpacity>
-            </View>
-
-            <FlatList
-              data={comments}
-              keyExtractor={(c) => String(c.id)}
-              style={{ maxHeight: 360 }}
-              contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16 }}
-              ListEmptyComponent={
-                <Text style={{ color: colors.mutedForeground, textAlign: "center", padding: 24 }}>No comments yet</Text>
-              }
-              renderItem={({ item }) => (
-                <View style={styles.commentItem}>
-                  <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold" }}>{item.displayName}</Text>
-                  <Text style={{ color: colors.foreground, marginTop: 2 }}>{item.content}</Text>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 4 }}>
-                    {formatTimeAgo(item.createdAt)}
-                  </Text>
-                </View>
-              )}
-            />
-          </View>
-        </View>
-      </DismissibleModal>
+      {user?.dbId && video ? (
+        <ReelsCommentsSheet
+          visible={commentsOpen}
+          onClose={() => setCommentsOpen(false)}
+          videoId={video.id}
+          commentCount={video.commentCount}
+          userId={user.dbId}
+          sessionToken={user.sessionToken}
+          userAvatarUrl={channel?.avatarUrl ?? null}
+          onCommentPosted={() => {
+            setVideo((v) => (v ? { ...v, commentCount: v.commentCount + 1 } : v));
+          }}
+        />
+      ) : null}
     </View>
     </>
   );
@@ -877,17 +828,4 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  commentInputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderRadius: 24,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  commentInput: { flex: 1, fontSize: 15 },
-  commentItem: { marginBottom: 16 },
 });

@@ -76,9 +76,15 @@ export function mapPublicReelsChannel(
 
 export function mapPublicReelsComment(row: Record<string, unknown>): Record<string, unknown> {
   return {
-    id: row.id,
+    id: Number(row.id),
     content: redactPhoneNumbersInText(String(row.content ?? "")),
     displayName: reelsVideoDisplayName(row.channel_handle as string | null | undefined),
+    channelHandle: row.channel_handle ?? null,
+    avatarUrl: row.avatar_url ?? null,
     createdAt: row.created_at,
+    likeCount: Number(row.like_count ?? 0),
+    replyCount: Number(row.reply_count ?? 0),
+    myReaction: row.my_reaction ?? null,
+    parentId: row.parent_id != null ? Number(row.parent_id) : null,
   };
 }

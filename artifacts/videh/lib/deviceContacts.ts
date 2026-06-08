@@ -1,7 +1,84 @@
 import * as Contacts from "expo-contacts";
 import type { ExistingContact } from "expo-contacts";
+import { Platform } from "react-native";
 import { jsonAuthHeaders } from "@/lib/authHeaders";
 import { normalizePhone } from "@/lib/videhContacts";
+
+export type AddDeviceContactResult =
+  | { ok: true }
+  | { ok: false; reason: "permission" | "cancelled" | "invalid" | "failed"; message: string };
+
+function sanitizeContactDisplayName(raw: string, phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  let name = raw.trim().replace(/^~+\s*/, "");
+  if (!name || name.replace(/\D/g, "") === digits) {
+    return phone;
+  }
+  return name;
+}
+
+/** Save a phone number to the device address book (WhatsApp-style Add contact). */
+export async function addDeviceContact(opts: {
+  name: string;
+  phone: string;
+}): Promise<AddDeviceContactResult> {
+  if (Platform.OS === "web") {
+    return { ok: false, reason: "failed", message: "Save this number from your phone's contact app." };
+  }
+
+  const phone = normalizePhone(opts.phone.trim());
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length < 10) {
+    return { ok: false, reason: "invalid", message: "Invalid phone number." };
+  }
+
+  const displayName = sanitizeContactDisplayName(opts.name, phone);
+  const [firstName, ...rest] = displayName.split(/\s+/).filter(Boolean);
+  const lastName = rest.join(" ");
+
+  const contactPayload: Contacts.Contact = {
+    contactType: Contacts.ContactTypes.Person,
+    firstName: firstName || displayName,
+    ...(lastName ? { lastName } : {}),
+    phoneNumbers: [{ number: phone, label: "mobile" }],
+  };
+
+  const { status } = await Contacts.requestPermissionsAsync();
+  if (status !== "granted") {
+    return {
+      ok: false,
+      reason: "permission",
+      message: "Allow Contacts access to save this contact.",
+    };
+  }
+
+  try {
+    await Contacts.addContactAsync(contactPayload);
+    return { ok: true };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const missingWrite = /WRITE_CONTACTS|MissingPermission/i.test(errMsg);
+
+    if (Platform.OS === "android" || missingWrite) {
+      try {
+        await Contacts.presentFormAsync(null, contactPayload);
+        const saved = await isPhoneInDeviceContacts(phone);
+        if (saved) return { ok: true };
+        return { ok: false, reason: "cancelled", message: "Contact was not saved." };
+      } catch {
+        if (missingWrite) {
+          return {
+            ok: false,
+            reason: "permission",
+            message: "Allow Contacts write access in Settings, then try again.",
+          };
+        }
+      }
+    }
+
+    return { ok: false, reason: "failed", message: "Could not save this contact." };
+  }
+}
 
 /** Load the full device address book (paginated — required on some Android builds). */
 export async function loadAllDeviceContacts(): Promise<ExistingContact[]> {

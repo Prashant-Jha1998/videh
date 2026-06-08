@@ -1292,16 +1292,32 @@ router.post("/videos/:videoId/react", async (req: Request, res: Response) => {
   }
 });
 
+const REELS_COMMENT_SELECT = `
+  c.id, c.content, c.created_at, c.parent_id, c.like_count,
+  rc.handle AS channel_handle, rc.avatar_url,
+  (SELECT COUNT(*)::int FROM reels_video_comments r WHERE r.parent_id = c.id) AS reply_count,
+  cr.reaction AS my_reaction
+`;
+
 router.get("/videos/:videoId/comments", async (req: Request, res: Response) => {
   const videoId = Number(req.params.videoId);
+  const userId = Number(req.query.userId ?? 0) || null;
+  const sort = String(req.query.sort ?? "top") === "newest" ? "newest" : "top";
   try {
     await ensureReelsTables();
+    const orderBy = sort === "newest"
+      ? "c.created_at DESC"
+      : "c.like_count DESC, c.created_at DESC";
     const result = await query(
-      `SELECT c.id, c.content, c.created_at, rc.handle AS channel_handle
+      `SELECT ${REELS_COMMENT_SELECT}
        FROM reels_video_comments c
        LEFT JOIN reels_channels rc ON rc.user_id = c.user_id
-       WHERE c.video_id = $1 ORDER BY c.created_at DESC LIMIT 100`,
-      [videoId],
+       LEFT JOIN reels_video_comment_likes cr
+         ON cr.comment_id = c.id AND cr.user_id = $2
+       WHERE c.video_id = $1 AND c.parent_id IS NULL
+       ORDER BY ${orderBy}
+       LIMIT 100`,
+      [videoId, userId],
     );
     res.json({
       success: true,
@@ -1313,9 +1329,40 @@ router.get("/videos/:videoId/comments", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/videos/:videoId/comments/:commentId/replies", async (req: Request, res: Response) => {
+  const videoId = Number(req.params.videoId);
+  const commentId = Number(req.params.commentId);
+  const userId = Number(req.query.userId ?? 0) || null;
+  try {
+    await ensureReelsTables();
+    const result = await query(
+      `SELECT ${REELS_COMMENT_SELECT}
+       FROM reels_video_comments c
+       LEFT JOIN reels_channels rc ON rc.user_id = c.user_id
+       LEFT JOIN reels_video_comment_likes cr
+         ON cr.comment_id = c.id AND cr.user_id = $3
+       WHERE c.video_id = $1 AND c.parent_id = $2
+       ORDER BY c.created_at ASC
+       LIMIT 50`,
+      [videoId, commentId, userId],
+    );
+    res.json({
+      success: true,
+      replies: result.rows.map((r) => mapPublicReelsComment(r as Record<string, unknown>)),
+    });
+  } catch (err) {
+    req.log.error({ err }, "reels comment replies");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 router.post("/videos/:videoId/comments", async (req: Request, res: Response) => {
   const videoId = Number(req.params.videoId);
-  const { userId, content } = req.body as { userId?: number; content?: string };
+  const { userId, content, parentId } = req.body as {
+    userId?: number;
+    content?: string;
+    parentId?: number | null;
+  };
   const text = String(content ?? "").trim();
   if (!userId || !assertSameUser(req, res, userId)) return;
   if (!text) {
@@ -1326,14 +1373,29 @@ router.post("/videos/:videoId/comments", async (req: Request, res: Response) => 
     await ensureReelsTables();
     const meta = await query(`SELECT channel_id FROM reels_videos WHERE id = $1`, [videoId]);
     const channelId = Number(meta.rows[0]?.channel_id);
+    let replyParentId: number | null = null;
+    if (parentId != null && Number(parentId) > 0) {
+      const parent = await query(
+        `SELECT id, parent_id FROM reels_video_comments WHERE id = $1 AND video_id = $2`,
+        [Number(parentId), videoId],
+      );
+      if (!parent.rows[0]) {
+        res.status(404).json({ success: false, message: "Parent comment not found" });
+        return;
+      }
+      replyParentId = parent.rows[0].parent_id != null
+        ? Number(parent.rows[0].parent_id)
+        : Number(parent.rows[0].id);
+    }
     const fraud = await checkCommentFraud(videoId, channelId, userId, text);
     if (!fraud.allowed) {
       res.status(429).json({ success: false, message: "Comment blocked — suspected spam.", reason: fraud.reason });
       return;
     }
     const inserted = await query(
-      `INSERT INTO reels_video_comments (video_id, user_id, content) VALUES ($1, $2, $3) RETURNING id, created_at`,
-      [videoId, userId, text.slice(0, 2000)],
+      `INSERT INTO reels_video_comments (video_id, user_id, content, parent_id)
+       VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+      [videoId, userId, text.slice(0, 2000), replyParentId],
     );
     await query("UPDATE reels_videos SET comment_count = comment_count + 1 WHERE id = $1", [videoId]);
     await query(
@@ -1343,6 +1405,68 @@ router.post("/videos/:videoId/comments", async (req: Request, res: Response) => 
     res.json({ success: true, comment: inserted.rows[0] });
   } catch (err) {
     req.log.error({ err }, "reels comment");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.post("/comments/:commentId/react", async (req: Request, res: Response) => {
+  const commentId = Number(req.params.commentId);
+  const { userId, reaction } = req.body as { userId?: number; reaction?: string };
+  if (!userId || !assertSameUser(req, res, userId)) return;
+  if (!commentId || !["like", "dislike"].includes(String(reaction))) {
+    res.status(400).json({ success: false, message: "Invalid reaction" });
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    const row = await query(
+      `SELECT id FROM reels_video_comments WHERE id = $1`,
+      [commentId],
+    );
+    if (!row.rows[0]) {
+      res.status(404).json({ success: false, message: "Comment not found" });
+      return;
+    }
+    const prev = await query(
+      "SELECT reaction FROM reels_video_comment_likes WHERE user_id = $1 AND comment_id = $2",
+      [userId, commentId],
+    );
+    const prevReaction = prev.rows[0]?.reaction as string | undefined;
+    if (prevReaction === reaction) {
+      await query(
+        "DELETE FROM reels_video_comment_likes WHERE user_id = $1 AND comment_id = $2",
+        [userId, commentId],
+      );
+      if (reaction === "like") {
+        await query(
+          "UPDATE reels_video_comments SET like_count = GREATEST(0, like_count - 1) WHERE id = $1",
+          [commentId],
+        );
+      }
+      res.json({ success: true, reaction: null });
+      return;
+    }
+    await query(
+      `INSERT INTO reels_video_comment_likes (user_id, comment_id, reaction)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, comment_id) DO UPDATE SET reaction = EXCLUDED.reaction`,
+      [userId, commentId, reaction],
+    );
+    if (prevReaction === "like") {
+      await query(
+        "UPDATE reels_video_comments SET like_count = GREATEST(0, like_count - 1) WHERE id = $1",
+        [commentId],
+      );
+    }
+    if (reaction === "like") {
+      await query(
+        "UPDATE reels_video_comments SET like_count = like_count + 1 WHERE id = $1",
+        [commentId],
+      );
+    }
+    res.json({ success: true, reaction });
+  } catch (err) {
+    req.log.error({ err }, "reels comment react");
     res.status(500).json({ success: false, message: "Server error" });
   }
 });

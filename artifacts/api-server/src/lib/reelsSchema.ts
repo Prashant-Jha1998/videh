@@ -74,6 +74,7 @@ export async function ensureReelsTables(): Promise<void> {
   await ensureReelsModerationColumns();
   await ensureReelsChannelBrandingColumns();
   await ensureReelsChannelLinksPlaylists();
+  await ensureReelsCommentRepliesLikes();
   const { ensureReelsAdsTables } = await import("./reelsAdsSchema");
   await ensureReelsAdsTables();
   ensured = true;
@@ -214,6 +215,34 @@ export async function ensureReelsChannelLinksPlaylists(): Promise<void> {
     ON reels_playlist_items (playlist_id, sort_order)
   `);
   linksPlaylistsEnsured = true;
+}
+
+let commentRepliesEnsured = false;
+
+export async function ensureReelsCommentRepliesLikes(): Promise<void> {
+  if (commentRepliesEnsured) return;
+  await query(`
+    ALTER TABLE reels_video_comments
+    ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES reels_video_comments(id) ON DELETE CASCADE
+  `);
+  await query(`
+    ALTER TABLE reels_video_comments
+    ADD COLUMN IF NOT EXISTS like_count INTEGER NOT NULL DEFAULT 0
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS reels_video_comment_likes (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      comment_id INTEGER NOT NULL REFERENCES reels_video_comments(id) ON DELETE CASCADE,
+      reaction VARCHAR(10) NOT NULL CHECK (reaction IN ('like', 'dislike')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, comment_id)
+    )
+  `);
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_reels_comments_parent
+    ON reels_video_comments (parent_id, created_at ASC)
+  `);
+  commentRepliesEnsured = true;
 }
 
 export function normalizeReelsHandle(raw: string): string | null {

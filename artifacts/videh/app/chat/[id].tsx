@@ -6,7 +6,6 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
-import * as Contacts from "expo-contacts";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import {
@@ -2264,26 +2263,22 @@ export default function ChatScreen() {
       Alert.alert(res.ok ? "Downloaded" : "Error", res.ok ? "Contact saved as .vcf file." : res.message);
       return;
     }
-    try {
-      const { status } = await Contacts.requestPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission required", "Allow Contacts access to save this contact.");
-        return;
-      }
-      const [firstName, ...rest] = parsed.name.split(/\s+/).filter(Boolean);
-      const lastName = rest.join(" ");
-      await Contacts.addContactAsync({
-        contactType: Contacts.ContactTypes.Person,
-        name: parsed.name,
-        firstName: firstName || parsed.name,
-        lastName: lastName || undefined,
-        phoneNumbers: parsed.phones.map((number) => ({ number, label: "mobile" })),
-        emails: parsed.emails?.map((email) => ({ email, label: "work" })),
-      });
-      Alert.alert("Saved", `${parsed.name} was added to your contacts.`);
-    } catch {
-      Alert.alert("Error", "Could not save this contact.");
+    const primaryPhone = parsed.phones[0];
+    if (!primaryPhone) {
+      Alert.alert("Error", "No phone number found in this contact.");
+      return;
     }
+    const { addDeviceContact } = await import("@/lib/deviceContacts");
+    const result = await addDeviceContact({ name: parsed.name, phone: primaryPhone });
+    if (result.ok) {
+      Alert.alert("Saved", `${parsed.name} was added to your contacts.`);
+      return;
+    }
+    if (result.reason === "cancelled") return;
+    Alert.alert(
+      result.reason === "permission" ? "Permission required" : "Error",
+      result.message,
+    );
   }, []);
 
   const handleStopLiveLocation = useCallback(async (msg: Message) => {
@@ -3176,33 +3171,25 @@ export default function ChatScreen() {
 
   const handleAddUnsavedContact = useCallback(async () => {
     if (!peerContactPreview) return;
-    if (Platform.OS === "web") {
-      Alert.alert("Add contact", "Save this number from your phone's contact app after copying it.");
+    const { addDeviceContact } = await import("@/lib/deviceContacts");
+    const profileName = peerContactPreview.profileName.trim() || peerContactPreview.phone;
+    const result = await addDeviceContact({
+      name: profileName,
+      phone: peerContactPreview.phone,
+    });
+    if (!result.ok) {
+      if (result.reason === "cancelled") return;
+      Alert.alert(
+        result.reason === "permission" ? "Permission required" : "Error",
+        result.message,
+      );
       return;
     }
-    try {
-      const { status } = await Contacts.requestPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission required", "Allow Contacts access to save this contact.");
-        return;
-      }
-      const profileName = peerContactPreview.profileName.trim() || peerContactPreview.phone;
-      const [firstName, ...rest] = profileName.split(/\s+/).filter(Boolean);
-      await Contacts.addContactAsync({
-        contactType: Contacts.ContactTypes.Person,
-        name: profileName,
-        firstName: firstName || profileName,
-        lastName: rest.join(" ") || undefined,
-        phoneNumbers: [{ number: peerContactPreview.phone, label: "mobile" }],
-      });
-      const { syncDeviceContactsToServer } = await import("@/lib/syncContactsToServer");
-      void syncDeviceContactsToServer(BASE_URL, user?.sessionToken);
-      setPeerContactPreview((prev) => (prev ? { ...prev, isSavedInDevice: true } : null));
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("Saved", `${profileName} was added to your contacts.`);
-    } catch {
-      Alert.alert("Error", "Could not save this contact.");
-    }
+    const { syncDeviceContactsToServer } = await import("@/lib/syncContactsToServer");
+    void syncDeviceContactsToServer(BASE_URL, user?.sessionToken);
+    setPeerContactPreview((prev) => (prev ? { ...prev, isSavedInDevice: true } : null));
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Alert.alert("Saved", `${profileName} was added to your contacts.`);
   }, [peerContactPreview, user?.sessionToken]);
 
   const handleMenuBlockToggle = useCallback(() => {

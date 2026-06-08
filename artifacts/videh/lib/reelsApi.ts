@@ -513,11 +513,68 @@ export async function reactReelsVideo(
   });
 }
 
-export async function fetchReelsComments(videoId: number, sessionToken?: string | null) {
-  return reelsJson<{
+export type ReelsCommentSort = "top" | "newest";
+
+export type ReelsComment = {
+  id: number;
+  content: string;
+  displayName: string;
+  channelHandle?: string | null;
+  avatarUrl?: string | null;
+  createdAt: string;
+  likeCount: number;
+  replyCount: number;
+  myReaction?: "like" | "dislike" | null;
+  parentId?: number | null;
+};
+
+function normalizeReelsComment(raw: Record<string, unknown>): ReelsComment {
+  return {
+    id: Number(raw.id),
+    content: String(raw.content ?? ""),
+    displayName: String(raw.displayName ?? "User"),
+    channelHandle: raw.channelHandle != null ? String(raw.channelHandle) : null,
+    avatarUrl: normalizeReelsMediaUrl(raw.avatarUrl != null ? String(raw.avatarUrl) : null),
+    createdAt: String(raw.createdAt ?? ""),
+    likeCount: Number(raw.likeCount ?? 0),
+    replyCount: Number(raw.replyCount ?? 0),
+    myReaction: raw.myReaction === "like" || raw.myReaction === "dislike"
+      ? raw.myReaction
+      : null,
+    parentId: raw.parentId != null ? Number(raw.parentId) : null,
+  };
+}
+
+export async function fetchReelsComments(
+  videoId: number,
+  userId: number,
+  sort: ReelsCommentSort = "top",
+  sessionToken?: string | null,
+) {
+  const res = await reelsJson<{
     success: boolean;
-    comments: { id: number; content: string; displayName: string; createdAt: string }[];
-  }>(`/videos/${videoId}/comments`, { sessionToken });
+    comments: Record<string, unknown>[];
+  }>(`/videos/${videoId}/comments?userId=${userId}&sort=${sort}`, { sessionToken });
+  if (res.comments) {
+    return { ...res, comments: res.comments.map(normalizeReelsComment) };
+  }
+  return { ...res, comments: [] as ReelsComment[] };
+}
+
+export async function fetchReelsCommentReplies(
+  videoId: number,
+  commentId: number,
+  userId: number,
+  sessionToken?: string | null,
+) {
+  const res = await reelsJson<{
+    success: boolean;
+    replies: Record<string, unknown>[];
+  }>(`/videos/${videoId}/comments/${commentId}/replies?userId=${userId}`, { sessionToken });
+  if (res.replies) {
+    return { ...res, replies: res.replies.map(normalizeReelsComment) };
+  }
+  return { ...res, replies: [] as ReelsComment[] };
 }
 
 export async function postReelsComment(
@@ -525,10 +582,24 @@ export async function postReelsComment(
   userId: number,
   content: string,
   sessionToken?: string | null,
+  parentId?: number | null,
 ) {
   return reelsJson<{ success: boolean }>(`/videos/${videoId}/comments`, {
     method: "POST",
-    body: { userId, content },
+    body: { userId, content, parentId: parentId ?? null },
+    sessionToken,
+  });
+}
+
+export async function reactReelsComment(
+  commentId: number,
+  userId: number,
+  reaction: "like" | "dislike",
+  sessionToken?: string | null,
+) {
+  return reelsJson<{ success: boolean; reaction: string | null }>(`/comments/${commentId}/react`, {
+    method: "POST",
+    body: { userId, reaction },
     sessionToken,
   });
 }
