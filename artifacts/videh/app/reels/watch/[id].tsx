@@ -35,6 +35,7 @@ import {
   fetchReelsVideo,
   recordReelsAdImpression,
   formatDuration,
+  formatTimeAgo,
   formatViewCount,
   reactReelsVideo,
   recordReelsView,
