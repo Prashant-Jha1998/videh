@@ -4,7 +4,6 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
-import * as Sharing from "expo-sharing";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -39,7 +38,6 @@ import {
   formatViewCount,
   reactReelsVideo,
   recordReelsView,
-  shareReelsVideo,
   subscribeReelsChannel,
   unsubscribeReelsChannel,
   type ReelsAdBreakItem,
@@ -55,6 +53,7 @@ import {
   saveVideoQualityPref,
   type ReelsVideoQuality,
 } from "@/lib/reelsVideoQuality";
+import { shareReelsVideoLink } from "@/lib/reelsShare";
 import { reelsWatchPlayerSize, reelsWatchTopInset } from "@/lib/reelsWatchLayout";
 
 const SCREEN_W = Dimensions.get("window").width;
@@ -326,13 +325,7 @@ export default function ReelsWatchScreen() {
 
   const shareVideo = async () => {
     if (!video || !user?.dbId) return;
-    await shareReelsVideo(video.id, user.dbId, user.sessionToken);
-    const msg = `${video.title}\n@${video.channelHandle}`;
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(video.videoUrl, { dialogTitle: msg }).catch(() => {});
-    } else {
-      Alert.alert("Share", msg);
-    }
+    await shareReelsVideoLink(video, user.dbId, user.sessionToken);
   };
 
   const openRelated = (v: ReelsVideo) => {

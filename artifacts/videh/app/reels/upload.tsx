@@ -33,6 +33,7 @@ import {
   uploadReelsVideo,
   type ReelsHashtagStat,
 } from "@/lib/reelsApi";
+import { showUploadShareDialog } from "@/lib/reelsShare";
 
 export default function ReelsUploadScreen() {
   const colors = useColors();
@@ -172,15 +173,18 @@ export default function ReelsUploadScreen() {
         );
         return;
       }
+      if (!res.video) return;
+      const watch = () => router.replace({ pathname: "/reels/watch/[id]", params: { id: String(res.video!.id) } });
       if (res.pending) {
-        Alert.alert(
-          "Under review",
-          res.message ?? "Your video is being checked for nudity and sexual content. It will go public when approved.",
-          [{ text: "OK", onPress: () => router.replace("/(tabs)/video") }],
-        );
+        showUploadShareDialog(res.video, {
+          pending: true,
+          pendingMessage: res.message ?? "Your video is being checked. It will go public when approved.",
+          onWatch: () => router.replace("/(tabs)/video"),
+          onDone: () => router.replace("/(tabs)/video"),
+        });
         return;
       }
-      router.replace({ pathname: "/reels/watch/[id]", params: { id: String(res.video!.id) } });
+      showUploadShareDialog(res.video, { onWatch: watch });
     } catch (e) {
       Alert.alert("Upload failed", e instanceof Error ? e.message : "Try again.");
     } finally {

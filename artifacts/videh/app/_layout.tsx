@@ -18,6 +18,7 @@ import { UiPreferencesProvider } from "@/context/UiPreferencesContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AssistantOverlay } from "@/components/AssistantOverlay";
 import { getApiUrl } from "@/lib/api";
+import { parseReelsWatchIdFromUrl } from "@/lib/reelsShare";
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
 import { fetchIncomingCallDetails } from "@/lib/fetchIncomingCallDetails";
 import { IncomingCallOverlay, type IncomingCallInfo } from "@/components/IncomingCallOverlay";
@@ -701,6 +702,19 @@ function RootLayoutNav() {
     offerIncomingCall,
     endCall,
   ]);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const openReelsFromUrl = (url: string | null) => {
+      if (!url) return;
+      const videoId = parseReelsWatchIdFromUrl(url);
+      if (!videoId) return;
+      router.push({ pathname: "/reels/watch/[id]", params: { id: videoId } } as unknown as Href);
+    };
+    void Linking.getInitialURL().then(openReelsFromUrl);
+    const sub = Linking.addEventListener("url", ({ url }) => openReelsFromUrl(url));
+    return () => sub.remove();
+  }, [router]);
 
   useEffect(() => {
     if (Platform.OS === "web" || !isAuthenticated) return;

@@ -41,6 +41,7 @@ import {
 import { resolveViewerGeoFromRequest } from "../lib/adsGeo";
 import { pickFeedAdPlacementsForBatch, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
 import { isS3MediaEnabled, scheduleS3Upload, tryRedirectStoredMediaToCdn } from "../lib/s3Storage";
+import { buildReelsVideoDeepLink, buildReelsVideoShareUrl } from "../lib/reelsShareUrl";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -180,6 +181,8 @@ function mapVideoRow(row: Record<string, unknown>, req?: Request) {
       : (avatar ?? null),
     myReaction: row.my_reaction ?? null,
     createdAt: row.created_at,
+    shareUrl: buildReelsVideoShareUrl(row.id as number | string),
+    deepLink: buildReelsVideoDeepLink(row.id as number | string),
   };
 }
 
@@ -449,6 +452,86 @@ router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err, videoId }, "reels video thumbnail");
     res.status(500).end();
+  }
+});
+
+/** YouTube-style share link landing — opens Videh app or shows download prompt. */
+router.get("/go/:videoId", async (req: Request, res: Response) => {
+  const videoId = Number(req.params.videoId);
+  if (!videoId) {
+    res.status(400).send("Invalid video");
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    const row = await query(
+      `SELECT v.title, v.status, v.play_enabled, c.handle, c.display_name
+       FROM reels_videos v
+       JOIN reels_channels c ON c.id = v.channel_id
+       WHERE v.id = $1`,
+      [videoId],
+    );
+    if (!row.rows.length) {
+      res.status(404).send("Video not found");
+      return;
+    }
+    const v = row.rows[0] as {
+      title?: string;
+      status?: string;
+      play_enabled?: boolean;
+      handle?: string;
+      display_name?: string;
+    };
+    const published = v.status === "published" && v.play_enabled !== false;
+    const title = String(v.title ?? "Videh Video").replace(/[<>&"]/g, (c) => (
+      { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c] ?? c
+    ));
+    const channel = String(v.display_name ?? v.handle ?? "Videh").replace(/[<>&"]/g, (c) => (
+      { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c] ?? c
+    ));
+    const deepLink = buildReelsVideoDeepLink(videoId);
+    const shareUrl = buildReelsVideoShareUrl(videoId);
+    const thumb = resolveVideoThumbnailUrl(req, null, videoId);
+    res.type("html").send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>${title} — Videh</title>
+  <meta property="og:title" content="${title}"/>
+  <meta property="og:description" content="Watch on Videh — ${channel}"/>
+  <meta property="og:url" content="${shareUrl}"/>
+  <meta property="og:image" content="${thumb}"/>
+  <meta property="og:type" content="video.other"/>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#0b141a;color:#e9edef;margin:0;padding:24px;text-align:center}
+    .card{max-width:420px;margin:40px auto;padding:24px;border-radius:16px;background:#1f2c34}
+    h1{font-size:1.25rem;margin:0 0 8px}
+    p{color:#8696a0;margin:0 0 20px}
+    a.btn{display:inline-block;padding:14px 28px;background:#00a884;color:#fff;text-decoration:none;border-radius:999px;font-weight:700}
+    .muted{font-size:.85rem;margin-top:16px;color:#8696a0}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>${title}</h1>
+    <p>${channel}${published ? "" : " · Under review"}</p>
+    <a class="btn" href="${deepLink}" id="open">Open in Videh</a>
+    <p class="muted">Don't have the app? Search <strong>Videh Messenger</strong> on Play Store.</p>
+  </div>
+  <script>
+    (function () {
+      var deep = ${JSON.stringify(deepLink)};
+      var published = ${published ? "true" : "false"};
+      if (!published) return;
+      try { window.location.href = deep; } catch (e) {}
+    })();
+  </script>
+</body>
+</html>`);
+  } catch (err) {
+    req.log.error({ err, videoId }, "reels go link");
+    res.status(500).send("Server error");
   }
 });
 
@@ -1548,7 +1631,7 @@ router.post("/videos/:videoId/share", async (req: Request, res: Response) => {
        FROM reels_videos v WHERE v.id = $1 AND c.id = v.channel_id`,
       [videoId],
     );
-    res.json({ success: true });
+    res.json({ success: true, shareUrl: buildReelsVideoShareUrl(videoId) });
   } catch (err) {
     req.log.error({ err }, "reels share");
     res.status(500).json({ success: false, message: "Server error" });

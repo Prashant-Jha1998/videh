@@ -87,6 +87,9 @@ export type ReelsVideo = {
   createdAt?: string;
   /** Native upload height in px; drives per-video quality menu. */
   sourceHeight?: number | null;
+  /** Public HTTPS link — opens app via /api/reels/go/:id */
+  shareUrl?: string;
+  deepLink?: string;
 };
 
 export const REELS_HANDLE_RE = /^[a-zA-Z][a-zA-Z0-9_]{2,29}$/;
@@ -621,7 +624,7 @@ export async function shareReelsVideo(
   userId: number,
   sessionToken?: string | null,
 ) {
-  return reelsJson<{ success: boolean }>(`/videos/${videoId}/share`, {
+  return reelsJson<{ success: boolean; shareUrl?: string }>(`/videos/${videoId}/share`, {
     method: "POST",
     body: { userId },
     sessionToken,

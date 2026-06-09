@@ -47,6 +47,20 @@
         "foregroundImage": "./assets/images/videh_icon_foreground.png",
         "backgroundColor": "#0B141A"
       },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "videh.co.in",
+              "pathPrefix": "/api/reels/go"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "permissions": [
         "android.permission.READ_CONTACTS",
         "android.permission.RECORD_AUDIO",
@@ -102,7 +116,7 @@
       [
         "expo-router",
         {
-          "origin": "https://replit.com/"
+          "origin": "https://videh.co.in"
         }
       ],
       "expo-font",
@@ -202,7 +216,7 @@
     "owner": "prashantjha112",
     "extra": {
       "router": {
-        "origin": "https://replit.com/"
+        "origin": "https://videh.co.in"
       },
       "eas": {
         "projectId": "72d49bc8-c465-47d0-ba9d-6aa765d6e315"
