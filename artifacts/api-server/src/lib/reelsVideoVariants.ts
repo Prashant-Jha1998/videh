@@ -2,7 +2,8 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { localPathForUploadsRel, uploadsRelPathFromStoredUrl } from "./mediaStorage";
+import { localPathForUploadsRel, uploadsRelFromLocalPath, uploadsRelPathFromStoredUrl } from "./mediaStorage";
+import { scheduleS3UploadFromLocalPath } from "./s3Storage";
 
 const execFileAsync = promisify(execFile);
 
@@ -85,7 +86,7 @@ export function parseMaxHeightQuery(raw: unknown): number | null {
 }
 
 function variantRelPath(videoId: number, height: number): string {
-  return `reels/variants/${videoId}_${height}.mp4`;
+  return `/uploads/reels/variants/${videoId}_${height}.mp4`;
 }
 
 /** Cached transcoded file for quality selection, or null to fall back to original. */
@@ -134,9 +135,20 @@ export async function resolveReelsQualityVideoPath(
       "+faststart",
       outPath,
     ], { timeout: 300_000, maxBuffer: 20 * 1024 * 1024 });
-    if (fs.existsSync(outPath) && fs.statSync(outPath).size > 1024) return outPath;
+    if (fs.existsSync(outPath) && fs.statSync(outPath).size > 1024) {
+      scheduleS3UploadFromLocalPath(outPath, uploadsRootDir);
+      return outPath;
+    }
   } catch {
     /* fall back to source */
   }
   return sourcePath;
+}
+
+export function variantUploadsRel(videoId: number, height: number): string {
+  return variantRelPath(videoId, height);
+}
+
+export function uploadsRelForLocalVideoPath(localPath: string, uploadsRootDir: string): string | null {
+  return uploadsRelFromLocalPath(localPath, uploadsRootDir);
 }

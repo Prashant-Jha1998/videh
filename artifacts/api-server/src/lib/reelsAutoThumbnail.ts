@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { query } from "./db";
 import { localPathForUploadsRel, uploadsRelPathFromStoredUrl } from "./mediaStorage";
+import { scheduleS3Upload } from "./s3Storage";
 
 const execFileAsync = promisify(execFile);
 
@@ -108,5 +109,6 @@ export async function ensureVideoThumbnail(opts: {
     `UPDATE reels_videos SET thumbnail_url = $1 WHERE id = $2`,
     [thumbRel, opts.videoId],
   );
+  scheduleS3Upload(thumbPath, thumbRel);
   return thumbRel;
 }

@@ -1144,10 +1144,10 @@ export default function ChatScreen() {
         messagePollInFlightRef.current = true;
         loadMessages(chatId).finally(() => { messagePollInFlightRef.current = false; });
       };
-      const msgTimer = setInterval(() => pollMessages(false), 5000);
+      const msgTimer = setInterval(() => pollMessages(false), 10000);
       void pollMessages(true);
       void pollTyping();
-      const typingTimer = setInterval(pollTyping, 1500);
+      const typingTimer = setInterval(pollTyping, 4000);
       const unsubMsgSignal = onChatMessageSignal((signal) => {
         if (String(signal.chatId) !== String(chatId)) return;
         // Incoming messages update `messages.length`; scroll only when following (see messages effect).
@@ -1171,7 +1171,7 @@ export default function ChatScreen() {
         }
       };
       void loadPresence();
-      const presenceTimer = !isGroupChat && peerId ? setInterval(loadPresence, 5000) : null;
+      const presenceTimer = !isGroupChat && peerId ? setInterval(loadPresence, 12000) : null;
 
       return () => {
         unsubMsgSignal();

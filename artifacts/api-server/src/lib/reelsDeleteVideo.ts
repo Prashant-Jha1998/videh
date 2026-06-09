@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { query } from "./db";
 import { localPathForUploadsRel, uploadsRelPathFromStoredUrl } from "./mediaStorage";
+import { deleteS3ObjectByUploadsRel } from "./s3Storage";
 
 function tryUnlinkStoredUpload(url: unknown, uploadsRootDir: string): void {
   const rel = uploadsRelPathFromStoredUrl(url);
@@ -30,6 +31,15 @@ export async function permanentlyDeleteReelsVideo(
   tryUnlinkStoredUpload(row.video_url, uploadsRootDir);
   tryUnlinkStoredUpload(row.thumbnail_url, uploadsRootDir);
   tryUnlinkStoredUpload(`/uploads/reels/thumb_auto_${videoId}.jpg`, uploadsRootDir);
+  await deleteS3ObjectByUploadsRel(row.video_url);
+  await deleteS3ObjectByUploadsRel(row.thumbnail_url);
+  await deleteS3ObjectByUploadsRel(`/uploads/reels/thumb_auto_${videoId}.jpg`);
+  await deleteS3ObjectByUploadsRel(`/uploads/reels/variants/${videoId}_1080.mp4`);
+  await deleteS3ObjectByUploadsRel(`/uploads/reels/variants/${videoId}_720.mp4`);
+  await deleteS3ObjectByUploadsRel(`/uploads/reels/variants/${videoId}_480.mp4`);
+  await deleteS3ObjectByUploadsRel(`/uploads/reels/variants/${videoId}_360.mp4`);
+  await deleteS3ObjectByUploadsRel(`/uploads/reels/variants/${videoId}_240.mp4`);
+  await deleteS3ObjectByUploadsRel(`/uploads/reels/variants/${videoId}_144.mp4`);
 
   await query(`DELETE FROM reels_videos WHERE id = $1`, [videoId]);
   return true;

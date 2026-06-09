@@ -1380,15 +1380,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     const detachStream = connectChatEventStream(u.dbId, authSessionToken, onChatEvent);
-    const chatTimer = setInterval(runChats, 5000);
-    /** Backup poll when SSE reconnects or on flaky networks. */
+    /** SSE delivers instantly; polling is backup only (reduces API load at scale). */
+    const chatTimer = setInterval(runChats, 15000);
     const activeChatMsgTimer = setInterval(() => {
       const cid = activeChatIdRef.current;
       if (!cid) return;
       void loadMessages(cid);
-    }, 12000);
-    const statusTimer = setInterval(runStatuses, 12000);
-    const callTimer = setInterval(runCalls, 30000);
+    }, 30000);
+    const statusTimer = setInterval(runStatuses, 30000);
+    const callTimer = setInterval(runCalls, 45000);
     return () => {
       detachStream();
       clearInterval(chatTimer);

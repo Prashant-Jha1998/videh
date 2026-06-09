@@ -40,6 +40,7 @@ import {
 } from "../lib/reelsPrivacy";
 import { resolveViewerGeoFromRequest } from "../lib/adsGeo";
 import { pickFeedAdPlacementsForBatch, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
+import { isS3MediaEnabled, scheduleS3Upload, tryRedirectStoredMediaToCdn } from "../lib/s3Storage";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -124,11 +125,23 @@ function resolveVideoThumbnailUrl(req: Request, _thumb: unknown, videoId: unknow
   return publicMediaUrl(req, `/api/reels/videos/${videoId}/thumbnail${q}`);
 }
 
-/** Uploaded videos stream through API (Range support); external URLs pass through. */
+function cdnDeliveryEnabled(): boolean {
+  return Boolean(
+    isS3MediaEnabled()
+    || process.env["MEDIA_PUBLIC_BASE_URL"]?.trim()
+    || process.env["CDN_BASE_URL"]?.trim(),
+  );
+}
+
+/** CDN direct URL when S3/CloudFront is configured; otherwise API stream (Range support). */
 function resolveVideoPlaybackUrl(req: Request, storedUrl: unknown, videoId: unknown): string {
   const raw = String(storedUrl ?? "").trim();
   if (!raw) return "";
   if (!uploadsRelPathFromStoredUrl(raw) && /^https?:\/\//i.test(raw)) return raw;
+  const rel = uploadsRelPathFromStoredUrl(raw);
+  if (rel && cdnDeliveryEnabled()) {
+    return publicMediaUrl(req, rel);
+  }
   const external = resolveStoredMediaUrl(req, raw);
   if (external && /^https?:\/\//i.test(external) && !uploadsRelPathFromStoredUrl(external)) {
     return external;
@@ -312,6 +325,7 @@ async function serveChannelBrandingAsset(
     const uploadsRoot = path.join(apiServerDir, "uploads");
     const filePath = localPathForUploadsRel(stored, uploadsRoot);
     if (!filePath || !fs.existsSync(filePath)) {
+      if (tryRedirectStoredMediaToCdn(req, res, stored)) return;
       res.status(404).end();
       return;
     }
@@ -400,6 +414,7 @@ router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
           res.sendFile(filePath);
           return;
         }
+        if (tryRedirectStoredMediaToCdn(req, res, thumbStored)) return;
       }
       if (needsReelsImageProxy(thumbStored)) {
         const proxied = proxyReelsImageUrl(req, thumbStored);
@@ -428,6 +443,7 @@ router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
         res.sendFile(filePath);
         return;
       }
+      if (tryRedirectStoredMediaToCdn(req, res, generated)) return;
     }
     res.status(404).end();
   } catch (err) {
@@ -469,7 +485,8 @@ router.get("/videos/:id/stream", async (req: Request, res: Response) => {
       return;
     }
     const uploadsRoot = path.join(apiServerDir, "uploads");
-    const { parseMaxHeightQuery, resolveReelsQualityVideoPath } = await import("../lib/reelsVideoVariants");
+    const { parseMaxHeightQuery, resolveReelsQualityVideoPath, uploadsRelForLocalVideoPath, variantUploadsRel } =
+      await import("../lib/reelsVideoVariants");
     const maxHeight = parseMaxHeightQuery(req.query.maxHeight);
     const localPath = await resolveReelsQualityVideoPath(
       uploadsRoot,
@@ -478,10 +495,15 @@ router.get("/videos/:id/stream", async (req: Request, res: Response) => {
       maxHeight,
     );
     if (localPath) {
+      const playbackRel = maxHeight
+        ? variantUploadsRel(videoId, maxHeight)
+        : (uploadsRelForLocalVideoPath(localPath, uploadsRoot) ?? stored.video_url);
+      if (cdnDeliveryEnabled() && tryRedirectStoredMediaToCdn(req, res, playbackRel)) return;
       const { serveLocalVideoWithRange } = await import("../lib/reelsVideoStream");
       serveLocalVideoWithRange(req, res, localPath);
       return;
     }
+    if (cdnDeliveryEnabled() && tryRedirectStoredMediaToCdn(req, res, stored.video_url)) return;
     if (tryStreamStoredReelsVideo(req, res, stored.video_url, uploadsRoot)) return;
     const external = externalVideoRedirectTarget(req, stored.video_url);
     if (external) {
@@ -648,10 +670,12 @@ router.patch("/channel/me", runChannelBrandingUpload, async (req: Request, res: 
     if (avatarUrl) {
       sets.push(`avatar_url = $${p++}`);
       params.push(avatarUrl);
+      scheduleS3Upload(path.join(reelsUploadsDir, avatarFile!.filename), avatarUrl);
     }
     if (coverUrl) {
       sets.push(`cover_url = $${p++}`);
       params.push(coverUrl);
+      scheduleS3Upload(path.join(reelsUploadsDir, coverFile!.filename), coverUrl);
     }
     await query(
       `UPDATE reels_channels SET ${sets.join(", ")} WHERE user_id = $1`,
@@ -1134,6 +1158,9 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
       void notifySubscribersNewVideo(channelId, videoId, title, handle);
       void evaluateChannelMonetization(channelId);
     }
+
+    scheduleS3Upload(videoPath, videoUrl);
+    if (thumbPath && thumbnailUrl) scheduleS3Upload(thumbPath, thumbnailUrl);
 
     const refreshed = await query("SELECT * FROM reels_videos WHERE id = $1", [videoId]);
     const finalRow = refreshed.rows[0] as Record<string, unknown>;

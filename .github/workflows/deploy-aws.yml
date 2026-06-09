@@ -50,10 +50,8 @@ jobs:
           BASE_PATH=/ pnpm --filter @workspace/videh-web build
           BASE_PATH=/ pnpm --filter @workspace/developer-web build
 
-          pm2 restart videh-api --update-env || (
-            cd /var/www/videh/artifacts/api-server
-            pm2 start dist/index.mjs --name videh-api --interpreter node --node-args="--env-file=/var/www/videh/artifacts/api-server/.env --enable-source-maps"
-          )
+          cd /var/www/videh/artifacts/api-server
+          pm2 startOrRestart ecosystem.config.cjs --update-env
           pm2 save
 
           sudo bash /var/www/videh/deploy/nginx/apply-videh-site.sh

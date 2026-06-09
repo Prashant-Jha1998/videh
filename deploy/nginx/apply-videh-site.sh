@@ -47,6 +47,15 @@ cert_dir_for_host_only() {
   echo ""
 }
 
+write_api_upstream() {
+  sudo tee /etc/nginx/conf.d/videh-api-upstream.conf >/dev/null <<'EOF'
+upstream videh_api {
+    server 127.0.0.1:3000;
+    keepalive 256;
+}
+EOF
+}
+
 write_ssl_server() {
   local conf_path="$1"
   local server_name="$2"
@@ -80,31 +89,50 @@ server {
     index index.html;
     client_max_body_size 160M;
 
-    location /api/ {
-        proxy_pass http://127.0.0.1:3000/api/;
+    location ~ ^/api/chats/user/[0-9]+/events\$ {
+        proxy_pass http://videh_api;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location /api/ {
+        proxy_pass http://videh_api/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Connection "";
+        proxy_read_timeout 120s;
     }
 
     location /uploads/ {
-        proxy_pass http://127.0.0.1:3000/uploads/;
+        proxy_pass http://videh_api/uploads/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Connection "";
+        proxy_read_timeout 300s;
     }
 
     location /v1/ {
-        proxy_pass http://127.0.0.1:3000/v1/;
+        proxy_pass http://videh_api/v1/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Connection "";
     }
 
     location / {
@@ -142,31 +170,50 @@ server {
     index index.html;
     client_max_body_size 160M;
 
-    location /api/ {
-        proxy_pass http://127.0.0.1:3000/api/;
+    location ~ ^/api/chats/user/[0-9]+/events\$ {
+        proxy_pass http://videh_api;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location /api/ {
+        proxy_pass http://videh_api/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Connection "";
+        proxy_read_timeout 120s;
     }
 
     location /uploads/ {
-        proxy_pass http://127.0.0.1:3000/uploads/;
+        proxy_pass http://videh_api/uploads/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Connection "";
+        proxy_read_timeout 300s;
     }
 
     location /v1/ {
-        proxy_pass http://127.0.0.1:3000/v1/;
+        proxy_pass http://videh_api/v1/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Connection "";
     }
 
     location / {
@@ -253,6 +300,7 @@ else
   echo "Configured HTTP for developer.videh.co.in"
 fi
 
+write_api_upstream
 echo "Testing nginx config..."
 sudo nginx -t
 sudo systemctl reload nginx

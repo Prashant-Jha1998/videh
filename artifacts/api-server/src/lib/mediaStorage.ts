@@ -23,6 +23,15 @@ export function resolveStoredMediaUrl(req: Request, url: unknown): string | null
 }
 
 /** Map `/uploads/reels/foo.mp4` to a local file under api-server/uploads (null if unsafe/missing). */
+/** Inverse of localPathForUploadsRel — e.g. `.../uploads/reels/a.mp4` → `/uploads/reels/a.mp4`. */
+export function uploadsRelFromLocalPath(localPath: string, uploadsRootDir: string): string | null {
+  const root = path.resolve(uploadsRootDir);
+  const full = path.resolve(localPath);
+  if (!full.startsWith(root + path.sep) && full !== root) return null;
+  const suffix = full.slice(root.length).replace(/\\/g, "/");
+  return `/uploads${suffix}`;
+}
+
 export function localPathForUploadsRel(relPath: string, uploadsRootDir: string): string | null {
   const rel = uploadsRelPathFromStoredUrl(relPath) ?? relPath;
   if (!rel.startsWith("/uploads/")) return null;

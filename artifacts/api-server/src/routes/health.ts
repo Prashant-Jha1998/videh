@@ -1,6 +1,8 @@
 import { Router, type IRouter } from "express";
 import { HealthCheckResponse } from "@workspace/api-zod";
-import { query } from "../lib/db";
+import { getPoolStats, query } from "../lib/db";
+import { isRedisBusEnabled, pingRedisBus } from "../lib/redisBus";
+import { isS3MediaEnabled, pingS3Bucket } from "../lib/s3Storage";
 import { stateDelete, stateGetJson, stateSetJson } from "../lib/sharedState";
 
 const router: IRouter = Router();
@@ -36,6 +38,28 @@ router.get("/readyz", async (_req, res) => {
   checks["mediaPublicBase"] = {
     ok: Boolean(process.env["MEDIA_PUBLIC_BASE_URL"] || process.env["CDN_BASE_URL"]),
     message: process.env["MEDIA_PUBLIC_BASE_URL"] || process.env["CDN_BASE_URL"] ? undefined : "Set MEDIA_PUBLIC_BASE_URL/CDN_BASE_URL for production media delivery",
+  };
+
+  if (isRedisBusEnabled()) {
+    const redisOk = await pingRedisBus();
+    checks["redis"] = {
+      ok: redisOk,
+      message: redisOk ? undefined : "REDIS_URL set but ping failed — SSE will not work across instances",
+    };
+  }
+
+  if (isS3MediaEnabled()) {
+    const s3Ok = await pingS3Bucket();
+    checks["s3"] = {
+      ok: s3Ok,
+      message: s3Ok ? undefined : "AWS_S3_BUCKET set but HeadBucket failed — check IAM and bucket region",
+    };
+  }
+
+  const pool = getPoolStats();
+  checks["dbPool"] = {
+    ok: pool.waiting < pool.max,
+    message: pool.waiting > 0 ? `pool waiting=${pool.waiting} total=${pool.total}/${pool.max}` : undefined,
   };
 
   const ok = Object.values(checks).every((check) => check.ok);
