@@ -24,31 +24,35 @@ const SECTIONS = [
   },
   {
     title: "5. Messaging & Content",
-    body: `Videh uses end-to-end encryption for messages between users. We do not have access to the content of your private messages.\n\nYou retain ownership of all content you share through Videh. By posting content, you grant Videh a non-exclusive, royalty-free license to store and transmit that content solely for the purpose of providing the service.\n\nYou are solely responsible for all content you send or share through the App.`,
+    body: `Videh uses encryption for messages in transit. We do not read your private chats to show third-party ads.\n\nYou retain ownership of content you create. By sending or uploading content, you grant Videh a non-exclusive, royalty-free license to host, store, reproduce, distribute, and display that content solely to operate and improve the service.\n\nYou are solely responsible for all content you send, share, or publish through the App.`,
   },
   {
-    title: "6. Privacy",
+    title: "6. Videh Video (Channels & Uploads)",
+    body: `Videh Video lets users create channels, upload videos, comment, subscribe, and discover content.\n\n**Your responsibilities**\n• You must own or have rights to all videos, music, and images you upload.\n• Do not upload illegal content, hate speech, harassment, sexually explicit material involving minors, malware, or spam.\n• Do not impersonate others or mislead viewers about who created a channel.\n\n**Channel rules**\n• Your @handle is permanent after creation.\n• Display name, bio, logo, cover, and links must follow community standards.\n• We may remove content, demonetize channels, or suspend accounts that violate these Terms.\n\n**Comments & community**\n• Comments and replies are public. Do not post personal phone numbers, threats, or abusive content.\n• We may remove comments and restrict accounts that abuse the feature.\n\n**Monetization & ads**\n• Optional ads may appear on Videh Video. Advertisers must comply with Videh Ads policies at ads.videh.co.in.\n• Revenue share, eligibility, and payouts are governed by separate monetization terms when offered.\n\n**Copyright**\n• If you believe content infringes your copyright, contact support@videh.co.in with proof of ownership and the video URL.`,
+  },
+  {
+    title: "7. Privacy",
     body: `Your privacy is important to us. Our Privacy Policy explains how we collect, use, and protect your personal information. By using Videh, you agree to our Privacy Policy, which is incorporated into these Terms by reference.\n\nWe collect minimal personal information — primarily your phone number and profile data — to provide and improve the service.`,
   },
   {
-    title: "7. Intellectual Property",
+    title: "8. Intellectual Property",
     body: `Videh and all associated logos, designs, trademarks, and software are the exclusive property of Videh Technologies. You may not copy, modify, distribute, or create derivative works based on our intellectual property without express written permission.\n\nThe Videh name, logo, and brand identity are protected trademarks.`,
   },
   {
-    title: "8. Disclaimers & Limitation of Liability",
+    title: "9. Disclaimers & Limitation of Liability",
     body: `Videh is provided "as is" without warranties of any kind, either express or implied. We do not guarantee that the App will be uninterrupted, error-free, or free of viruses.\n\nTo the maximum extent permitted by law, Videh shall not be liable for any indirect, incidental, special, or consequential damages arising out of or in connection with your use of the App.\n\nVideh's total liability to you for any cause shall not exceed the amount paid by you, if any, for accessing the App.`,
   },
   {
-    title: "9. Termination",
+    title: "10. Termination",
     body: `We reserve the right to suspend or terminate your access to Videh at any time, with or without cause, and with or without notice. Upon termination, your right to use the App will immediately cease.\n\nYou may terminate your account at any time by deleting the App and requesting account deletion through the Settings screen.`,
   },
   {
-    title: "10. Governing Law",
+    title: "11. Governing Law",
     body: `These Terms shall be governed by and construed in accordance with the laws of India. Any disputes arising under these Terms shall be subject to the exclusive jurisdiction of the courts located in New Delhi, India.\n\nIf any provision of these Terms is found to be unenforceable, the remaining provisions will remain in full force and effect.`,
   },
   {
-    title: "11. Contact Us",
-    body: `If you have any questions, concerns, or complaints regarding these Terms, please contact us at:\n\nVideh Technologies\nEmail: legal@videh.app\nAddress: New Delhi, India\n\nLast updated: April 2026`,
+    title: "12. Contact Us",
+    body: `If you have any questions, concerns, or complaints regarding these Terms, please contact us at:\n\nVideh Technologies\nEmail: support@videh.co.in\nAddress: New Delhi, India\n\nLast updated: June 2026`,
   },
 ];
 
@@ -73,7 +77,7 @@ export default function TermsScreen() {
       >
         <View style={[styles.badge, { backgroundColor: colors.primary + "20" }]}>
           <Ionicons name="document-text-outline" size={24} color={colors.primary} />
-          <Text style={[styles.badgeText, { color: colors.primary }]}>Last updated: April 2026</Text>
+          <Text style={[styles.badgeText, { color: colors.primary }]}>Last updated: June 2026</Text>
         </View>
 
         <Text style={[styles.intro, { color: colors.foreground }]}>

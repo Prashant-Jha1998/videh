@@ -8,7 +8,7 @@ import { useColors } from "@/hooks/useColors";
 const SECTIONS = [
   {
     title: "1. Information We Collect",
-    body: `We collect the following types of information when you use Videh:\n\n**Account Information**\n• Phone number (required for registration and OTP verification)\n• Profile name and about text (set by you)\n• Profile photo (uploaded by you, stored securely)\n\n**Usage Information**\n• Last seen timestamp and online status\n• Message delivery and read receipts\n• Call logs (duration, timestamp, call type)\n\n**Device Information**\n• Device type and operating system version (for compatibility)\n• App version\n• Crash reports and diagnostics (anonymised)\n\nWe do NOT collect your location data, contacts list, or browsing history.`,
+    body: `We collect the following types of information when you use Videh:\n\n**Account Information**\n• Phone number (required for registration and OTP verification)\n• Profile name and about text (set by you)\n• Profile photo (uploaded by you, stored securely)\n\n**Messaging & Calls**\n• Last seen timestamp and online status\n• Message delivery and read receipts\n• Call logs (duration, timestamp, call type)\n\n**Videh Video (channels & uploads)**\n• Channel handle, display name, bio, logo, cover image, and links you add\n• Videos, thumbnails, titles, descriptions, and tags you upload\n• View counts, likes, dislikes, comments, replies, and subscriptions\n• Watch time and interaction signals used for recommendations and safety\n• Optional channel ads and monetization data if you use Videh Ads\n\n**Device Information**\n• Device type and operating system version (for compatibility)\n• App version\n• Crash reports and diagnostics (anonymised)\n\n**Optional data you choose to share**\n• Contacts (only if you grant permission, to find friends on Videh)\n• Location when you share it in chat or use SOS\n\nWe do NOT sell your private message content for advertising.`,
   },
   {
     title: "2. How We Use Your Information",
@@ -51,8 +51,12 @@ const SECTIONS = [
     body: `We may update this Privacy Policy from time to time. When we make significant changes, we will notify you through the App or via SMS. The updated policy will be effective from the date it is posted.\n\nWe encourage you to review this Privacy Policy periodically to stay informed about how we protect your information.`,
   },
   {
-    title: "12. Contact Us",
-    body: `If you have questions, concerns, or requests regarding this Privacy Policy or how we handle your data, please contact our Data Protection Officer:\n\nVideh Technologies\nPrivacy Team\nEmail: pjhawithu@gmail.com\nAddress: New Delhi, India\nPhone: Available through in-app support\n\nLast updated: April 2026`,
+    title: "12. Videh Video — Privacy",
+    body: `When you watch or upload videos on Videh:\n\n**Public by default**\n• Channel pages, uploaded videos, comments, and public engagement (likes, subscriber counts) are visible to other Videh users unless a feature explicitly says otherwise.\n\n**What we store**\n• Video files, thumbnails, metadata, and moderation scan results\n• Comments, replies, and reactions you post\n• Reports you submit about videos or channels\n\n**Recommendations & safety**\n• We use watch history, likes, and subscriptions to rank your feed — not your private chats.\n• Automated and human review may flag content that violates our policies.\n• Phone numbers are not shown on public video surfaces; channel handles are used instead.\n\n**Ads on Video**\n• If ads appear before or during videos, we may log ad impressions and skips to measure delivery. Advertisers do not receive your private messages.\n\nYou can delete videos you uploaded, remove comments you wrote, and request account deletion as described in Section 5.`,
+  },
+  {
+    title: "13. Contact Us",
+    body: `If you have questions, concerns, or requests regarding this Privacy Policy or how we handle your data, please contact our Data Protection Officer:\n\nVideh Technologies\nPrivacy Team\nEmail: support@videh.co.in\nAddress: New Delhi, India\nPhone: Available through in-app support\n\nLast updated: June 2026`,
   },
 ];
 

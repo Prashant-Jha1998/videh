@@ -73,7 +73,7 @@ export default function ReelsChannelEditScreen() {
   const pickImage = async (kind: "avatar" | "cover") => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission", "Photos access allow karein.");
+      Alert.alert("Permission", "Please allow Photos access.");
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -93,7 +93,7 @@ export default function ReelsChannelEditScreen() {
       if (kind === "avatar") setAvatarUri(prepared);
       else setCoverUri(prepared);
     } catch {
-      Alert.alert("Image", "Photo prepare nahi ho payi. Koi aur image try karein.");
+      Alert.alert("Image", "Could not prepare the photo. Try another image.");
     } finally {
       if (kind === "avatar") setPreparingAvatar(false);
       else setPreparingCover(false);
@@ -104,7 +104,7 @@ export default function ReelsChannelEditScreen() {
     if (!user?.dbId) return;
     const name = displayName.trim();
     if (name.length > 0 && name.length < 2) {
-      Alert.alert("Channel name", "Kam se kam 2 letters likhein, ya khali chhod dein.");
+      Alert.alert("Channel name", "Use at least 2 characters, or leave blank.");
       return;
     }
     setSaving(true);
@@ -118,12 +118,12 @@ export default function ReelsChannelEditScreen() {
         coverUri: coverUri ?? undefined,
       });
       if (!res.success) {
-        Alert.alert("Save nahi hua", res.message ?? "Phir se try karein.");
+        Alert.alert("Could not save", res.message ?? "Please try again.");
         return;
       }
       router.back();
     } catch {
-      Alert.alert("Error", "Channel update nahi ho paya.");
+      Alert.alert("Error", "Could not update channel.");
     } finally {
       setSaving(false);
     }
@@ -154,12 +154,12 @@ export default function ReelsChannelEditScreen() {
     try {
       const res = await updateChannelLinks(user.dbId, cleaned, user.sessionToken);
       if (!res.success) {
-        Alert.alert("Links save nahi hue", res.message ?? "Phir se try karein.");
+        Alert.alert("Could not save links", res.message ?? "Please try again.");
         return;
       }
-      Alert.alert("Saved", "Channel links update ho gaye.");
+      Alert.alert("Saved", "Channel links updated.");
     } catch {
-      Alert.alert("Error", "Links save nahi ho paye.");
+      Alert.alert("Error", "Could not save links.");
     } finally {
       setSavingLinks(false);
     }
@@ -190,7 +190,7 @@ export default function ReelsChannelEditScreen() {
       </TouchableOpacity>
       <Text style={[styles.title, { color: colors.foreground }]}>Channel customize</Text>
       <Text style={[styles.sub, { color: colors.mutedForeground }]}>
-        Logo, cover photo aur apna channel name yahan se badlein
+        Update your logo, cover photo, and channel name here.
       </Text>
 
       <Text style={[styles.label, { color: colors.foreground }]}>Cover photo (banner)</Text>
@@ -207,7 +207,7 @@ export default function ReelsChannelEditScreen() {
         ) : (
           <View style={styles.coverPlaceholder}>
             <Ionicons name="image-outline" size={32} color={colors.primary} />
-            <Text style={{ color: colors.mutedForeground, marginTop: 8 }}>Cover photo chunein</Text>
+            <Text style={{ color: colors.mutedForeground, marginTop: 8 }}>Choose cover photo</Text>
             <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 4 }}>16:9 landscape</Text>
           </View>
         )}
@@ -230,9 +230,9 @@ export default function ReelsChannelEditScreen() {
           </View>
         )}
         <View style={{ flex: 1 }}>
-          <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>Logo change karein</Text>
+          <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>Change logo</Text>
           <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4 }}>
-            Square {CHANNEL_AVATAR_ASPECT}:1 crop auto hoga
+            Automatically cropped to a square {CHANNEL_AVATAR_ASPECT}:1 ratio
           </Text>
         </View>
         <Ionicons name="camera-outline" size={22} color={colors.primary} />
@@ -240,7 +240,7 @@ export default function ReelsChannelEditScreen() {
 
       <Text style={[styles.label, { color: colors.foreground }]}>Username (@handle)</Text>
       <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-        Permanent ID — create ke baad change nahi hota (jaise YouTube @username)
+        Permanent ID — cannot be changed after creation (like a YouTube @username)
       </Text>
       <View style={[styles.readOnly, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold" }}>@{handle}</Text>
@@ -248,7 +248,7 @@ export default function ReelsChannelEditScreen() {
 
       <Text style={[styles.label, { color: colors.foreground }]}>Channel name</Text>
       <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-        Viewers ko yeh naam dikhega — alag ho sakta hai @username se (jaise &quot;Videh Official&quot;)
+        This is the name viewers see — it can differ from your @username (e.g. &quot;Videh Official&quot;)
       </Text>
       <TextInput
         style={[styles.input, { color: colors.foreground, borderColor: colors.border }]}
@@ -262,7 +262,7 @@ export default function ReelsChannelEditScreen() {
       <Text style={[styles.label, { color: colors.foreground }]}>Bio</Text>
       <TextInput
         style={[styles.input, styles.area, { color: colors.foreground, borderColor: colors.border }]}
-        placeholder="Apne channel ke baare me likhein"
+        placeholder="Tell viewers about your channel"
         placeholderTextColor={colors.mutedForeground}
         value={bio}
         onChangeText={setBio}
@@ -272,7 +272,7 @@ export default function ReelsChannelEditScreen() {
 
       <Text style={[styles.label, { color: colors.foreground }]}>Links</Text>
       <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-        App, website, social media — viewers ko About section me dikhenge (YouTube jaisa)
+        App, website, and social links — shown to viewers in the About section (like YouTube)
       </Text>
       {links.map((link, index) => (
         <View key={index} style={[styles.linkCard, { borderColor: colors.border }]}>
