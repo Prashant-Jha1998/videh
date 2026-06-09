@@ -18,7 +18,7 @@ module.exports = {
       cwd: "/var/www/videh/artifacts/api-server",
       interpreter: "node",
       node_args: "--env-file=/var/www/videh/artifacts/api-server/.env --enable-source-maps",
-      instances: process.env.API_WORKERS || "max",
+      instances: process.env.API_WORKERS || 2,
       exec_mode: "cluster",
       max_memory_restart: "1200M",
       listen_timeout: 15000,

@@ -62,7 +62,8 @@ router.get("/readyz", async (_req, res) => {
     message: pool.waiting > 0 ? `pool waiting=${pool.waiting} total=${pool.total}/${pool.max}` : undefined,
   };
 
-  const ok = Object.values(checks).every((check) => check.ok);
+  // Deploy health gate: database must be up; Redis/S3/CDN are reported but non-blocking.
+  const ok = checks["database"]?.ok === true;
   res.status(ok ? 200 : 503).json({ status: ok ? "ready" : "not_ready", checks });
 });
 

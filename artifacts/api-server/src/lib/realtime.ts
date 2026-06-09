@@ -21,14 +21,18 @@ export async function initRealtimeBus(): Promise<void> {
     logger.info("Realtime bus: single-process mode (set REDIS_URL for horizontal scale)");
     return;
   }
-  await initRedisBus((raw) => {
-    try {
-      bus.emit("chat", JSON.parse(raw) as ChatEvent);
-    } catch (err) {
-      logger.warn({ err }, "Ignored malformed chat event from Redis");
-    }
-  });
-  redisBusActive = true;
+  try {
+    await initRedisBus((raw) => {
+      try {
+        bus.emit("chat", JSON.parse(raw) as ChatEvent);
+      } catch (err) {
+        logger.warn({ err }, "Ignored malformed chat event from Redis");
+      }
+    });
+    redisBusActive = true;
+  } catch (err) {
+    logger.warn({ err }, "Redis bus unavailable — falling back to single-process SSE");
+  }
 }
 
 export function publishChatEvent(event: ChatEvent): void {

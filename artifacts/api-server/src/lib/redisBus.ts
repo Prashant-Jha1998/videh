@@ -17,7 +17,9 @@ export async function initRedisBus(onMessage: (payload: string) => void): Promis
   const options = {
     maxRetriesPerRequest: null as null,
     enableReadyCheck: true,
-    lazyConnect: false,
+    lazyConnect: true,
+    connectTimeout: 8000,
+    tls: REDIS_URL.startsWith("rediss://") ? {} : undefined,
   };
 
   publisher = new Redis(REDIS_URL, options);
@@ -27,6 +29,7 @@ export async function initRedisBus(onMessage: (payload: string) => void): Promis
   subscriber.on("error", (err: Error) => logger.error({ err }, "Redis subscriber error"));
   publisher.on("error", (err: Error) => logger.error({ err }, "Redis publisher error"));
 
+  await Promise.all([publisher.connect(), subscriber.connect()]);
   await subscriber.subscribe(CHAT_EVENTS_CHANNEL);
   logger.info({ channel: CHAT_EVENTS_CHANNEL }, "Redis chat event bus ready");
 }
