@@ -1,5 +1,6 @@
 import { getApiUrl } from "@/lib/api";
 import { extractUrls } from "@/lib/chatUrls";
+import { parseAlbumMessageContent } from "@/lib/chatAlbumMessage";
 import { normalizeMessageType } from "@/lib/normalizeMessage";
 
 export type SharedMediaItem = {
@@ -46,6 +47,13 @@ export function bucketSharedMediaFromRows(rows: Array<Record<string, unknown>>):
       mediaUrl,
     };
 
+    if (type === "album") {
+      const album = parseAlbumMessageContent(content);
+      for (const url of album?.urls ?? []) {
+        media.push({ ...base, id: `${base.id}_${url}`, kind: "image", mediaUrl: url });
+      }
+      continue;
+    }
     if (type === "image" || type === "video") {
       if (mediaUrl) media.push({ ...base, kind: type });
       continue;
