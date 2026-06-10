@@ -25,7 +25,7 @@ export type CachedChatMessage = {
 
 export type ChatMessageCacheStore = Record<string, CachedChatMessage[]>;
 
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 const MAX_MESSAGES_PER_CHAT = 80;
 const MAX_CACHED_CHATS = 40;
 

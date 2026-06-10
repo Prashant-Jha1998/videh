@@ -107,6 +107,8 @@ export interface Message {
   mediaUrl?: string;
   /** Multiple images in one bubble (WhatsApp-style album). */
   albumUrls?: string[];
+  /** Local picker URIs kept until CDN/API copies are confirmed (WhatsApp-style). */
+  albumLocalUrls?: string[];
   isStarred?: boolean;
   isForwarded?: boolean;
   forwardCount?: number;
@@ -152,6 +154,9 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     albumUrls: prevLocal?.albumUrls,
     mediaUrl,
   });
+  const albumLocalUrls = prevLocal?.albumLocalUrls?.length
+    ? prevLocal.albumLocalUrls
+    : undefined;
   const resolvedType = albumUrls && albumUrls.length >= 2 ? "album" : type;
   const displayText = resolvedType === "album" && albumParsed
     ? (albumParsed.caption ?? albumChatPreview(albumParsed.urls.length))
@@ -168,6 +173,7 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     status,
     mediaUrl: resolvedType === "album" ? (albumUrls?.[0] ?? mediaUrl) : mediaUrl,
     albumUrls,
+    albumLocalUrls,
     isStarred: m.is_starred,
     isForwarded: m.is_forwarded,
     forwardCount: m.forward_count ?? 0,
@@ -1679,6 +1685,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           });
           patchMsg({ mediaUrl: upload.url, uploadProgress: 100 });
           await postMediaMessage(upload.url);
+          patchMsg({ uploadProgress: undefined, localMediaUri: undefined });
         } catch (e) {
           patchMsg({ uploadProgress: undefined, uploadFailed: true });
           Alert.alert("Send failed", e instanceof Error ? e.message : "Could not send media.");
@@ -1745,7 +1752,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             status: "delivered",
             uploadProgress: undefined,
             uploadFailed: false,
-            localMediaUri: undefined,
           });
         } else {
           patchMsg({
@@ -1755,7 +1761,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             mediaUrl: remoteUrls[0],
             uploadProgress: undefined,
             uploadFailed: false,
-            localMediaUri: undefined,
           });
         }
       };
@@ -1774,6 +1779,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           mediaUrl: localUris[0],
           localMediaUri: localUris[0],
           albumUrls: localUris,
+          albumLocalUrls: localUris,
           uploadProgress: 0,
         };
         setChats((prev) =>
@@ -1796,8 +1802,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               patchMsg({ uploadProgress: overall });
             },
           });
-          patchMsg({ albumUrls: uploaded, mediaUrl: uploaded[0], uploadProgress: 100 });
+          patchMsg({
+            albumUrls: uploaded,
+            mediaUrl: uploaded[0],
+            uploadProgress: 100,
+          });
           await postAlbumMessage(uploaded);
+          patchMsg({ uploadProgress: undefined, albumLocalUrls: undefined });
         } catch (e) {
           patchMsg({ uploadProgress: undefined, uploadFailed: true });
           Alert.alert("Send failed", e instanceof Error ? e.message : "Could not send photos.");

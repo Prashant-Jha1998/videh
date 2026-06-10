@@ -2,8 +2,10 @@ import { query } from "./db";
 
 export function mediaFilenameFromUrl(mediaUrl: string | null | undefined): string | null {
   if (!mediaUrl || mediaUrl.startsWith("data:")) return null;
-  const m = mediaUrl.match(/\/media\/([^?#/]+)/i);
-  return m?.[1] ? decodeURIComponent(m[1]) : null;
+  const api = mediaUrl.match(/\/media\/([^?#/]+)/i);
+  if (api?.[1]) return decodeURIComponent(api[1]);
+  const chat = mediaUrl.match(/\/uploads\/chats\/([^?#/]+)/i);
+  return chat?.[1] ? decodeURIComponent(chat[1]) : null;
 }
 
 let viewOnceColsReady = false;
@@ -22,8 +24,10 @@ export async function userCanAccessChatMedia(userId: number, filename: string): 
      FROM messages m
      JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $2
      WHERE m.is_deleted = false
-       AND m.media_url IS NOT NULL
-       AND m.media_url LIKE '%' || $1 || '%'
+       AND (
+         (m.media_url IS NOT NULL AND m.media_url LIKE '%' || $1 || '%')
+         OR (m.content IS NOT NULL AND m.content LIKE '%' || $1 || '%')
+       )
        AND (NOT m.is_view_once OR m.view_once_opened_at IS NULL OR m.sender_id = $2)
      LIMIT 1`,
     [filename, userId],

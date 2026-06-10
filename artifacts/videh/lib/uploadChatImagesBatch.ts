@@ -7,7 +7,7 @@ import {
   type MediaQuality,
 } from "@/lib/imageEdit";
 
-const UPLOAD_CONCURRENCY = 3;
+const UPLOAD_CONCURRENCY = 5;
 
 export type BatchUploadProgress = {
   completed: number;
@@ -32,9 +32,12 @@ export async function uploadChatImagesBatch(opts: {
     onProgress?.({ completed, total, currentPct });
   };
 
+  const prepared = await Promise.all(
+    uris.map(async (raw) => (isGifUri(raw) ? raw : prepareImageForChatUpload(raw, quality))),
+  );
+
   async function uploadOne(index: number) {
-    let uri = uris[index];
-    if (!isGifUri(uri)) uri = await prepareImageForChatUpload(uri, quality);
+    let uri = prepared[index];
     const mime = imageMimeFromUri(uri);
     const ext = imageExtFromUri(uri);
     const uploaded = await uploadChatMediaWithProgress({

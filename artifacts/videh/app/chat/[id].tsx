@@ -83,7 +83,7 @@ import { stashBatchMedia } from "@/lib/chatMediaBatch";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 import { launchChatPhotoCamera, launchChatVideoCamera } from "@/lib/openChatCamera";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
-import { isAlbumMessage, resolveAlbumUrls } from "@/lib/chatAlbumMessage";
+import { displayAlbumUrls, isAlbumMessage, resolveAlbumUrls } from "@/lib/chatAlbumMessage";
 import { ChatAlbumGalleryModal } from "@/components/ChatAlbumGalleryModal";
 import { isGifUri } from "@/lib/imageEdit";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
@@ -2542,14 +2542,17 @@ export default function ChatScreen() {
     const isDeleted = item.type === "deleted";
     const isViewOnceOpened = (item.type === "image" || item.type === "video") && item.isViewOnce && (item.viewOnceOpened || !item.mediaUrl);
     const isViewOncePending = (item.type === "image" || item.type === "video") && item.isViewOnce && !!item.mediaUrl && !item.viewOnceOpened && !isMe;
-    const albumUrls = resolveAlbumUrls(item.text, {
-      albumUrls: item.albumUrls,
-      mediaUrl: item.mediaUrl,
+    const albumUrls = displayAlbumUrls({
+      albumUrls: resolveAlbumUrls(item.text, {
+        albumUrls: item.albumUrls,
+        mediaUrl: item.mediaUrl,
+      }),
+      albumLocalUrls: item.albumLocalUrls,
     });
     const isAlbum = isAlbumMessage(item.type, item.text, {
-      albumUrls: item.albumUrls,
+      albumUrls: item.albumUrls ?? item.albumLocalUrls,
       mediaUrl: item.mediaUrl,
-    }) && !!albumUrls;
+    }) && albumUrls.length >= 2;
     const displayMediaUri = item.localMediaUri ?? item.mediaUrl ?? "";
     const isImage = !isAlbum && item.type === "image" && !!displayMediaUri && !isViewOncePending;
     const isVideo = item.type === "video" && !!displayMediaUri && !isViewOncePending;

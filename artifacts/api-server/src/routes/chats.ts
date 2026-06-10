@@ -12,7 +12,8 @@ import { pushNotificationImageUrl } from "../lib/pushMediaUrl";
 import { enforceModerationForActivity } from "../lib/moderation";
 import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
 import { assertSameUser, getAuthUserId, requireAuth } from "../lib/auth";
-import { publicMediaUrl } from "../lib/mediaStorage";
+import { publicMediaUrl, resolveStoredMediaUrl } from "../lib/mediaStorage";
+import { tryRedirectStoredMediaToCdn, uploadLocalFileToS3 } from "../lib/s3Storage";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
 import {
   ensureChatMemberHistoryClearedColumn,
@@ -101,10 +102,11 @@ async function ensureChatMediaTable(): Promise<void> {
       filename TEXT PRIMARY KEY,
       mime_type TEXT NOT NULL,
       size_bytes INTEGER NOT NULL,
-      data BYTEA NOT NULL,
+      data BYTEA,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  await query(`ALTER TABLE chat_media_files ALTER COLUMN data DROP NOT NULL`).catch(() => {});
   chatMediaTableEnsured = true;
 }
 
@@ -464,12 +466,27 @@ router.get("/media/:filename", requireAuth, async (req: Request, res: Response) 
       res.status(403).json({ success: false, message: "Media access denied." });
       return;
     }
+    const uploadsRel = `/uploads/chats/${filename}`;
+    if (tryRedirectStoredMediaToCdn(req, res, uploadsRel)) return;
+
+    const diskPath = path.join(chatUploadsDir, filename);
+    if (fs.existsSync(diskPath)) {
+      const stat = fs.statSync(diskPath);
+      const mimeType = mimeFromFilename(filename);
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("Content-Length", String(stat.size));
+      fs.createReadStream(diskPath).pipe(res);
+      return;
+    }
+
     const result = await query(
       "SELECT filename, mime_type, size_bytes, data FROM chat_media_files WHERE filename = $1",
       [filename],
     );
-    const row = result.rows[0] as { filename: string; mime_type: string; size_bytes: number; data: Buffer } | undefined;
-    if (!row) {
+    const row = result.rows[0] as { filename: string; mime_type: string; size_bytes: number; data: Buffer | null } | undefined;
+    if (!row || !row.data) {
       res.status(404).json({ success: false, message: "Media not found." });
       return;
     }
@@ -513,21 +530,23 @@ router.post("/media", requireAuth, chatMediaUpload.single("file"), async (req: R
   }
   try {
     await ensureChatMediaTable();
-    const data = await fs.promises.readFile(req.file.path);
     const mimeType = mimeFromFilename(req.file.filename, req.file.mimetype);
+    const uploadsRel = `/uploads/chats/${req.file.filename}`;
+    await uploadLocalFileToS3(req.file.path, uploadsRel);
     await query(
       `INSERT INTO chat_media_files (filename, mime_type, size_bytes, data)
-       VALUES ($1, $2, $3, $4)
+       VALUES ($1, $2, $3, NULL)
        ON CONFLICT (filename)
-       DO UPDATE SET mime_type = EXCLUDED.mime_type, size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data`,
-      [req.file.filename, mimeType, req.file.size, data],
+       DO UPDATE SET mime_type = EXCLUDED.mime_type, size_bytes = EXCLUDED.size_bytes`,
+      [req.file.filename, mimeType, req.file.size],
     );
-    await fs.promises.unlink(req.file.path).catch(() => {});
 
-    const rel = `/api/chats/media/${encodeURIComponent(req.file.filename)}`;
+    const publicUrl =
+      resolveStoredMediaUrl(req, uploadsRel)
+      ?? publicMediaUrl(req, `/api/chats/media/${encodeURIComponent(req.file.filename)}`);
     res.json({
       success: true,
-      url: publicMediaUrl(req, rel),
+      url: publicUrl,
       mimeType,
       size: req.file.size,
     });

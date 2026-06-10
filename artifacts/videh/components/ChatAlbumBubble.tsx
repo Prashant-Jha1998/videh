@@ -11,6 +11,7 @@ import {
   type StyleProp,
 } from "react-native";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
+import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 
 const GAP = 2;
 
@@ -29,11 +30,12 @@ function AlbumTile({
 }) {
   const [useNative, setUseNative] = useState(false);
   const [failed, setFailed] = useState(false);
-  const needsAuth = uri.includes("/api/chats/media/") && !!sessionToken;
+  const absolute = resolvePublicAssetUrl(uri) ?? uri;
+  const needsAuth = absolute.includes("/api/chats/media/") && !!sessionToken;
   const isLocal = uri.startsWith("file://") || uri.startsWith("content://");
   const source = needsAuth
-    ? { uri, headers: authFetchHeaders(sessionToken) as Record<string, string> }
-    : { uri };
+    ? { uri: absolute, headers: authFetchHeaders(sessionToken) as Record<string, string> }
+    : { uri: absolute };
 
   return (
     <TouchableOpacity activeOpacity={0.9} onPress={onPress} style={[style, styles.tile]}>
