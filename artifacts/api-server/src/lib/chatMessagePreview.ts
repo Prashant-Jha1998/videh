@@ -83,6 +83,18 @@ export function chatMessagePushPreview(type: string | undefined, content: string
       if (clean) return truncate(clean, 80);
       return "Voice message";
     }
+    case "album": {
+      try {
+        const album = JSON.parse(raw) as { urls?: unknown[]; caption?: string };
+        if (Array.isArray(album.urls) && album.urls.length > 1) {
+          if (album.caption?.trim()) return truncate(album.caption.trim(), 80);
+          return `${album.urls.length} photos`;
+        }
+      } catch {
+        /* fall through */
+      }
+      return "Album";
+    }
     case "image":
       return raw && raw !== "📷 Photo" ? truncate(raw, 80) : "Photo";
     case "video":

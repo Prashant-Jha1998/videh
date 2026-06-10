@@ -23,6 +23,7 @@ import { ensureUploadableFileUri } from "@/lib/prepareFileUpload";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { encodeVoiceMessageText, stripWaveformMeta } from "@/lib/voiceWaveform";
 import { messageReplyPreviewText } from "@/lib/messageReplyPreview";
+import { albumChatPreview, encodeAlbumMessageContent, parseAlbumMessageContent } from "@/lib/chatAlbumMessage";
 import { inferChatListPreview, normalizeMessageType } from "@/lib/normalizeMessage";
 import { parseLocationPayload } from "@/lib/locationMessage";
 import {
@@ -87,9 +88,11 @@ export interface Message {
   timestamp: number;
   senderId: string;
   senderName?: string;
-  type: "text" | "image" | "video" | "audio" | "document" | "location" | "contact" | "deleted" | "call" | "system";
+  type: "text" | "image" | "video" | "audio" | "document" | "location" | "contact" | "deleted" | "call" | "system" | "album";
   status: "sent" | "delivered" | "read";
   mediaUrl?: string;
+  /** Multiple images in one bubble (WhatsApp-style album). */
+  albumUrls?: string[];
   isStarred?: boolean;
   isForwarded?: boolean;
   forwardCount?: number;
@@ -127,18 +130,26 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
   }
   const content = m.is_deleted ? "This message was deleted" : (m.content ?? "");
   const mediaUrl = m.media_url ?? undefined;
+  const albumParsed = parseAlbumMessageContent(content);
   const type = m.is_deleted
     ? "deleted"
     : normalizeMessageType(m.type, content, mediaUrl);
+  const albumUrls = type === "album"
+    ? (albumParsed?.urls ?? (mediaUrl ? [mediaUrl] : undefined))
+    : undefined;
+  const displayText = type === "album" && albumParsed
+    ? (albumParsed.caption ?? albumChatPreview(albumParsed.urls.length))
+    : content;
   return {
     id: String(m.id),
-    text: content,
+    text: displayText,
     timestamp: new Date(m.created_at).getTime(),
     senderId: isMe ? "me" : String(m.sender_id),
     senderName: m.sender_name ?? undefined,
     type,
     status,
-    mediaUrl,
+    mediaUrl: type === "album" ? (albumUrls?.[0] ?? mediaUrl) : mediaUrl,
+    albumUrls,
     isStarred: m.is_starred,
     isForwarded: m.is_forwarded,
     forwardCount: m.forward_count ?? 0,
@@ -297,6 +308,7 @@ interface AppContextType {
     chatId: string,
     opts: { mediaUrl: string; kind: "image" | "video"; caption?: string; isViewOnce?: boolean },
   ) => void;
+  sendAlbumMessage: (chatId: string, opts: { urls: string[]; caption?: string }) => void;
   consumeViewOnceMessage: (chatId: string, messageId: string) => Promise<string | null>;
   sendAudioMessage: (chatId: string, audioUri: string, durationSecs: number, waveform?: number[]) => void;
   sendDocumentMessage: (
@@ -1624,6 +1636,64 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
+  const sendAlbumMessage = useCallback((chatId: string, opts: { urls: string[]; caption?: string }) => {
+    void (async () => {
+      const u = userRef.current;
+      const urls = opts.urls.map((x) => x.trim()).filter(Boolean);
+      if (urls.length < 2) return;
+      const caption = opts.caption?.trim() ?? "";
+      const content = encodeAlbumMessageContent(urls, caption);
+      const preview = albumChatPreview(urls.length, caption);
+      const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      const newMsg: Message = {
+        id: tempId,
+        text: caption || preview,
+        timestamp: Date.now(),
+        senderId: "me",
+        type: "album",
+        status: "sent",
+        mediaUrl: urls[0],
+        albumUrls: urls,
+      };
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId
+            ? { ...c, messages: [...c.messages, newMsg], lastMessage: preview, lastMessageTime: Date.now() }
+            : c,
+        ),
+      );
+      if (!u?.dbId) return;
+      const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
+        method: "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          senderId: u.dbId,
+          content,
+          type: "album",
+          mediaUrl: urls[0],
+        }),
+      });
+      const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
+      if (res.status === 403) {
+        Alert.alert("Cannot send message", typeof data.message === "string" ? data.message : "Not allowed.");
+        setChats((prev) =>
+          prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
+        );
+        return;
+      }
+      if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
+        const mid = data.message.id;
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered" } : m) }
+              : c,
+          ),
+        );
+      }
+    })();
+  }, []);
+
   const consumeViewOnceMessage = useCallback(async (chatId: string, messageId: string): Promise<string | null> => {
     const u = userRef.current;
     if (!u?.dbId || messageId.startsWith("tmp_")) return null;
@@ -2444,7 +2514,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       starMessage, forwardMessage, starredMessages, updateAvatar,
       createDirectChat, loadMessages, applyIncomingMessageHint, loadOlderMessages, refreshChats, clearAllChatHistory,
       deleteChatsFromList, hideChatsInList, hiddenChatIds, chatDeletedAtMap,
-      sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage, sendDocumentMessage, cancelDocumentUpload,
+      sendImageMessage, sendPreparedMediaMessage, sendAlbumMessage, consumeViewOnceMessage, sendAudioMessage, sendDocumentMessage, cancelDocumentUpload,
       sendContactMessage, setTyping, clearTyping,
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, reportUser, setChatDisappear,

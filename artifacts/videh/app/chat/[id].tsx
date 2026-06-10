@@ -83,10 +83,12 @@ import { stashBatchMedia } from "@/lib/chatMediaBatch";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 import { launchChatPhotoCamera, launchChatVideoCamera } from "@/lib/openChatCamera";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
+import { parseAlbumMessageContent } from "@/lib/chatAlbumMessage";
 import { isGifUri } from "@/lib/imageEdit";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { formatTypingLabel } from "@/lib/typingIndicator";
 import { TypingIndicator } from "@/components/TypingIndicator";
+import { ChatAlbumBubble } from "@/components/ChatAlbumBubble";
 import { ChatSystemMessageBubble } from "@/components/ChatSystemMessageBubble";
 import { GroupWelcomeCard } from "@/components/GroupWelcomeCard";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
@@ -2500,7 +2502,10 @@ export default function ChatScreen() {
     const isDeleted = item.type === "deleted";
     const isViewOnceOpened = (item.type === "image" || item.type === "video") && item.isViewOnce && (item.viewOnceOpened || !item.mediaUrl);
     const isViewOncePending = (item.type === "image" || item.type === "video") && item.isViewOnce && !!item.mediaUrl && !item.viewOnceOpened && !isMe;
-    const isImage = item.type === "image" && !!item.mediaUrl && !isViewOncePending;
+    const albumUrls = item.albumUrls
+      ?? (item.type === "album" ? parseAlbumMessageContent(item.text)?.urls : undefined);
+    const isAlbum = item.type === "album" && !!albumUrls && albumUrls.length >= 2;
+    const isImage = !isAlbum && item.type === "image" && !!item.mediaUrl && !isViewOncePending;
     const isVideo = item.type === "video" && !!item.mediaUrl && !isViewOncePending;
     const isAudio = item.type === "audio" && !!item.mediaUrl;
     const effectiveType = normalizeMessageType(item.type, item.text, item.mediaUrl);
@@ -2685,6 +2690,31 @@ export default function ChatScreen() {
               kind={item.type === "video" ? "video" : "image"}
               onOpen={() => { void openViewOnceMedia(item); }}
             />
+          ) : isAlbum && albumUrls ? (
+            <>
+              <ChatAlbumBubble
+                urls={albumUrls}
+                width={W * 0.62}
+                sessionToken={user?.sessionToken}
+                onOpenImage={(uri) => {
+                  const cap = item.text?.trim();
+                  const defaultLabel = `${albumUrls.length} photos`;
+                  setMediaPreview({
+                    uri,
+                    type: "image",
+                    caption: cap && cap !== defaultLabel && cap !== "Photo" ? cap : undefined,
+                  });
+                }}
+              />
+              {(() => {
+                const cap = item.text?.trim();
+                const defaultLabel = `${albumUrls.length} photos`;
+                if (!cap || cap === defaultLabel || cap === "Photo") return null;
+                return (
+                  <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{cap}</Text>
+                );
+              })()}
+            </>
           ) : isImage && item.mediaUrl ? (
             <>
               <ChatImageBubble

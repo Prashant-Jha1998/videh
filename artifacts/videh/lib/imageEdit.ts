@@ -5,8 +5,13 @@ import { ensureUploadableFileUri } from "./prepareFileUpload";
 export type MediaQuality = "standard" | "hd";
 
 export const QUALITY_COMPRESS: Record<MediaQuality, number> = {
-  standard: 0.75,
-  hd: 1,
+  standard: 0.72,
+  hd: 0.92,
+};
+
+const CHAT_IMAGE_MAX_EDGE: Record<MediaQuality, number> = {
+  standard: 1280,
+  hd: 2560,
 };
 
 export type ImageDimensionHints = { width?: number; height?: number };
@@ -165,10 +170,25 @@ export async function cropImageRect(
 }
 
 export async function applyImageQuality(uri: string, quality: MediaQuality): Promise<string> {
-  if (isGifUri(uri) || quality === "hd") return uri;
+  return prepareImageForChatUpload(uri, quality);
+}
+
+/** Resize + compress before chat upload (faster sends, smaller files). */
+export async function prepareImageForChatUpload(uri: string, quality: MediaQuality): Promise<string> {
+  if (isGifUri(uri)) return uri;
   const local = await ensureEditableImageUri(uri);
-  const result = await ImageManipulator.manipulateAsync(local, [], {
-    compress: QUALITY_COMPRESS.standard,
+  const { width, height } = await getImageDimensions(local);
+  const maxEdge = CHAT_IMAGE_MAX_EDGE[quality];
+  const actions: ImageManipulator.Action[] = [];
+  if (Math.max(width, height) > maxEdge) {
+    actions.push(
+      width >= height
+        ? { resize: { width: maxEdge } }
+        : { resize: { height: maxEdge } },
+    );
+  }
+  const result = await ImageManipulator.manipulateAsync(local, actions, {
+    compress: QUALITY_COMPRESS[quality],
     format: ImageManipulator.SaveFormat.JPEG,
   });
   return result.uri;

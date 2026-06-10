@@ -20,7 +20,7 @@ import { useApp } from "@/context/AppContext";
 import { authFetchHeaders, authPlaybackSource } from "@/lib/authenticatedMedia";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 import {
-  applyImageQuality,
+  prepareImageForChatUpload,
   cropImageRect,
   ensureEditableImageUri,
   imageExtFromUri,
@@ -83,7 +83,7 @@ export default function ChatMediaComposeScreen() {
     abortRef.current = new AbortController();
     try {
       let uploadUri = uri;
-      if (kind === "image" && !isGif) uploadUri = await applyImageQuality(uri, quality);
+      if (kind === "image" && !isGif) uploadUri = await prepareImageForChatUpload(uri, quality);
       const uploaded = await uploadChatMediaWithProgress({
         uri: uploadUri,
         mime,

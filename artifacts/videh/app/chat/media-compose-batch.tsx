@@ -16,25 +16,19 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
 import { takeBatchMedia } from "@/lib/chatMediaBatch";
-import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
-import {
-  applyImageQuality,
-  imageExtFromUri,
-  imageMimeFromUri,
-  isGifUri,
-  type MediaQuality,
-} from "@/lib/imageEdit";
+import { isGifUri, type MediaQuality } from "@/lib/imageEdit";
+import { uploadChatImagesBatch } from "@/lib/uploadChatImagesBatch";
 
 export default function ChatMediaComposeBatchScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, sendPreparedMediaMessage } = useApp();
+  const { user, sendAlbumMessage, sendPreparedMediaMessage } = useApp();
   const [chatId, setChatId] = useState("");
   const [uris, setUris] = useState<string[]>([]);
   const [caption, setCaption] = useState("");
   const [quality, setQuality] = useState<MediaQuality>("standard");
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState({ current: 0, total: 0, pct: 0 });
+  const [progress, setProgress] = useState({ completed: 0, total: 0, pct: 0 });
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -54,29 +48,25 @@ export default function ChatMediaComposeBatchScreen() {
     setBusy(true);
     abortRef.current = new AbortController();
     const total = uris.length;
+    setProgress({ completed: 0, total, pct: 0 });
     try {
-      for (let i = 0; i < uris.length; i++) {
-        if (abortRef.current.signal.aborted) throw new Error("Upload cancelled.");
-        setProgress({ current: i + 1, total, pct: 0 });
-        let uri = uris[i];
-        if (!isGifUri(uri)) uri = await applyImageQuality(uri, quality);
-        const mime = imageMimeFromUri(uri);
-        const ext = imageExtFromUri(uri);
-        const uploaded = await uploadChatMediaWithProgress({
-          uri,
-          mime,
-          filename: `chat_${Date.now()}_${i}.${ext}`,
-          sessionToken: user?.sessionToken,
-          signal: abortRef.current.signal,
-          onProgress: (p) => setProgress({ current: i + 1, total, pct: p.percent }),
-        });
-        const cap = i === uris.length - 1 ? caption.trim() : "";
+      const uploaded = await uploadChatImagesBatch({
+        uris,
+        quality,
+        sessionToken: user?.sessionToken,
+        signal: abortRef.current.signal,
+        onProgress: (p) => setProgress({ completed: p.completed, total: p.total, pct: p.currentPct }),
+      });
+      const cap = caption.trim();
+      if (uploaded.length === 1) {
         sendPreparedMediaMessage(chatId, {
-          mediaUrl: uploaded.url,
+          mediaUrl: uploaded[0],
           kind: "image",
           caption: cap,
           isViewOnce: false,
         });
+      } else {
+        sendAlbumMessage(chatId, { urls: uploaded, caption: cap });
       }
       router.back();
     } catch (e) {
@@ -156,7 +146,8 @@ export default function ChatMediaComposeBatchScreen() {
         <View style={styles.progressRow}>
           <ActivityIndicator color="#00a884" />
           <Text style={styles.progressText}>
-            Sending {progress.current}/{progress.total} · {progress.pct}%
+            Uploading {progress.completed}/{progress.total}
+            {progress.pct > 0 ? ` · ${progress.pct}%` : ""}
           </Text>
           <TouchableOpacity onPress={onCancel}>
             <Text style={styles.cancelText}>Cancel</Text>

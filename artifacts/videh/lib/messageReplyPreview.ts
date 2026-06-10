@@ -3,6 +3,7 @@ import {
   formatCallMessageLabel,
   parseCallMessageMeta,
 } from "@/lib/callMessage";
+import { parseAlbumMessageContent } from "@/lib/chatAlbumMessage";
 import { contactChatPreview } from "@/lib/contactMessage";
 import { normalizeMessageType } from "@/lib/normalizeMessage";
 import { stripWaveformMeta } from "@/lib/voiceWaveform";
@@ -33,6 +34,12 @@ export function messageReplyPreviewText(msg: MessageReplyPreviewInput): string {
     return callMessagePreviewText(content);
   }
 
+  if (type === "album") {
+    const album = parseAlbumMessageContent(content);
+    if (album?.caption) return album.caption;
+    if (album) return `${album.urls.length} photos`;
+    return content && !/^\d+ photos?$/.test(content) ? content : "Album";
+  }
   if (type === "image") {
     return content && content !== "📷 Photo" && content !== "🔁 View once" ? content : "Photo";
   }

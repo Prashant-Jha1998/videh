@@ -1,3 +1,4 @@
+import { albumChatPreview, parseAlbumMessageContent } from "@/lib/chatAlbumMessage";
 import { callMessagePreviewText, parseCallMessageMeta } from "@/lib/callMessage";
 import { contactChatPreview } from "@/lib/contactMessage";
 import { documentChatPreview, isDocumentMessagePayload } from "@/lib/documentMessage";
@@ -71,6 +72,7 @@ export function normalizeMessageType(
   if (declaredType === "contact" || raw.startsWith(CONTACT_PREFIX)) return "contact";
   if (declaredType === "location" || looksLikeLocationJson(raw)) return "location";
   if (isDocumentMessagePayload(raw) || declaredType === "document") return "document";
+  if (declaredType === "album" || parseAlbumMessageContent(raw)) return "album";
   if (declaredType === "image" || declaredType === "video" || declaredType === "audio") {
     return declaredType;
   }
@@ -100,6 +102,10 @@ export function inferChatListPreview(
   switch (type) {
     case "call":
       return callMessagePreviewText(raw);
+    case "album": {
+      const album = parseAlbumMessageContent(raw);
+      return albumChatPreview(album?.urls.length ?? 0, album?.caption);
+    }
     case "image":
       return raw && raw !== "📷 Photo" ? raw : "Photo";
     case "video":
