@@ -119,10 +119,24 @@ function proxyReelsImageUrl(req: Request, url: unknown): string | null {
   return `${proxy}?url=${encodeURIComponent(u)}`;
 }
 
-/** Always return API thumbnail URL (handles wrong extensions, auto-frame, Pexels proxy). */
-function resolveVideoThumbnailUrl(req: Request, _thumb: unknown, videoId: unknown, cacheVersion?: unknown): string {
+/** Prefer CDN for stored thumbs; fall back to API route (auto-frame / proxy). */
+function resolveVideoThumbnailUrl(req: Request, thumb: unknown, videoId: unknown, cacheVersion?: unknown): string {
+  const thumbStored = String(thumb ?? "").trim();
   const v = cacheVersion != null ? encodeURIComponent(String(cacheVersion)) : "";
   const q = v ? `?v=${v}` : "";
+  if (thumbStored) {
+    if (needsReelsImageProxy(thumbStored)) {
+      const proxied = proxyReelsImageUrl(req, thumbStored);
+      if (proxied) return proxied;
+    }
+    const rel = uploadsRelPathFromStoredUrl(thumbStored);
+    if (rel && cdnDeliveryEnabled()) {
+      return `${publicMediaUrl(req, rel)}${q}`;
+    }
+    if (/^https?:\/\//i.test(thumbStored) && !uploadsRelPathFromStoredUrl(thumbStored)) {
+      return thumbStored;
+    }
+  }
   return publicMediaUrl(req, `/api/reels/videos/${videoId}/thumbnail${q}`);
 }
 
@@ -190,6 +204,11 @@ function resolveChannelBrandingPublicUrl(
   if (needsReelsImageProxy(raw)) return proxyReelsImageUrl(req, raw);
   const v = cacheVersion != null ? encodeURIComponent(String(cacheVersion)) : "";
   const q = v ? `?v=${v}` : "";
+  const rel = uploadsRelPathFromStoredUrl(raw);
+  if (rel && cdnDeliveryEnabled()) {
+    return `${publicMediaUrl(req, rel)}${q}`;
+  }
+  if (/^https?:\/\//i.test(raw) && !rel) return raw;
   return publicMediaUrl(req, `/api/reels/channels/${channelId}/${kind}${q}`);
 }
 
@@ -321,6 +340,18 @@ async function serveChannelBrandingAsset(
     const filePath = localPathForUploadsRel(stored, uploadsRoot);
     if (!filePath || !fs.existsSync(filePath)) {
       if (tryRedirectStoredMediaToCdn(req, res, stored)) return;
+      if (needsReelsImageProxy(stored)) {
+        const proxied = proxyReelsImageUrl(req, stored);
+        if (proxied) {
+          res.redirect(proxied);
+          return;
+        }
+      }
+      const external = resolveStoredMediaUrl(req, stored);
+      if (external && /^https?:\/\//i.test(external)) {
+        res.redirect(external);
+        return;
+      }
       res.status(404).end();
       return;
     }

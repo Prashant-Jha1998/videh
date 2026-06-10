@@ -23,10 +23,12 @@ import {
   formatDuration,
   formatTimeAgo,
   formatViewCount,
+  type ReelsChannel,
   type ReelsFeedAdPlacement,
   type ReelsFeedCursor,
   type ReelsVideo,
 } from "@/lib/reelsApi";
+import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { headerTopInset } from "@/lib/headerInset";
 
 type FeedRow =
@@ -53,6 +55,81 @@ const THUMB_H = Math.round((SCREEN_W * 9) / 16);
 const TREND_W = Math.round(SCREEN_W * 0.72);
 const TREND_H = Math.round((TREND_W * 9) / 16);
 
+function VideoThumb({
+  uri,
+  videoId,
+  compact,
+  placeholderColor,
+  iconColor,
+}: {
+  uri: string | null | undefined;
+  videoId: number;
+  compact?: boolean;
+  placeholderColor: string;
+  iconColor: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const style = compact ? styles.trendThumb : styles.thumb;
+  if (!uri || failed) {
+    return (
+      <View style={[style, styles.thumbPlaceholder, { backgroundColor: placeholderColor }]}>
+        <Ionicons name="videocam" size={compact ? 28 : 40} color={iconColor} />
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      contentFit="cover"
+      recyclingKey={`thumb-${videoId}`}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function ChannelAvatar({
+  uri,
+  channelId,
+  label,
+  size,
+  primaryColor,
+}: {
+  uri: string | null | undefined;
+  channelId: number;
+  label: string;
+  size: number;
+  primaryColor: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const initial = (label.replace(/^@/, "")[0] ?? "?").toUpperCase();
+  if (!uri || failed) {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: primaryColor,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Text style={{ color: "#fff", fontFamily: "Inter_700Bold", fontSize: size * 0.42 }}>{initial}</Text>
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={{ uri }}
+      style={{ width: size, height: size, borderRadius: size / 2 }}
+      contentFit="cover"
+      recyclingKey={`ch-${channelId}`}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 export default function VideoTabScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -67,11 +144,13 @@ export default function VideoTabScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasChannel, setHasChannel] = useState<boolean | null>(null);
+  const [myChannel, setMyChannel] = useState<ReelsChannel | null>(null);
   const loadingMoreRef = useRef(false);
 
   const loadInitial = useCallback(async () => {
     if (!user?.dbId) return;
     const ch = await fetchMyReelsChannel(user.dbId, user.sessionToken);
+    setMyChannel(ch.channel ?? null);
     setHasChannel(Boolean(ch.channel));
     const feed = await fetchReelsFeed(user.dbId, null, user.sessionToken);
     setVideos(feed.videos ?? []);
@@ -139,50 +218,31 @@ export default function VideoTabScreen() {
       activeOpacity={0.9}
     >
       <View style={styles.thumbWrap}>
-        {item.thumbnailUrl ? (
-          <Image
-            source={{ uri: item.thumbnailUrl }}
-            style={compact ? styles.trendThumb : styles.thumb}
-            contentFit="cover"
-            recyclingKey={`thumb-${item.id}`}
-            cacheKey={`thumb-${item.id}-${item.thumbnailUrl}`}
-          />
-        ) : (
-          <View
-            style={[
-              compact ? styles.trendThumb : styles.thumb,
-              styles.thumbPlaceholder,
-              { backgroundColor: colors.muted },
-            ]}
-          >
-            <Ionicons name="videocam" size={compact ? 28 : 40} color={colors.mutedForeground} />
-          </View>
-        )}
+        <VideoThumb
+          uri={item.thumbnailUrl}
+          videoId={item.id}
+          compact={compact}
+          placeholderColor={colors.muted}
+          iconColor={colors.mutedForeground}
+        />
         <View style={styles.durationBadge}>
           <Text style={styles.durationText}>{formatDuration(item.durationSeconds)}</Text>
         </View>
       </View>
 
       <View style={compact ? styles.trendInfo : styles.infoRow}>
-        {!compact && (
-          <TouchableOpacity
-            onPress={() => item.channelHandle && router.push({ pathname: "/reels/channel/[handle]", params: { handle: item.channelHandle } })}
-          >
-            {item.channelAvatarUrl ? (
-              <Image
-                source={{ uri: item.channelAvatarUrl }}
-                style={styles.channelAvatar}
-                contentFit="cover"
-                cacheKey={`ch-avatar-${item.channelId}-${item.channelAvatarUrl}`}
-              />
-            ) : (
-              <View style={[styles.channelAvatar, { backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }]}>
-                <Text style={{ color: "#fff", fontFamily: "Inter_700Bold" }}>{(item.channelHandle ?? "?")[0]?.toUpperCase()}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        )}
-        <View style={styles.infoText}>
+        <TouchableOpacity
+          onPress={() => item.channelHandle && router.push({ pathname: "/reels/channel/[handle]", params: { handle: item.channelHandle } })}
+        >
+          <ChannelAvatar
+            uri={item.channelAvatarUrl}
+            channelId={item.channelId}
+            label={channelLabel(item)}
+            size={compact ? 28 : 36}
+            primaryColor={colors.primary}
+          />
+        </TouchableOpacity>
+        <View style={[styles.infoText, compact ? { flex: 1 } : undefined]}>
           <Text style={[styles.ytTitle, { color: colors.foreground }]} numberOfLines={compact ? 2 : 2}>{item.title}</Text>
           <Text style={[styles.ytMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
             {channelLabel(item)} · {formatViewCount(item.viewCount)} views
@@ -268,9 +328,27 @@ export default function VideoTabScreen() {
                 router.push("/reels/setup");
               }
             }}
-            style={styles.iconBtn}
+            style={styles.headerAvatarBtn}
           >
-            <Ionicons name="person-circle-outline" size={24} color="#fff" />
+            {myChannel?.avatarUrl ? (
+              <Image
+                source={{ uri: myChannel.avatarUrl }}
+                style={styles.headerAvatar}
+                contentFit="cover"
+              />
+            ) : user?.avatar ? (
+              <Image
+                source={{ uri: resolvePublicAssetUrl(user.avatar) ?? user.avatar }}
+                style={styles.headerAvatar}
+                contentFit="cover"
+              />
+            ) : (
+              <View style={[styles.headerAvatar, styles.headerAvatarFallback, { backgroundColor: "rgba(255,255,255,0.25)" }]}>
+                <Text style={styles.headerAvatarInitial}>
+                  {(myChannel?.displayName ?? user?.name ?? "?")[0]?.toUpperCase()}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -330,6 +408,10 @@ const styles = StyleSheet.create({
   headerTitle: { color: "#fff", fontSize: 20, fontFamily: "Inter_700Bold" },
   headerActions: { flexDirection: "row", gap: 4 },
   iconBtn: { padding: 8 },
+  headerAvatarBtn: { padding: 4 },
+  headerAvatar: { width: 32, height: 32, borderRadius: 16 },
+  headerAvatarFallback: { alignItems: "center", justifyContent: "center" },
+  headerAvatarInitial: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 14 },
   setupBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -346,7 +428,7 @@ const styles = StyleSheet.create({
   trendScroll: { paddingHorizontal: 12, gap: 12 },
   trendCard: { width: TREND_W, marginRight: 12 },
   trendThumb: { width: TREND_W, height: TREND_H, borderRadius: 10 },
-  trendInfo: { paddingTop: 8 },
+  trendInfo: { flexDirection: "row", paddingTop: 8, gap: 8, alignItems: "flex-start" },
   ytCard: { marginBottom: 16 },
   thumbWrap: { position: "relative" },
   thumb: { width: SCREEN_W, height: THUMB_H },
