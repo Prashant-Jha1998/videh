@@ -104,25 +104,42 @@ export function normalizeUrl(url?: string | null): string | null {
   return raw;
 }
 
-export function videoThumbnailSrc(video: ReelsVideo): string {
-  return normalizeUrl(video.thumbnailUrl)
-    ?? `${getApiBase() || ""}/api/reels/videos/${video.id}/thumbnail`;
+function apiOrigin(): string {
+  if (typeof window !== "undefined") return window.location.origin.replace(/\/$/, "");
+  return getApiBase().replace(/\/$/, "");
+}
+
+/** Always use same-origin API routes — works with S3/CDN via server redirect. */
+export function videoThumbnailSrc(video: ReelsVideo, cacheBust?: string | number): string {
+  const q = cacheBust != null ? `?v=${encodeURIComponent(String(cacheBust))}` : "";
+  return `${apiOrigin()}/api/reels/videos/${video.id}/thumbnail${q}`;
+}
+
+export function channelAvatarSrc(channelId: number, cacheBust?: string | number): string {
+  const q = cacheBust != null ? `?v=${encodeURIComponent(String(cacheBust))}` : "";
+  return `${apiOrigin()}/api/reels/channels/${channelId}/avatar${q}`;
+}
+
+export function channelCoverSrc(channelId: number, cacheBust?: string | number): string {
+  const q = cacheBust != null ? `?v=${encodeURIComponent(String(cacheBust))}` : "";
+  return `${apiOrigin()}/api/reels/channels/${channelId}/cover${q}`;
 }
 
 function normalizeVideo(v: ReelsVideo): ReelsVideo {
-  return {
+  const out = {
     ...v,
-    thumbnailUrl: normalizeUrl(v.thumbnailUrl),
+    thumbnailUrl: videoThumbnailSrc(v),
     videoUrl: normalizeUrl(v.videoUrl) ?? v.videoUrl,
-    channelAvatarUrl: normalizeUrl(v.channelAvatarUrl),
+    channelAvatarUrl: v.channelId ? channelAvatarSrc(v.channelId) : normalizeUrl(v.channelAvatarUrl),
   };
+  return out;
 }
 
 function normalizeChannel(c: ReelsChannel): ReelsChannel {
   return {
     ...c,
-    avatarUrl: normalizeUrl(c.avatarUrl),
-    coverUrl: normalizeUrl(c.coverUrl ?? null),
+    avatarUrl: channelAvatarSrc(c.id),
+    coverUrl: channelCoverSrc(c.id),
   };
 }
 

@@ -45,6 +45,7 @@ import {
   headS3ObjectByUploadsRel,
   isS3DirectUploadEnabled,
   isS3MediaEnabled,
+  serveStoredImageFromS3,
   tryRedirectStoredMediaToCdn,
   uploadStoredMediaBatch,
 } from "../lib/s3Storage";
@@ -342,18 +343,13 @@ async function serveChannelBrandingAsset(
     const uploadsRoot = path.join(apiServerDir, "uploads");
     const filePath = localPathForUploadsRel(stored, uploadsRoot);
     if (!filePath || !fs.existsSync(filePath)) {
-      if (tryRedirectStoredMediaToCdn(req, res, stored)) return;
+      if (await serveStoredImageFromS3(res, stored)) return;
       if (needsReelsImageProxy(stored)) {
         const proxied = proxyReelsImageUrl(req, stored);
         if (proxied) {
           res.redirect(proxied);
           return;
         }
-      }
-      const external = resolveStoredMediaUrl(req, stored, reelsUploadsRoot());
-      if (external && /^https?:\/\//i.test(external)) {
-        res.redirect(external);
-        return;
       }
       res.status(404).end();
       return;
@@ -443,7 +439,7 @@ router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
           res.sendFile(filePath);
           return;
         }
-        if (tryRedirectStoredMediaToCdn(req, res, thumbStored)) return;
+        if (await serveStoredImageFromS3(res, thumbStored)) return;
       }
       if (needsReelsImageProxy(thumbStored)) {
         const proxied = proxyReelsImageUrl(req, thumbStored);
@@ -451,11 +447,6 @@ router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
           res.redirect(proxied);
           return;
         }
-      }
-      const external = resolveStoredMediaUrl(req, thumbStored, reelsUploadsRoot());
-      if (external && /^https?:\/\//i.test(external) && !needsReelsImageProxy(external)) {
-        res.redirect(external);
-        return;
       }
     }
     const generated = await ensureVideoThumbnail({
@@ -472,7 +463,7 @@ router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
         res.sendFile(filePath);
         return;
       }
-      if (tryRedirectStoredMediaToCdn(req, res, generated)) return;
+      if (await serveStoredImageFromS3(res, generated)) return;
     }
     res.status(404).end();
   } catch (err) {

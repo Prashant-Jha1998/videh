@@ -170,6 +170,33 @@ export async function pingS3Bucket(): Promise<boolean> {
   }
 }
 
+/** Stream a stored image from S3 through the API (private bucket — no CDN redirect). */
+export async function serveStoredImageFromS3(res: Response, storedUrl: unknown): Promise<boolean> {
+  if (!isS3MediaEnabled()) return false;
+  const rel = uploadsRelPathFromStoredUrl(storedUrl);
+  if (!rel) return false;
+  const key = uploadsRelToS3Key(rel);
+  try {
+    const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+    const { Readable } = await import("node:stream");
+    const client = await s3Client();
+    const out = await client.send(new GetObjectCommand({ Bucket: s3Bucket(), Key: key }));
+    if (!out.Body) return false;
+    res.setHeader("Content-Type", out.ContentType || mimeForFile(key));
+    res.setHeader("Cache-Control", cacheControlForKey(key));
+    if (out.Body instanceof Readable) {
+      out.Body.pipe(res);
+      return true;
+    }
+    const bytes = await (out.Body as { transformToByteArray(): Promise<Uint8Array> }).transformToByteArray();
+    res.send(Buffer.from(bytes));
+    return true;
+  } catch (err) {
+    logger.warn({ err, key }, "S3 image serve failed");
+    return false;
+  }
+}
+
 /** Redirect to CloudFront/CDN when media is on S3 (or CDN base is configured). */
 export function tryRedirectStoredMediaToCdn(req: Request, res: Response, storedUrl: unknown): boolean {
   const rel = uploadsRelPathFromStoredUrl(storedUrl);

@@ -1,12 +1,37 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { navigate } from "@/lib/router";
 import { Sidebar } from "./Sidebar";
 
+function useIsMobile(breakpoint = 900) {
+  const [mobile, setMobile] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < breakpoint,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+    const onChange = () => setMobile(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [breakpoint]);
+  return mobile;
+}
+
 export function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [q, setQ] = useState("");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const isMobile = useIsMobile();
+
+  const toggleMenu = () => {
+    if (isMobile) setMobileOpen((v) => !v);
+    else setCollapsed((v) => !v);
+  };
+
+  useEffect(() => {
+    if (!isMobile) setMobileOpen(false);
+  }, [isMobile]);
 
   const onSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -15,14 +40,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="yt-app">
+    <div className={`yt-app${collapsed ? " sidebar-collapsed" : ""}${mobileOpen ? " mobile-nav-open" : ""}`}>
       <header className="yt-header">
         <div className="yt-header-left">
           <button
             type="button"
             className="yt-icon-btn"
             aria-label="Guide"
-            onClick={() => setSidebarOpen((v) => !v)}
+            aria-expanded={isMobile ? mobileOpen : !collapsed}
+            onClick={toggleMenu}
           >
             ☰
           </button>
@@ -74,8 +100,20 @@ export function Layout({ children }: { children: React.ReactNode }) {
           )}
         </div>
       </header>
+      {mobileOpen ? (
+        <button
+          type="button"
+          className="yt-sidebar-backdrop"
+          aria-label="Close menu"
+          onClick={() => setMobileOpen(false)}
+        />
+      ) : null}
       <div className="yt-body">
-        <Sidebar open={sidebarOpen} />
+        <Sidebar
+          open={isMobile ? mobileOpen : true}
+          collapsed={!isMobile && collapsed}
+          onNavigate={() => setMobileOpen(false)}
+        />
         <main className="yt-main">{children}</main>
       </div>
       {user ? (

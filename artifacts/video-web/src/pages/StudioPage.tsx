@@ -1,12 +1,15 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import {
+  channelAvatarSrc,
+  channelCoverSrc,
   checkHandle,
   createChannel,
   deleteVideo,
   fetchChannel,
   fetchMyChannel,
   updateChannelProfile,
+  videoThumbnailSrc,
   type ReelsChannel,
   type ReelsVideo,
 } from "@/lib/reelsApi";
@@ -24,27 +27,67 @@ export function StudioPage() {
   const [bio, setBio] = useState("");
   const [avatar, setAvatar] = useState<File | null>(null);
   const [cover, setCover] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [mediaVersion, setMediaVersion] = useState(0);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const loadChannel = async () => {
+    if (!user) return;
+    const res = await fetchMyChannel(user.dbId, user.sessionToken);
+    if (!res.channel) {
+      setMode("create");
+      return;
+    }
+    setChannel(res.channel);
+    setDisplayName(res.channel.displayName ?? "");
+    setBio(res.channel.bio ?? "");
+    setMediaVersion((v) => v + 1);
+    const pub = await fetchChannel(res.channel.handle, user.dbId, user.sessionToken);
+    setVideos(pub.videos ?? []);
+  };
 
   useEffect(() => {
     if (!user) {
       navigate(`/login?redirect=${encodeURIComponent("/studio")}`);
       return;
     }
-    fetchMyChannel(user.dbId, user.sessionToken).then(async (res) => {
-      if (!res.channel) {
-        setMode("create");
-        return;
-      }
-      setChannel(res.channel);
-      setDisplayName(res.channel.displayName ?? "");
-      setBio(res.channel.bio ?? "");
-      const pub = await fetchChannel(res.channel.handle, user.dbId, user.sessionToken);
-      setVideos(pub.videos ?? []);
-    });
+    void loadChannel();
   }, [user]);
+
+  useEffect(() => {
+    if (!avatar) {
+      setAvatarPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(avatar);
+    setAvatarPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [avatar]);
+
+  useEffect(() => {
+    if (!cover) {
+      setCoverPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(cover);
+    setCoverPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [cover]);
+
+  const avatarSrc = useMemo(() => {
+    if (avatarPreview) return avatarPreview;
+    if (!channel) return null;
+    return channelAvatarSrc(channel.id, mediaVersion);
+  }, [avatarPreview, channel, mediaVersion]);
+
+  const coverSrc = useMemo(() => {
+    if (coverPreview) return coverPreview;
+    if (!channel) return null;
+    return channelCoverSrc(channel.id, mediaVersion);
+  }, [coverPreview, channel, mediaVersion]);
 
   const create = async () => {
     if (!user) return;
@@ -88,7 +131,10 @@ export function StudioPage() {
       return;
     }
     setChannel(res.channel);
-    setMsg("Profile updated.");
+    setAvatar(null);
+    setCover(null);
+    setMediaVersion((v) => v + 1);
+    setMsg("Profile saved — same on Videh app and web.");
   };
 
   const removeVideo = async (id: number) => {
@@ -103,7 +149,7 @@ export function StudioPage() {
     return (
       <div className="page-form">
         <h1>Create your channel</h1>
-        <p className="hint">One channel per Videh account. Same videos sync to the mobile app.</p>
+        <p className="hint">One channel per Videh account. Syncs with the Videh app automatically.</p>
         <label>
           @username (permanent)
           <input value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="mychannel" />
@@ -125,9 +171,28 @@ export function StudioPage() {
   return (
     <div className="page-studio">
       <h1>Channel studio — @{channel.handle}</h1>
+      <p className="hint">Changes here appear in the Videh app instantly (same channel &amp; database).</p>
       {msg ? <p className="success">{msg}</p> : null}
+
+      {coverSrc ? (
+        <div className="studio-cover-preview" style={{ backgroundImage: `url(${coverSrc})` }} />
+      ) : (
+        <div className="studio-cover-preview studio-cover-empty">No cover image yet</div>
+      )}
+
       <section className="studio-card">
         <h2>Profile</h2>
+        <div className="studio-avatar-row">
+          {avatarSrc ? (
+            <img src={avatarSrc} alt="" className="studio-avatar-preview" />
+          ) : (
+            <span className="studio-avatar-preview studio-avatar-empty">?</span>
+          )}
+          <div>
+            <strong>{displayName || `@${channel.handle}`}</strong>
+            <p className="hint" style={{ margin: "4px 0 0" }}>Channel logo from app or web</p>
+          </div>
+        </div>
         <label>
           Display name
           <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
@@ -137,7 +202,7 @@ export function StudioPage() {
           <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={3} />
         </label>
         <label>
-          Avatar
+          Avatar (logo)
           <input type="file" accept="image/*" onChange={(e) => setAvatar(e.target.files?.[0] ?? null)} />
         </label>
         <label>
@@ -152,6 +217,7 @@ export function StudioPage() {
           View public channel
         </button>
       </section>
+
       <section className="studio-card">
         <div className="row-between">
           <h2>Your videos ({videos.length})</h2>
@@ -159,9 +225,10 @@ export function StudioPage() {
             + Upload
           </button>
         </div>
-        <ul className="studio-videos">
+        <ul className="studio-videos studio-videos-rich">
           {videos.map((v) => (
             <li key={v.id}>
+              <img src={videoThumbnailSrc(v, mediaVersion)} alt="" className="studio-vid-thumb" />
               <button type="button" className="link-btn" onClick={() => navigate(`/watch/${v.id}`)}>
                 {v.title}
               </button>

@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { VideoCard } from "@/components/VideoCard";
 import {
+  channelAvatarSrc,
+  channelCoverSrc,
   fetchChannel,
   formatCount,
   subscribeChannel,
@@ -58,13 +60,10 @@ export function ChannelPage({ handle }: { handle: string }) {
     <div className="page-channel">
       <div
         className="channel-banner"
-        style={channel.coverUrl ? { backgroundImage: `url(${channel.coverUrl})` } : undefined}
+        style={{ backgroundImage: `url(${channelCoverSrc(channel.id)})` }}
       />
       <div className="channel-head">
-        <div
-          className="channel-avatar-lg"
-          style={channel.avatarUrl ? { backgroundImage: `url(${channel.avatarUrl})` } : undefined}
-        />
+        <img src={channelAvatarSrc(channel.id)} alt="" className="channel-avatar-lg-img" />
         <div>
           <h1>{title}</h1>
           <p>@{channel.handle} · {formatCount(channel.subscriberCount)} subscribers · {formatCount(channel.totalViews)} views</p>

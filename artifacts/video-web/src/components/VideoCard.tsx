@@ -1,5 +1,5 @@
 import type { ReelsVideo } from "@/lib/reelsApi";
-import { formatCount, formatDuration, timeAgo, videoThumbnailSrc } from "@/lib/reelsApi";
+import { channelAvatarSrc, formatCount, formatDuration, timeAgo, videoThumbnailSrc } from "@/lib/reelsApi";
 import { navigate } from "@/lib/router";
 
 export function VideoCard({ video }: { video: ReelsVideo }) {
@@ -13,26 +13,20 @@ export function VideoCard({ video }: { video: ReelsVideo }) {
         onClick={() => navigate(`/watch/${video.id}`)}
         onKeyDown={(e) => e.key === "Enter" && navigate(`/watch/${video.id}`)}
       >
-        <img
-          src={videoThumbnailSrc(video)}
-          alt=""
-          loading="lazy"
-          onError={(e) => {
-            const img = e.currentTarget;
-            const fallback = `/api/reels/videos/${video.id}/thumbnail`;
-            if (!img.src.endsWith(fallback)) img.src = fallback;
-          }}
-        />
+        <img src={videoThumbnailSrc(video)} alt="" loading="lazy" />
         <span className="yt-duration">{formatDuration(video.durationSeconds)}</span>
       </div>
       <div className="yt-video-meta">
         <button
           type="button"
           className="yt-ch-avatar"
-          style={video.channelAvatarUrl ? { backgroundImage: `url(${video.channelAvatarUrl})` } : undefined}
           onClick={() => video.channelHandle && navigate(`/@${video.channelHandle}`)}
           aria-label={channelLabel}
-        />
+        >
+          {video.channelId ? (
+            <img src={channelAvatarSrc(video.channelId)} alt="" className="yt-ch-avatar-img" />
+          ) : null}
+        </button>
         <div className="yt-video-text">
           <h3
             onClick={() => navigate(`/watch/${video.id}`)}
