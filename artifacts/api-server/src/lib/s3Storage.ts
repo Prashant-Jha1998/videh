@@ -72,6 +72,102 @@ export function uploadsRelToS3Key(uploadsRel: string): string {
   return prefix ? `${prefix}/${key}` : key;
 }
 
+/** Candidate S3 keys — handles legacy paths and optional prefix. */
+export function candidateS3KeysForStoredUrl(storedUrl: unknown): string[] {
+  const rel = uploadsRelPathFromStoredUrl(storedUrl);
+  if (!rel) return [];
+  const keys = new Set<string>();
+  keys.add(uploadsRelToS3Key(rel));
+  const bare = rel.replace(/^\//, "");
+  keys.add(bare);
+  const underReels = bare.replace(/^uploads\//, "");
+  if (underReels !== bare) keys.add(underReels);
+  const prefix = (process.env["S3_KEY_PREFIX"] ?? "").replace(/^\/+|\/+$/g, "");
+  if (prefix) {
+    keys.add(`${prefix}/${bare}`);
+    if (underReels !== bare) keys.add(`${prefix}/${underReels}`);
+  }
+  return [...keys];
+}
+
+async function headS3ObjectByKey(key: string): Promise<{ size: number; contentType?: string } | null> {
+  try {
+    const { HeadObjectCommand } = await import("@aws-sdk/client-s3");
+    const client = await s3Client();
+    const out = await client.send(new HeadObjectCommand({ Bucket: s3Bucket(), Key: key }));
+    const size = Number(out.ContentLength ?? 0);
+    if (!Number.isFinite(size) || size <= 0) return null;
+    return { size, contentType: out.ContentType };
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveExistingS3Key(storedUrl: unknown): Promise<string | null> {
+  if (!isS3MediaEnabled()) return null;
+  for (const key of candidateS3KeysForStoredUrl(storedUrl)) {
+    const head = await headS3ObjectByKey(key);
+    if (head) return key;
+  }
+  return null;
+}
+
+export async function fetchS3ObjectBytes(
+  storedUrl: unknown,
+): Promise<{ body: Buffer; contentType: string; key: string } | null> {
+  if (!isS3MediaEnabled()) return null;
+  const key = await resolveExistingS3Key(storedUrl);
+  if (!key) return null;
+  try {
+    const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+    const client = await s3Client();
+    const out = await client.send(new GetObjectCommand({ Bucket: s3Bucket(), Key: key }));
+    if (!out.Body) return null;
+    const body = Buffer.from(await out.Body.transformToByteArray());
+    return {
+      body,
+      contentType: out.ContentType || mimeForFile(key),
+      key,
+    };
+  } catch (err) {
+    logger.warn({ err, key }, "S3 GetObject failed");
+    return null;
+  }
+}
+
+export async function getPresignedDownloadUrl(storedUrl: unknown, expiresIn = 3600): Promise<string | null> {
+  if (!isS3MediaEnabled()) return null;
+  const key = await resolveExistingS3Key(storedUrl);
+  if (!key) return null;
+  try {
+    const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+    const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
+    const client = await s3Client();
+    return await getSignedUrl(
+      client,
+      new GetObjectCommand({ Bucket: s3Bucket(), Key: key }),
+      { expiresIn },
+    );
+  } catch (err) {
+    logger.warn({ err, key }, "S3 presigned download failed");
+    return null;
+  }
+}
+
+/** Download S3 object to a local temp path (for ffmpeg thumbnail extraction). */
+export async function downloadS3ObjectToFile(storedUrl: unknown, destPath: string): Promise<boolean> {
+  const fetched = await fetchS3ObjectBytes(storedUrl);
+  if (!fetched) return false;
+  try {
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+    fs.writeFileSync(destPath, fetched.body);
+    return fs.existsSync(destPath) && fs.statSync(destPath).size > 0;
+  } catch (err) {
+    logger.warn({ err, destPath }, "S3 download to file failed");
+    return false;
+  }
+}
+
 function mimeForFile(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === ".mp4" || ext === ".m4v") return "video/mp4";
@@ -170,31 +266,21 @@ export async function pingS3Bucket(): Promise<boolean> {
   }
 }
 
-/** Stream a stored image from S3 through the API (private bucket — no CDN redirect). */
+/** Serve image from S3 via API buffer or presigned redirect (CloudFront is private). */
 export async function serveStoredImageFromS3(res: Response, storedUrl: unknown): Promise<boolean> {
-  if (!isS3MediaEnabled()) return false;
-  const rel = uploadsRelPathFromStoredUrl(storedUrl);
-  if (!rel) return false;
-  const key = uploadsRelToS3Key(rel);
-  try {
-    const { GetObjectCommand } = await import("@aws-sdk/client-s3");
-    const { Readable } = await import("node:stream");
-    const client = await s3Client();
-    const out = await client.send(new GetObjectCommand({ Bucket: s3Bucket(), Key: key }));
-    if (!out.Body) return false;
-    res.setHeader("Content-Type", out.ContentType || mimeForFile(key));
-    res.setHeader("Cache-Control", cacheControlForKey(key));
-    if (out.Body instanceof Readable) {
-      out.Body.pipe(res);
-      return true;
-    }
-    const bytes = await (out.Body as { transformToByteArray(): Promise<Uint8Array> }).transformToByteArray();
-    res.send(Buffer.from(bytes));
+  const fetched = await fetchS3ObjectBytes(storedUrl);
+  if (fetched) {
+    res.setHeader("Content-Type", fetched.contentType);
+    res.setHeader("Cache-Control", cacheControlForKey(fetched.key));
+    res.send(fetched.body);
     return true;
-  } catch (err) {
-    logger.warn({ err, key }, "S3 image serve failed");
-    return false;
   }
+  const signed = await getPresignedDownloadUrl(storedUrl);
+  if (signed) {
+    res.redirect(302, signed);
+    return true;
+  }
+  return false;
 }
 
 /** Redirect to CloudFront/CDN when media is on S3 (or CDN base is configured). */
@@ -265,17 +351,7 @@ export async function createPresignedUploadUrl(
 
 export async function headS3ObjectByUploadsRel(uploadsRel: string): Promise<{ size: number; contentType?: string } | null> {
   if (!isS3MediaEnabled()) return null;
-  const rel = uploadsRelPathFromStoredUrl(uploadsRel);
-  if (!rel) return null;
-  const key = uploadsRelToS3Key(rel);
-  try {
-    const { HeadObjectCommand } = await import("@aws-sdk/client-s3");
-    const client = await s3Client();
-    const out = await client.send(new HeadObjectCommand({ Bucket: s3Bucket(), Key: key }));
-    const size = Number(out.ContentLength ?? 0);
-    if (!Number.isFinite(size) || size <= 0) return null;
-    return { size, contentType: out.ContentType };
-  } catch {
-    return null;
-  }
+  const key = await resolveExistingS3Key(uploadsRel);
+  if (!key) return null;
+  return headS3ObjectByKey(key);
 }

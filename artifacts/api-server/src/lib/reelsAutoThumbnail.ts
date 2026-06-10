@@ -4,7 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { query } from "./db";
 import { localPathForUploadsRel, uploadsRelPathFromStoredUrl } from "./mediaStorage";
-import { uploadLocalFileToS3 } from "./s3Storage";
+import { downloadS3ObjectToFile, uploadLocalFileToS3 } from "./s3Storage";
 
 const execFileAsync = promisify(execFile);
 
@@ -75,6 +75,21 @@ export function localVideoPathFromStoredUrl(videoStoredUrl: unknown, uploadsRoot
   return local;
 }
 
+async function resolveVideoPathForThumbnail(
+  videoStoredUrl: string,
+  videoId: number,
+  uploadsRootDir: string,
+): Promise<string | null> {
+  const local = localVideoPathFromStoredUrl(videoStoredUrl, uploadsRootDir);
+  if (local) return local;
+  const rel = uploadsRelPathFromStoredUrl(videoStoredUrl);
+  if (!rel) return null;
+  const tempName = path.basename(rel) || `video_${videoId}.mp4`;
+  const tempPath = path.join(uploadsRootDir, "reels", "_tmp_thumb", String(videoId), tempName);
+  const ok = await downloadS3ObjectToFile(videoStoredUrl, tempPath);
+  return ok ? tempPath : null;
+}
+
 /** Create thumbnail from video file, save under /uploads/reels/, update DB. Returns relative URL. */
 export async function ensureVideoThumbnail(opts: {
   videoId: number;
@@ -82,7 +97,11 @@ export async function ensureVideoThumbnail(opts: {
   uploadsRootDir: string;
   durationSeconds?: number;
 }): Promise<string | null> {
-  const videoPath = localVideoPathFromStoredUrl(opts.videoStoredUrl, opts.uploadsRootDir);
+  const videoPath = await resolveVideoPathForThumbnail(
+    opts.videoStoredUrl,
+    opts.videoId,
+    opts.uploadsRootDir,
+  );
   if (!videoPath) return null;
 
   const existing = await query(

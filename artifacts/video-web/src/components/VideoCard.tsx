@@ -13,7 +13,16 @@ export function VideoCard({ video }: { video: ReelsVideo }) {
         onClick={() => navigate(`/watch/${video.id}`)}
         onKeyDown={(e) => e.key === "Enter" && navigate(`/watch/${video.id}`)}
       >
-        <img src={videoThumbnailSrc(video)} alt="" loading="lazy" />
+        <img
+          src={videoThumbnailSrc(video)}
+          alt=""
+          loading="lazy"
+          onError={(e) => {
+            const el = e.target as HTMLImageElement;
+            el.onerror = null;
+            el.src = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect fill="#333" width="100%" height="100%"/></svg>')}`;
+          }}
+        />
         <span className="yt-duration">{formatDuration(video.durationSeconds)}</span>
       </div>
       <div className="yt-video-meta">

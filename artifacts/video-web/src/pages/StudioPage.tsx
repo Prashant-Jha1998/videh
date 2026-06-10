@@ -184,7 +184,12 @@ export function StudioPage() {
         <h2>Profile</h2>
         <div className="studio-avatar-row">
           {avatarSrc ? (
-            <img src={avatarSrc} alt="" className="studio-avatar-preview" />
+            <img
+              src={avatarSrc}
+              alt=""
+              className="studio-avatar-preview"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
           ) : (
             <span className="studio-avatar-preview studio-avatar-empty">?</span>
           )}
