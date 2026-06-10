@@ -1,4 +1,20 @@
--- Videh Creator Program: 500 subscribers + 2,000 watch hours (half of typical 1k/4k tiers).
+-- Videh Creator Program: 500 subscribers + 2,000 watch hours.
+-- Run on the SAME database as Videh API (DATABASE_URL), not the default "postgres" DB.
+-- Quick check first:
+--   SELECT table_name FROM information_schema.tables
+--   WHERE table_schema = 'public' AND table_name IN ('users', 'reels_channels', 'reels_platform_config');
+
+CREATE TABLE IF NOT EXISTS reels_platform_config (
+  id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by TEXT
+);
+
+INSERT INTO reels_platform_config (id, config)
+VALUES (1, '{}'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+
 UPDATE reels_platform_config
 SET config = config
   || jsonb_build_object(
