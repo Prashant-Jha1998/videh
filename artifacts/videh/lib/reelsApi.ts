@@ -48,7 +48,13 @@ export type ReelsPlaylist = {
 };
 
 export type ReelsPublicRules = {
-  monetization: { rules: string[]; revenueSharePercent: number };
+  monetization: {
+    rules: string[];
+    revenueSharePercent: number;
+    minSubscribers: number;
+    minWatchHours: number;
+    minPublicVideos: number;
+  };
   playButton: { rules: string[] };
   feed: { rules: string[] };
   contentModeration?: { rules: string[] };

@@ -103,18 +103,18 @@ export type ReelsPlatformConfig = {
 
 export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
   monetization: {
-    minSubscribers: 1000,
-    minWatchHours: 4000,
+    minSubscribers: 500,
+    minWatchHours: 2000,
     minPublicVideos: 5,
     maxFraudScore: 25,
     revenueSharePercent: 35,
     requireGoodStanding: true,
     summary: [
-      "At least 1,000 subscribers on your channel",
-      "At least 4,000 valid watch hours in the last 12 months",
+      "At least 500 subscribers on your channel",
+      "At least 2,000 valid watch hours in the last 12 months",
       "At least 5 public videos on your channel",
       "Channel in good standing (low fraud score, no policy strikes)",
-      "YouTube Partner Program–style review may apply before ads run",
+      "Videh may review your channel before ads run on your videos",
     ],
   },
   playButton: {
@@ -126,7 +126,7 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
       "Play is available when the video is published and not removed",
       "Views count only after the viewer watches at least 30 seconds",
       "Videos with very high fraud scores may be blocked from playback",
-      "Monetized playback follows the same eligibility rules as the Partner Program",
+      "Monetized playback follows the same eligibility rules as the Videh Creator Program",
     ],
   },
   fraud: {
@@ -271,6 +271,9 @@ export function publicReelsRules(config: ReelsPlatformConfig) {
     monetization: {
       rules: config.monetization.summary,
       revenueSharePercent: config.monetization.revenueSharePercent,
+      minSubscribers: config.monetization.minSubscribers,
+      minWatchHours: config.monetization.minWatchHours,
+      minPublicVideos: config.monetization.minPublicVideos,
     },
     playButton: { rules: config.playButton.summary },
     feed: { rules: config.feed.summary },

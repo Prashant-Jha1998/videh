@@ -23,12 +23,13 @@ import {
   CHANNEL_COVER_ASPECT,
   CHANNEL_COVER_HINT,
   fetchMyReelsChannel,
+  formatViewCount,
   prepareChannelAvatar,
   prepareChannelCover,
   updateChannelLinks,
   updateChannelProfile,
 } from "@/lib/reelsApi";
-import type { ReelsChannelLink } from "@/lib/reelsApi";
+import type { ReelsChannel, ReelsChannelLink, ReelsMonetizationStatus, ReelsPublicRules } from "@/lib/reelsApi";
 
 export default function ReelsChannelEditScreen() {
   const colors = useColors();
@@ -48,6 +49,9 @@ export default function ReelsChannelEditScreen() {
   const [preparingCover, setPreparingCover] = useState(false);
   const [links, setLinks] = useState<{ title: string; url: string }[]>([]);
   const [savingLinks, setSavingLinks] = useState(false);
+  const [channelStats, setChannelStats] = useState<ReelsChannel | null>(null);
+  const [monetization, setMonetization] = useState<ReelsMonetizationStatus | null>(null);
+  const [platformRules, setPlatformRules] = useState<ReelsPublicRules | null>(null);
 
   useEffect(() => {
     if (!user?.dbId) return;
@@ -66,6 +70,9 @@ export default function ReelsChannelEditScreen() {
       setExistingAvatar(res.channel.avatarUrl);
       setExistingCover(res.channel.coverUrl ?? null);
       setLinks((res.links ?? []).map((l: ReelsChannelLink) => ({ title: l.title, url: l.url })));
+      setChannelStats(res.channel);
+      setMonetization(res.monetization ?? null);
+      setPlatformRules(res.rules ?? null);
       setLoading(false);
     });
   }, [user?.dbId, user?.sessionToken, router]);
@@ -246,7 +253,7 @@ export default function ReelsChannelEditScreen() {
 
       <Text style={[styles.label, { color: colors.foreground }]}>Username (@handle)</Text>
       <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-        Permanent ID — cannot be changed after creation (like a YouTube @username)
+        Permanent ID — cannot be changed after your channel is created
       </Text>
       <View style={[styles.readOnly, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold" }}>@{handle}</Text>
@@ -278,7 +285,7 @@ export default function ReelsChannelEditScreen() {
 
       <Text style={[styles.label, { color: colors.foreground }]}>Links</Text>
       <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-        App, website, and social links — shown to viewers in the About section (like YouTube)
+        App, website, and social links — shown to viewers in your channel About section
       </Text>
       {links.map((link, index) => (
         <View key={index} style={[styles.linkCard, { borderColor: colors.border }]}>
@@ -323,6 +330,76 @@ export default function ReelsChannelEditScreen() {
         )}
       </TouchableOpacity>
 
+      {platformRules?.monetization ? (
+        <View style={[styles.monetCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+          <Text style={[styles.label, { color: colors.foreground, marginTop: 0 }]}>Monetization</Text>
+          <Text style={[styles.hint, { color: colors.mutedForeground, marginBottom: 12 }]}>
+            Earn ad revenue when your channel qualifies for the Videh Creator Program.
+            {" "}
+            You keep {platformRules.monetization.revenueSharePercent}% of eligible ad revenue.
+          </Text>
+          <MonetProgressRow
+            label="Subscribers"
+            current={channelStats?.subscriberCount ?? 0}
+            goal={platformRules.monetization.minSubscribers}
+            colors={colors}
+          />
+          <MonetProgressRow
+            label="Watch hours (last 12 months)"
+            current={channelStats?.totalViewHours ?? 0}
+            goal={platformRules.monetization.minWatchHours}
+            colors={colors}
+            decimals
+          />
+          <MonetProgressRow
+            label="Public videos"
+            current={channelStats?.videoCount ?? 0}
+            goal={platformRules.monetization.minPublicVideos}
+            colors={colors}
+          />
+          <Text style={[styles.monetRulesTitle, { color: colors.foreground }]}>Program rules</Text>
+          {platformRules.monetization.rules.map((rule) => (
+            <Text key={rule} style={[styles.monetRule, { color: colors.mutedForeground }]}>
+              • {rule}
+            </Text>
+          ))}
+          <View
+            style={[
+              styles.monetStatus,
+              {
+                backgroundColor: monetization?.eligible
+                  ? "rgba(34, 197, 94, 0.12)"
+                  : "rgba(234, 179, 8, 0.12)",
+              },
+            ]}
+          >
+            <Ionicons
+              name={monetization?.eligible ? "checkmark-circle" : "time-outline"}
+              size={18}
+              color={monetization?.eligible ? "#16a34a" : "#ca8a04"}
+            />
+            <Text
+              style={{
+                color: monetization?.eligible ? "#16a34a" : "#a16207",
+                fontFamily: "Inter_600SemiBold",
+                flex: 1,
+              }}
+            >
+              {monetization?.eligible
+                ? "Eligible for monetization"
+                : monetization?.status === "suspended"
+                  ? "Monetization suspended"
+                  : "Not eligible yet"}
+            </Text>
+          </View>
+          {!monetization?.eligible && monetization?.reasons?.length ? (
+            <Text style={[styles.monetHint, { color: colors.mutedForeground }]}>
+              {monetization.reasons.join(" · ")}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
       <TouchableOpacity
         style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: busy ? 0.6 : 1 }]}
         onPress={save}
@@ -331,6 +408,39 @@ export default function ReelsChannelEditScreen() {
         {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Save changes</Text>}
       </TouchableOpacity>
     </KeyboardAwareScrollViewCompat>
+  );
+}
+
+function MonetProgressRow({
+  label,
+  current,
+  goal,
+  colors,
+  decimals,
+}: {
+  label: string;
+  current: number;
+  goal: number;
+  colors: ReturnType<typeof useColors>;
+  decimals?: boolean;
+}) {
+  const pct = goal > 0 ? Math.min(100, (current / goal) * 100) : 0;
+  const currentLabel = decimals
+    ? current.toFixed(1)
+    : formatViewCount(current);
+  const goalLabel = decimals ? goal.toLocaleString() : formatViewCount(goal);
+  return (
+    <View style={styles.monetRow}>
+      <View style={styles.monetRowHead}>
+        <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: "Inter_500Medium" }}>{label}</Text>
+        <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+          {currentLabel} / {goalLabel}
+        </Text>
+      </View>
+      <View style={[styles.monetTrack, { backgroundColor: colors.border }]}>
+        <View style={[styles.monetFill, { width: `${pct}%`, backgroundColor: colors.primary }]} />
+      </View>
+    </View>
   );
 }
 
@@ -382,4 +492,20 @@ const styles = StyleSheet.create({
   },
   saveBtn: { marginTop: 28, paddingVertical: 14, borderRadius: 28, alignItems: "center" },
   saveText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 16 },
+  monetCard: { borderWidth: 1, borderRadius: 12, padding: 14, marginTop: 20 },
+  monetRow: { marginBottom: 12 },
+  monetRowHead: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
+  monetTrack: { height: 6, borderRadius: 3, overflow: "hidden" },
+  monetFill: { height: "100%", borderRadius: 3 },
+  monetRulesTitle: { fontFamily: "Inter_600SemiBold", fontSize: 13, marginTop: 4, marginBottom: 6 },
+  monetRule: { fontSize: 12, lineHeight: 18, marginBottom: 2 },
+  monetStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  monetHint: { fontSize: 11, lineHeight: 16, marginTop: 8 },
 });

@@ -141,7 +141,7 @@ export default function ReelsChannelScreen() {
     if (!user?.dbId || !channel?.isOwner) return;
     const trimmed = newPlaylistTitle.trim();
     if (!trimmed) {
-      Alert.alert("Title", "Playlist ka naam likhein.");
+      Alert.alert("Title", "Enter a playlist name.");
       return;
     }
     setCreatingPlaylist(true);
