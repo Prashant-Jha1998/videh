@@ -48,6 +48,8 @@ export type ReelsNotificationRules = {
 export type ReelsContentModerationRules = {
   enabled: boolean;
   nsfwBlockThreshold: number;
+  /** Scores at or above this (but below block threshold) go to admin review only. */
+  manualReviewMinScore: number;
   requireThumbnail: boolean;
   blockWithoutVisionApi: boolean;
   syncVideoScanMaxSeconds: number;
@@ -158,14 +160,15 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
   contentModeration: {
     enabled: true,
     nsfwBlockThreshold: 0.55,
+    manualReviewMinScore: 0.38,
     requireThumbnail: true,
-    blockWithoutVisionApi: true, // queue for admin manual approve until Vision API keys are set
+    blockWithoutVisionApi: false,
     syncVideoScanMaxSeconds: 60,
     summary: [
-      "Every video is automatically scanned for nudity and sexual content before it goes public",
-      "Thumbnails and video frames are checked with AI vision",
-      "Sexual, nude, or adult content is blocked and cannot be published",
-      "Longer videos may take a few minutes to review — you will be notified when live",
+      "Clean videos publish automatically after upload",
+      "Only suspicious or borderline content is sent to Videh admin for review",
+      "Sexual, nude, or adult content is blocked automatically",
+      "Videh admins can review and block any published video at any time",
       "Repeated policy violations may suspend your channel",
     ],
   },

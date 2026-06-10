@@ -256,21 +256,18 @@ export async function moderateReelsUpload(opts: {
         details,
       };
     }
-  } else if (cm.requireThumbnail) {
-    const hasRecordedThumb = Boolean(String(opts.thumbnailUrl ?? "").trim());
+  } else if (cm.requireThumbnail && !String(opts.thumbnailUrl ?? "").trim()) {
     return {
       action: "pending",
-      reason: hasRecordedThumb
-        ? "Queued for manual safety review."
-        : "Video is under safety review. It will go public when approved.",
+      reason: "Missing thumbnail — queued for admin review.",
       nsfwScore: 0,
-      details: {
-        ...details,
-        thumbnail: { skipped: true, note: hasRecordedThumb ? "s3_or_scan_pending" : "auto_thumbnail_pending" },
-      },
+      details: { ...details, thumbnail: { skipped: true, note: "missing_thumbnail" } },
     };
+  } else if (!opts.thumbnailPath && String(opts.thumbnailUrl ?? "").trim()) {
+    details.thumbnail = { skipped: true, note: "cdn_only_no_local_scan" };
   }
 
+  const reviewMin = cm.manualReviewMinScore ?? 0.38;
   const hasVision = Boolean(process.env.GOOGLE_VISION_API_KEY?.trim() || process.env.SIGHTENGINE_API_USER?.trim());
   if (!hasVision && cm.blockWithoutVisionApi) {
     return {
@@ -295,14 +292,25 @@ export async function moderateReelsUpload(opts: {
         details,
       };
     }
-    if (videoScan.pending || opts.durationSeconds > cm.syncVideoScanMaxSeconds) {
+    const longVideo = opts.durationSeconds > cm.syncVideoScanMaxSeconds;
+    const borderlineVideo = videoScan.score >= reviewMin;
+    if (videoScan.pending && (longVideo || borderlineVideo)) {
       return {
         action: "pending",
-        reason: "Video is being scanned for nudity and sexual content. It will appear when approved.",
+        reason: "Flagged for manual review (long or borderline safety scan).",
         nsfwScore: maxScore,
         details,
       };
     }
+  }
+
+  if (maxScore >= reviewMin && maxScore < threshold) {
+    return {
+      action: "pending",
+      reason: "Borderline safety score — admin review required.",
+      nsfwScore: maxScore,
+      details,
+    };
   }
 
   return { action: "approve", nsfwScore: maxScore, details };

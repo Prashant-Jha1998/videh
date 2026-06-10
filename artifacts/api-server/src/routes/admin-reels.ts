@@ -170,6 +170,68 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
     }
   });
 
+  router.get("/reels/videos", requireAdmin, requireAnyPermission("reels.read", "moderation.read"), async (req, res) => {
+    const q = String(req.query.q ?? "").trim();
+    const channel = String(req.query.channel ?? "").trim().replace(/^@/, "");
+    const status = String(req.query.status ?? "all").trim();
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    try {
+      await ensureReelsModerationColumns();
+      const params: unknown[] = [];
+      let where = "1=1";
+      let idx = 1;
+
+      if (status === "published") {
+        where += " AND v.status = 'published' AND v.moderation_status = 'approved'";
+      } else if (status === "pending") {
+        where += " AND (v.status = 'pending_review' OR v.moderation_status IN ('pending_scan', 'pending_review'))";
+      } else if (status === "blocked") {
+        where += " AND (v.moderation_status = 'rejected' OR v.status = 'removed')";
+      }
+
+      if (channel) {
+        where += ` AND LOWER(c.handle) = LOWER($${idx++})`;
+        params.push(channel);
+      }
+      if (q) {
+        where += ` AND (LOWER(v.title) LIKE $${idx} OR CAST(v.id AS TEXT) = $${idx + 1})`;
+        params.push(`%${q.toLowerCase()}%`, q);
+        idx += 2;
+      }
+
+      params.push(limit, offset);
+      const r = await query(
+        `SELECT v.id, v.title, v.description, v.duration_seconds, v.status, v.moderation_status,
+                v.moderation_reason, v.nsfw_score, v.thumbnail_url, v.video_url, v.view_count, v.created_at,
+                c.handle AS channel_handle, c.user_id, c.id AS channel_id
+         FROM reels_videos v
+         JOIN reels_channels c ON c.id = v.channel_id
+         WHERE ${where}
+         ORDER BY v.created_at DESC
+         LIMIT $${idx++} OFFSET $${idx}`,
+        params,
+      );
+      const countParams = params.slice(0, -2);
+      const total = await query(
+        `SELECT COUNT(*)::int AS total
+         FROM reels_videos v
+         JOIN reels_channels c ON c.id = v.channel_id
+         WHERE ${where}`,
+        countParams,
+      );
+      res.json({
+        success: true,
+        videos: r.rows.map((row) => mapModerationQueueRow(req, row as Record<string, unknown>)),
+        total: Number((total.rows[0] as { total?: number })?.total ?? 0),
+        limit,
+        offset,
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, message: "Video list failed" });
+    }
+  });
+
   router.get("/reels/moderation-queue", requireAdmin, requireAnyPermission("reels.read", "moderation.read"), async (req, res) => {
     const limit = Math.min(200, Number(req.query.limit) || 50);
     const status = String(req.query.status ?? "pending").trim();
@@ -324,6 +386,38 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ success: false, message: "Reject failed" });
+    }
+  });
+
+  /** Block a published video at any time (same as reject — removes from public feed). */
+  router.post("/reels/videos/:videoId/block", requireAdmin, requireAnyPermission("reels.manage", "moderation.manage"), async (req, res) => {
+    const videoId = Number(req.params.videoId);
+    const { reason } = req.body as { reason?: string };
+    try {
+      const meta = await query(
+        `SELECT v.title, c.handle FROM reels_videos v
+         JOIN reels_channels c ON c.id = v.channel_id WHERE v.id = $1`,
+        [videoId],
+      );
+      if (!meta.rows.length) {
+        res.status(404).json({ success: false, message: "Video not found" });
+        return;
+      }
+      await applyVideoModerationResult(videoId, {
+        action: "reject",
+        reason: reason?.trim() || "Blocked by Videh admin",
+        nsfwScore: 1,
+        details: { manual: true, blockedAfterPublish: true },
+      });
+      await logAdminAction({
+        action: "reels_video_block",
+        entityType: "reels_video",
+        entityId: videoId,
+        metadata: { reason, title: meta.rows[0].title, channel: meta.rows[0].handle },
+      }, req);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ success: false, message: "Block failed" });
     }
   });
 

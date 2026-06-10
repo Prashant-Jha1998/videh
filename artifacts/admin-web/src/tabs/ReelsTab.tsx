@@ -77,7 +77,9 @@ type ReelsConfig = {
   contentModeration?: {
     enabled: boolean;
     nsfwBlockThreshold: number;
+    manualReviewMinScore?: number;
     requireThumbnail: boolean;
+    blockWithoutVisionApi?: boolean;
     summary: string[];
   };
 };
@@ -172,6 +174,7 @@ type ModerationVideo = {
   file_on_server?: boolean;
   channel_handle: string;
   user_id: number;
+  view_count?: number;
   created_at: string;
 };
 
@@ -183,7 +186,12 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [moderationQueue, setModerationQueue] = useState<ModerationVideo[]>([]);
-  const [subTab, setSubTab] = useState<"channels" | "rules" | "fraud" | "moderation" | "ads_overview" | "ads">("channels");
+  const [allVideos, setAllVideos] = useState<ModerationVideo[]>([]);
+  const [allVideosTotal, setAllVideosTotal] = useState(0);
+  const [videoSearch, setVideoSearch] = useState("");
+  const [videoChannel, setVideoChannel] = useState("");
+  const [videoStatusFilter, setVideoStatusFilter] = useState<"all" | "published" | "pending" | "blocked">("all");
+  const [subTab, setSubTab] = useState<"channels" | "all_videos" | "rules" | "fraud" | "moderation" | "ads_overview" | "ads">("channels");
   const [adReviewQueue, setAdReviewQueue] = useState<AdReviewCreative[]>([]);
   const [adsOverview, setAdsOverview] = useState<AdsPlatformOverview | null>(null);
   const [previewVideo, setPreviewVideo] = useState<ModerationVideo | null>(null);
@@ -198,7 +206,11 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
 
   const load = useCallback(async () => {
     onErr(null);
-    const [st, ch, fe, cfg, mq, aq, ao] = await Promise.all([
+    const videoQs = new URLSearchParams({ limit: "80", offset: "0", status: videoStatusFilter });
+    if (videoSearch.trim()) videoQs.set("q", videoSearch.trim());
+    if (videoChannel.trim()) videoQs.set("channel", videoChannel.trim().replace(/^@/, ""));
+
+    const [st, ch, fe, cfg, mq, av, aq, ao] = await Promise.all([
       adminApi<{ success: boolean; stats: ReelsStats }>("/admin/reels/stats"),
       adminApi<{ success: boolean; channels: ReelsChannel[] }>(
         `/admin/reels/channels?limit=100${search ? `&q=${encodeURIComponent(search)}` : ""}`,
@@ -206,6 +218,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
       adminApi<{ success: boolean; events: FraudEvent[] }>("/admin/reels/fraud-events?limit=50"),
       adminApi<{ success: boolean; config: ReelsConfig }>("/admin/reels/config"),
       adminApi<{ success: boolean; videos: ModerationVideo[] }>("/admin/reels/moderation-queue?limit=80"),
+      adminApi<{ success: boolean; videos: ModerationVideo[]; total: number }>(`/admin/reels/videos?${videoQs}`),
       adminApi<{ success: boolean; creatives: AdReviewCreative[] }>("/admin/reels/ads/review-queue?limit=80"),
       adminApi<{ success: boolean; overview: AdsPlatformOverview }>("/admin/reels/ads/platform-overview"),
     ]);
@@ -214,9 +227,11 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
     setFraudEvents(fe.events ?? []);
     setConfig(cfg.config);
     setModerationQueue(mq.videos ?? []);
+    setAllVideos(av.videos ?? []);
+    setAllVideosTotal(av.total ?? 0);
     setAdReviewQueue(aq.creatives ?? []);
     setAdsOverview(ao.overview ?? null);
-  }, [search, onErr]);
+  }, [search, videoSearch, videoChannel, videoStatusFilter, onErr]);
 
   useEffect(() => {
     void load().catch((e) => onErr(e instanceof Error ? e.message : "Load failed"));
@@ -342,6 +357,34 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
     }
   };
 
+  const blockVideo = async (id: number, title: string) => {
+    if (!window.confirm(`Block "${title}"? It will be removed from public feed immediately.`)) return;
+    const reason = window.prompt("Block reason (optional)", "Blocked by Videh admin") ?? "Blocked by Videh admin";
+    try {
+      await adminApi(`/admin/reels/videos/${id}/block`, { method: "POST", body: JSON.stringify({ reason }) });
+      alert("Video blocked.");
+      closePreview();
+      await load();
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : "Block failed");
+    }
+  };
+
+  const openChannelVideos = (handle: string) => {
+    setVideoChannel(handle);
+    setVideoStatusFilter("all");
+    setSubTab("all_videos");
+  };
+
+  const videoStatusLabel = (v: ModerationVideo) => {
+    if (v.moderation_status === "rejected" || v.status === "removed") return "blocked";
+    if (v.status === "pending_review" || v.moderation_status === "pending_scan" || v.moderation_status === "pending_review") {
+      return "pending";
+    }
+    if (v.status === "published" && v.moderation_status === "approved") return "published";
+    return v.status || v.moderation_status;
+  };
+
   const approveAd = async (id: number, title: string) => {
     if (!confirm(`Approve ad "${title}" for public display?`)) return;
     try {
@@ -446,6 +489,9 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
           <button type="button" className={subTab === "channels" ? "active" : ""} onClick={() => setSubTab("channels")}>
             Channels
           </button>
+          <button type="button" className={subTab === "all_videos" ? "active" : ""} onClick={() => setSubTab("all_videos")}>
+            All videos
+          </button>
           <button type="button" className={subTab === "rules" ? "active" : ""} onClick={() => setSubTab("rules")}>
             Rules
           </button>
@@ -453,7 +499,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
             Fraud
           </button>
           <button type="button" className={subTab === "moderation" ? "active" : ""} onClick={() => setSubTab("moderation")}>
-            NSFW queue{moderationQueue.length > 0 ? ` (${moderationQueue.length})` : ""}
+            Review queue{moderationQueue.length > 0 ? ` (${moderationQueue.length})` : ""}
           </button>
           <button type="button" className={subTab === "ads_overview" ? "active" : ""} onClick={() => setSubTab("ads_overview")}>
             Ads overview
@@ -508,7 +554,9 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
                 {channels.map((c) => (
                   <tr key={c.id}>
                     <td className="channel-cell">
-                      <strong>@{c.handle}</strong>
+                      <button type="button" className="linkish" onClick={() => openChannelVideos(c.handle)}>
+                        <strong>@{c.handle}</strong>
+                      </button>
                       <div className="muted">{c.owner_name ?? "—"}</div>
                     </td>
                     <td>{c.user_id}</td>
@@ -526,6 +574,105 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
               </tbody>
             </table>
             {channels.length === 0 ? <p className="admin-empty">No channels match your search.</p> : null}
+          </div>
+        </div>
+      ) : null}
+
+      {subTab === "all_videos" ? (
+        <div className="admin-card">
+          <div className="admin-alert" style={{ marginBottom: 14 }}>
+            <strong>Browse &amp; block any video</strong>
+            <p>Review any channel&apos;s videos at any time. Block removes it from the public feed immediately.</p>
+          </div>
+          <div className="admin-card__toolbar">
+            <input
+              className="search-input"
+              placeholder="Search title or video id…"
+              value={videoSearch}
+              onChange={(e) => setVideoSearch(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void load()}
+            />
+            <input
+              className="search-input"
+              placeholder="Channel @handle"
+              value={videoChannel}
+              onChange={(e) => setVideoChannel(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void load()}
+            />
+            <select
+              className="search-input"
+              value={videoStatusFilter}
+              onChange={(e) => setVideoStatusFilter(e.target.value as typeof videoStatusFilter)}
+            >
+              <option value="all">All statuses</option>
+              <option value="published">Published</option>
+              <option value="pending">Pending review</option>
+              <option value="blocked">Blocked</option>
+            </select>
+            <button type="button" className="btn-sm btn-sm-primary" onClick={() => void load()}>
+              Search
+            </button>
+            <span className="dev-count">{allVideosTotal.toLocaleString()} videos</span>
+          </div>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Video</th>
+                  <th>Channel</th>
+                  <th>Views</th>
+                  <th>Duration</th>
+                  <th>Status</th>
+                  <th>Uploaded</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allVideos.map((v) => {
+                  const st = videoStatusLabel(v);
+                  const isPending = st === "pending";
+                  const isBlocked = st === "blocked";
+                  return (
+                    <tr key={v.id}>
+                      <td>
+                        <strong>{v.title}</strong>
+                        <div className="muted">#{v.id}</div>
+                      </td>
+                      <td>@{v.channel_handle}</td>
+                      <td>{Number(v.view_count ?? 0).toLocaleString()}</td>
+                      <td>{v.duration_seconds ? `${v.duration_seconds}s` : "—"}</td>
+                      <td>
+                        <span className={`badge-pill ${isBlocked ? "badge-pill--danger" : isPending ? "badge-pill--warn" : "badge-pill--ok"}`}>
+                          {st}
+                        </span>
+                      </td>
+                      <td>{fmtDate(v.created_at)}</td>
+                      <td>
+                        <div className="action-btns">
+                          <button type="button" className="btn-sm" onClick={() => openPreview(v)}>Preview</button>
+                          {isPending ? (
+                            <button
+                              type="button"
+                              className="btn-sm btn-sm-primary"
+                              disabled={!previewReadyIds.has(v.id)}
+                              onClick={() => void approveVideo(v.id, v.title)}
+                            >
+                              Approve
+                            </button>
+                          ) : null}
+                          {!isBlocked ? (
+                            <button type="button" className="btn-sm btn-sm-danger" onClick={() => void blockVideo(v.id, v.title)}>
+                              Block
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {allVideos.length === 0 ? <p className="admin-empty">No videos match your filters.</p> : null}
           </div>
         </div>
       ) : null}
@@ -595,7 +742,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
             Auto-scan videos before publish
           </label>
           <label style={{ marginTop: 10 }}>
-            Block threshold (0–1)
+            Auto-block threshold (0–1)
             <input
               type="number"
               step="0.05"
@@ -608,11 +755,54 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
                   ...config.contentModeration!,
                   enabled: config.contentModeration?.enabled ?? true,
                   nsfwBlockThreshold: Number(e.target.value),
+                  manualReviewMinScore: config.contentModeration?.manualReviewMinScore ?? 0.38,
                   requireThumbnail: config.contentModeration?.requireThumbnail ?? true,
+                  blockWithoutVisionApi: config.contentModeration?.blockWithoutVisionApi ?? false,
                   summary: config.contentModeration?.summary ?? [],
                 },
               })}
             />
+          </label>
+          <label style={{ marginTop: 10 }}>
+            Manual review threshold (0–1) — only scores in this band go to admin
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={config.contentModeration?.manualReviewMinScore ?? 0.38}
+              onChange={(e) => setConfig({
+                ...config,
+                contentModeration: {
+                  ...config.contentModeration!,
+                  enabled: config.contentModeration?.enabled ?? true,
+                  nsfwBlockThreshold: config.contentModeration?.nsfwBlockThreshold ?? 0.55,
+                  manualReviewMinScore: Number(e.target.value),
+                  requireThumbnail: config.contentModeration?.requireThumbnail ?? true,
+                  blockWithoutVisionApi: config.contentModeration?.blockWithoutVisionApi ?? false,
+                  summary: config.contentModeration?.summary ?? [],
+                },
+              })}
+            />
+          </label>
+          <label style={{ marginTop: 10 }}>
+            <input
+              type="checkbox"
+              checked={config.contentModeration?.blockWithoutVisionApi ?? false}
+              onChange={(e) => setConfig({
+                ...config,
+                contentModeration: {
+                  ...config.contentModeration!,
+                  enabled: config.contentModeration?.enabled ?? true,
+                  nsfwBlockThreshold: config.contentModeration?.nsfwBlockThreshold ?? 0.55,
+                  manualReviewMinScore: config.contentModeration?.manualReviewMinScore ?? 0.38,
+                  requireThumbnail: config.contentModeration?.requireThumbnail ?? true,
+                  blockWithoutVisionApi: e.target.checked,
+                  summary: config.contentModeration?.summary ?? [],
+                },
+              })}
+            />
+            Queue all uploads when Vision API is not configured (off = auto-publish clean videos)
           </label>
           <p className="muted" style={{ marginTop: 10 }}>
             Set GOOGLE_VISION_API_KEY and/or SIGHTENGINE credentials on the API server for AI vision scans.
@@ -648,10 +838,10 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
       {subTab === "moderation" ? (
         <>
           <div className="admin-alert">
-            <strong>Manual approval — watch first, then approve</strong>
+            <strong>Suspicious videos only — watch first, then approve</strong>
             <p>
-              For each pending video, tap <strong>Preview</strong> and watch at least {MIN_PREVIEW_SEC}s.
-              Only then will <strong>Approve</strong> become available.
+              Clean uploads publish automatically. Only flagged videos appear here.
+              Watch at least {MIN_PREVIEW_SEC}s in <strong>Preview</strong> before approving.
             </p>
           </div>
           <div className="admin-card">
@@ -774,6 +964,11 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
                     <button type="button" className="btn-sm btn-sm-danger" onClick={() => void rejectVideo(previewVideo.id)}>
                       Reject
                     </button>
+                    {videoStatusLabel(previewVideo) !== "blocked" ? (
+                      <button type="button" className="btn-sm btn-sm-danger" onClick={() => void blockVideo(previewVideo.id, previewVideo.title)}>
+                        Block
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>
