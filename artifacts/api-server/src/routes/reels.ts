@@ -1215,6 +1215,7 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
       description,
       hashtags,
       thumbnailPath: thumbPath,
+      thumbnailUrl,
       videoPublicUrl: videoUrl,
       durationSeconds,
     });

@@ -212,6 +212,8 @@ export async function moderateReelsUpload(opts: {
   description: string;
   hashtags: string[];
   thumbnailPath?: string | null;
+  /** DB-stored thumbnail URL — counts as present even when local file was moved to S3. */
+  thumbnailUrl?: string | null;
   videoPublicUrl: string;
   durationSeconds: number;
 }): Promise<ModerationScanResult> {
@@ -255,11 +257,17 @@ export async function moderateReelsUpload(opts: {
       };
     }
   } else if (cm.requireThumbnail) {
+    const hasRecordedThumb = Boolean(String(opts.thumbnailUrl ?? "").trim());
     return {
-      action: "reject",
-      reason: "Thumbnail is required for content safety review.",
+      action: "pending",
+      reason: hasRecordedThumb
+        ? "Queued for manual safety review."
+        : "Video is under safety review. It will go public when approved.",
       nsfwScore: 0,
-      details,
+      details: {
+        ...details,
+        thumbnail: { skipped: true, note: hasRecordedThumb ? "s3_or_scan_pending" : "auto_thumbnail_pending" },
+      },
     };
   }
 

@@ -58,6 +58,7 @@ export async function processPendingReelsModeration(limit = 10): Promise<number>
       description: String(row.description ?? ""),
       hashtags: Array.isArray(row.hashtags) ? row.hashtags.map(String) : [],
       thumbnailPath: thumbPath,
+      thumbnailUrl: thumbUrl,
       videoPublicUrl: String(row.video_url ?? ""),
       durationSeconds: Number(row.duration_seconds ?? 0),
     });
