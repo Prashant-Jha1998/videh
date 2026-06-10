@@ -53,6 +53,28 @@ export type ReelsComment = {
 
 export type ReelsFeedCursor = { at: string; id: number };
 
+export type ReelsFeedAd = {
+  id: number;
+  format: "video" | "image" | "app_install" | "shopping";
+  title: string;
+  headline: string;
+  description: string;
+  imageUrl: string | null;
+  videoUrl: string | null;
+  ctaType: string;
+  destinationUrl: string | null;
+  playStoreUrl: string | null;
+  appStoreUrl: string | null;
+  appName: string | null;
+  advertiserName: string;
+  sponsoredLabel: string;
+};
+
+export type ReelsFeedAdPlacement = {
+  insertAfterIndex: number;
+  ad: ReelsFeedAd;
+};
+
 /** Rewrite API host to current site so thumbnails work on video.videh.co.in. */
 function rewriteApiHost(url: string): string {
   try {
@@ -67,7 +89,7 @@ function rewriteApiHost(url: string): string {
   return url;
 }
 
-function normalizeUrl(url?: string | null): string | null {
+export function normalizeUrl(url?: string | null): string | null {
   const raw = String(url ?? "").trim();
   if (!raw) return null;
   if (/^https?:\/\//i.test(raw)) return rewriteApiHost(raw);
@@ -236,6 +258,14 @@ export async function updateChannelProfile(
   return res;
 }
 
+function normalizeFeedAd(ad: ReelsFeedAd): ReelsFeedAd {
+  return {
+    ...ad,
+    imageUrl: normalizeUrl(ad.imageUrl),
+    videoUrl: normalizeUrl(ad.videoUrl),
+  };
+}
+
 export async function fetchFeed(userId: number, cursor?: ReelsFeedCursor | null, token?: string | null) {
   const c = cursor ? `&cursorAt=${encodeURIComponent(cursor.at)}&cursorId=${cursor.id}` : "";
   const res = await reelsFetch<{
@@ -243,10 +273,52 @@ export async function fetchFeed(userId: number, cursor?: ReelsFeedCursor | null,
     videos: ReelsVideo[];
     trending?: ReelsVideo[];
     nextCursor: ReelsFeedCursor | null;
+    feedAdPlacements?: ReelsFeedAdPlacement[];
   }>(`/feed?userId=${userId}&limit=20${c}`, { token });
   res.videos = (res.videos ?? []).map(normalizeVideo);
   if (res.trending) res.trending = res.trending.map(normalizeVideo);
+  if (res.feedAdPlacements) {
+    res.feedAdPlacements = res.feedAdPlacements.map((p) => ({
+      ...p,
+      ad: normalizeFeedAd(p.ad),
+    }));
+  }
   return res;
+}
+
+export async function recordReelsAdImpression(
+  opts: {
+    creativeId: number;
+    contentVideoId: number;
+    userId: number;
+    placement: string;
+    watchedSeconds: number;
+    skipped: boolean;
+    completed: boolean;
+  },
+  token?: string | null,
+) {
+  return reelsFetch<{ success: boolean }>("/ads/impression", {
+    method: "POST",
+    token,
+    body: opts,
+  });
+}
+
+export async function recordReelsAdClick(
+  opts: {
+    creativeId: number;
+    userId: number;
+    placement: string;
+    clickTarget: "cta" | "play_store" | "app_store" | "destination";
+  },
+  token?: string | null,
+) {
+  return reelsFetch<{ success: boolean }>("/ads/click", {
+    method: "POST",
+    token,
+    body: opts,
+  });
 }
 
 export async function searchReels(q: string, userId: number, token?: string | null) {
