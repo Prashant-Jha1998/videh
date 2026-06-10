@@ -107,7 +107,6 @@ export default function ReelsWatchScreen() {
   const [subscribed, setSubscribed] = useState(false);
   const [related, setRelated] = useState<ReelsVideo[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [metaRefreshing, setMetaRefreshing] = useState(false);
   const [playAllowed, setPlayAllowed] = useState(true);
   const [playBlockReasons, setPlayBlockReasons] = useState<string[]>([]);
   const [descOpen, setDescOpen] = useState(false);
@@ -273,11 +272,9 @@ export default function ReelsWatchScreen() {
     }
 
     setInitialLoading(false);
-    setMetaRefreshing(false);
   }, [id, user?.dbId, user?.sessionToken]);
 
   useEffect(() => {
-    setMetaRefreshing(true);
     void load();
   }, [load]);
 
@@ -297,22 +294,25 @@ export default function ReelsWatchScreen() {
     };
   }, [id, user?.dbId, user?.sessionToken, switchingVideo, video, watchPhase]);
 
-  const refreshVideoMeta = useCallback(async () => {
-    if (!user?.dbId || !id) return;
-    setMetaRefreshing(true);
-    const res = await fetchReelsVideo(Number(id), user.dbId, user.sessionToken);
-    if (res.success && res.video) {
-      setVideo(res.video);
-      setPlayAllowed(res.playAllowed !== false);
-      setPlayBlockReasons(res.playBlockReasons ?? []);
-    }
-    setMetaRefreshing(false);
-  }, [id, user?.dbId, user?.sessionToken]);
-
   const toggleReaction = async (reaction: "like" | "dislike") => {
     if (!user?.dbId || !video) return;
-    await reactReelsVideo(video.id, user.dbId, reaction, user.sessionToken);
-    void refreshVideoMeta();
+    const prevReaction = video.myReaction ?? null;
+    const prevLike = video.likeCount;
+    const prevDislike = video.dislikeCount ?? 0;
+    let likeCount = prevLike;
+    let dislikeCount = prevDislike;
+    if (prevReaction !== reaction) {
+      if (prevReaction === "like") likeCount = Math.max(0, likeCount - 1);
+      if (prevReaction === "dislike") dislikeCount = Math.max(0, dislikeCount - 1);
+      if (reaction === "like") likeCount += 1;
+      else dislikeCount += 1;
+    }
+    setVideo({ ...video, myReaction: reaction, likeCount, dislikeCount });
+    try {
+      await reactReelsVideo(video.id, user.dbId, reaction, user.sessionToken);
+    } catch {
+      setVideo({ ...video, myReaction: prevReaction, likeCount: prevLike, dislikeCount: prevDislike });
+    }
   };
 
   const toggleSubscribe = async () => {
@@ -450,7 +450,7 @@ export default function ReelsWatchScreen() {
               quality={videoQuality}
               qualities={qualityOptions}
               durationSeconds={video.durationSeconds}
-              paused={switchingVideo || metaRefreshing}
+              paused={switchingVideo}
               onBack={() => router.back()}
               hasNext={related.length > 0}
               onNext={() => related[0] && openRelated(related[0])}
@@ -475,7 +475,7 @@ export default function ReelsWatchScreen() {
             </Text>
           </View>
         ) : null}
-        {(switchingVideo || metaRefreshing) && watchPhase === "content" ? (
+        {switchingVideo && watchPhase === "content" ? (
           <View style={styles.playerLoadingOverlay}>
             <ActivityIndicator color="#fff" size="large" />
           </View>
