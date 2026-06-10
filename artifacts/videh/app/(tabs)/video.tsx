@@ -146,18 +146,31 @@ export default function VideoTabScreen() {
   const [hasChannel, setHasChannel] = useState<boolean | null>(null);
   const [myChannel, setMyChannel] = useState<ReelsChannel | null>(null);
   const loadingMoreRef = useRef(false);
+  const loadedOnceRef = useRef(false);
 
-  const loadInitial = useCallback(async () => {
+  const loadInitial = useCallback(async (opts?: { silent?: boolean }) => {
     if (!user?.dbId) return;
-    const ch = await fetchMyReelsChannel(user.dbId, user.sessionToken);
-    setMyChannel(ch.channel ?? null);
-    setHasChannel(Boolean(ch.channel));
-    const feed = await fetchReelsFeed(user.dbId, null, user.sessionToken);
-    setVideos(feed.videos ?? []);
-    setAdPlacements(feed.feedAdPlacements ?? []);
-    setTrending(feed.trending ?? []);
-    setNextCursor(feed.nextCursor ?? null);
-    setLoading(false);
+    const showFullLoader = !opts?.silent && !loadedOnceRef.current;
+    if (showFullLoader) setLoading(true);
+
+    const feedPromise = fetchReelsFeed(user.dbId, null, user.sessionToken);
+    const channelPromise = fetchMyReelsChannel(user.dbId, user.sessionToken, { summary: true });
+
+    try {
+      const feed = await feedPromise;
+      setVideos(feed.videos ?? []);
+      setAdPlacements(feed.feedAdPlacements ?? []);
+      setTrending(feed.trending ?? []);
+      setNextCursor(feed.nextCursor ?? null);
+      loadedOnceRef.current = true;
+      setLoading(false);
+
+      const ch = await channelPromise;
+      setMyChannel(ch.channel ?? null);
+      setHasChannel(Boolean(ch.channel));
+    } catch {
+      if (showFullLoader) setLoading(false);
+    }
   }, [user?.dbId, user?.sessionToken]);
 
   const loadMore = useCallback(async () => {
@@ -193,14 +206,13 @@ export default function VideoTabScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
-      void loadInitial();
+      void loadInitial({ silent: loadedOnceRef.current });
     }, [loadInitial]),
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadInitial();
+    await loadInitial({ silent: true });
     setRefreshing(false);
   };
 
@@ -304,54 +316,61 @@ export default function VideoTabScreen() {
     </>
   );
 
-  if (loading) {
+  const headerBar = (
+    <View style={[styles.header, { paddingTop: headerTopInset(insets) + 8, backgroundColor: colors.headerBg ?? colors.primary }]}>
+      <Text style={styles.headerTitle}>Video</Text>
+      <View style={styles.headerActions}>
+        <TouchableOpacity onPress={() => router.push("/reels/search")} style={styles.iconBtn}>
+          <Ionicons name="search" size={22} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => {
+            if (hasChannel) {
+              router.push({ pathname: "/reels/channel/[handle]", params: { handle: "me" } });
+            } else {
+              router.push("/reels/setup");
+            }
+          }}
+          style={styles.headerAvatarBtn}
+        >
+          {myChannel?.avatarUrl ? (
+            <Image
+              source={{ uri: myChannel.avatarUrl }}
+              style={styles.headerAvatar}
+              contentFit="cover"
+            />
+          ) : user?.avatar ? (
+            <Image
+              source={{ uri: resolvePublicAssetUrl(user.avatar) ?? user.avatar }}
+              style={styles.headerAvatar}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={[styles.headerAvatar, styles.headerAvatarFallback, { backgroundColor: "rgba(255,255,255,0.25)" }]}>
+              <Text style={styles.headerAvatarInitial}>
+                {(myChannel?.displayName ?? user?.name ?? "?")[0]?.toUpperCase()}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  if (loading && videos.length === 0) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.primary} />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        {headerBar}
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
       </View>
     );
   }
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: headerTopInset(insets) + 8, backgroundColor: colors.headerBg ?? colors.primary }]}>
-        <Text style={styles.headerTitle}>Video</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity onPress={() => router.push("/reels/search")} style={styles.iconBtn}>
-            <Ionicons name="search" size={22} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => {
-              if (hasChannel) {
-                router.push({ pathname: "/reels/channel/[handle]", params: { handle: "me" } });
-              } else {
-                router.push("/reels/setup");
-              }
-            }}
-            style={styles.headerAvatarBtn}
-          >
-            {myChannel?.avatarUrl ? (
-              <Image
-                source={{ uri: myChannel.avatarUrl }}
-                style={styles.headerAvatar}
-                contentFit="cover"
-              />
-            ) : user?.avatar ? (
-              <Image
-                source={{ uri: resolvePublicAssetUrl(user.avatar) ?? user.avatar }}
-                style={styles.headerAvatar}
-                contentFit="cover"
-              />
-            ) : (
-              <View style={[styles.headerAvatar, styles.headerAvatarFallback, { backgroundColor: "rgba(255,255,255,0.25)" }]}>
-                <Text style={styles.headerAvatarInitial}>
-                  {(myChannel?.displayName ?? user?.name ?? "?")[0]?.toUpperCase()}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
+      {headerBar}
 
       <FlatList
         data={feedRows}

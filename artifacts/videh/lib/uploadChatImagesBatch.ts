@@ -7,7 +7,7 @@ import {
   type MediaQuality,
 } from "@/lib/imageEdit";
 
-const UPLOAD_CONCURRENCY = 5;
+const UPLOAD_CONCURRENCY = 3;
 
 export type BatchUploadProgress = {
   completed: number;
@@ -28,16 +28,17 @@ export async function uploadChatImagesBatch(opts: {
   let completed = 0;
   let nextIndex = 0;
 
-  const report = (currentPct: number) => {
-    onProgress?.({ completed, total, currentPct });
+  const report = (filePct: number) => {
+    const overall = total > 0
+      ? Math.min(99, Math.round(((completed + filePct / 100) / total) * 100))
+      : 0;
+    onProgress?.({ completed, total, currentPct: overall });
   };
 
-  const prepared = await Promise.all(
-    uris.map(async (raw) => (isGifUri(raw) ? raw : prepareImageForChatUpload(raw, quality))),
-  );
-
-  async function uploadOne(index: number) {
-    let uri = prepared[index];
+  async function processOne(index: number) {
+    const raw = uris[index];
+    report(0);
+    const uri = isGifUri(raw) ? raw : await prepareImageForChatUpload(raw, quality);
     const mime = imageMimeFromUri(uri);
     const ext = imageExtFromUri(uri);
     const uploaded = await uploadChatMediaWithProgress({
@@ -58,11 +59,12 @@ export async function uploadChatImagesBatch(opts: {
       if (signal?.aborted) throw new Error("Upload cancelled.");
       const index = nextIndex;
       nextIndex += 1;
-      await uploadOne(index);
+      await processOne(index);
     }
   }
 
   const workers = Math.min(UPLOAD_CONCURRENCY, total);
   await Promise.all(Array.from({ length: workers }, () => worker()));
+  onProgress?.({ completed: total, total, currentPct: 100 });
   return results;
 }

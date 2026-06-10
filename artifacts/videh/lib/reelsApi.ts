@@ -5,6 +5,7 @@ import { resolvePublicAssetUrl } from "./publicAssetUrl";
 import { jsonAuthHeaders } from "./authHeaders";
 import { clampCropRect, ensureEditableImageUri } from "./imageEdit";
 import { ensureUploadableFileUri } from "./prepareFileUpload";
+import { putFileToPresignedUrl, type PresignedUploadSlot } from "./s3DirectUpload";
 import { getWebFile } from "./web/webFileRegistry";
 
 export type ReelsChannel = {
@@ -276,7 +277,12 @@ export async function fetchReelsRules(sessionToken?: string | null) {
   return reelsJson<{ success: boolean; rules: ReelsPublicRules }>("/rules", { sessionToken });
 }
 
-export async function fetchMyReelsChannel(userId: number, sessionToken?: string | null) {
+export async function fetchMyReelsChannel(
+  userId: number,
+  sessionToken?: string | null,
+  opts?: { summary?: boolean },
+) {
+  const summaryQ = opts?.summary ? "&summary=1" : "";
   const res = await reelsJson<{
     success: boolean;
     channel: ReelsChannel | null;
@@ -285,7 +291,7 @@ export async function fetchMyReelsChannel(userId: number, sessionToken?: string 
     monetization?: ReelsMonetizationStatus;
     rules?: ReelsPublicRules;
   }>(
-    `/channel/me?userId=${userId}`,
+    `/channel/me?userId=${userId}${summaryQ}`,
     { sessionToken },
   );
   if (res.channel) res.channel = normalizeReelsChannel(res.channel);
@@ -684,7 +690,107 @@ export type UploadReelsVideoOpts = {
   onProgress?: (pct: number) => void;
 };
 
-export function uploadReelsVideo(opts: UploadReelsVideoOpts): Promise<{
+type UploadIntentResponse = {
+  success: boolean;
+  directUpload?: boolean;
+  video?: PresignedUploadSlot;
+  thumbnail?: PresignedUploadSlot | null;
+  message?: string;
+};
+
+type CompleteUploadResponse = {
+  success: boolean;
+  pending?: boolean;
+  video?: ReelsVideo;
+  message?: string;
+  moderationStatus?: string;
+};
+
+async function fetchReelsUploadIntent(
+  userId: number,
+  videoMime: string,
+  hasThumbnail: boolean,
+  sessionToken?: string | null,
+): Promise<UploadIntentResponse> {
+  return reelsJson<UploadIntentResponse>("/videos/upload-intent", {
+    method: "POST",
+    sessionToken,
+    body: {
+      userId,
+      videoContentType: videoMime,
+      hasThumbnail,
+      thumbnailContentType: "image/jpeg",
+    },
+  });
+}
+
+async function completeReelsDirectUpload(
+  opts: UploadReelsVideoOpts & {
+    videoUploadsRel: string;
+    thumbnailUploadsRel?: string;
+  },
+): Promise<CompleteUploadResponse> {
+  const res = await reelsJson<CompleteUploadResponse>("/videos/complete", {
+    method: "POST",
+    sessionToken: opts.sessionToken,
+    body: {
+      userId: opts.userId,
+      title: opts.title,
+      description: opts.description,
+      hashtags: opts.hashtags,
+      durationSeconds: opts.durationSeconds,
+      videoUploadsRel: opts.videoUploadsRel,
+      thumbnailUploadsRel: opts.thumbnailUploadsRel,
+    },
+  });
+  if (res.video) res.video = normalizeReelsVideo(res.video);
+  return res;
+}
+
+async function uploadReelsVideoViaS3(opts: UploadReelsVideoOpts): Promise<CompleteUploadResponse | null> {
+  const intent = await fetchReelsUploadIntent(
+    opts.userId,
+    opts.videoMime,
+    Boolean(opts.thumbnailUri),
+    opts.sessionToken,
+  );
+  if (!intent.success || !intent.directUpload || !intent.video?.uploadUrl) {
+    return null;
+  }
+
+  const report = (pct: number) => opts.onProgress?.(pct);
+
+  await putFileToPresignedUrl({
+    presignedUrl: intent.video.uploadUrl,
+    localUri: opts.videoUri,
+    contentType: intent.video.contentType || opts.videoMime,
+    filename: "reels_video.mp4",
+    onProgress: (p) => report(Math.round(p * 0.92)),
+  });
+
+  let thumbnailUploadsRel: string | undefined;
+  if (opts.thumbnailUri && intent.thumbnail?.uploadUrl) {
+    await putFileToPresignedUrl({
+      presignedUrl: intent.thumbnail.uploadUrl,
+      localUri: opts.thumbnailUri,
+      contentType: intent.thumbnail.contentType || "image/jpeg",
+      filename: "reels_thumb.jpg",
+      onProgress: (p) => report(92 + Math.round(p * 0.06)),
+    });
+    thumbnailUploadsRel = intent.thumbnail.uploadsRel;
+  }
+
+  report(98);
+  const done = await completeReelsDirectUpload({
+    ...opts,
+    videoUploadsRel: intent.video.uploadsRel,
+    thumbnailUploadsRel,
+  });
+  report(100);
+  return done;
+}
+
+function uploadReelsVideoLegacy(opts: UploadReelsVideoOpts): Promise<{
   success: boolean;
   pending?: boolean;
   video?: ReelsVideo;
@@ -752,6 +858,32 @@ export function uploadReelsVideo(opts: UploadReelsVideoOpts): Promise<{
 
     xhr.send(form);
   }));
+}
+
+export async function uploadReelsVideo(opts: UploadReelsVideoOpts): Promise<{
+  success: boolean;
+  pending?: boolean;
+  video?: ReelsVideo;
+  message?: string;
+  moderationStatus?: string;
+}> {
+  try {
+    const direct = await uploadReelsVideoViaS3(opts);
+    if (direct) {
+      if (direct.success) return direct;
+      return {
+        success: false,
+        message: direct.message ?? "Upload failed",
+        moderationStatus: direct.moderationStatus,
+      };
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg && !msg.includes("Network") && !msg.includes("Upload")) {
+      throw e;
+    }
+  }
+  return uploadReelsVideoLegacy(opts);
 }
 
 export function formatViewCount(n: number): string {

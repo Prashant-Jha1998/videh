@@ -28,11 +28,15 @@ function AlbumTile({
   overlay?: string;
   onPress: () => void;
 }) {
-  const [useNative, setUseNative] = useState(false);
+  const isLocalPicker =
+    uri.startsWith("file://")
+    || uri.startsWith("content://")
+    || uri.startsWith("ph://");
+  const [useNative, setUseNative] = useState(isLocalPicker);
   const [failed, setFailed] = useState(false);
   const absolute = resolvePublicAssetUrl(uri) ?? uri;
   const needsAuth = absolute.includes("/api/chats/media/") && !!sessionToken;
-  const isLocal = uri.startsWith("file://") || uri.startsWith("content://");
+  const isLocal = isLocalPicker;
   const source = needsAuth
     ? { uri: absolute, headers: authFetchHeaders(sessionToken) as Record<string, string> }
     : { uri: absolute };

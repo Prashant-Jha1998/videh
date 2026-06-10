@@ -1,16 +1,36 @@
 import type { Message } from "@/context/AppContext";
+import { parseAlbumMessageContent } from "@/lib/chatAlbumMessage";
 
 const TEMP_MATCH_WINDOW_MS = 60_000;
 /** Keep optimistic/patched outgoing rows until the messages API returns them. */
-const RECENT_OUTGOING_KEEP_MS = 120_000;
+const RECENT_OUTGOING_KEEP_MS = 300_000;
+
+function isMediaMessage(m: Message): boolean {
+  return m.type === "document" || m.type === "image" || m.type === "video" || m.type === "album";
+}
 
 function isUploadInFlight(m: Message): boolean {
-  return (
-    (m.type === "document" || m.type === "image" || m.type === "video" || m.type === "album")
-    && typeof m.uploadProgress === "number"
-    && m.uploadProgress < 100
-    && !m.uploadFailed
-  );
+  if (m.uploadFailed || !isMediaMessage(m)) return false;
+  if (typeof m.uploadProgress === "number" && m.uploadProgress < 100) return true;
+  // Upload finished but server row not linked yet (still tmp_*).
+  if (m.id.startsWith("tmp_") && typeof m.uploadProgress === "number" && m.uploadProgress >= 100) {
+    return true;
+  }
+  return false;
+}
+
+function normalizeUrlKey(url: string | undefined | null): string {
+  return String(url ?? "").trim().split("?")[0].split("#")[0];
+}
+
+function albumUrlsLikelyMatch(tmp: Message, server: Message): boolean {
+  const tmpUrls = (tmp.albumUrls ?? []).map(normalizeUrlKey).filter(Boolean);
+  const serverParsed = parseAlbumMessageContent(server.text);
+  const serverUrls = (server.albumUrls ?? serverParsed?.urls ?? []).map(normalizeUrlKey).filter(Boolean);
+  if (tmpUrls.length < 2 || serverUrls.length < 2) return false;
+  if (tmpUrls.length === serverUrls.length && tmpUrls.every((u, i) => u === serverUrls[i])) return true;
+  return normalizeUrlKey(tmpUrls[0]) === normalizeUrlKey(serverUrls[0])
+    && Math.abs(server.timestamp - tmp.timestamp) < 15_000;
 }
 
 function tempMatchesServer(tmp: Message, server: Message): boolean {
@@ -21,15 +41,18 @@ function tempMatchesServer(tmp: Message, server: Message): boolean {
   if (tmp.type === "text" || !tmp.type) {
     return (server.type === "text" || !server.type) && server.text === tmp.text;
   }
-  if (server.type !== tmp.type) return false;
   if (tmp.type === "album") {
-    const tmpCount = tmp.albumUrls?.length ?? 0;
-    const serverCount = server.albumUrls?.length ?? 0;
-    if (tmpCount >= 2 && serverCount >= 2 && tmpCount === serverCount) return true;
+    const serverIsAlbum = server.type === "album" || !!parseAlbumMessageContent(server.text);
+    if (!serverIsAlbum) return false;
+    if (albumUrlsLikelyMatch(tmp, server)) return true;
     if (server.text === tmp.text) return true;
-    return Math.abs(server.timestamp - tmp.timestamp) < 15_000;
+    return false;
   }
+  if (server.type !== tmp.type) return false;
   if (server.text === tmp.text) return true;
+  const tmpMedia = normalizeUrlKey(tmp.mediaUrl);
+  const serverMedia = normalizeUrlKey(server.mediaUrl);
+  if (tmpMedia && serverMedia && tmpMedia === serverMedia) return true;
   return Math.abs(server.timestamp - tmp.timestamp) < 15_000;
 }
 

@@ -8,6 +8,7 @@
  *   AWS_S3_BUCKET=videh-media-prod                  S3 bucket (origin for CloudFront)
  *   AWS_REGION=ap-south-1                           bucket region
  *   S3_DELETE_LOCAL_AFTER_UPLOAD=1                  free EC2 disk after upload (optional)
+ *   S3_DIRECT_UPLOAD=1                              presigned PUT for reels (default on when S3 set)
  *   API_WORKERS=max                 override instance count (default: all cores)
  */
 module.exports = {

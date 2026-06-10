@@ -28,12 +28,7 @@ import { checkCommentFraud, checkSubscribeFraud, checkViewFraud, recordViewSessi
 import { fetchLatestReelsFeed, fetchTrendingReels, type FeedCursor } from "../lib/reelsFeed";
 import { fetchHashtagStats, fetchHashtagSuggestions } from "../lib/reelsHashtags";
 import { canPlayVideo, evaluateChannelMonetization } from "../lib/reelsMonetization";
-import { notifySubscribersNewVideo } from "../lib/reelsNotifications";
-import {
-  applyVideoModerationResult,
-  moderateReelsUpload,
-  scanReelsText,
-} from "../lib/reelsContentModeration";
+import { scanReelsText } from "../lib/reelsContentModeration";
 import {
   isPhoneLikeQuery,
   mapPublicReelsChannel,
@@ -42,12 +37,15 @@ import {
 } from "../lib/reelsPrivacy";
 import { resolveViewerGeoFromRequest } from "../lib/adsGeo";
 import { pickFeedAdPlacementsForBatch, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
+import { publishReelsVideo } from "../lib/reelsVideoPublish";
 import {
   cdnDeliveryEnabled,
+  createPresignedUploadUrl,
+  extFromContentType,
+  headS3ObjectByUploadsRel,
+  isS3DirectUploadEnabled,
   isS3MediaEnabled,
-  scheduleS3Upload,
   tryRedirectStoredMediaToCdn,
-  uploadLocalFileToS3,
   uploadStoredMediaBatch,
 } from "../lib/s3Storage";
 import { buildReelsVideoDeepLink, buildReelsVideoShareUrl } from "../lib/reelsShareUrl";
@@ -704,6 +702,7 @@ router.post("/channel", async (req: Request, res: Response) => {
 
 router.get("/channel/me", async (req: Request, res: Response) => {
   const userId = Number(req.query.userId);
+  const summary = String(req.query.summary ?? "") === "1";
   if (!userId) {
     res.status(400).json({ success: false, message: "userId required" });
     return;
@@ -722,6 +721,13 @@ router.get("/channel/me", async (req: Request, res: Response) => {
       return;
     }
     const channelRow = result.rows[0] as Record<string, unknown>;
+    if (summary) {
+      res.json({
+        success: true,
+        channel: mapPublicChannelResponse(req, channelRow, userId),
+      });
+      return;
+    }
     const channelId = Number(channelRow.id);
     const monetization = await evaluateChannelMonetization(channelId);
     const config = await getReelsPlatformConfig();
@@ -1064,11 +1070,14 @@ router.get("/feed", async (req: Request, res: Response) => {
     : null;
   try {
     await ensureReelsTables();
-    const trendingRows = cursor ? [] : await fetchTrendingReels(viewerId, 10);
-    const { videos: rows, nextCursor } = await fetchLatestReelsFeed(viewerId, limit, cursor);
+    const [trendingRows, feedResult, cfg] = await Promise.all([
+      cursor ? Promise.resolve([]) : fetchTrendingReels(viewerId, 10),
+      fetchLatestReelsFeed(viewerId, limit, cursor),
+      getReelsPlatformConfig(),
+    ]);
+    const { videos: rows, nextCursor } = feedResult;
     const videos = rows.map((r) => mapVideoRow(r, req));
     const trending = trendingRows.map((r) => mapVideoRow(r, req));
-    const cfg = await getReelsPlatformConfig();
     const feedAdMinGap = cfg.ads.feedAdMinGap ?? cfg.ads.feedAdEveryVideos ?? 2;
     const feedAdMaxGap = cfg.ads.feedAdMaxGap ?? Math.max(feedAdMinGap + 3, 7);
     const feedAdPlacements = cfg.ads.feedAdsEnabled && videos.length > 0
@@ -1183,6 +1192,174 @@ router.get("/search", async (req: Request, res: Response) => {
   }
 });
 
+function reelsUploadFilename(prefix: "media" | "thumb", contentType: string, fallbackExt: string): string {
+  const ext = extFromContentType(contentType, fallbackExt);
+  const safeExt = ext.replace(/[^.\w]/g, "") || fallbackExt;
+  return `${prefix}_${Date.now()}_${crypto.randomBytes(6).toString("hex")}${safeExt}`;
+}
+
+function isValidReelsUploadsRel(rel: string): boolean {
+  return /^\/uploads\/reels\/(media|thumb|thumb_auto)_[\w.-]+$/i.test(rel);
+}
+
+/** Presigned S3 URLs — client uploads video/thumbnail directly to S3 (no EC2 disk). */
+router.post("/videos/upload-intent", async (req: Request, res: Response) => {
+  const userId = Number((req.body as { userId?: number }).userId);
+  const videoContentType = String((req.body as { videoContentType?: string }).videoContentType ?? "video/mp4").trim();
+  const hasThumbnail = Boolean((req.body as { hasThumbnail?: boolean }).hasThumbnail);
+  const thumbnailContentType = String((req.body as { thumbnailContentType?: string }).thumbnailContentType ?? "image/jpeg").trim();
+  if (!userId) {
+    res.status(400).json({ success: false, message: "userId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  if (!isS3DirectUploadEnabled()) {
+    res.json({ success: true, directUpload: false });
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    const ch = await query("SELECT id FROM reels_channels WHERE user_id = $1", [userId]);
+    if (ch.rows.length === 0) {
+      res.status(403).json({ success: false, message: "Create your reels account first." });
+      return;
+    }
+
+    const videoRel = `/uploads/reels/${reelsUploadFilename("media", videoContentType, ".mp4")}`;
+    const videoSlot = await createPresignedUploadUrl(req, videoRel, videoContentType);
+    if (!videoSlot) {
+      res.json({ success: true, directUpload: false });
+      return;
+    }
+
+    let thumbnail: typeof videoSlot | null = null;
+    if (hasThumbnail) {
+      const thumbRel = `/uploads/reels/${reelsUploadFilename("thumb", thumbnailContentType, ".jpg")}`;
+      thumbnail = await createPresignedUploadUrl(req, thumbRel, thumbnailContentType);
+    }
+
+    res.json({
+      success: true,
+      directUpload: true,
+      video: videoSlot,
+      thumbnail,
+      maxVideoBytes: 2 * 1024 * 1024 * 1024,
+    });
+  } catch (err) {
+    req.log.error({ err }, "reels upload intent");
+    res.status(500).json({ success: false, message: "Could not start upload." });
+  }
+});
+
+/** Finalize reels video after direct S3 upload. */
+router.post("/videos/complete", async (req: Request, res: Response) => {
+  const body = req.body as {
+    userId?: number;
+    title?: string;
+    description?: string;
+    hashtags?: string;
+    durationSeconds?: number;
+    videoUploadsRel?: string;
+    thumbnailUploadsRel?: string;
+  };
+  const userId = Number(body.userId);
+  const title = String(body.title ?? "").trim();
+  const description = String(body.description ?? "").trim();
+  const hashtags = parseHashtags(body.hashtags);
+  const durationSeconds = Number(body.durationSeconds) || 0;
+  const videoUploadsRel = String(body.videoUploadsRel ?? "").trim();
+  const thumbnailUploadsRel = String(body.thumbnailUploadsRel ?? "").trim() || null;
+
+  if (!userId) {
+    res.status(400).json({ success: false, message: "userId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  if (title.length < 2) {
+    res.status(400).json({ success: false, message: "Title is required." });
+    return;
+  }
+  if (durationSeconds > MAX_REELS_VIDEO_SECONDS) {
+    res.status(400).json({ success: false, message: "Video is too long (max 4 hours)." });
+    return;
+  }
+  if (!isValidReelsUploadsRel(videoUploadsRel)) {
+    res.status(400).json({ success: false, message: "Invalid video upload reference." });
+    return;
+  }
+  if (thumbnailUploadsRel && !isValidReelsUploadsRel(thumbnailUploadsRel)) {
+    res.status(400).json({ success: false, message: "Invalid thumbnail upload reference." });
+    return;
+  }
+
+  try {
+    await ensureReelsTables();
+    const combinedText = [title, description, ...hashtags.map((h) => `#${h}`)].join(" ");
+    const quickText = scanReelsText(combinedText);
+    if (quickText.blocked) {
+      res.status(403).json({ success: false, message: quickText.reason ?? "Sexual or nudity content is not allowed." });
+      return;
+    }
+
+    const videoHead = await headS3ObjectByUploadsRel(videoUploadsRel);
+    if (!videoHead) {
+      res.status(400).json({ success: false, message: "Video not found on storage. Upload may have failed — try again." });
+      return;
+    }
+    if (thumbnailUploadsRel) {
+      const thumbHead = await headS3ObjectByUploadsRel(thumbnailUploadsRel);
+      if (!thumbHead) {
+        res.status(400).json({ success: false, message: "Thumbnail not found on storage." });
+        return;
+      }
+    }
+
+    const published = await publishReelsVideo({
+      req,
+      userId,
+      title,
+      description,
+      hashtags,
+      durationSeconds,
+      videoUrl: videoUploadsRel,
+      thumbnailUrl: thumbnailUploadsRel,
+      thumbPath: null,
+      videoPath: null,
+      deferModeration: true,
+    });
+
+    if (published.modResult?.action === "reject") {
+      res.status(403).json({
+        success: false,
+        message: published.message ?? "Video blocked.",
+        moderationStatus: "rejected",
+      });
+      return;
+    }
+
+    const refreshed = await query("SELECT * FROM reels_videos WHERE id = $1", [published.videoId]);
+    const finalRow = refreshed.rows[0] as Record<string, unknown>;
+    res.json({
+      success: true,
+      pending: published.pending,
+      message: published.message,
+      video: mapVideoRow({
+        ...finalRow,
+        channel_handle: published.chRow?.handle,
+        channel_avatar_url: published.chRow?.avatar_url,
+        channel_updated_at: published.chRow?.updated_at,
+      }, req),
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === "CHANNEL_REQUIRED") {
+      res.status(403).json({ success: false, message: "Create your reels account first." });
+      return;
+    }
+    req.log.error({ err }, "reels complete upload");
+    res.status(500).json({ success: false, message: "Could not publish video." });
+  }
+});
+
 router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
   const userId = Number((req.body as { userId?: string }).userId);
   const title = String((req.body as { title?: string }).title ?? "").trim();
@@ -1241,64 +1418,40 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
       }
     }
 
-    const inserted = await query(
-      `INSERT INTO reels_videos (
-         channel_id, title, description, hashtags, video_url, thumbnail_url, duration_seconds,
-         status, play_enabled, moderation_status
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_review', FALSE, 'pending_scan') RETURNING *`,
-      [ch.rows[0].id, title.slice(0, 200), description || null, hashtags, videoUrl, thumbnailUrl, durationSeconds],
-    );
-    const row = inserted.rows[0] as Record<string, unknown>;
-    const videoId = Number(row.id);
-    const channel = await query("SELECT handle, avatar_url, updated_at FROM reels_channels WHERE id = $1", [row.channel_id]);
-    const chRow = channel.rows[0] as Record<string, unknown> | undefined;
-    const channelId = Number(row.channel_id);
-    const handle = String(chRow?.handle ?? "");
-
-    const modResult = await moderateReelsUpload({
-      videoId,
+    const published = await publishReelsVideo({
+      req,
+      userId,
       title,
       description,
       hashtags,
-      thumbnailPath: thumbPath,
-      thumbnailUrl,
-      videoPublicUrl: videoUrl,
       durationSeconds,
+      videoUrl,
+      thumbnailUrl,
+      thumbPath,
+      videoPath,
+      deferModeration: false,
     });
-    await applyVideoModerationResult(videoId, modResult);
 
-    if (modResult.action === "reject") {
+    if (published.modResult?.action === "reject") {
       res.status(403).json({
         success: false,
-        message: modResult.reason ?? "Video blocked: nudity or sexual content detected.",
+        message: published.message ?? "Video blocked: nudity or sexual content detected.",
         moderationStatus: "rejected",
       });
       return;
     }
 
-    if (modResult.action === "approve") {
-      void notifySubscribersNewVideo(channelId, videoId, title, handle);
-      void evaluateChannelMonetization(channelId);
-    }
-
-    scheduleS3Upload(videoPath, videoUrl);
-    if (thumbPath && thumbnailUrl) {
-      await uploadLocalFileToS3(thumbPath, thumbnailUrl);
-    }
-
-    const refreshed = await query("SELECT * FROM reels_videos WHERE id = $1", [videoId]);
+    const refreshed = await query("SELECT * FROM reels_videos WHERE id = $1", [published.videoId]);
     const finalRow = refreshed.rows[0] as Record<string, unknown>;
     res.json({
       success: true,
-      pending: modResult.action === "pending",
-      message: modResult.action === "pending"
-        ? (modResult.reason ?? "Video is under safety review. It will go public when approved.")
-        : undefined,
+      pending: published.pending,
+      message: published.message,
       video: mapVideoRow({
         ...finalRow,
-        channel_handle: chRow?.handle,
-        channel_avatar_url: chRow?.avatar_url,
-        channel_updated_at: chRow?.updated_at,
+        channel_handle: published.chRow?.handle,
+        channel_avatar_url: published.chRow?.avatar_url,
+        channel_updated_at: published.chRow?.updated_at,
       }, req),
     });
   } catch (err) {

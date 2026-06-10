@@ -41,6 +41,30 @@ export function isS3MediaEnabled(): boolean {
   return Boolean(s3Bucket());
 }
 
+/** Client PUT straight to S3 (skips EC2 disk for large reels uploads). */
+export function isS3DirectUploadEnabled(): boolean {
+  if (process.env["S3_DIRECT_UPLOAD"] === "0") return false;
+  return isS3MediaEnabled();
+}
+
+export function mimeFromContentType(contentType: string, fallback = "application/octet-stream"): string {
+  const mime = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return mime || fallback;
+}
+
+export function extFromContentType(contentType: string, fallbackExt: string): string {
+  const mime = mimeFromContentType(contentType);
+  if (mime.includes("quicktime")) return ".mov";
+  if (mime.includes("webm")) return ".webm";
+  if (mime.includes("3gpp")) return ".3gp";
+  if (mime.includes("png")) return ".png";
+  if (mime.includes("webp")) return ".webp";
+  if (mime.includes("gif")) return ".gif";
+  if (mime.includes("jpeg") || mime.includes("jpg")) return ".jpg";
+  if (mime.includes("mp4")) return ".mp4";
+  return fallbackExt;
+}
+
 export function uploadsRelToS3Key(uploadsRel: string): string {
   const rel = uploadsRelPathFromStoredUrl(uploadsRel) ?? uploadsRel;
   const prefix = (process.env["S3_KEY_PREFIX"] ?? "").replace(/^\/+|\/+$/g, "");
@@ -164,4 +188,67 @@ export function tryRedirectStoredMediaToCdn(req: Request, res: Response, storedU
 export function scheduleS3UploadFromLocalPath(localPath: string, uploadsRootDir: string): void {
   const rel = uploadsRelFromLocalPath(localPath, uploadsRootDir);
   if (rel) scheduleS3Upload(localPath, rel);
+}
+
+export type PresignedUploadSlot = {
+  uploadsRel: string;
+  uploadUrl: string;
+  publicUrl: string;
+  contentType: string;
+  expiresInSeconds: number;
+};
+
+/** Presigned PUT URL for browser/app direct upload to S3. */
+export async function createPresignedUploadUrl(
+  req: Request,
+  uploadsRel: string,
+  contentType: string,
+  expiresInSeconds = 3600,
+): Promise<PresignedUploadSlot | null> {
+  if (!isS3MediaEnabled()) return null;
+  const rel = uploadsRelPathFromStoredUrl(uploadsRel);
+  if (!rel || !rel.startsWith("/uploads/")) return null;
+
+  const key = uploadsRelToS3Key(rel);
+  const mime = mimeFromContentType(contentType);
+  try {
+    const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+    const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
+    const client = await s3Client();
+    const command = new PutObjectCommand({
+      Bucket: s3Bucket(),
+      Key: key,
+      ContentType: mime,
+      CacheControl: cacheControlForKey(key),
+    });
+    const uploadUrl = await getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+    const publicUrl = publicMediaUrl(req, rel);
+    return {
+      uploadsRel: rel,
+      uploadUrl,
+      publicUrl,
+      contentType: mime,
+      expiresInSeconds,
+    };
+  } catch (err) {
+    logger.error({ err, key }, "presigned upload URL failed");
+    return null;
+  }
+}
+
+export async function headS3ObjectByUploadsRel(uploadsRel: string): Promise<{ size: number; contentType?: string } | null> {
+  if (!isS3MediaEnabled()) return null;
+  const rel = uploadsRelPathFromStoredUrl(uploadsRel);
+  if (!rel) return null;
+  const key = uploadsRelToS3Key(rel);
+  try {
+    const { HeadObjectCommand } = await import("@aws-sdk/client-s3");
+    const client = await s3Client();
+    const out = await client.send(new HeadObjectCommand({ Bucket: s3Bucket(), Key: key }));
+    const size = Number(out.ContentLength ?? 0);
+    if (!Number.isFinite(size) || size <= 0) return null;
+    return { size, contentType: out.ContentType };
+  } catch {
+    return null;
+  }
 }

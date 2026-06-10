@@ -33,6 +33,8 @@ import { encodeVoiceMessageText, stripWaveformMeta } from "@/lib/voiceWaveform";
 import { messageReplyPreviewText } from "@/lib/messageReplyPreview";
 import {
   albumChatPreview,
+  ensureAlbumDisplayUris,
+  normalizeAlbumMediaUrl,
   encodeAlbumMessageContent,
   parseAlbumMessageContent,
   resolveAlbumUrls,
@@ -1334,7 +1336,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           parsed.payload?.senderId != null ? String(parsed.payload.senderId) : undefined;
         const rawType = String(parsed.payload?.type ?? "text").toLowerCase();
         const messageType =
-          rawType === "image" || rawType === "video" || rawType === "audio" || rawType === "document"
+          rawType === "image" || rawType === "video" || rawType === "audio" || rawType === "document" || rawType === "album"
             ? rawType
             : "text";
         const mediaUrl = parsed.payload?.mediaUrl?.trim();
@@ -1708,12 +1710,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const u = userRef.current;
       const caption = opts.caption?.trim() ?? "";
       const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      let activeMsgId = tempId;
 
       const patchMsg = (patch: Partial<Message>) => {
+        const targetId = activeMsgId;
+        if (typeof patch.id === "string") activeMsgId = patch.id;
         setChats((prev) =>
           prev.map((c) =>
             c.id === chatId
-              ? { ...c, messages: c.messages.map((m) => (m.id === tempId ? { ...m, ...patch } : m)) }
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) => (m.id === targetId ? { ...m, ...patch } : m)),
+                }
               : c,
           ),
         );
@@ -1723,6 +1731,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (remoteUrls.length < 2) return;
         const content = encodeAlbumMessageContent(remoteUrls, caption);
         const preview = albumChatPreview(remoteUrls.length, caption);
+        const displayText = caption || preview;
         if (!u?.dbId) return;
         const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
           method: "POST",
@@ -1738,25 +1747,58 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (res.status === 403) {
           Alert.alert("Cannot send message", typeof data.message === "string" ? data.message : "Not allowed.");
           setChats((prev) =>
-            prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
+            prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== activeMsgId && m.id !== tempId) } : c)),
           );
           return;
         }
-        if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
-          patchMsg({
-            id: String(data.message.id),
-            type: "album",
-            text: content,
-            albumUrls: remoteUrls,
-            mediaUrl: remoteUrls[0],
-            status: "delivered",
-            uploadProgress: undefined,
-            uploadFailed: false,
-          });
+        const serverId =
+          data?.success && data.message && typeof data.message === "object" && "id" in data.message
+            ? String(data.message.id)
+            : null;
+        const finalize = (id: string) => {
+          setChats((prev) =>
+            prev.map((c) => {
+              if (c.id !== chatId) return c;
+              const local = c.messages.find((m) => m.id === activeMsgId || m.id === tempId || m.id === id);
+              const sentAt = local?.timestamp ?? Date.now();
+              const finalized: Message = {
+                id,
+                text: displayText,
+                timestamp: sentAt,
+                senderId: "me",
+                type: "album",
+                status: "delivered",
+                albumUrls: remoteUrls,
+                mediaUrl: remoteUrls[0],
+                uploadProgress: undefined,
+                uploadFailed: false,
+              };
+              if (!local) {
+                return {
+                  ...c,
+                  messages: [...c.messages, finalized].sort((a, b) => a.timestamp - b.timestamp),
+                  lastMessage: preview,
+                  lastMessageTime: sentAt,
+                };
+              }
+              return {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === activeMsgId || m.id === tempId || m.id === id ? { ...m, ...finalized, id } : m,
+                ),
+                lastMessage: preview,
+                lastMessageTime: sentAt,
+              };
+            }),
+          );
+          activeMsgId = serverId ?? activeMsgId;
+        };
+        if (serverId) {
+          finalize(serverId);
         } else {
           patchMsg({
             type: "album",
-            text: content,
+            text: displayText,
             albumUrls: remoteUrls,
             mediaUrl: remoteUrls[0],
             uploadProgress: undefined,
@@ -1769,6 +1811,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const localUris = opts.localUris.filter(Boolean);
         if (localUris.length < 2) return;
         const preview = albumChatPreview(localUris.length, caption);
+        const displayUris = await ensureAlbumDisplayUris(localUris);
         const newMsg: Message = {
           id: tempId,
           text: caption || preview,
@@ -1776,10 +1819,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           senderId: "me",
           type: "album",
           status: "sent",
-          mediaUrl: localUris[0],
-          localMediaUri: localUris[0],
-          albumUrls: localUris,
-          albumLocalUrls: localUris,
+          mediaUrl: displayUris[0],
+          localMediaUri: displayUris[0],
+          albumUrls: displayUris,
+          albumLocalUrls: displayUris,
           uploadProgress: 0,
         };
         setChats((prev) =>
@@ -1795,20 +1838,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             uris: localUris,
             quality: opts.quality ?? "standard",
             sessionToken: u.sessionToken,
-            onProgress: (p) => {
-              const overall = p.total > 0
-                ? Math.min(99, Math.round(((p.completed + p.currentPct / 100) / p.total) * 100))
-                : 0;
-              patchMsg({ uploadProgress: overall });
-            },
+            onProgress: (p) => patchMsg({ uploadProgress: p.currentPct }),
           });
+          const remoteUrls = uploaded.map((url) => normalizeAlbumMediaUrl(url));
           patchMsg({
-            albumUrls: uploaded,
-            mediaUrl: uploaded[0],
+            albumUrls: remoteUrls,
+            mediaUrl: remoteUrls[0],
             uploadProgress: 100,
           });
-          await postAlbumMessage(uploaded);
-          patchMsg({ uploadProgress: undefined, albumLocalUrls: undefined });
+          await postAlbumMessage(remoteUrls);
+          patchMsg({ uploadProgress: undefined, albumLocalUrls: undefined, text: caption || preview });
         } catch (e) {
           patchMsg({ uploadProgress: undefined, uploadFailed: true });
           Alert.alert("Send failed", e instanceof Error ? e.message : "Could not send photos.");

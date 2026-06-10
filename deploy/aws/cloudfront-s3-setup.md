@@ -5,19 +5,21 @@
 - Name: `videh-media-prod` (or your choice)
 - Region: `ap-south-1` (Mumbai)
 - Block public access: **ON** (CloudFront OAI/OAC only)
-- CORS (for direct uploads if added later):
+- CORS (**required for direct S3 uploads** from app + web):
 
 ```json
 [
   {
     "AllowedHeaders": ["*"],
-    "AllowedMethods": ["GET", "HEAD"],
-    "AllowedOrigins": ["https://videh.co.in", "https://*.videh.co.in"],
+    "AllowedMethods": ["GET", "HEAD", "PUT"],
+    "AllowedOrigins": ["https://videh.co.in", "https://*.videh.co.in", "*"],
     "ExposeHeaders": ["ETag", "Content-Length", "Content-Range"],
     "MaxAgeSeconds": 86400
   }
 ]
 ```
+
+Native Android/iOS apps do not use CORS; web upload needs `AllowedOrigins` for your domain.
 
 ## 2. CloudFront distribution
 

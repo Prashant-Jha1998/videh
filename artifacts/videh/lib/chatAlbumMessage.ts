@@ -1,4 +1,5 @@
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
+import { ensureUploadableFileUri } from "@/lib/prepareFileUpload";
 
 export type ChatAlbumPayload = {
   urls: string[];
@@ -78,6 +79,29 @@ export function displayAlbumUrls(msg: {
     if (pick) out.push(pick);
   }
   return out;
+}
+
+/** Copy content:// / ph:// URIs to file:// so chat bubbles can preview while uploading. */
+export async function ensureAlbumDisplayUris(uris: string[]): Promise<string[]> {
+  return Promise.all(
+    uris.map(async (uri, index) => {
+      const raw = uri.trim();
+      if (!raw) return raw;
+      if (
+        raw.startsWith("file://")
+        || raw.startsWith("http://")
+        || raw.startsWith("https://")
+        || raw.startsWith("data:")
+      ) {
+        return raw;
+      }
+      try {
+        return await ensureUploadableFileUri(raw, `album_preview_${index}.jpg`);
+      } catch {
+        return raw;
+      }
+    }),
+  );
 }
 
 export function isAlbumMessage(

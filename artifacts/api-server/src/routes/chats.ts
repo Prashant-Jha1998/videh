@@ -7,6 +7,7 @@ import multer from "multer";
 import { query } from "../lib/db";
 import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
 import { chatMessagePushPreview } from "../lib/chatMessagePreview";
+import { resolveChatMessageRowForClient } from "../lib/chatMessageMedia";
 import { isValidPushToken, sendChatPush, sendChatPushToMembers } from "../lib/pushNotify";
 import { pushNotificationImageUrl } from "../lib/pushMediaUrl";
 import { enforceModerationForActivity } from "../lib/moderation";
@@ -609,7 +610,10 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
       LIMIT $2
     `, before ? [chatId, limit, before, viewerId] : [chatId, limit, viewerId]);
 
-    res.json({ success: true, messages: result.rows.reverse() });
+    const messages = result.rows
+      .reverse()
+      .map((row) => resolveChatMessageRowForClient(req, row as Record<string, unknown>));
+    res.json({ success: true, messages });
   } catch (err) {
     req.log.error({ err }, "get messages error");
     res.status(500).json({ success: false });
@@ -898,7 +902,10 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
       },
     });
 
-    res.json({ success: true, message: result.rows[0] });
+    res.json({
+      success: true,
+      message: resolveChatMessageRowForClient(req, result.rows[0] as Record<string, unknown>),
+    });
   } catch (err) {
     req.log.error({ err }, "send message error");
     res.status(500).json({ success: false });

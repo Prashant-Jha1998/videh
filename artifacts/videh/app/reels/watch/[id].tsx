@@ -236,29 +236,34 @@ export default function ReelsWatchScreen() {
     setContentResumeAt(0);
     setWatchPhase("loading");
 
-    const res = await fetchReelsVideo(Number(id), user.dbId, user.sessionToken);
+    const videoId = Number(id);
+    const [res, feed, ads] = await Promise.all([
+      fetchReelsVideo(videoId, user.dbId, user.sessionToken),
+      fetchReelsFeed(user.dbId, null, user.sessionToken),
+      fetchReelsAdBreaks(videoId, user.dbId, user.sessionToken),
+    ]);
+
     if (res.success && res.video) {
       setVideo(res.video);
       setPlayAllowed(res.playAllowed !== false);
       setPlayBlockReasons(res.playBlockReasons ?? []);
-      if (res.video.channelHandle) {
-        const ch = await fetchReelsChannel(res.video.channelHandle, user.dbId, user.sessionToken);
-        isOwnerViewRef.current = Boolean(ch.channel?.isOwner);
-        setChannel(ch.channel ?? null);
-        setSubscribed(Boolean(ch.channel?.isSubscribed));
+      const channelHandle = res.video.channelHandle;
+      if (channelHandle) {
+        void fetchReelsChannel(channelHandle, user.dbId, user.sessionToken).then((ch) => {
+          isOwnerViewRef.current = Boolean(ch.channel?.isOwner);
+          setChannel(ch.channel ?? null);
+          setSubscribed(Boolean(ch.channel?.isSubscribed));
+        });
       } else {
         setChannel(null);
       }
     }
 
-    const feed = await fetchReelsFeed(user.dbId, null, user.sessionToken);
-    const currentId = Number(id);
-    const list = (feed.videos ?? []).filter((v) => v.id !== currentId);
+    const list = (feed.videos ?? []).filter((v) => v.id !== videoId);
     const sameChannel = list.filter((v) => v.channelId === res.video?.channelId);
     const other = list.filter((v) => v.channelId !== res.video?.channelId);
     setRelated([...sameChannel, ...other].slice(0, 20));
 
-    const ads = await fetchReelsAdBreaks(Number(id), user.dbId, user.sessionToken);
     if (ads.success !== false) {
       setAdBreaks(ads);
       if (ads.enabled && ads.preRoll.length > 0) {
