@@ -175,6 +175,18 @@ export async function autoThumbnailFromVideo(videoUri: string, durationSeconds =
   }
 }
 
+/** Direct API route for channel logo/cover (fallback when CDN URL is not ready). */
+export function channelBrandingApiUrl(
+  channelId: number,
+  kind: "avatar" | "cover",
+  cacheVersion?: string | null,
+): string {
+  const base = getApiUrl().replace(/\/$/, "");
+  const v = cacheVersion != null ? String(cacheVersion).trim() : "";
+  const q = v ? `?v=${encodeURIComponent(v)}` : "";
+  return `${base}/api/reels/channels/${channelId}/${kind}${q}`;
+}
+
 /** Fix stored media URLs (wrong host or relative /uploads paths) for Image/Video components. */
 export function normalizeReelsMediaUrl(url?: string | null): string | null {
   const raw = String(url ?? "").trim();

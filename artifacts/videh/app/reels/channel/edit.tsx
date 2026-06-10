@@ -121,6 +121,12 @@ export default function ReelsChannelEditScreen() {
         Alert.alert("Could not save", res.message ?? "Please try again.");
         return;
       }
+      if (res.channel) {
+        setExistingAvatar(res.channel.avatarUrl ?? null);
+        setExistingCover(res.channel.coverUrl ?? null);
+        setAvatarUri(null);
+        setCoverUri(null);
+      }
       router.back();
     } catch {
       Alert.alert("Error", "Could not update channel.");

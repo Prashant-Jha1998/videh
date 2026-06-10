@@ -14,6 +14,7 @@ import {
   localPathForUploadsRel,
   publicMediaUrl,
   resolveStoredMediaUrl,
+  storedUploadFileExists,
   uploadsRelPathFromStoredUrl,
 } from "../lib/mediaStorage";
 import {
@@ -40,7 +41,13 @@ import {
 } from "../lib/reelsPrivacy";
 import { resolveViewerGeoFromRequest } from "../lib/adsGeo";
 import { pickFeedAdPlacementsForBatch, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
-import { cdnDeliveryEnabled, isS3MediaEnabled, scheduleS3Upload, tryRedirectStoredMediaToCdn } from "../lib/s3Storage";
+import {
+  cdnDeliveryEnabled,
+  isS3MediaEnabled,
+  scheduleS3Upload,
+  tryRedirectStoredMediaToCdn,
+  uploadLocalFileToS3,
+} from "../lib/s3Storage";
 import { buildReelsVideoDeepLink, buildReelsVideoShareUrl } from "../lib/reelsShareUrl";
 
 const router = Router();
@@ -205,7 +212,9 @@ function resolveChannelBrandingPublicUrl(
   const v = cacheVersion != null ? encodeURIComponent(String(cacheVersion)) : "";
   const q = v ? `?v=${v}` : "";
   const rel = uploadsRelPathFromStoredUrl(raw);
-  if (rel && cdnDeliveryEnabled()) {
+  const uploadsRoot = path.join(apiServerDir, "uploads");
+  // Serve via API while the file is still on disk (S3 upload may be in progress).
+  if (rel && cdnDeliveryEnabled() && !storedUploadFileExists(raw, uploadsRoot)) {
     return `${publicMediaUrl(req, rel)}${q}`;
   }
   if (/^https?:\/\//i.test(raw) && !rel) return raw;
@@ -220,10 +229,10 @@ function mapPublicChannelResponse(
   const ch = mapPublicReelsChannel(row, viewerId);
   const channelId = Number(row.id);
   const version = row.updated_at ?? row.created_at;
-  if (ch.avatarUrl) {
+  if (row.avatar_url) {
     ch.avatarUrl = resolveChannelBrandingPublicUrl(req, channelId, row.avatar_url, "avatar", version);
   }
-  if (ch.coverUrl) {
+  if (row.cover_url) {
     ch.coverUrl = resolveChannelBrandingPublicUrl(req, channelId, row.cover_url, "cover", version);
   }
   return ch;
@@ -776,12 +785,12 @@ router.patch("/channel/me", runChannelBrandingUpload, async (req: Request, res: 
     if (avatarUrl) {
       sets.push(`avatar_url = $${p++}`);
       params.push(avatarUrl);
-      scheduleS3Upload(path.join(reelsUploadsDir, avatarFile!.filename), avatarUrl);
+      await uploadLocalFileToS3(path.join(reelsUploadsDir, avatarFile!.filename), avatarUrl);
     }
     if (coverUrl) {
       sets.push(`cover_url = $${p++}`);
       params.push(coverUrl);
-      scheduleS3Upload(path.join(reelsUploadsDir, coverFile!.filename), coverUrl);
+      await uploadLocalFileToS3(path.join(reelsUploadsDir, coverFile!.filename), coverUrl);
     }
     await query(
       `UPDATE reels_channels SET ${sets.join(", ")} WHERE user_id = $1`,

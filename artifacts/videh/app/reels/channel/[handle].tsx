@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -25,6 +25,7 @@ import {
   truncateChannelBio,
 } from "@/lib/channelLinkUtils";
 import {
+  channelBrandingApiUrl,
   createReelsPlaylist,
   deleteReelsPlaylist,
   deleteReelsVideo,
@@ -335,6 +336,45 @@ export default function ReelsChannelScreen() {
   );
 }
 
+function ChannelCover({
+  uri,
+  channelId,
+  fallbackColor,
+}: {
+  uri: string | null | undefined;
+  channelId: number;
+  fallbackColor: string;
+}) {
+  const [src, setSrc] = useState(uri ?? null);
+  const triedApiFallback = useRef(false);
+
+  useEffect(() => {
+    setSrc(uri ?? null);
+    triedApiFallback.current = false;
+  }, [uri]);
+
+  if (!src) {
+    return <View style={[styles.cover, { backgroundColor: fallbackColor }]} />;
+  }
+
+  const apiFallback = channelBrandingApiUrl(channelId, "cover");
+
+  return (
+    <Image
+      source={{ uri: src }}
+      style={styles.cover}
+      contentFit="cover"
+      cacheKey={`cover-${channelId}-${src}`}
+      onError={() => {
+        if (!triedApiFallback.current && src !== apiFallback) {
+          triedApiFallback.current = true;
+          setSrc(apiFallback);
+        }
+      }}
+    />
+  );
+}
+
 function ChannelHeader({
   channel,
   colors,
@@ -365,16 +405,7 @@ function ChannelHeader({
   return (
     <>
       <View style={styles.coverWrap}>
-        {channel.coverUrl ? (
-          <Image
-            source={{ uri: channel.coverUrl }}
-            style={styles.cover}
-            contentFit="cover"
-            cacheKey={`cover-${channel.id}-${channel.coverUrl}`}
-          />
-        ) : (
-          <View style={[styles.cover, { backgroundColor: colors.primary }]} />
-        )}
+        <ChannelCover uri={channel.coverUrl} channelId={channel.id} fallbackColor={colors.primary} />
         <View style={[styles.headerBar, { paddingTop: insetsTop + 8 }]}>
           <TouchableOpacity onPress={onBack} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
