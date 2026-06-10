@@ -233,14 +233,48 @@ export async function createChannel(
   return res;
 }
 
+export type ReelsPlaylist = {
+  id: number;
+  title: string;
+  description?: string | null;
+  videoCount?: number;
+  thumbnailUrl?: string | null;
+  createdAt?: string;
+};
+
 export async function fetchMyChannel(userId: number, token: string) {
   const res = await reelsFetch<{
     success: boolean;
     channel: ReelsChannel | null;
+    playlists?: ReelsPlaylist[];
     monetization?: { eligible: boolean; status: string; reasons: string[] };
   }>(`/channel/me?userId=${userId}`, { token });
   if (res.channel) res.channel = normalizeChannel(res.channel);
   return res;
+}
+
+export async function addVideoToPlaylist(
+  userId: number,
+  playlistId: number,
+  videoId: number,
+  token: string,
+) {
+  return reelsFetch<{ success: boolean; message?: string }>(
+    `/channel/me/playlists/${playlistId}/videos`,
+    { method: "POST", token, body: { userId, videoId } },
+  );
+}
+
+export async function createPlaylist(
+  userId: number,
+  title: string,
+  token: string,
+  videoIds: number[] = [],
+) {
+  return reelsFetch<{ success: boolean; playlists?: ReelsPlaylist[]; message?: string }>(
+    "/channel/me/playlists",
+    { method: "POST", token, body: { userId, title, videoIds } },
+  );
 }
 
 export async function fetchChannel(handle: string, userId?: number, token?: string | null) {
@@ -445,6 +479,153 @@ async function putToS3(url: string, file: File, contentType: string, onProgress?
     };
     xhr.onerror = () => reject(new Error("Upload network error"));
     xhr.send(file);
+  });
+}
+
+export type VideoUploadSession = {
+  videoUploadsRel?: string;
+  thumbnailUploadsRel?: string;
+  videoFile: File;
+  thumbnailFile?: File;
+};
+
+export async function beginVideoUpload(opts: {
+  userId: number;
+  token: string;
+  videoFile: File;
+  thumbnailFile?: File;
+  onProgress?: (pct: number) => void;
+}): Promise<{ success: boolean; session?: VideoUploadSession; message?: string }> {
+  const intent = await reelsFetch<{
+    success: boolean;
+    directUpload?: boolean;
+    video?: PresignedSlot;
+    thumbnail?: PresignedSlot | null;
+    message?: string;
+  }>("/videos/upload-intent", {
+    method: "POST",
+    token: opts.token,
+    body: {
+      userId: opts.userId,
+      videoContentType: opts.videoFile.type || "video/mp4",
+      hasThumbnail: Boolean(opts.thumbnailFile),
+      thumbnailContentType: opts.thumbnailFile?.type || "image/jpeg",
+    },
+  });
+
+  if (!intent.success) {
+    return { success: false, message: intent.message ?? "Could not start upload" };
+  }
+
+  if (intent.directUpload && intent.video?.uploadUrl) {
+    await putToS3(
+      intent.video.uploadUrl,
+      opts.videoFile,
+      intent.video.contentType || opts.videoFile.type,
+      (p) => opts.onProgress?.(Math.round(p * 0.92)),
+    );
+    let thumbRel: string | undefined;
+    if (opts.thumbnailFile && intent.thumbnail?.uploadUrl) {
+      await putToS3(
+        intent.thumbnail.uploadUrl,
+        opts.thumbnailFile,
+        intent.thumbnail.contentType || opts.thumbnailFile.type,
+        (p) => opts.onProgress?.(92 + Math.round(p * 0.07)),
+      );
+      thumbRel = intent.thumbnail.uploadsRel;
+    }
+    opts.onProgress?.(100);
+    return {
+      success: true,
+      session: {
+        videoUploadsRel: intent.video.uploadsRel,
+        thumbnailUploadsRel: thumbRel,
+        videoFile: opts.videoFile,
+        thumbnailFile: opts.thumbnailFile,
+      },
+    };
+  }
+
+  return {
+    success: true,
+    session: { videoFile: opts.videoFile, thumbnailFile: opts.thumbnailFile },
+  };
+}
+
+async function uploadThumbnailToS3(
+  userId: number,
+  token: string,
+  thumbFile: File,
+): Promise<string | undefined> {
+  const intent = await reelsFetch<{
+    success: boolean;
+    directUpload?: boolean;
+    thumbnail?: PresignedSlot;
+  }>("/videos/thumbnail-intent", {
+    method: "POST",
+    token,
+    body: {
+      userId,
+      thumbnailContentType: thumbFile.type || "image/jpeg",
+    },
+  });
+  if (intent.directUpload && intent.thumbnail?.uploadUrl) {
+    await putToS3(
+      intent.thumbnail.uploadUrl,
+      thumbFile,
+      intent.thumbnail.contentType || thumbFile.type,
+    );
+    return intent.thumbnail.uploadsRel;
+  }
+  return undefined;
+}
+
+export async function finalizeVideoUpload(opts: {
+  userId: number;
+  token: string;
+  title: string;
+  description: string;
+  hashtags: string;
+  durationSeconds: number;
+  session: VideoUploadSession;
+  thumbnailFile?: File;
+}) {
+  if (opts.session.videoUploadsRel) {
+    let thumbRel = opts.session.thumbnailUploadsRel;
+    if (!thumbRel && opts.thumbnailFile) {
+      thumbRel = await uploadThumbnailToS3(opts.userId, opts.token, opts.thumbnailFile);
+    }
+    const done = await reelsFetch<{
+      success: boolean;
+      video?: ReelsVideo;
+      message?: string;
+      pending?: boolean;
+    }>("/videos/complete", {
+      method: "POST",
+      token: opts.token,
+      body: {
+        userId: opts.userId,
+        title: opts.title,
+        description: opts.description,
+        hashtags: opts.hashtags,
+        durationSeconds: opts.durationSeconds,
+        videoUploadsRel: opts.session.videoUploadsRel,
+        thumbnailUploadsRel: thumbRel,
+      },
+    });
+    if (done.video) done.video = normalizeVideo(done.video);
+    return done;
+  }
+
+  return uploadVideo({
+    userId: opts.userId,
+    token: opts.token,
+    title: opts.title,
+    description: opts.description,
+    hashtags: opts.hashtags,
+    durationSeconds: opts.durationSeconds,
+    videoFile: opts.session.videoFile,
+    thumbnailFile: opts.session.thumbnailFile,
   });
 }
 

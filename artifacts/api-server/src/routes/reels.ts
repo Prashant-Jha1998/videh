@@ -912,6 +912,65 @@ router.post("/channel/me/playlists", async (req: Request, res: Response) => {
   }
 });
 
+router.post("/channel/me/playlists/:playlistId/videos", async (req: Request, res: Response) => {
+  const userId = Number((req.body as { userId?: number }).userId);
+  const playlistId = Number(req.params.playlistId);
+  const videoId = Number((req.body as { videoId?: number }).videoId);
+  if (!userId) {
+    res.status(400).json({ success: false, message: "userId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  if (!playlistId || !videoId) {
+    res.status(400).json({ success: false, message: "playlistId and videoId required" });
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    const ch = await query("SELECT id FROM reels_channels WHERE user_id = $1", [userId]);
+    if (!ch.rows.length) {
+      res.status(404).json({ success: false, message: "Create your channel first." });
+      return;
+    }
+    const channelId = Number(ch.rows[0].id);
+    const pl = await query(
+      `SELECT p.id FROM reels_playlists p
+       JOIN reels_channels c ON c.id = p.channel_id
+       WHERE p.id = $1 AND c.user_id = $2`,
+      [playlistId, userId],
+    );
+    if (!pl.rows.length) {
+      res.status(404).json({ success: false, message: "Playlist not found." });
+      return;
+    }
+    const owned = await query(
+      `SELECT id FROM reels_videos WHERE id = $1 AND channel_id = $2`,
+      [videoId, channelId],
+    );
+    if (!owned.rows.length) {
+      res.status(404).json({ success: false, message: "Video not found on your channel." });
+      return;
+    }
+    const orderRes = await query(
+      `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order
+       FROM reels_playlist_items WHERE playlist_id = $1`,
+      [playlistId],
+    );
+    const nextOrder = Number(orderRes.rows[0]?.next_order ?? 0);
+    await query(
+      `INSERT INTO reels_playlist_items (playlist_id, video_id, sort_order)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (playlist_id, video_id) DO NOTHING`,
+      [playlistId, videoId, nextOrder],
+    );
+    const playlists = await fetchChannelPlaylists(channelId, true);
+    res.json({ success: true, playlists });
+  } catch (err) {
+    req.log.error({ err }, "reels add video to playlist");
+    res.status(500).json({ success: false, message: "Could not add video to playlist." });
+  }
+});
+
 router.delete("/channel/me/playlists/:playlistId", async (req: Request, res: Response) => {
   const userId = Number((req.body as { userId?: number }).userId ?? req.query.userId);
   const playlistId = Number(req.params.playlistId);
@@ -1239,6 +1298,39 @@ router.post("/videos/upload-intent", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "reels upload intent");
     res.status(500).json({ success: false, message: "Could not start upload." });
+  }
+});
+
+/** Presigned URL for a custom thumbnail (after video is already on S3). */
+router.post("/videos/thumbnail-intent", async (req: Request, res: Response) => {
+  const userId = Number((req.body as { userId?: number }).userId);
+  const thumbnailContentType = String((req.body as { thumbnailContentType?: string }).thumbnailContentType ?? "image/jpeg").trim();
+  if (!userId) {
+    res.status(400).json({ success: false, message: "userId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  if (!isS3DirectUploadEnabled()) {
+    res.json({ success: true, directUpload: false });
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    const ch = await query("SELECT id FROM reels_channels WHERE user_id = $1", [userId]);
+    if (!ch.rows.length) {
+      res.status(403).json({ success: false, message: "Create your channel first." });
+      return;
+    }
+    const thumbRel = `/uploads/reels/${reelsUploadFilename("thumb", thumbnailContentType, ".jpg")}`;
+    const thumbnail = await createPresignedUploadUrl(req, thumbRel, thumbnailContentType);
+    if (!thumbnail) {
+      res.json({ success: true, directUpload: false });
+      return;
+    }
+    res.json({ success: true, directUpload: true, thumbnail });
+  } catch (err) {
+    req.log.error({ err }, "reels thumbnail intent");
+    res.status(500).json({ success: false, message: "Could not start thumbnail upload." });
   }
 });
 

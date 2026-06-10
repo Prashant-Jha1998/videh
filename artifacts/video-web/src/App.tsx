@@ -40,9 +40,9 @@ function AppInner() {
     return () => window.removeEventListener("popstate", onNav);
   }, []);
 
-  const isLogin = route.page === "login";
+  const isFullBleed = route.page === "login" || route.page === "upload";
 
-  return isLogin ? (
+  return isFullBleed ? (
     <RouterView route={route} />
   ) : (
     <Layout>
