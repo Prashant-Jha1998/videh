@@ -11,6 +11,7 @@ export type CachedChatMessage = {
   type: string;
   status?: string;
   mediaUrl?: string;
+  albumUrls?: string[];
   isViewOnce?: boolean;
   viewOnceOpened?: boolean;
   isEdited?: boolean;
@@ -24,7 +25,7 @@ export type CachedChatMessage = {
 
 export type ChatMessageCacheStore = Record<string, CachedChatMessage[]>;
 
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const MAX_MESSAGES_PER_CHAT = 80;
 const MAX_CACHED_CHATS = 40;
 
@@ -43,6 +44,9 @@ export function slimMessageForCache(m: CachedChatMessage & Record<string, unknow
     type: String(m.type ?? "text"),
     status: m.status ? String(m.status) : undefined,
     mediaUrl: m.mediaUrl ? String(m.mediaUrl) : undefined,
+    albumUrls: Array.isArray(m.albumUrls)
+      ? m.albumUrls.map((u) => String(u).trim()).filter(Boolean)
+      : undefined,
     isViewOnce: m.isViewOnce ? true : undefined,
     viewOnceOpened: m.viewOnceOpened ? true : undefined,
     isEdited: m.isEdited ? true : undefined,

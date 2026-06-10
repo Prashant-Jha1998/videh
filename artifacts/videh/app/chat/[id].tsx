@@ -83,12 +83,14 @@ import { stashBatchMedia } from "@/lib/chatMediaBatch";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 import { launchChatPhotoCamera, launchChatVideoCamera } from "@/lib/openChatCamera";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
-import { parseAlbumMessageContent } from "@/lib/chatAlbumMessage";
+import { isAlbumMessage, resolveAlbumUrls } from "@/lib/chatAlbumMessage";
+import { ChatAlbumGalleryModal } from "@/components/ChatAlbumGalleryModal";
 import { isGifUri } from "@/lib/imageEdit";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { formatTypingLabel } from "@/lib/typingIndicator";
 import { TypingIndicator } from "@/components/TypingIndicator";
 import { ChatAlbumBubble } from "@/components/ChatAlbumBubble";
+import { MediaProgressRing } from "@/components/MediaProgressRing";
 import { ChatSystemMessageBubble } from "@/components/ChatSystemMessageBubble";
 import { GroupWelcomeCard } from "@/components/GroupWelcomeCard";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
@@ -825,6 +827,39 @@ function ChatVideoThumbnailBubble({ uri, sessionToken, onOpen }: { uri: string; 
         <Text style={styles.videoThumbDuration}>{durationLabel}</Text>
       </View>
     </TouchableOpacity>
+  );
+}
+
+function MediaUploadOverlay({
+  uploading,
+  failed,
+  progress,
+}: {
+  uploading: boolean;
+  failed?: boolean;
+  progress: number;
+}) {
+  if (!uploading && !failed) return null;
+  return (
+    <View style={styles.mediaUploadOverlay} pointerEvents="none">
+      <View style={styles.mediaUploadDim} />
+      {failed ? (
+        <View style={styles.mediaUploadCenter}>
+          <Ionicons name="alert-circle" size={32} color="#fff" />
+          <Text style={styles.mediaUploadFailedText}>Couldn&apos;t send</Text>
+        </View>
+      ) : (
+        <MediaProgressRing
+          size={48}
+          strokeWidth={3}
+          progress={progress}
+          progressColor="#00A884"
+          trackColor="rgba(255,255,255,0.35)"
+        >
+          <Text style={styles.mediaUploadPct}>{progress}%</Text>
+        </MediaProgressRing>
+      )}
+    </View>
   );
 }
 
@@ -2414,6 +2449,11 @@ export default function ChatScreen() {
 
   const [cameraSheetOpen, setCameraSheetOpen] = useState(false);
   const [mediaPreview, setMediaPreview] = useState<{ uri: string; caption?: string; type: "image" | "video" } | null>(null);
+  const [albumGallery, setAlbumGallery] = useState<{
+    urls: string[];
+    index: number;
+    caption?: string;
+  } | null>(null);
   const showAttachMenu = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setAttachVisible(true);
@@ -2502,11 +2542,24 @@ export default function ChatScreen() {
     const isDeleted = item.type === "deleted";
     const isViewOnceOpened = (item.type === "image" || item.type === "video") && item.isViewOnce && (item.viewOnceOpened || !item.mediaUrl);
     const isViewOncePending = (item.type === "image" || item.type === "video") && item.isViewOnce && !!item.mediaUrl && !item.viewOnceOpened && !isMe;
-    const albumUrls = item.albumUrls
-      ?? (item.type === "album" ? parseAlbumMessageContent(item.text)?.urls : undefined);
-    const isAlbum = item.type === "album" && !!albumUrls && albumUrls.length >= 2;
-    const isImage = !isAlbum && item.type === "image" && !!item.mediaUrl && !isViewOncePending;
-    const isVideo = item.type === "video" && !!item.mediaUrl && !isViewOncePending;
+    const albumUrls = resolveAlbumUrls(item.text, {
+      albumUrls: item.albumUrls,
+      mediaUrl: item.mediaUrl,
+    });
+    const isAlbum = isAlbumMessage(item.type, item.text, {
+      albumUrls: item.albumUrls,
+      mediaUrl: item.mediaUrl,
+    }) && !!albumUrls;
+    const displayMediaUri = item.localMediaUri ?? item.mediaUrl ?? "";
+    const isImage = !isAlbum && item.type === "image" && !!displayMediaUri && !isViewOncePending;
+    const isVideo = item.type === "video" && !!displayMediaUri && !isViewOncePending;
+    const mediaUploading = isMe
+      && (isImage || isVideo || isAlbum)
+      && typeof item.uploadProgress === "number"
+      && item.uploadProgress < 100
+      && !item.uploadFailed;
+    const mediaUploadFailed = isMe && (isImage || isVideo || isAlbum) && item.uploadFailed === true;
+    const mediaUploadPct = item.uploadProgress ?? 0;
     const isAudio = item.type === "audio" && !!item.mediaUrl;
     const effectiveType = normalizeMessageType(item.type, item.text, item.mediaUrl);
     const isDocument = effectiveType === "document";
@@ -2517,15 +2570,16 @@ export default function ChatScreen() {
     const isSpecial = isDocument || isLocation || isContact || isCall;
     const urls = (!isDeleted && !isImage && !isAudio && !isSpecial) ? extractUrls(item.text) : [];
     const isManyForwarded = (item.forwardCount ?? 0) >= 5;
-    const metaTextColor = isImage || isLocation
+    const metaTextColor = isImage || isAlbum || isLocation
       ? "rgba(255,255,255,0.92)"
       : isMe
         ? "rgba(0,0,0,0.55)"
         : colors.mutedForeground;
 
-    const showSvgTail = !isImage && !isVideo && !isLocation && !isViewOnceOpened && !isViewOncePending;
+    const showSvgTail = !isImage && !isVideo && !isAlbum && !isLocation && !isViewOnceOpened && !isViewOncePending;
     const isPlainText =
       !isDeleted
+      && !isAlbum
       && !isImage
       && !isVideo
       && !isAudio
@@ -2636,7 +2690,7 @@ export default function ChatScreen() {
               styles.bubble,
               showSvgTail && styles.bubbleWithTailShape,
               { backgroundColor: isMe ? colors.chatBubbleSent : colors.chatBubbleReceived },
-              (isImage || isVideo || isLocation || isViewOnceOpened || isViewOncePending) && styles.bubbleImg,
+              (isImage || isVideo || isAlbum || isLocation || isViewOnceOpened || isViewOncePending) && styles.bubbleImg,
               isDeleted && styles.bubbleDeleted,
               compactTextBubble && styles.bubbleCompact,
             ]}
@@ -2692,20 +2746,27 @@ export default function ChatScreen() {
             />
           ) : isAlbum && albumUrls ? (
             <>
-              <ChatAlbumBubble
-                urls={albumUrls}
-                width={W * 0.62}
-                sessionToken={user?.sessionToken}
-                onOpenImage={(uri) => {
-                  const cap = item.text?.trim();
-                  const defaultLabel = `${albumUrls.length} photos`;
-                  setMediaPreview({
-                    uri,
-                    type: "image",
-                    caption: cap && cap !== defaultLabel && cap !== "Photo" ? cap : undefined,
-                  });
-                }}
-              />
+              <View style={styles.mediaBubbleWrap}>
+                <ChatAlbumBubble
+                  urls={albumUrls}
+                  width={W * 0.62}
+                  sessionToken={user?.sessionToken}
+                  onOpenImage={(_uri, index) => {
+                    const cap = item.text?.trim();
+                    const defaultLabel = `${albumUrls.length} photos`;
+                    setAlbumGallery({
+                      urls: albumUrls,
+                      index,
+                      caption: cap && cap !== defaultLabel && cap !== "Photo" ? cap : undefined,
+                    });
+                  }}
+                />
+                <MediaUploadOverlay
+                  uploading={mediaUploading}
+                  failed={mediaUploadFailed}
+                  progress={mediaUploadPct}
+                />
+              </View>
               {(() => {
                 const cap = item.text?.trim();
                 const defaultLabel = `${albumUrls.length} photos`;
@@ -2715,33 +2776,40 @@ export default function ChatScreen() {
                 );
               })()}
             </>
-          ) : isImage && item.mediaUrl ? (
+          ) : isImage && displayMediaUri ? (
             <>
-              <ChatImageBubble
-                uri={item.mediaUrl}
-                sessionToken={user?.sessionToken}
-                onOpen={() => {
-                  if (!item.mediaUrl) return;
-                  if (item.isViewOnce) {
-                    void openViewOnceMedia(item);
-                    return;
-                  }
-                  setMediaPreview({
-                    uri: item.mediaUrl,
-                    type: "image",
-                    caption: item.text && item.text !== "ðŸ“· Photo" && item.text !== "ðŸŽ¥ Video" && item.text !== "ðŸ” View once"
-                      ? item.text
-                      : undefined,
-                  });
-                }}
-              />
+              <View style={styles.mediaBubbleWrap}>
+                <ChatImageBubble
+                  uri={displayMediaUri}
+                  sessionToken={user?.sessionToken}
+                  onOpen={() => {
+                    if (mediaUploading) return;
+                    if (item.isViewOnce) {
+                      void openViewOnceMedia(item);
+                      return;
+                    }
+                    setMediaPreview({
+                      uri: displayMediaUri,
+                      type: "image",
+                      caption: item.text && item.text !== "ðŸ“· Photo" && item.text !== "ðŸŽ¥ Video" && item.text !== "ðŸ” View once"
+                        ? item.text
+                        : undefined,
+                    });
+                  }}
+                />
+                <MediaUploadOverlay
+                  uploading={mediaUploading}
+                  failed={mediaUploadFailed}
+                  progress={mediaUploadPct}
+                />
+              </View>
               {item.isViewOnce && (
                 <View style={styles.viewOnceOverlay}>
                   <Ionicons name="eye-outline" size={18} color="#fff" />
                   <Text style={styles.viewOnceText}>View once</Text>
                 </View>
               )}
-              {item.mediaUrl && isGifUri(item.mediaUrl) && (
+              {displayMediaUri && isGifUri(displayMediaUri) && (
                 <View style={[styles.viewOnceOverlay, { left: undefined, right: 8 }]}>
                   <Text style={styles.viewOnceText}>GIF</Text>
                 </View>
@@ -2750,20 +2818,28 @@ export default function ChatScreen() {
                 <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{item.text}</Text>
               )}
             </>
-          ) : isVideo && item.mediaUrl ? (
+          ) : isVideo && displayMediaUri ? (
             <>
-              <ChatVideoThumbnailBubble
-                uri={item.mediaUrl}
-                sessionToken={user?.sessionToken}
-                onOpen={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  if (item.isViewOnce) {
-                    void openViewOnceMedia(item);
-                    return;
-                  }
-                  void openChatVideoFullScreen(item.mediaUrl!, isMe, item.timestamp);
-                }}
-              />
+              <View style={styles.mediaBubbleWrap}>
+                <ChatVideoThumbnailBubble
+                  uri={displayMediaUri}
+                  sessionToken={user?.sessionToken}
+                  onOpen={() => {
+                    if (mediaUploading) return;
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    if (item.isViewOnce) {
+                      void openViewOnceMedia(item);
+                      return;
+                    }
+                    void openChatVideoFullScreen(displayMediaUri, isMe, item.timestamp);
+                  }}
+                />
+                <MediaUploadOverlay
+                  uploading={mediaUploading}
+                  failed={mediaUploadFailed}
+                  progress={mediaUploadPct}
+                />
+              </View>
               {item.isViewOnce && (
                 <View style={styles.viewOnceOverlay}>
                   <Ionicons name="eye-outline" size={18} color="#fff" />
@@ -2874,7 +2950,7 @@ export default function ChatScreen() {
 
           {/* Footer: time + edited + ticks (compact short text uses inline row above) */}
           {!isDeleted && !compactTextBubble ? (
-            <View style={[styles.msgMeta, (isImage || isVideo || isLocation) && styles.msgMetaOnMedia, isCall && styles.msgMetaCall]}>
+            <View style={[styles.msgMeta, (isImage || isVideo || isAlbum || isLocation) && styles.msgMetaOnMedia, isCall && styles.msgMetaCall]}>
               {item.isEdited && <Text style={[styles.editedLabel, { color: colors.mutedForeground }]}>edited </Text>}
               <Text style={[styles.msgTime, { color: metaTextColor }]}>
                 {formatChatBubbleTime(item.timestamp)}
@@ -4353,6 +4429,16 @@ export default function ChatScreen() {
         </View>
       </DismissibleModal>
 
+      <ChatAlbumGalleryModal
+        visible={!!albumGallery}
+        urls={albumGallery?.urls ?? []}
+        initialIndex={albumGallery?.index ?? 0}
+        sessionToken={user?.sessionToken}
+        caption={albumGallery?.caption}
+        onClose={() => setAlbumGallery(null)}
+        onSave={(uri) => { void saveImageToGallery(uri); }}
+      />
+
       <Modal visible={!!mediaPreview} animationType="fade" transparent onRequestClose={() => setMediaPreview(null)}>
         <Pressable style={styles.mediaPreviewModal} onPress={() => setMediaPreview(null)}>
           <View style={styles.mediaPreviewHeader}>
@@ -4574,6 +4660,19 @@ const styles = StyleSheet.create({
   videoLoadingText: { color: "#fff", fontSize: 12, fontFamily: "Inter_500Medium" },
   videoErrorWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 12, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
   videoErrorText: { color: "#fff", fontSize: 12, fontFamily: "Inter_500Medium" },
+  mediaBubbleWrap: { position: "relative" },
+  mediaUploadOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 4,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  mediaUploadDim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.38)" },
+  mediaUploadCenter: { alignItems: "center", gap: 6 },
+  mediaUploadPct: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  mediaUploadFailedText: { color: "#fff", fontSize: 12, fontWeight: "600" },
   viewOnceOverlay: { position: "absolute", top: 8, left: 8, flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   viewOnceText: { color: "#fff", fontSize: 11, fontFamily: "Inter_500Medium" },
   viewOncePlaceholder: {

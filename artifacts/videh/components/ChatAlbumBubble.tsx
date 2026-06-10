@@ -29,7 +29,8 @@ function AlbumTile({
 }) {
   const [useNative, setUseNative] = useState(false);
   const [failed, setFailed] = useState(false);
-  const needsAuth = uri.includes("/api/chats/media/") && sessionToken;
+  const needsAuth = uri.includes("/api/chats/media/") && !!sessionToken;
+  const isLocal = uri.startsWith("file://") || uri.startsWith("content://");
   const source = needsAuth
     ? { uri, headers: authFetchHeaders(sessionToken) as Record<string, string> }
     : { uri };
@@ -52,6 +53,7 @@ function AlbumTile({
           source={source}
           style={StyleSheet.absoluteFill}
           contentFit="cover"
+          cachePolicy={isLocal ? "none" : "memory-disk"}
           onError={() => setUseNative(true)}
         />
       )}

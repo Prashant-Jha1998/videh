@@ -1,10 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Platform,
   StyleSheet,
@@ -17,19 +16,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
 import { takeBatchMedia } from "@/lib/chatMediaBatch";
 import { isGifUri, type MediaQuality } from "@/lib/imageEdit";
-import { uploadChatImagesBatch } from "@/lib/uploadChatImagesBatch";
 
 export default function ChatMediaComposeBatchScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, sendAlbumMessage, sendPreparedMediaMessage } = useApp();
+  const { sendAlbumMessage, sendPreparedMediaMessage } = useApp();
   const [chatId, setChatId] = useState("");
   const [uris, setUris] = useState<string[]>([]);
   const [caption, setCaption] = useState("");
   const [quality, setQuality] = useState<MediaQuality>("standard");
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState({ completed: 0, total: 0, pct: 0 });
-  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -43,43 +38,21 @@ export default function ChatMediaComposeBatchScreen() {
     })();
   }, [router]);
 
-  async function onSend() {
-    if (!chatId || uris.length === 0 || busy) return;
-    setBusy(true);
-    abortRef.current = new AbortController();
-    const total = uris.length;
-    setProgress({ completed: 0, total, pct: 0 });
-    try {
-      const uploaded = await uploadChatImagesBatch({
-        uris,
+  function onSend() {
+    if (!chatId || uris.length === 0) return;
+    const cap = caption.trim();
+    if (uris.length === 1) {
+      sendPreparedMediaMessage(chatId, {
+        localUri: uris[0],
+        kind: "image",
+        caption: cap,
         quality,
-        sessionToken: user?.sessionToken,
-        signal: abortRef.current.signal,
-        onProgress: (p) => setProgress({ completed: p.completed, total: p.total, pct: p.currentPct }),
+        isViewOnce: false,
       });
-      const cap = caption.trim();
-      if (uploaded.length === 1) {
-        sendPreparedMediaMessage(chatId, {
-          mediaUrl: uploaded[0],
-          kind: "image",
-          caption: cap,
-          isViewOnce: false,
-        });
-      } else {
-        sendAlbumMessage(chatId, { urls: uploaded, caption: cap });
-      }
-      router.back();
-    } catch (e) {
-      Alert.alert("Send failed", e instanceof Error ? e.message : "Could not send photos.");
-    } finally {
-      setBusy(false);
-      abortRef.current = null;
+    } else {
+      sendAlbumMessage(chatId, { localUris: uris, caption: cap, quality });
     }
-  }
-
-  function onCancel() {
-    abortRef.current?.abort();
-    setBusy(false);
+    router.back();
   }
 
   if (!chatId || uris.length === 0) {
@@ -93,7 +66,7 @@ export default function ChatMediaComposeBatchScreen() {
   return (
     <View style={[styles.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 12 }]}>
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => router.back()} disabled={busy}>
+        <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="close" size={28} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.title}>{uris.length} photos</Text>
@@ -104,14 +77,12 @@ export default function ChatMediaComposeBatchScreen() {
         <TouchableOpacity
           style={[styles.qualityBtn, quality === "standard" && styles.qualityBtnActive]}
           onPress={() => setQuality("standard")}
-          disabled={busy}
         >
           <Text style={[styles.qualityText, quality === "standard" && styles.qualityTextActive]}>Standard</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.qualityBtn, quality === "hd" && styles.qualityBtnActive]}
           onPress={() => setQuality("hd")}
-          disabled={busy}
         >
           <Text style={[styles.qualityText, quality === "hd" && styles.qualityTextActive]}>HD</Text>
         </TouchableOpacity>
@@ -138,27 +109,13 @@ export default function ChatMediaComposeBatchScreen() {
         placeholderTextColor="#8696a0"
         value={caption}
         onChangeText={setCaption}
-        editable={!busy}
         multiline
       />
 
-      {busy ? (
-        <View style={styles.progressRow}>
-          <ActivityIndicator color="#00a884" />
-          <Text style={styles.progressText}>
-            Uploading {progress.completed}/{progress.total}
-            {progress.pct > 0 ? ` · ${progress.pct}%` : ""}
-          </Text>
-          <TouchableOpacity onPress={onCancel}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <TouchableOpacity style={styles.sendBtn} onPress={() => void onSend()}>
-          <Ionicons name="send" size={22} color="#fff" />
-          <Text style={styles.sendText}>Send {uris.length} photos</Text>
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity style={styles.sendBtn} onPress={onSend}>
+        <Ionicons name="send" size={22} color="#fff" />
+        <Text style={styles.sendText}>Send {uris.length} photos</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -201,7 +158,4 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   sendText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  progressRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, marginHorizontal: 16, paddingVertical: 14 },
-  progressText: { color: "#fff", fontSize: 14 },
-  cancelText: { color: "#ea4335", fontWeight: "600" },
 });

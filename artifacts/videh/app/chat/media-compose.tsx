@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -18,9 +18,7 @@ import { ImageDrawModal } from "@/components/ImageDrawModal";
 import { ManualImageCropModal } from "@/components/ManualImageCropModal";
 import { useApp } from "@/context/AppContext";
 import { authFetchHeaders, authPlaybackSource } from "@/lib/authenticatedMedia";
-import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 import {
-  prepareImageForChatUpload,
   cropImageRect,
   ensureEditableImageUri,
   imageExtFromUri,
@@ -48,12 +46,9 @@ export default function ChatMediaComposeScreen() {
   const [uri, setUri] = useState(initialUri);
   const [caption, setCaption] = useState("");
   const [quality, setQuality] = useState<MediaQuality>("standard");
-  const [uploadPct, setUploadPct] = useState(0);
-  const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [cropOpen, setCropOpen] = useState(false);
   const [drawOpen, setDrawOpen] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (kind !== "image" || isGifUri(initialUri)) return;
@@ -76,35 +71,16 @@ export default function ChatMediaComposeScreen() {
   const ext = kind === "video" ? (mime.includes("quicktime") ? "mov" : "mp4") : imageExtFromUri(uri);
   const isGif = kind === "image" && isGifUri(uri);
 
-  async function onSend() {
-    if (!chatId || !uri || busy) return;
-    setBusy(true);
-    setUploadPct(0);
-    abortRef.current = new AbortController();
-    try {
-      let uploadUri = uri;
-      if (kind === "image" && !isGif) uploadUri = await prepareImageForChatUpload(uri, quality);
-      const uploaded = await uploadChatMediaWithProgress({
-        uri: uploadUri,
-        mime,
-        filename: `chat_${Date.now()}.${ext}`,
-        sessionToken: user?.sessionToken,
-        signal: abortRef.current.signal,
-        onProgress: (p) => setUploadPct(p.percent),
-      });
-      sendPreparedMediaMessage(chatId, {
-        mediaUrl: uploaded.url,
-        kind,
-        caption: caption.trim(),
-        isViewOnce,
-      });
-      router.back();
-    } catch (e) {
-      Alert.alert("Send failed", e instanceof Error ? e.message : "Could not send media.");
-    } finally {
-      setBusy(false);
-      abortRef.current = null;
-    }
+  function onSend() {
+    if (!chatId || !uri) return;
+    sendPreparedMediaMessage(chatId, {
+      localUri: uri,
+      kind,
+      caption: caption.trim(),
+      isViewOnce,
+      quality,
+    });
+    router.back();
   }
 
   async function onCropDone(rect: { originX: number; originY: number; width: number; height: number }) {
@@ -163,12 +139,6 @@ export default function ChatMediaComposeScreen() {
     setDrawOpen(true);
   }
 
-  function onCancelUpload() {
-    abortRef.current?.abort();
-    setBusy(false);
-    setUploadPct(0);
-  }
-
   if (!uri || !chatId) {
     return (
       <View style={styles.center}>
@@ -187,7 +157,7 @@ export default function ChatMediaComposeScreen() {
   return (
     <View style={[styles.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 12 }]}>
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => router.back()} disabled={busy}>
+        <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="close" size={28} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.title}>
@@ -201,14 +171,14 @@ export default function ChatMediaComposeScreen() {
           <TouchableOpacity
             style={[styles.qualityBtn, quality === "standard" && styles.qualityBtnActive]}
             onPress={() => setQuality("standard")}
-            disabled={busy || editing}
+            disabled={editing}
           >
             <Text style={[styles.qualityText, quality === "standard" && styles.qualityTextActive]}>Standard</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.qualityBtn, quality === "hd" && styles.qualityBtnActive]}
             onPress={() => setQuality("hd")}
-            disabled={busy || editing}
+            disabled={editing}
           >
             <Text style={[styles.qualityText, quality === "hd" && styles.qualityTextActive]}>HD</Text>
           </TouchableOpacity>
@@ -234,15 +204,15 @@ export default function ChatMediaComposeScreen() {
 
       {kind === "image" && !isGif ? (
         <View style={styles.editRow}>
-          <TouchableOpacity style={styles.editBtn} onPress={onCropPress} disabled={busy || editing}>
+          <TouchableOpacity style={styles.editBtn} onPress={onCropPress} disabled={editing}>
             <Ionicons name="crop" size={20} color="#fff" />
             <Text style={styles.editBtnText}>Crop</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.editBtn} onPress={onDrawPress} disabled={busy || editing}>
+          <TouchableOpacity style={styles.editBtn} onPress={onDrawPress} disabled={editing}>
             <Ionicons name="brush" size={20} color="#fff" />
             <Text style={styles.editBtnText}>Draw</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.editBtn} onPress={() => void onRotate()} disabled={busy || editing}>
+          <TouchableOpacity style={styles.editBtn} onPress={() => void onRotate()} disabled={editing}>
             <Ionicons name="refresh" size={20} color="#fff" />
             <Text style={styles.editBtnText}>Rotate</Text>
           </TouchableOpacity>
@@ -256,24 +226,13 @@ export default function ChatMediaComposeScreen() {
         placeholderTextColor="#8696a0"
         value={caption}
         onChangeText={setCaption}
-        editable={!busy}
         multiline
       />
 
-      {busy ? (
-        <View style={styles.progressRow}>
-          <ActivityIndicator color="#00a884" />
-          <Text style={styles.progressText}>Uploading {uploadPct}%</Text>
-          <TouchableOpacity onPress={onCancelUpload}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <TouchableOpacity style={styles.sendBtn} onPress={() => void onSend()}>
-          <Ionicons name="send" size={22} color="#fff" />
-          <Text style={styles.sendText}>Send</Text>
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity style={styles.sendBtn} onPress={onSend}>
+        <Ionicons name="send" size={22} color="#fff" />
+        <Text style={styles.sendText}>Send</Text>
+      </TouchableOpacity>
 
       <ManualImageCropModal
         visible={cropOpen}
@@ -333,7 +292,4 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   sendText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  progressRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, marginHorizontal: 16, paddingVertical: 14 },
-  progressText: { color: "#fff", fontSize: 14 },
-  cancelText: { color: "#ea4335", fontWeight: "600" },
 });

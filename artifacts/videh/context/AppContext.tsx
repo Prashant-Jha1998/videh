@@ -19,12 +19,26 @@ import { loadChatMediaSettings } from "@/lib/chatMediaSettings";
 import { shouldAutoDownload } from "@/lib/chatMediaNetwork";
 import { cacheChatImageUrl, cacheChatVideoUrl } from "@/lib/cacheChatMedia";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
+import { uploadChatImagesBatch } from "@/lib/uploadChatImagesBatch";
+import {
+  imageExtFromUri,
+  imageMimeFromUri,
+  isGifUri,
+  prepareImageForChatUpload,
+  type MediaQuality,
+} from "@/lib/imageEdit";
 import { ensureUploadableFileUri } from "@/lib/prepareFileUpload";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { encodeVoiceMessageText, stripWaveformMeta } from "@/lib/voiceWaveform";
 import { messageReplyPreviewText } from "@/lib/messageReplyPreview";
-import { albumChatPreview, encodeAlbumMessageContent, parseAlbumMessageContent } from "@/lib/chatAlbumMessage";
+import {
+  albumChatPreview,
+  encodeAlbumMessageContent,
+  parseAlbumMessageContent,
+  resolveAlbumUrls,
+} from "@/lib/chatAlbumMessage";
 import { inferChatListPreview, normalizeMessageType } from "@/lib/normalizeMessage";
+import { collectPendingLocalMessages, mergeServerWithPending } from "@/lib/mergePendingChatMessages";
 import { parseLocationPayload } from "@/lib/locationMessage";
 import {
   loadChatMessageCache,
@@ -134,21 +148,25 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
   const type = m.is_deleted
     ? "deleted"
     : normalizeMessageType(m.type, content, mediaUrl);
-  const albumUrls = type === "album"
-    ? (albumParsed?.urls ?? (mediaUrl ? [mediaUrl] : undefined))
-    : undefined;
-  const displayText = type === "album" && albumParsed
+  const albumUrls = resolveAlbumUrls(content, {
+    albumUrls: prevLocal?.albumUrls,
+    mediaUrl,
+  });
+  const resolvedType = albumUrls && albumUrls.length >= 2 ? "album" : type;
+  const displayText = resolvedType === "album" && albumParsed
     ? (albumParsed.caption ?? albumChatPreview(albumParsed.urls.length))
-    : content;
+    : resolvedType === "album" && albumUrls
+      ? albumChatPreview(albumUrls.length, albumParsed?.caption)
+      : content;
   return {
     id: String(m.id),
     text: displayText,
     timestamp: new Date(m.created_at).getTime(),
     senderId: isMe ? "me" : String(m.sender_id),
     senderName: m.sender_name ?? undefined,
-    type,
+    type: resolvedType,
     status,
-    mediaUrl: type === "album" ? (albumUrls?.[0] ?? mediaUrl) : mediaUrl,
+    mediaUrl: resolvedType === "album" ? (albumUrls?.[0] ?? mediaUrl) : mediaUrl,
     albumUrls,
     isStarred: m.is_starred,
     isForwarded: m.is_forwarded,
@@ -306,9 +324,19 @@ interface AppContextType {
   sendImageMessage: (chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean, mediaKind?: "image" | "video") => void;
   sendPreparedMediaMessage: (
     chatId: string,
-    opts: { mediaUrl: string; kind: "image" | "video"; caption?: string; isViewOnce?: boolean },
+    opts: {
+      mediaUrl?: string;
+      localUri?: string;
+      quality?: MediaQuality;
+      kind: "image" | "video";
+      caption?: string;
+      isViewOnce?: boolean;
+    },
   ) => void;
-  sendAlbumMessage: (chatId: string, opts: { urls: string[]; caption?: string }) => void;
+  sendAlbumMessage: (
+    chatId: string,
+    opts: { urls?: string[]; localUris?: string[]; caption?: string; quality?: MediaQuality },
+  ) => void;
   consumeViewOnceMessage: (chatId: string, messageId: string) => Promise<string | null>;
   sendAudioMessage: (chatId: string, audioUri: string, durationSecs: number, waveform?: number[]) => void;
   sendDocumentMessage: (
@@ -1083,53 +1111,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 && m.status === n.status
                 && m.type === n.type
                 && m.mediaUrl === n.mediaUrl
+                && (m.albumUrls?.length ?? 0) === (n.albumUrls?.length ?? 0)
                 && (m.reactions?.length ?? 0) === (n.reactions?.length ?? 0);
             })
           ) {
             return c;
           }
-          const isSupersededTemp = (tmp: Message, serverMsgs: Message[]) =>
-            serverMsgs.some(
-              (s) =>
-                s.senderId === "me"
-                && Math.abs(s.timestamp - tmp.timestamp) < 120_000
-                && (s.text === tmp.text || (tmp.type !== "text" && s.type === tmp.type)),
-            );
-          const pendingLocal = prevMsgs.filter((m) => {
-            if (m.id.startsWith("hint_")) {
-              const hintedServerId = m.id.startsWith("hint_t") ? null : m.id.slice(5);
-              if (hintedServerId && msgs.some((s) => s.id === hintedServerId)) return false;
-              if (
-                m.text.trim()
-                && msgs.some(
-                  (s) =>
-                    s.senderId !== "me"
-                    && (s.text === m.text || (hintedServerId != null && s.id === hintedServerId)),
-                )
-              ) {
-                return false;
-              }
-              if (!m.text.trim() && hintedServerId && msgs.some((s) => s.id === hintedServerId)) {
-                return false;
-              }
-              return true;
-            }
-            if (!m.id.startsWith("tmp_")) return false;
-            if (
-              m.type === "document"
-              && typeof m.uploadProgress === "number"
-              && m.uploadProgress < 100
-              && !m.uploadFailed
-            ) {
-              return true;
-            }
-            return !isSupersededTemp(m, msgs);
-          });
-          const merged = [...msgs];
-          for (const p of pendingLocal) {
-            if (!merged.some((m) => m.id === p.id)) merged.push(p);
-          }
-          merged.sort((a, b) => a.timestamp - b.timestamp);
+          const pendingLocal = collectPendingLocalMessages(prevMsgs, msgs);
+          const merged = mergeServerWithPending(msgs, pendingLocal);
           mergedMessages = merged;
           return { ...c, messages: merged };
         });
@@ -1584,7 +1573,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const sendPreparedMediaMessage = useCallback((
     chatId: string,
-    opts: { mediaUrl: string; kind: "image" | "video"; caption?: string; isViewOnce?: boolean },
+    opts: {
+      mediaUrl?: string;
+      localUri?: string;
+      quality?: MediaQuality;
+      kind: "image" | "video";
+      caption?: string;
+      isViewOnce?: boolean;
+    },
   ) => {
     void (async () => {
       const u = userRef.current;
@@ -1592,59 +1588,226 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const isVideo = opts.kind === "video";
       const text = opts.caption?.trim() || (opts.isViewOnce ? "🔁 View once" : isVideo ? "🎥 Video" : "📷 Photo");
       const msgType: Message["type"] = isVideo ? "video" : "image";
-      const newMsg: Message = {
-        id: tempId, text, timestamp: Date.now(), senderId: "me",
-        type: msgType, status: "sent", mediaUrl: opts.mediaUrl, isViewOnce: opts.isViewOnce,
-      };
-      setChats((prev) =>
-        prev.map((c) =>
-          c.id === chatId
-            ? { ...c, messages: [...c.messages, newMsg], lastMessage: text, lastMessageTime: Date.now() }
-            : c
-        )
-      );
-      if (!u?.dbId) return;
-      const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          senderId: u.dbId,
-          content: text,
-          type: msgType,
-          mediaUrl: opts.mediaUrl,
-          isViewOnce: opts.isViewOnce ?? false,
-        }),
-      });
-      const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
-      if (res.status === 403) {
-        Alert.alert("Cannot send message", typeof data.message === "string" ? data.message : "Not allowed.");
-        setChats((prev) =>
-          prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
-        );
-        return;
-      }
-      if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
-        const mid = data.message.id;
+      const listPreview = inferChatListPreview(msgType, text, opts.mediaUrl ?? opts.localUri);
+
+      const patchMsg = (patch: Partial<Message>) => {
         setChats((prev) =>
           prev.map((c) =>
             c.id === chatId
-              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered" } : m) }
+              ? { ...c, messages: c.messages.map((m) => (m.id === tempId ? { ...m, ...patch } : m)) }
               : c,
           ),
         );
+      };
+
+      const showOptimistic = (displayUri: string) => {
+        const newMsg: Message = {
+          id: tempId,
+          text,
+          timestamp: Date.now(),
+          senderId: "me",
+          type: msgType,
+          status: "sent",
+          mediaUrl: displayUri,
+          localMediaUri: opts.localUri ? displayUri : undefined,
+          uploadProgress: opts.localUri ? 0 : undefined,
+          isViewOnce: opts.isViewOnce,
+        };
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? { ...c, messages: [...c.messages, newMsg], lastMessage: listPreview, lastMessageTime: Date.now() }
+              : c,
+          ),
+        );
+      };
+
+      const postMediaMessage = async (remoteUrl: string) => {
+        if (!u?.dbId) return;
+        const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            senderId: u.dbId,
+            content: text,
+            type: msgType,
+            mediaUrl: remoteUrl,
+            isViewOnce: opts.isViewOnce ?? false,
+          }),
+        });
+        const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
+        if (res.status === 403) {
+          Alert.alert("Cannot send message", typeof data.message === "string" ? data.message : "Not allowed.");
+          setChats((prev) =>
+            prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
+          );
+          return;
+        }
+        if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
+          patchMsg({
+            id: String(data.message.id),
+            status: "delivered",
+            mediaUrl: remoteUrl,
+            uploadProgress: undefined,
+            uploadFailed: false,
+          });
+        } else {
+          patchMsg({ uploadProgress: undefined, uploadFailed: false });
+        }
+      };
+
+      if (opts.localUri) {
+        showOptimistic(opts.localUri);
+        if (!u?.dbId) return;
+        try {
+          let uploadUri = opts.localUri;
+          if (!isVideo && !isGifUri(opts.localUri)) {
+            uploadUri = await prepareImageForChatUpload(opts.localUri, opts.quality ?? "standard");
+          } else {
+            uploadUri = await ensureUploadableFileUri(opts.localUri, `chat_${Date.now()}.${imageExtFromUri(opts.localUri)}`);
+          }
+          const mime = isVideo
+            ? (uploadUri.includes(".mov") ? "video/quicktime" : "video/mp4")
+            : imageMimeFromUri(uploadUri);
+          const ext = isVideo ? (mime.includes("quicktime") ? "mov" : "mp4") : imageExtFromUri(uploadUri);
+          const upload = await uploadChatMediaWithProgress({
+            uri: uploadUri,
+            mime,
+            filename: `chat_${Date.now()}.${ext}`,
+            sessionToken: u.sessionToken,
+            onProgress: (p) => patchMsg({ uploadProgress: p.percent }),
+          });
+          patchMsg({ mediaUrl: upload.url, uploadProgress: 100 });
+          await postMediaMessage(upload.url);
+        } catch (e) {
+          patchMsg({ uploadProgress: undefined, uploadFailed: true });
+          Alert.alert("Send failed", e instanceof Error ? e.message : "Could not send media.");
+        }
+        return;
       }
+
+      const remoteUrl = opts.mediaUrl?.trim();
+      if (!remoteUrl) return;
+      showOptimistic(remoteUrl);
+      await postMediaMessage(remoteUrl);
     })();
   }, []);
 
-  const sendAlbumMessage = useCallback((chatId: string, opts: { urls: string[]; caption?: string }) => {
+  const sendAlbumMessage = useCallback((
+    chatId: string,
+    opts: { urls?: string[]; localUris?: string[]; caption?: string; quality?: MediaQuality },
+  ) => {
     void (async () => {
       const u = userRef.current;
-      const urls = opts.urls.map((x) => x.trim()).filter(Boolean);
-      if (urls.length < 2) return;
       const caption = opts.caption?.trim() ?? "";
-      const content = encodeAlbumMessageContent(urls, caption);
-      const preview = albumChatPreview(urls.length, caption);
       const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
+
+      const patchMsg = (patch: Partial<Message>) => {
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? { ...c, messages: c.messages.map((m) => (m.id === tempId ? { ...m, ...patch } : m)) }
+              : c,
+          ),
+        );
+      };
+
+      const postAlbumMessage = async (remoteUrls: string[]) => {
+        if (remoteUrls.length < 2) return;
+        const content = encodeAlbumMessageContent(remoteUrls, caption);
+        const preview = albumChatPreview(remoteUrls.length, caption);
+        if (!u?.dbId) return;
+        const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            senderId: u.dbId,
+            content,
+            type: "album",
+            mediaUrl: remoteUrls[0],
+          }),
+        });
+        const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
+        if (res.status === 403) {
+          Alert.alert("Cannot send message", typeof data.message === "string" ? data.message : "Not allowed.");
+          setChats((prev) =>
+            prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
+          );
+          return;
+        }
+        if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
+          patchMsg({
+            id: String(data.message.id),
+            type: "album",
+            text: content,
+            albumUrls: remoteUrls,
+            mediaUrl: remoteUrls[0],
+            status: "delivered",
+            uploadProgress: undefined,
+            uploadFailed: false,
+            localMediaUri: undefined,
+          });
+        } else {
+          patchMsg({
+            type: "album",
+            text: content,
+            albumUrls: remoteUrls,
+            mediaUrl: remoteUrls[0],
+            uploadProgress: undefined,
+            uploadFailed: false,
+            localMediaUri: undefined,
+          });
+        }
+      };
+
+      if (opts.localUris?.length) {
+        const localUris = opts.localUris.filter(Boolean);
+        if (localUris.length < 2) return;
+        const preview = albumChatPreview(localUris.length, caption);
+        const newMsg: Message = {
+          id: tempId,
+          text: caption || preview,
+          timestamp: Date.now(),
+          senderId: "me",
+          type: "album",
+          status: "sent",
+          mediaUrl: localUris[0],
+          localMediaUri: localUris[0],
+          albumUrls: localUris,
+          uploadProgress: 0,
+        };
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? { ...c, messages: [...c.messages, newMsg], lastMessage: preview, lastMessageTime: Date.now() }
+              : c,
+          ),
+        );
+        if (!u?.dbId) return;
+        try {
+          const uploaded = await uploadChatImagesBatch({
+            uris: localUris,
+            quality: opts.quality ?? "standard",
+            sessionToken: u.sessionToken,
+            onProgress: (p) => {
+              const overall = p.total > 0
+                ? Math.min(99, Math.round(((p.completed + p.currentPct / 100) / p.total) * 100))
+                : 0;
+              patchMsg({ uploadProgress: overall });
+            },
+          });
+          patchMsg({ albumUrls: uploaded, mediaUrl: uploaded[0], uploadProgress: 100 });
+          await postAlbumMessage(uploaded);
+        } catch (e) {
+          patchMsg({ uploadProgress: undefined, uploadFailed: true });
+          Alert.alert("Send failed", e instanceof Error ? e.message : "Could not send photos.");
+        }
+        return;
+      }
+
+      const urls = (opts.urls ?? []).map((x) => x.trim()).filter(Boolean);
+      if (urls.length < 2) return;
+      const preview = albumChatPreview(urls.length, caption);
       const newMsg: Message = {
         id: tempId,
         text: caption || preview,
@@ -1662,35 +1825,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             : c,
         ),
       );
-      if (!u?.dbId) return;
-      const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          senderId: u.dbId,
-          content,
-          type: "album",
-          mediaUrl: urls[0],
-        }),
-      });
-      const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
-      if (res.status === 403) {
-        Alert.alert("Cannot send message", typeof data.message === "string" ? data.message : "Not allowed.");
-        setChats((prev) =>
-          prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c)),
-        );
-        return;
-      }
-      if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
-        const mid = data.message.id;
-        setChats((prev) =>
-          prev.map((c) =>
-            c.id === chatId
-              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered" } : m) }
-              : c,
-          ),
-        );
-      }
+      await postAlbumMessage(urls);
     })();
   }, []);
 
