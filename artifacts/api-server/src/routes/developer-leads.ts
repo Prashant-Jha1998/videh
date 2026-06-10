@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import { query } from "../lib/db";
 import { logger } from "../lib/logger";
+import { uploadLocalFileToS3 } from "../lib/s3Storage";
 import {
   createRazorpayOrder,
   ensureRazorpayPaymentCaptured,
@@ -89,7 +90,8 @@ export const DEVELOPER_STATUSES = [
   "rejected",
 ] as const;
 
-const apiServerDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const routesDir = path.dirname(fileURLToPath(import.meta.url));
+const apiServerDir = path.resolve(routesDir, "../..");
 const developerUploadsDir = path.join(apiServerDir, "uploads", "developer");
 fs.mkdirSync(developerUploadsDir, { recursive: true });
 
@@ -357,6 +359,7 @@ router.post("/:id/documents", docUpload.single("file"), async (req: Request, res
   try {
     await ensureDeveloperPlatformTables();
     const url = publicUploadUrl(req.file.path);
+    await uploadLocalFileToS3(req.file.path, url);
     await query(
       `INSERT INTO developer_lead_documents (lead_id, doc_type, file_name, file_path, mime_type)
        VALUES ($1,$2,$3,$4,$5)
@@ -383,6 +386,7 @@ router.post("/:id/logo", logoUpload.single("logo"), async (req: Request, res: Re
   try {
     await ensureDeveloperPlatformTables();
     const url = publicUploadUrl(req.file.path);
+    await uploadLocalFileToS3(req.file.path, url);
     await query(`UPDATE developer_leads SET logo_url = $1, updated_at = NOW() WHERE id = $2`, [url, id]);
     res.json({ success: true, logoUrl: url });
   } catch (err) {

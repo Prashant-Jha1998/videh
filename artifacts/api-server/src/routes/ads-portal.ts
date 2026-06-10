@@ -3,6 +3,7 @@ import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { query } from "../lib/db";
 import {
   adsPortalSessionConfigured,
@@ -30,9 +31,12 @@ import { AD_FORMATS_CATALOG, findAdFormat } from "../lib/adFormatsCatalog";
 import { getAdvertiserDashboard } from "../lib/adsAnalytics";
 import { getRazorpayConfig } from "../lib/razorpay";
 import { resolveGoogleOAuthClientId, verifyGoogleIdToken } from "../lib/googleIdTokenVerify";
+import { uploadLocalFileToS3, scheduleS3Upload } from "../lib/s3Storage";
 
 const router = Router();
-const adsUploadsDir = path.join(process.cwd(), "uploads", "reels", "ads");
+const adsRoutesDir = path.dirname(fileURLToPath(import.meta.url));
+const apiServerDir = path.resolve(adsRoutesDir, "../..");
+const adsUploadsDir = path.join(apiServerDir, "uploads", "reels", "ads");
 fs.mkdirSync(adsUploadsDir, { recursive: true });
 
 const adUpload = multer({
@@ -556,8 +560,10 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
     const files = req.files as { video?: Express.Multer.File[]; image?: Express.Multer.File[] } | undefined;
     let videoUrl = String(body.videoUrl ?? "").trim();
     let imageUrl = String(body.imageUrl ?? "").trim();
-    if (files?.video?.[0]) videoUrl = `/uploads/reels/ads/${files.video[0].filename}`;
-    if (files?.image?.[0]) imageUrl = `/uploads/reels/ads/${files.image[0].filename}`;
+    const imageFile = files?.image?.[0];
+    const videoFile = files?.video?.[0];
+    if (videoFile) videoUrl = `/uploads/reels/ads/${videoFile.filename}`;
+    if (imageFile) imageUrl = `/uploads/reels/ads/${imageFile.filename}`;
 
     const needsVideo = specFromId?.requiresVideo ?? ["video", "bumper", "shorts_video"].includes(format);
     const needsImage = specFromId?.requiresImage ?? !needsVideo;
@@ -602,6 +608,13 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
         res.status(404).json({ success: false, message: "Campaign not found" });
         return;
       }
+      if (imageFile && imageUrl) {
+        await uploadLocalFileToS3(path.join(adsUploadsDir, imageFile.filename), imageUrl);
+      }
+      if (videoFile && videoUrl) {
+        scheduleS3Upload(path.join(adsUploadsDir, videoFile.filename), videoUrl);
+      }
+
       const r = await query(
         `INSERT INTO reels_ad_creatives
           (campaign_id, title, format, video_url, image_url, headline, description,

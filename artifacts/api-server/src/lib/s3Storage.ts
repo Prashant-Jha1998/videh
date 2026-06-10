@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Request, Response } from "express";
 import { logger } from "./logger";
 import {
+  cdnDeliveryConfigured,
   publicMediaUrl,
   storedUploadFileExists,
   uploadsRelFromLocalPath,
@@ -23,11 +24,7 @@ function s3Region(): string {
 
 /** True when media can be served from S3 / CloudFront / CDN base URL. */
 export function cdnDeliveryEnabled(): boolean {
-  return Boolean(
-    isS3MediaEnabled()
-    || process.env["MEDIA_PUBLIC_BASE_URL"]?.trim()
-    || process.env["CDN_BASE_URL"]?.trim(),
-  );
+  return cdnDeliveryConfigured();
 }
 
 /** Local disk or CDN/S3 — used by admin moderation preview. */
@@ -113,6 +110,14 @@ export async function uploadLocalFileToS3(localPath: string, uploadsRel: string)
 export function scheduleS3Upload(localPath: string, uploadsRel: string): void {
   if (!isS3MediaEnabled()) return;
   void uploadLocalFileToS3(localPath, uploadsRel);
+}
+
+/** Upload one or more local files to S3 and wait for completion. */
+export async function uploadStoredMediaBatch(
+  items: Array<{ localPath: string; uploadsRel: string }>,
+): Promise<void> {
+  if (!items.length || !isS3MediaEnabled()) return;
+  await Promise.all(items.map((item) => uploadLocalFileToS3(item.localPath, item.uploadsRel)));
 }
 
 export async function deleteS3ObjectByUploadsRel(uploadsRel: unknown): Promise<void> {

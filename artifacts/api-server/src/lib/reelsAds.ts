@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { query } from "./db";
+import { defaultUploadsRootDir, resolveStoredMediaUrlEnv } from "./mediaStorage";
 import { getReelsPlatformConfig, type ReelsAdsRules } from "./reelsConfig";
 import { ensureReelsAdsTables } from "./reelsAdsSchema";
 
@@ -73,19 +74,11 @@ type CreativeRow = {
 
 function resolveAdAssetUrl(stored: string | null | undefined): string | null {
   if (!stored?.trim()) return null;
-  if (/^https?:\/\//i.test(stored)) return stored;
-  const domain = process.env.EXPO_PUBLIC_DOMAIN || process.env.PUBLIC_API_DOMAIN || "videh.co.in";
-  const base = /^https?:\/\//i.test(domain) ? domain.replace(/\/+$/, "") : `https://${domain}`;
-  const path = stored.startsWith("/") ? stored : `/uploads/${stored.replace(/^uploads\//, "")}`;
-  return `${base}${path}`;
+  return resolveStoredMediaUrlEnv(stored, defaultUploadsRootDir());
 }
 
 function resolveAdVideoUrl(stored: string): string {
-  if (/^https?:\/\//i.test(stored)) return stored;
-  const domain = process.env.EXPO_PUBLIC_DOMAIN || process.env.PUBLIC_API_DOMAIN || "videh.co.in";
-  const base = /^https?:\/\//i.test(domain) ? domain.replace(/\/+$/, "") : `https://${domain}`;
-  const path = stored.startsWith("/") ? stored : `/uploads/${stored.replace(/^uploads\//, "")}`;
-  return `${base}${path}`;
+  return resolveStoredMediaUrlEnv(stored, defaultUploadsRootDir()) ?? stored;
 }
 
 function mapFeedAd(row: CreativeRow): ReelsFeedAdItem {

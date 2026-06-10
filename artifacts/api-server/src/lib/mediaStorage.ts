@@ -1,6 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Request } from "express";
+
+const mediaStorageDir = path.dirname(fileURLToPath(import.meta.url));
+const defaultUploadsRoot = path.resolve(mediaStorageDir, "../../uploads");
+
+/** Default api-server/uploads directory. */
+export function defaultUploadsRootDir(): string {
+  return defaultUploadsRoot;
+}
 
 /** Extract `/uploads/...` from stored URL (absolute, relative, or bare path). */
 export function uploadsRelPathFromStoredUrl(url: unknown): string | null {
@@ -12,14 +21,115 @@ export function uploadsRelPathFromStoredUrl(url: unknown): string | null {
   return null;
 }
 
-/** Resolve any stored media URL to a browser-loadable absolute URL on this API host. */
-export function resolveStoredMediaUrl(req: Request, url: unknown): string | null {
-  const rel = uploadsRelPathFromStoredUrl(url);
-  if (rel) return publicMediaUrl(req, rel);
+/** True when media can be served from S3 / CloudFront / CDN base URL. */
+export function cdnDeliveryConfigured(): boolean {
+  if (process.env["S3_UPLOAD_ENABLED"] === "0") {
+    return Boolean(process.env["MEDIA_PUBLIC_BASE_URL"]?.trim() || process.env["CDN_BASE_URL"]?.trim());
+  }
+  return Boolean(
+    process.env["AWS_S3_BUCKET"]?.trim()
+    || process.env["MEDIA_PUBLIC_BASE_URL"]?.trim()
+    || process.env["CDN_BASE_URL"]?.trim(),
+  );
+}
+
+/** API host for routes and local /uploads/ delivery (never the CDN host). */
+export function apiHostBase(req: Request): string {
+  const configured = (process.env["PUBLIC_API_DOMAIN"] || process.env["EXPO_PUBLIC_DOMAIN"] || "").trim();
+  if (configured) {
+    const base = /^https?:\/\//i.test(configured) ? configured : `https://${configured}`;
+    return base.replace(/\/+$/, "");
+  }
+  const proto = String(req.headers["x-forwarded-proto"] ?? req.protocol ?? "https").split(",")[0];
+  const host = req.get("host");
+  if (host) return `${proto}://${host}`;
+  return "https://videh.co.in";
+}
+
+/** CDN or API base URL for a relative path (e.g. `/uploads/reels/foo.jpg`). */
+export function publicMediaUrl(req: Request, relPath: string): string {
+  const rel = relPath.startsWith("/") ? relPath : `/${relPath}`;
+  if (rel.startsWith("/api/")) {
+    return `${apiHostBase(req)}${rel}`;
+  }
+  const cdnBase = (process.env["MEDIA_PUBLIC_BASE_URL"] || process.env["CDN_BASE_URL"] || "").replace(/\/+$/, "");
+  if (cdnBase) return `${cdnBase}${rel}`;
+
+  const configured = (process.env["PUBLIC_API_DOMAIN"] || process.env["EXPO_PUBLIC_DOMAIN"] || "").trim();
+  if (configured) {
+    const base = /^https?:\/\//i.test(configured) ? configured : `https://${configured}`;
+    return `${base.replace(/\/+$/, "")}${rel}`;
+  }
+
+  const proto = String(req.headers["x-forwarded-proto"] ?? req.protocol ?? "https").split(",")[0];
+  const host = req.get("host");
+  if (host) return `${proto}://${host}${rel}`;
+  return `https://videh.co.in${rel}`;
+}
+
+/**
+ * Resolve stored `/uploads/...` for JSON responses.
+ * Serves via API/static host while the file is still on disk; CDN after local copy is removed.
+ */
+export function resolveStoredMediaUrl(
+  req: Request,
+  url: unknown,
+  uploadsRootDir?: string,
+): string | null {
   const raw = String(url ?? "").trim();
   if (!raw) return null;
-  if (/^https?:\/\//i.test(raw)) return raw;
-  return publicMediaUrl(req, raw.startsWith("/") ? raw : `/${raw}`);
+  if (/^https?:\/\//i.test(raw) && !uploadsRelPathFromStoredUrl(raw)) return raw;
+
+  const rel = uploadsRelPathFromStoredUrl(raw);
+  if (!rel) {
+    if (raw.startsWith("/api/")) return `${apiHostBase(req)}${raw}`;
+    return publicMediaUrl(req, raw.startsWith("/") ? raw : `/${raw}`);
+  }
+
+  const root = uploadsRootDir ?? defaultUploadsRootDir();
+  if (storedUploadFileExists(url, root)) {
+    return `${apiHostBase(req)}${rel}`;
+  }
+  if (cdnDeliveryConfigured()) {
+    return publicMediaUrl(req, rel);
+  }
+  return `${apiHostBase(req)}${rel}`;
+}
+
+/**
+ * Resolve reels-style media: CDN when file is on S3 only, otherwise an API fallback route.
+ */
+export function resolveUploadsPublicUrl(
+  req: Request,
+  storedUrl: unknown,
+  opts: {
+    uploadsRootDir?: string;
+    apiFallbackPath: string;
+    cacheVersion?: unknown;
+  },
+): string {
+  const raw = String(storedUrl ?? "").trim();
+  const v = opts.cacheVersion != null ? encodeURIComponent(String(opts.cacheVersion)) : "";
+  const q = v ? `?v=${v}` : "";
+  const root = opts.uploadsRootDir ?? defaultUploadsRootDir();
+
+  if (raw && /^https?:\/\//i.test(raw) && !uploadsRelPathFromStoredUrl(raw)) {
+    return raw;
+  }
+
+  const rel = uploadsRelPathFromStoredUrl(raw);
+  if (rel && cdnDeliveryConfigured() && !storedUploadFileExists(raw, root)) {
+    return `${publicMediaUrl(req, rel)}${q}`;
+  }
+
+  const fallback = opts.apiFallbackPath.startsWith("/") ? opts.apiFallbackPath : `/${opts.apiFallbackPath}`;
+  return `${apiHostBase(req)}${fallback}${q}`;
+}
+
+/** Resolve stored uploads without a live request (ads feed, background jobs). */
+export function resolveStoredMediaUrlEnv(url: unknown, uploadsRootDir?: string): string | null {
+  const fakeReq = { headers: {}, protocol: "https", get: () => undefined } as Request;
+  return resolveStoredMediaUrl(fakeReq, url, uploadsRootDir);
 }
 
 /** Map `/uploads/reels/foo.mp4` to a local file under api-server/uploads (null if unsafe/missing). */
@@ -65,20 +175,4 @@ export function detectImageMimeType(filePath: string): string {
   if (ext === ".webp") return "image/webp";
   if (ext === ".gif") return "image/gif";
   return "image/jpeg";
-}
-
-export function publicMediaUrl(req: Request, relPath: string): string {
-  const cdnBase = (process.env["MEDIA_PUBLIC_BASE_URL"] || process.env["CDN_BASE_URL"] || "").replace(/\/+$/, "");
-  if (cdnBase) return `${cdnBase}${relPath}`;
-
-  const configured = (process.env["PUBLIC_API_DOMAIN"] || process.env["EXPO_PUBLIC_DOMAIN"] || "").trim();
-  if (configured) {
-    const base = /^https?:\/\//i.test(configured) ? configured : `https://${configured}`;
-    return `${base.replace(/\/+$/, "")}${relPath}`;
-  }
-
-  const proto = String(req.headers["x-forwarded-proto"] ?? req.protocol ?? "https").split(",")[0];
-  const host = req.get("host");
-  if (host) return `${proto}://${host}${relPath}`;
-  return `https://videh.co.in${relPath}`;
 }

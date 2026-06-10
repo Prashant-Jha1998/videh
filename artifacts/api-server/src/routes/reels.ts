@@ -10,11 +10,12 @@ import { ensureVideoThumbnail } from "../lib/reelsAutoThumbnail";
 import { permanentlyDeleteReelsVideo } from "../lib/reelsDeleteVideo";
 import { externalVideoRedirectTarget, tryStreamStoredReelsVideo } from "../lib/reelsVideoStream";
 import {
+  apiHostBase,
   detectImageMimeType,
   localPathForUploadsRel,
   publicMediaUrl,
   resolveStoredMediaUrl,
-  storedUploadFileExists,
+  resolveUploadsPublicUrl,
   uploadsRelPathFromStoredUrl,
 } from "../lib/mediaStorage";
 import {
@@ -47,6 +48,7 @@ import {
   scheduleS3Upload,
   tryRedirectStoredMediaToCdn,
   uploadLocalFileToS3,
+  uploadStoredMediaBatch,
 } from "../lib/s3Storage";
 import { buildReelsVideoDeepLink, buildReelsVideoShareUrl } from "../lib/reelsShareUrl";
 
@@ -126,41 +128,40 @@ function proxyReelsImageUrl(req: Request, url: unknown): string | null {
   return `${proxy}?url=${encodeURIComponent(u)}`;
 }
 
-/** Prefer CDN for stored thumbs; fall back to API route (auto-frame / proxy). */
+const reelsUploadsRoot = () => path.join(apiServerDir, "uploads");
+
+/** Prefer API route while file is on disk; CDN after S3 upload. */
 function resolveVideoThumbnailUrl(req: Request, thumb: unknown, videoId: unknown, cacheVersion?: unknown): string {
   const thumbStored = String(thumb ?? "").trim();
+  if (thumbStored && needsReelsImageProxy(thumbStored)) {
+    const proxied = proxyReelsImageUrl(req, thumbStored);
+    if (proxied) return proxied;
+  }
+  if (thumbStored) {
+    return resolveUploadsPublicUrl(req, thumbStored, {
+      uploadsRootDir: reelsUploadsRoot(),
+      apiFallbackPath: `/api/reels/videos/${videoId}/thumbnail`,
+      cacheVersion,
+    });
+  }
   const v = cacheVersion != null ? encodeURIComponent(String(cacheVersion)) : "";
   const q = v ? `?v=${v}` : "";
-  if (thumbStored) {
-    if (needsReelsImageProxy(thumbStored)) {
-      const proxied = proxyReelsImageUrl(req, thumbStored);
-      if (proxied) return proxied;
-    }
-    const rel = uploadsRelPathFromStoredUrl(thumbStored);
-    if (rel && cdnDeliveryEnabled()) {
-      return `${publicMediaUrl(req, rel)}${q}`;
-    }
-    if (/^https?:\/\//i.test(thumbStored) && !uploadsRelPathFromStoredUrl(thumbStored)) {
-      return thumbStored;
-    }
-  }
-  return publicMediaUrl(req, `/api/reels/videos/${videoId}/thumbnail${q}`);
+  return `${apiHostBase(req)}/api/reels/videos/${videoId}/thumbnail${q}`;
 }
 
-/** CDN direct URL when S3/CloudFront is configured; otherwise API stream (Range support). */
+/** API stream while local file exists; CDN direct URL after S3 upload. */
 function resolveVideoPlaybackUrl(req: Request, storedUrl: unknown, videoId: unknown): string {
   const raw = String(storedUrl ?? "").trim();
   if (!raw) return "";
   if (!uploadsRelPathFromStoredUrl(raw) && /^https?:\/\//i.test(raw)) return raw;
-  const rel = uploadsRelPathFromStoredUrl(raw);
-  if (rel && cdnDeliveryEnabled()) {
-    return publicMediaUrl(req, rel);
-  }
-  const external = resolveStoredMediaUrl(req, raw);
+  const external = resolveStoredMediaUrl(req, raw, reelsUploadsRoot());
   if (external && /^https?:\/\//i.test(external) && !uploadsRelPathFromStoredUrl(external)) {
     return external;
   }
-  return publicMediaUrl(req, `/api/reels/videos/${videoId}/stream`);
+  return resolveUploadsPublicUrl(req, raw, {
+    uploadsRootDir: reelsUploadsRoot(),
+    apiFallbackPath: `/api/reels/videos/${videoId}/stream`,
+  });
 }
 
 function mapVideoRow(row: Record<string, unknown>, req?: Request) {
@@ -209,16 +210,11 @@ function resolveChannelBrandingPublicUrl(
   const raw = String(storedUrl ?? "").trim();
   if (!raw) return null;
   if (needsReelsImageProxy(raw)) return proxyReelsImageUrl(req, raw);
-  const v = cacheVersion != null ? encodeURIComponent(String(cacheVersion)) : "";
-  const q = v ? `?v=${v}` : "";
-  const rel = uploadsRelPathFromStoredUrl(raw);
-  const uploadsRoot = path.join(apiServerDir, "uploads");
-  // Serve via API while the file is still on disk (S3 upload may be in progress).
-  if (rel && cdnDeliveryEnabled() && !storedUploadFileExists(raw, uploadsRoot)) {
-    return `${publicMediaUrl(req, rel)}${q}`;
-  }
-  if (/^https?:\/\//i.test(raw) && !rel) return raw;
-  return publicMediaUrl(req, `/api/reels/channels/${channelId}/${kind}${q}`);
+  return resolveUploadsPublicUrl(req, raw, {
+    uploadsRootDir: reelsUploadsRoot(),
+    apiFallbackPath: `/api/reels/channels/${channelId}/${kind}`,
+    cacheVersion,
+  });
 }
 
 function mapPublicChannelResponse(
@@ -356,7 +352,7 @@ async function serveChannelBrandingAsset(
           return;
         }
       }
-      const external = resolveStoredMediaUrl(req, stored);
+      const external = resolveStoredMediaUrl(req, stored, reelsUploadsRoot());
       if (external && /^https?:\/\//i.test(external)) {
         res.redirect(external);
         return;
@@ -458,7 +454,7 @@ router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
           return;
         }
       }
-      const external = resolveStoredMediaUrl(req, thumbStored);
+      const external = resolveStoredMediaUrl(req, thumbStored, reelsUploadsRoot());
       if (external && /^https?:\/\//i.test(external) && !needsReelsImageProxy(external)) {
         res.redirect(external);
         return;
@@ -782,15 +778,25 @@ router.patch("/channel/me", runChannelBrandingUpload, async (req: Request, res: 
       sets.push(`bio = $${p++}`);
       params.push(bio || null);
     }
+    const brandingUploads: Array<{ localPath: string; uploadsRel: string }> = [];
     if (avatarUrl) {
       sets.push(`avatar_url = $${p++}`);
       params.push(avatarUrl);
-      await uploadLocalFileToS3(path.join(reelsUploadsDir, avatarFile!.filename), avatarUrl);
+      brandingUploads.push({
+        localPath: path.join(reelsUploadsDir, avatarFile!.filename),
+        uploadsRel: avatarUrl,
+      });
     }
     if (coverUrl) {
       sets.push(`cover_url = $${p++}`);
       params.push(coverUrl);
-      await uploadLocalFileToS3(path.join(reelsUploadsDir, coverFile!.filename), coverUrl);
+      brandingUploads.push({
+        localPath: path.join(reelsUploadsDir, coverFile!.filename),
+        uploadsRel: coverUrl,
+      });
+    }
+    if (brandingUploads.length) {
+      await uploadStoredMediaBatch(brandingUploads);
     }
     await query(
       `UPDATE reels_channels SET ${sets.join(", ")} WHERE user_id = $1`,
@@ -1276,7 +1282,9 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
     }
 
     scheduleS3Upload(videoPath, videoUrl);
-    if (thumbPath && thumbnailUrl) scheduleS3Upload(thumbPath, thumbnailUrl);
+    if (thumbPath && thumbnailUrl) {
+      await uploadLocalFileToS3(thumbPath, thumbnailUrl);
+    }
 
     const refreshed = await query("SELECT * FROM reels_videos WHERE id = $1", [videoId]);
     const finalRow = refreshed.rows[0] as Record<string, unknown>;

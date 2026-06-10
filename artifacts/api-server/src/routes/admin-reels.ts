@@ -34,8 +34,8 @@ const apiServerDir = path.resolve(adminRoutesDir, "../..");
 const uploadsRootDir = path.join(apiServerDir, "uploads");
 
 function mapModerationQueueRow(req: Parameters<typeof resolveStoredMediaUrl>[0], row: Record<string, unknown>) {
-  const videoUrl = resolveStoredMediaUrl(req, row.video_url);
-  const thumbnailUrl = resolveStoredMediaUrl(req, row.thumbnail_url);
+  const videoUrl = resolveStoredMediaUrl(req, row.video_url, uploadsRootDir);
+  const thumbnailUrl = resolveStoredMediaUrl(req, row.thumbnail_url, uploadsRootDir);
   return {
     ...row,
     video_url: videoUrl,
@@ -452,8 +452,8 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
         const rec = row as Record<string, unknown>;
         return {
           ...rec,
-          image_url: rec.image_url ? resolveStoredMediaUrl(req, rec.image_url) : null,
-          video_url: rec.video_url ? resolveStoredMediaUrl(req, rec.video_url) : null,
+          image_url: rec.image_url ? resolveStoredMediaUrl(req, rec.image_url, uploadsRootDir) : null,
+          video_url: rec.video_url ? resolveStoredMediaUrl(req, rec.video_url, uploadsRootDir) : null,
         };
       });
       res.json({ success: true, creatives });

@@ -1,6 +1,11 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import type { Request, Response } from "express";
-import { localPathForUploadsRel, resolveStoredMediaUrl, uploadsRelPathFromStoredUrl } from "./mediaStorage";
+import {
+  defaultUploadsRootDir,
+  localPathForUploadsRel,
+  resolveStoredMediaUrl,
+  uploadsRelPathFromStoredUrl,
+} from "./mediaStorage";
 
 function videoMimeType(filePath: string): string {
   const ext = filePath.split(".").pop()?.toLowerCase();
@@ -66,6 +71,6 @@ export function externalVideoRedirectTarget(req: Request, storedUrl: unknown): s
   const raw = String(storedUrl ?? "").trim();
   if (!raw || uploadsRelPathFromStoredUrl(raw)) return null;
   if (/^https?:\/\//i.test(raw)) return raw;
-  const resolved = resolveStoredMediaUrl(req, raw);
+  const resolved = resolveStoredMediaUrl(req, raw, defaultUploadsRootDir());
   return resolved && /^https?:\/\//i.test(resolved) ? resolved : null;
 }
