@@ -122,6 +122,7 @@ export default function ReelsWatchScreen() {
   const triggeredMidRollsRef = useRef(new Set<number>());
   const watchedRef = useRef(0);
   const viewSentRef = useRef(false);
+  const isOwnerViewRef = useRef(false);
   const watchTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const playbackUrl = video?.videoUrl ?? null;
@@ -228,6 +229,7 @@ export default function ReelsWatchScreen() {
     if (!user?.dbId || !id) return;
     viewSentRef.current = false;
     watchedRef.current = 0;
+    isOwnerViewRef.current = false;
     triggeredMidRollsRef.current.clear();
     setPreRollIndex(0);
     preRollIndexRef.current = 0;
@@ -242,6 +244,7 @@ export default function ReelsWatchScreen() {
       setPlayBlockReasons(res.playBlockReasons ?? []);
       if (res.video.channelHandle) {
         const ch = await fetchReelsChannel(res.video.channelHandle, user.dbId, user.sessionToken);
+        isOwnerViewRef.current = Boolean(ch.channel?.isOwner);
         setChannel(ch.channel ?? null);
         setSubscribed(Boolean(ch.channel?.isSubscribed));
       } else {
@@ -287,7 +290,7 @@ export default function ReelsWatchScreen() {
     }, 1000);
     return () => {
       if (watchTickRef.current) clearInterval(watchTickRef.current);
-      if (!viewSentRef.current && user?.dbId && id && watchedRef.current > 2) {
+      if (!viewSentRef.current && user?.dbId && id && watchedRef.current > 2 && !isOwnerViewRef.current) {
         viewSentRef.current = true;
         void recordReelsView(Number(id), user.dbId, watchedRef.current, user.sessionToken);
       }

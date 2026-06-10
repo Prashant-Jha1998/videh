@@ -1324,10 +1324,19 @@ router.post("/videos/:videoId/view", async (req: Request, res: Response) => {
       return;
     }
     const meta = await query(
-      `SELECT v.channel_id FROM reels_videos v WHERE v.id = $1`,
+      `SELECT v.channel_id, c.user_id AS channel_owner_id
+       FROM reels_videos v
+       JOIN reels_channels c ON c.id = v.channel_id
+       WHERE v.id = $1`,
       [videoId],
     );
     const channelId = Number(meta.rows[0]?.channel_id);
+    const channelOwnerId = Number(meta.rows[0]?.channel_owner_id ?? 0);
+    if (userId && channelOwnerId > 0 && userId === channelOwnerId) {
+      await recordViewSession(videoId, userId, secs, false);
+      res.json({ success: true, counted: false, reason: "owner_view" });
+      return;
+    }
     const fraud = await checkViewFraud(videoId, channelId, userId ?? null, secs, config);
     await recordViewSession(videoId, userId ?? null, secs, fraud.counted);
     if (!fraud.counted) {
