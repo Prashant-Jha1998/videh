@@ -40,7 +40,7 @@ import {
 } from "../lib/reelsPrivacy";
 import { resolveViewerGeoFromRequest } from "../lib/adsGeo";
 import { pickFeedAdPlacementsForBatch, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
-import { isS3MediaEnabled, scheduleS3Upload, tryRedirectStoredMediaToCdn } from "../lib/s3Storage";
+import { cdnDeliveryEnabled, isS3MediaEnabled, scheduleS3Upload, tryRedirectStoredMediaToCdn } from "../lib/s3Storage";
 import { buildReelsVideoDeepLink, buildReelsVideoShareUrl } from "../lib/reelsShareUrl";
 
 const router = Router();
@@ -124,14 +124,6 @@ function resolveVideoThumbnailUrl(req: Request, _thumb: unknown, videoId: unknow
   const v = cacheVersion != null ? encodeURIComponent(String(cacheVersion)) : "";
   const q = v ? `?v=${v}` : "";
   return publicMediaUrl(req, `/api/reels/videos/${videoId}/thumbnail${q}`);
-}
-
-function cdnDeliveryEnabled(): boolean {
-  return Boolean(
-    isS3MediaEnabled()
-    || process.env["MEDIA_PUBLIC_BASE_URL"]?.trim()
-    || process.env["CDN_BASE_URL"]?.trim(),
-  );
 }
 
 /** CDN direct URL when S3/CloudFront is configured; otherwise API stream (Range support). */

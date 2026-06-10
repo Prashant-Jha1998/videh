@@ -2,7 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Request, Response } from "express";
 import { logger } from "./logger";
-import { publicMediaUrl, uploadsRelFromLocalPath, uploadsRelPathFromStoredUrl } from "./mediaStorage";
+import {
+  publicMediaUrl,
+  storedUploadFileExists,
+  uploadsRelFromLocalPath,
+  uploadsRelPathFromStoredUrl,
+} from "./mediaStorage";
 
 function s3Bucket(): string {
   return process.env["AWS_S3_BUCKET"]?.trim() ?? "";
@@ -14,6 +19,23 @@ function s3Region(): string {
     || process.env["AWS_DEFAULT_REGION"]?.trim()
     || "ap-south-1"
   );
+}
+
+/** True when media can be served from S3 / CloudFront / CDN base URL. */
+export function cdnDeliveryEnabled(): boolean {
+  return Boolean(
+    isS3MediaEnabled()
+    || process.env["MEDIA_PUBLIC_BASE_URL"]?.trim()
+    || process.env["CDN_BASE_URL"]?.trim(),
+  );
+}
+
+/** Local disk or CDN/S3 — used by admin moderation preview. */
+export function storedMediaIsPlayable(storedUrl: unknown, uploadsRootDir: string): boolean {
+  if (storedUploadFileExists(storedUrl, uploadsRootDir)) return true;
+  const rel = uploadsRelPathFromStoredUrl(storedUrl);
+  if (rel && cdnDeliveryEnabled()) return true;
+  return /^https?:\/\//i.test(String(storedUrl ?? "").trim());
 }
 
 /** True when AWS_S3_BUCKET is set and uploads are not explicitly disabled. */

@@ -6,10 +6,10 @@ import { query } from "../lib/db";
 import {
   localPathForUploadsRel,
   resolveStoredMediaUrl,
-  storedUploadFileExists,
   uploadsRelPathFromStoredUrl,
 } from "../lib/mediaStorage";
 import { externalVideoRedirectTarget, tryStreamStoredReelsVideo } from "../lib/reelsVideoStream";
+import { storedMediaIsPlayable, tryRedirectStoredMediaToCdn } from "../lib/s3Storage";
 import { logAdminAction } from "../lib/adminAudit";
 import { getReelsPlatformConfig, saveReelsPlatformConfig, type ReelsPlatformConfig } from "../lib/reelsConfig";
 import { runChannelFraudRescan } from "../lib/reelsFraud";
@@ -36,13 +36,12 @@ const uploadsRootDir = path.join(apiServerDir, "uploads");
 function mapModerationQueueRow(req: Parameters<typeof resolveStoredMediaUrl>[0], row: Record<string, unknown>) {
   const videoUrl = resolveStoredMediaUrl(req, row.video_url);
   const thumbnailUrl = resolveStoredMediaUrl(req, row.thumbnail_url);
-  const hasLocalFile = storedUploadFileExists(row.video_url, uploadsRootDir);
   return {
     ...row,
     video_url: videoUrl,
     thumbnail_url: thumbnailUrl,
     preview_stream_url: `/api/admin/reels/videos/${row.id}/stream`,
-    file_on_server: hasLocalFile,
+    file_on_server: storedMediaIsPlayable(row.video_url, uploadsRootDir),
   };
 }
 
@@ -209,11 +208,12 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
       }
       const storedUrl = r.rows[0].video_url;
       if (tryStreamStoredReelsVideo(req, res, storedUrl, uploadsRootDir)) return;
+      if (tryRedirectStoredMediaToCdn(req, res, storedUrl)) return;
       const rel = uploadsRelPathFromStoredUrl(storedUrl);
       if (rel) {
         res.status(404).json({
           success: false,
-          message: "Video file server par nahi mili — ho sakta hai server restart ke baad upload delete ho gaya. User se dubara upload karwayein.",
+          message: "Video file not found on server or CDN. Ask the user to re-upload.",
         });
         return;
       }
@@ -256,7 +256,7 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
       if (watchedSeconds < required) {
         res.status(400).json({
           success: false,
-          message: `Pehle kam se kam ${required} second video dekhein, phir approve karein.`,
+          message: `Watch at least ${required} seconds of the video before approving.`,
           requiredSeconds: required,
         });
         return;
@@ -295,7 +295,7 @@ export function registerAdminReelsRoutes(router: Router, requireAdmin: RequireAd
       if (!previewed) {
         res.status(400).json({
           success: false,
-          message: "Pehle video play karke dekhein (Preview), phir approve karein.",
+          message: "Watch the video in Preview before approving.",
           requiredSeconds: required,
         });
         return;

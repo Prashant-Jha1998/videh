@@ -109,7 +109,7 @@ export default function ReelsChannelScreen() {
     if (!user?.dbId || !channel?.isOwner) return;
     Alert.alert(
       "Delete video permanently?",
-      `"${item.title}" hamesha ke liye delete ho jayega.`,
+      `"${item.title}" will be permanently deleted.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -119,7 +119,7 @@ export default function ReelsChannelScreen() {
             void (async () => {
               const res = await deleteReelsVideo(item.id, user.dbId!, user.sessionToken);
               if (!res.success) {
-                Alert.alert("Delete failed", res.message ?? "Phir se try karein.");
+                Alert.alert("Delete failed", res.message ?? "Please try again.");
                 return;
               }
               void load();
@@ -151,7 +151,7 @@ export default function ReelsChannelScreen() {
         user.sessionToken,
       );
       if (!res.success) {
-        Alert.alert("Error", res.message ?? "Playlist create nahi hui.");
+        Alert.alert("Error", res.message ?? "Could not create playlist.");
         return;
       }
       setPlaylists(res.playlists ?? []);
@@ -172,7 +172,7 @@ export default function ReelsChannelScreen() {
           void (async () => {
             const res = await deleteReelsPlaylist(user.dbId!, pl.id, user.sessionToken);
             if (!res.success) {
-              Alert.alert("Error", res.message ?? "Delete nahi hua.");
+              Alert.alert("Error", res.message ?? "Could not delete.");
               return;
             }
             setPlaylists(res.playlists ?? []);

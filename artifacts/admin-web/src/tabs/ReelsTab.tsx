@@ -257,8 +257,15 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
     setPreviewVideo(v);
   };
 
-  const previewPlaybackUrl = (v: ModerationVideo) =>
-    v.preview_stream_url ?? v.video_url ?? "";
+  const previewPlaybackUrl = (v: ModerationVideo) => {
+    const direct = (v.video_url ?? "").trim();
+    if (/^https?:\/\//i.test(direct)) return direct;
+    const stream = (v.preview_stream_url ?? "").trim();
+    if (!stream) return direct;
+    if (/^https?:\/\//i.test(stream)) return stream;
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    return origin ? `${origin}${stream.startsWith("/") ? stream : `/${stream}`}` : stream;
+  };
 
   const closePreview = () => {
     setPreviewVideo(null);
@@ -306,7 +313,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
 
   const approveVideo = async (id: number, title: string) => {
     if (!previewReadyIds.has(id)) {
-      alert("Pehle ▶ Preview se video play karke dekhein, phir approve karein.");
+      alert("Play the video in Preview for at least the required seconds, then approve.");
       return;
     }
     if (!window.confirm(`Approve "${title}" and publish publicly?`)) return;
@@ -641,10 +648,10 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
       {subTab === "moderation" ? (
         <>
           <div className="admin-alert">
-            <strong>Manual approval — pehle video dekho, phir approve</strong>
+            <strong>Manual approval — watch first, then approve</strong>
             <p>
-              Har pending video par <strong>Preview</strong> dabao, kam se kam {MIN_PREVIEW_SEC}s dekho.
-              Uske baad hi <strong>Approve</strong> active hoga.
+              For each pending video, tap <strong>Preview</strong> and watch at least {MIN_PREVIEW_SEC}s.
+              Only then will <strong>Approve</strong> become available.
             </p>
           </div>
           <div className="admin-card">
@@ -678,7 +685,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
                             type="button"
                             className="btn-sm btn-sm-primary"
                             disabled={!previewReadyIds.has(v.id)}
-                            title={previewReadyIds.has(v.id) ? "Approve & publish" : "Pehle Preview se video dekhein"}
+                            title={previewReadyIds.has(v.id) ? "Approve & publish" : "Watch the video in Preview first"}
                             onClick={() => void approveVideo(v.id, v.title)}
                           >
                             Approve
@@ -694,7 +701,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
                 </tbody>
               </table>
               {moderationQueue.length === 0 ? (
-                <p className="admin-empty">Koi pending video nahi — queue khali hai.</p>
+                <p className="admin-empty">No pending videos — queue is empty.</p>
               ) : null}
             </div>
           </div>
@@ -717,7 +724,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
                     </p>
                     {previewVideo.file_on_server === false ? (
                       <p className="err" style={{ marginTop: 8 }}>
-                        Video file missing on server — ask user to re-upload or reject.
+                        Video file not found on server or CDN — ask the user to re-upload or reject.
                       </p>
                     ) : null}
                     <video
@@ -731,7 +738,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
                       onTimeUpdate={onVideoTimeUpdate}
                       onEnded={onVideoEnded}
                       onError={() => {
-                        setPreviewPlayError("Video load failed — redeploy API or check file on disk.");
+                        setPreviewPlayError("Video failed to load — check CDN/S3 config or ask the user to re-upload.");
                       }}
                       poster={previewVideo.thumbnail_url}
                     />
