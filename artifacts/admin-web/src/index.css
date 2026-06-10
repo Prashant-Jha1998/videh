@@ -533,6 +533,18 @@ th {
   margin-top: 8px;
   width: 100%;
 }
+.linkish {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.linkish:hover strong {
+  color: var(--accent);
+}
 .err {
   color: var(--danger);
   font-size: 0.85rem;
