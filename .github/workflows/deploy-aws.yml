@@ -49,6 +49,7 @@ jobs:
           BASE_PATH=/ pnpm --filter @workspace/ads-web build
           BASE_PATH=/ pnpm --filter @workspace/videh-web build
           BASE_PATH=/ pnpm --filter @workspace/developer-web build
+          BASE_PATH=/ pnpm --filter @workspace/video-web build
 
           cd /var/www/videh/artifacts/api-server
           pm2 startOrRestart ecosystem.config.cjs --update-env

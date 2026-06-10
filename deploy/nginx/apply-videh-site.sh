@@ -8,6 +8,7 @@ ADMIN_CONF="/etc/nginx/conf.d/videh-admin.conf"
 WEB_CONF="/etc/nginx/conf.d/videh-web.conf"
 DEVELOPER_CONF="/etc/nginx/conf.d/videh-developer.conf"
 ADS_CONF="/etc/nginx/conf.d/videh-ads.conf"
+VIDEO_CONF="/etc/nginx/conf.d/videh-video.conf"
 
 cert_dir_for() {
   local host="$1"
@@ -249,6 +250,7 @@ ADMIN_ROOT="/var/www/videh/artifacts/admin-web/dist/public"
 ADS_ROOT="/var/www/videh/artifacts/ads-web/dist/public"
 WEB_ROOT="/var/www/videh/artifacts/videh-web/dist/public"
 DEVELOPER_ROOT="/var/www/videh/artifacts/developer-web/dist/public"
+VIDEO_ROOT="/var/www/videh/artifacts/video-web/dist/public"
 
 if write_ssl_server "${ADMIN_CONF}" "admin.videh.co.in" "${ADMIN_ROOT}" "true"; then
   echo "Configured HTTPS for admin.videh.co.in"
@@ -261,7 +263,9 @@ if [ -f "${ICON_SRC}" ]; then
   sudo cp "${ICON_SRC}" "${WEB_ROOT}/videh-logo.png" 2>/dev/null || true
   sudo cp "${ICON_SRC}" "${ADS_ROOT}/videh-logo.png" 2>/dev/null || true
   sudo cp "${ICON_SRC}" "${ADS_ROOT}/videh_icon_foreground.png" 2>/dev/null || true
-  echo "Copied videh-logo.png to web.videh.co.in and ads.videh.co.in"
+  sudo cp "${ICON_SRC}" "${VIDEO_ROOT}/videh_icon_foreground.png" 2>/dev/null || true
+  sudo cp "${ICON_SRC}" "${VIDEO_ROOT}/videh-logo.png" 2>/dev/null || true
+  echo "Copied videh-logo.png to web.videh.co.in, ads.videh.co.in, and video.videh.co.in"
 fi
 
 if write_ssl_server "${WEB_CONF}" "web.videh.co.in" "${WEB_ROOT}" "true"; then
@@ -289,6 +293,16 @@ if write_ssl_server "${DEVELOPER_CONF}" "developer.videh.co.in" "${DEVELOPER_ROO
   echo "Configured HTTPS for developer.videh.co.in"
 else
   echo "Configured HTTP for developer.videh.co.in"
+fi
+
+write_http_server "${VIDEO_CONF}" "video.videh.co.in" "${VIDEO_ROOT}" "true"
+sudo nginx -t
+sudo systemctl reload nginx
+ensure_letsencrypt_cert "video.videh.co.in" || true
+if write_ssl_server "${VIDEO_CONF}" "video.videh.co.in" "${VIDEO_ROOT}" "true" "cert_dir_for_host_only"; then
+  echo "Configured HTTPS for video.videh.co.in"
+else
+  echo "Configured HTTP for video.videh.co.in (add DNS A record, then re-run this script)"
 fi
 
 echo "Testing nginx config..."

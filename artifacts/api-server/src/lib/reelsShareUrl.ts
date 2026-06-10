@@ -1,12 +1,10 @@
-/** Public HTTPS link — opens Videh app or landing page (YouTube-style share URL). */
+/** Public HTTPS watch URL — video.videh.co.in (web) with app deep link fallback via /api/reels/go. */
 export function buildReelsVideoShareUrl(videoId: number | string): string {
-  const domain = (
-    process.env["PUBLIC_API_DOMAIN"]
-    || process.env["EXPO_PUBLIC_DOMAIN"]
-    || "videh.co.in"
-  ).trim();
-  const base = /^https?:\/\//i.test(domain) ? domain.replace(/\/+$/, "") : `https://${domain}`;
-  return `${base}/api/reels/go/${videoId}`;
+  const videoHost = (process.env["PUBLIC_VIDEO_DOMAIN"] || "video.videh.co.in").trim();
+  const base = /^https?:\/\//i.test(videoHost)
+    ? videoHost.replace(/\/+$/, "")
+    : `https://${videoHost}`;
+  return `${base}/watch/${videoId}`;
 }
 
 export function buildReelsVideoDeepLink(videoId: number | string): string {
