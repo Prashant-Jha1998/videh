@@ -53,13 +53,38 @@ export type ReelsComment = {
 
 export type ReelsFeedCursor = { at: string; id: number };
 
+/** Rewrite API host to current site so thumbnails work on video.videh.co.in. */
+function rewriteApiHost(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.pathname.startsWith("/api/") || u.pathname.startsWith("/uploads/")) {
+      const origin = typeof window !== "undefined" ? window.location.origin : getApiBase();
+      if (origin) return `${origin.replace(/\/$/, "")}${u.pathname}${u.search}`;
+    }
+  } catch {
+    /* keep original */
+  }
+  return url;
+}
+
 function normalizeUrl(url?: string | null): string | null {
   const raw = String(url ?? "").trim();
   if (!raw) return null;
-  if (/^https?:\/\//i.test(raw)) return raw;
-  const base = getApiBase();
-  if (raw.startsWith("/")) return `${base}${raw}`;
+  if (/^https?:\/\//i.test(raw)) return rewriteApiHost(raw);
+  const base = typeof window !== "undefined" ? window.location.origin : getApiBase();
+  if (raw.startsWith("/api/") || raw.startsWith("/uploads/")) {
+    return `${base.replace(/\/$/, "")}${raw}`;
+  }
+  const uploadsPath = raw.match(/\/uploads\/[^\s?#]+/)?.[0]
+    ?? (raw.startsWith("uploads/") ? `/${raw.split(/[?#]/)[0]}` : null);
+  if (uploadsPath) return `${base.replace(/\/$/, "")}${uploadsPath}`;
+  if (raw.startsWith("/")) return `${base.replace(/\/$/, "")}${raw}`;
   return raw;
+}
+
+export function videoThumbnailSrc(video: ReelsVideo): string {
+  return normalizeUrl(video.thumbnailUrl)
+    ?? `${getApiBase() || ""}/api/reels/videos/${video.id}/thumbnail`;
 }
 
 function normalizeVideo(v: ReelsVideo): ReelsVideo {
@@ -119,12 +144,28 @@ export async function verifyOtp(phone: string, otp: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone, otp }),
   });
-  return res.json() as Promise<{
+  const data = await res.json() as {
     success: boolean;
-    user?: { dbId: number; name?: string; phone?: string };
+    dbId?: number;
     sessionToken?: string;
+    name?: string | null;
     message?: string;
-  }>;
+    user?: { dbId: number; name?: string; phone?: string };
+  };
+  if (data.success && data.dbId && data.sessionToken) {
+    return {
+      success: true,
+      sessionToken: data.sessionToken,
+      user: { dbId: data.dbId, name: data.name ?? undefined, phone },
+      message: data.message,
+    };
+  }
+  return {
+    success: Boolean(data.success),
+    sessionToken: data.sessionToken,
+    user: data.user,
+    message: data.message,
+  };
 }
 
 export async function checkHandle(handle: string, token?: string | null) {

@@ -1,5 +1,5 @@
 import type { ReelsVideo } from "@/lib/reelsApi";
-import { formatCount, formatDuration, timeAgo } from "@/lib/reelsApi";
+import { formatCount, formatDuration, timeAgo, videoThumbnailSrc } from "@/lib/reelsApi";
 import { navigate } from "@/lib/router";
 
 export function VideoCard({ video }: { video: ReelsVideo }) {
@@ -13,11 +13,16 @@ export function VideoCard({ video }: { video: ReelsVideo }) {
       onKeyDown={(e) => e.key === "Enter" && navigate(`/watch/${video.id}`)}
     >
       <div className="thumb-wrap">
-        {video.thumbnailUrl ? (
-          <img src={video.thumbnailUrl} alt="" loading="lazy" />
-        ) : (
-          <div className="thumb-fallback" />
-        )}
+        <img
+          src={videoThumbnailSrc(video)}
+          alt=""
+          loading="lazy"
+          onError={(e) => {
+            const img = e.currentTarget;
+            const fallback = `/api/reels/videos/${video.id}/thumbnail`;
+            if (!img.src.endsWith(fallback)) img.src = fallback;
+          }}
+        />
         <span className="duration">{formatDuration(video.durationSeconds)}</span>
       </div>
       <div className="meta">

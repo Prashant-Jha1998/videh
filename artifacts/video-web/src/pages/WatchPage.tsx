@@ -12,6 +12,7 @@ import {
   subscribeChannel,
   unsubscribeChannel,
   videoStreamUrl,
+  videoThumbnailSrc,
   type ReelsComment,
   type ReelsVideo,
 } from "@/lib/reelsApi";
@@ -115,7 +116,7 @@ export function WatchPage({ videoId }: { videoId: number }) {
           className="player"
           controls
           playsInline
-          poster={video.thumbnailUrl ?? undefined}
+          poster={videoThumbnailSrc(video)}
           src={videoStreamUrl(video.id)}
           onTimeUpdate={(e) => onTimeUpdate(e.currentTarget)}
         />

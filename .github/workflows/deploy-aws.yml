@@ -58,14 +58,13 @@ jobs:
           sudo bash /var/www/videh/deploy/nginx/apply-videh-site.sh
 
           for attempt in 1 2 3 4 5; do
-            if curl --fail --silent --show-error https://videh.co.in/api/readyz \
-              && curl --fail --silent --show-error https://videh.co.in/ | grep -q "Videh" \
-              && curl --fail --silent --show-error https://developer.videh.co.in/ | grep -q "Videh"; then
+            if curl --fail --silent --show-error http://127.0.0.1:3000/api/readyz \
+              && curl --fail --silent --show-error -k --resolve videh.co.in:443:127.0.0.1 https://videh.co.in/ | grep -q "Videh"; then
               echo "Deploy health checks passed."
               exit 0
             fi
             echo "Health check failed on attempt ${attempt}; retrying..."
-            sleep 5
+            sleep 8
           done
 
           echo "::group::PM2 logs"

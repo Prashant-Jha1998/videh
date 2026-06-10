@@ -29,7 +29,7 @@ export function LoginPage({ redirect }: { redirect?: string }) {
       } else {
         const res = await verifyOtp(phone, otp);
         if (!res.success || !res.user?.dbId || !res.sessionToken) {
-          setError(res.message ?? "Invalid OTP.");
+          setError(res.message === "OTP verified" ? "Sign-in failed. Please try again." : (res.message ?? "Invalid OTP."));
           return;
         }
         setUser({
