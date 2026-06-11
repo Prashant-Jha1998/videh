@@ -3,6 +3,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
 import { agentDebugLog } from "@/lib/agentDebugLog";
+import { albumSendLog } from "@/lib/albumSendLog";
 import { connectChatEventStream } from "@/lib/connectChatEventStream";
 import { emitChatMessageSignal, onChatMessageSignal, type ChatMessageSignal } from "@/lib/chatMessageEvents";
 import {
@@ -1727,12 +1728,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
       };
 
-      const postAlbumMessage = async (remoteUrls: string[]) => {
-        if (remoteUrls.length < 2) return;
+      const postAlbumMessage = async (remoteUrls: string[]): Promise<boolean> => {
+        if (remoteUrls.length < 2) {
+          albumSendLog("error", "post skipped — fewer than 2 remote URLs", { chatId, tempId, count: remoteUrls.length });
+          return false;
+        }
         const content = encodeAlbumMessageContent(remoteUrls, caption);
         const preview = albumChatPreview(remoteUrls.length, caption);
         const displayText = caption || preview;
-        if (!u?.dbId) return;
+        if (!u?.dbId) {
+          albumSendLog("error", "post skipped — no dbId", { chatId, tempId });
+          return false;
+        }
+        albumSendLog("message_create", "creating album message", {
+          chatId,
+          tempId,
+          imageCount: remoteUrls.length,
+          contentBytes: content.length,
+        });
         const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
           method: "POST",
           headers: authHeaders({ "Content-Type": "application/json" }),
@@ -1744,18 +1757,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }),
         });
         const data = (await res.json()) as { success?: boolean; message?: { id: number } | string };
+        albumSendLog("db_write", "album message API response", {
+          chatId,
+          tempId,
+          status: res.status,
+          success: data?.success ?? false,
+          hasMessageId:
+            !!(data?.message && typeof data.message === "object" && "id" in data.message),
+        });
         if (res.status === 403) {
           Alert.alert("Cannot send message", typeof data.message === "string" ? data.message : "Not allowed.");
+          albumSendLog("cleanup", "removing optimistic album after 403", { chatId, tempId });
           setChats((prev) =>
             prev.map((c) => (c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== activeMsgId && m.id !== tempId) } : c)),
           );
-          return;
+          return false;
         }
         const serverId =
           data?.success && data.message && typeof data.message === "object" && "id" in data.message
             ? String(data.message.id)
             : null;
         const finalize = (id: string) => {
+          albumSendLog("db_write", "finalizing album with server id", { chatId, tempId, serverId: id });
           setChats((prev) =>
             prev.map((c) => {
               if (c.id !== chatId) return c;
@@ -1772,6 +1795,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 mediaUrl: remoteUrls[0],
                 uploadProgress: undefined,
                 uploadFailed: false,
+                albumLocalUrls: undefined,
               };
               if (!local) {
                 return {
@@ -1795,16 +1819,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         };
         if (serverId) {
           finalize(serverId);
-        } else {
-          patchMsg({
-            type: "album",
-            text: displayText,
-            albumUrls: remoteUrls,
-            mediaUrl: remoteUrls[0],
-            uploadProgress: undefined,
-            uploadFailed: false,
-          });
+          return true;
         }
+        albumSendLog("error", "album message create failed — no server id", { chatId, tempId, status: res.status });
+        return false;
       };
 
       if (opts.localUris?.length) {
@@ -1812,6 +1830,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (localUris.length < 2) return;
         const preview = albumChatPreview(localUris.length, caption);
         const displayUris = await ensureAlbumDisplayUris(localUris);
+        albumSendLog("render", "optimistic album bubble", {
+          chatId,
+          tempId,
+          imageCount: displayUris.length,
+          localReady: displayUris.filter((u) => u.startsWith("file://")).length,
+        });
         const newMsg: Message = {
           id: tempId,
           text: caption || preview,
@@ -1835,20 +1859,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (!u?.dbId) return;
         try {
           const uploaded = await uploadChatImagesBatch({
-            uris: localUris,
+            uris: displayUris,
             quality: opts.quality ?? "standard",
             sessionToken: u.sessionToken,
             onProgress: (p) => patchMsg({ uploadProgress: p.currentPct }),
           });
           const remoteUrls = uploaded.map((url) => normalizeAlbumMediaUrl(url));
+          albumSendLog("upload_finish", "all files uploaded — awaiting DB write", {
+            chatId,
+            tempId,
+            remoteCount: remoteUrls.length,
+          });
+          patchMsg({ uploadProgress: 99 });
+          const posted = await postAlbumMessage(remoteUrls);
+          if (!posted) {
+            patchMsg({ uploadProgress: undefined, uploadFailed: true });
+            Alert.alert("Send failed", "Photos uploaded but the album message could not be saved. Tap to retry.");
+            return;
+          }
           patchMsg({
             albumUrls: remoteUrls,
             mediaUrl: remoteUrls[0],
-            uploadProgress: 100,
+            uploadProgress: undefined,
+            albumLocalUrls: undefined,
+            text: caption || preview,
+            uploadFailed: false,
           });
-          await postAlbumMessage(remoteUrls);
-          patchMsg({ uploadProgress: undefined, albumLocalUrls: undefined, text: caption || preview });
+          albumSendLog("cleanup", "album send complete", { chatId, tempId, activeMsgId });
         } catch (e) {
+          albumSendLog("error", "album send failed", {
+            chatId,
+            tempId,
+            error: e instanceof Error ? e.message : String(e),
+          });
           patchMsg({ uploadProgress: undefined, uploadFailed: true });
           Alert.alert("Send failed", e instanceof Error ? e.message : "Could not send photos.");
         }

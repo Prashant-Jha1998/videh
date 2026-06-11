@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { albumSendLog } from "@/lib/albumSendLog";
 import { getApiUrl } from "./api";
 import { ensureUploadableFileUri } from "./prepareFileUpload";
 import { getWebFile } from "./web/webFileRegistry";
@@ -16,13 +17,16 @@ export type UploadChatMediaOptions = {
   sessionToken?: string | null;
   onProgress?: (p: UploadProgress) => void;
   signal?: AbortSignal;
+  logContext?: Record<string, unknown>;
 };
 
 export function uploadChatMediaWithProgress(opts: UploadChatMediaOptions): Promise<{ url: string; mimeType: string; size: number }> {
-  const { uri, mime, filename, sessionToken, onProgress, signal } = opts;
+  const { uri, mime, filename, sessionToken, onProgress, signal, logContext } = opts;
   const base = getApiUrl();
+  const started = Date.now();
 
   return ensureUploadableFileUri(uri, filename).then((uploadUri) => new Promise((resolve, reject) => {
+    albumSendLog("upload_start", "xhr upload posting", { filename, ...logContext });
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${base}/api/chats/media`);
     if (sessionToken) xhr.setRequestHeader("Authorization", `Bearer ${sessionToken}`);
@@ -45,14 +49,33 @@ export function uploadChatMediaWithProgress(opts: UploadChatMediaOptions): Promi
         return;
       }
       if (xhr.status < 200 || xhr.status >= 300 || !data.success || !data.url) {
+        albumSendLog("error", "xhr upload rejected", {
+          status: xhr.status,
+          message: data.message,
+          elapsedMs: Date.now() - started,
+          ...logContext,
+        });
         reject(new Error(data.message ?? "Could not upload file."));
         return;
       }
+      albumSendLog("upload_finish", "xhr upload ok", {
+        status: xhr.status,
+        url: data.url?.slice(0, 120),
+        size: data.size ?? 0,
+        elapsedMs: Date.now() - started,
+        ...logContext,
+      });
       resolve({ url: data.url, mimeType: data.mimeType ?? mime, size: data.size ?? 0 });
     };
 
-    xhr.onerror = () => reject(new Error("Network error during upload."));
-    xhr.onabort = () => reject(new Error("Upload cancelled."));
+    xhr.onerror = () => {
+      albumSendLog("error", "xhr network error", { elapsedMs: Date.now() - started, ...logContext });
+      reject(new Error("Network error during upload."));
+    };
+    xhr.onabort = () => {
+      albumSendLog("cleanup", "xhr upload aborted", { elapsedMs: Date.now() - started, ...logContext });
+      reject(new Error("Upload cancelled."));
+    };
 
     if (signal) {
       if (signal.aborted) {

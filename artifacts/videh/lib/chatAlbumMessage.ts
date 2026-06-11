@@ -64,18 +64,27 @@ export function resolveAlbumUrls(
   return best.length >= 2 ? best : undefined;
 }
 
-/** Prefer remote URL per tile, fall back to local picker URI while uploading. */
+/** Prefer local picker URIs until the server message is confirmed (remote may 403 before DB write). */
 export function displayAlbumUrls(msg: {
   albumUrls?: string[];
   albumLocalUrls?: string[];
+  uploadProgress?: number;
+  uploadFailed?: boolean;
+  id?: string;
 }): string[] {
   const remote = msg.albumUrls ?? [];
   const local = msg.albumLocalUrls ?? [];
   const len = Math.max(remote.length, local.length);
   if (len === 0) return [];
+  const stillUploading =
+    !msg.uploadFailed
+    && (
+      (typeof msg.uploadProgress === "number" && msg.uploadProgress < 100)
+      || (msg.id?.startsWith("tmp_") && local.length > 0)
+    );
   const out: string[] = [];
   for (let i = 0; i < len; i++) {
-    const pick = (remote[i] || local[i] || "").trim();
+    const pick = (stillUploading ? (local[i] || remote[i]) : (remote[i] || local[i]) || "").trim();
     if (pick) out.push(pick);
   }
   return out;

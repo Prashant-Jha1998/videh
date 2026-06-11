@@ -2548,6 +2548,9 @@ export default function ChatScreen() {
         mediaUrl: item.mediaUrl,
       }),
       albumLocalUrls: item.albumLocalUrls,
+      uploadProgress: item.uploadProgress,
+      uploadFailed: item.uploadFailed,
+      id: item.id,
     });
     const isAlbum = isAlbumMessage(item.type, item.text, {
       albumUrls: item.albumUrls ?? item.albumLocalUrls,

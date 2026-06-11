@@ -10,6 +10,7 @@ import {
   type ImageStyle,
   type StyleProp,
 } from "react-native";
+import { albumSendLog } from "@/lib/albumSendLog";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 
@@ -52,7 +53,10 @@ function AlbumTile({
           source={source}
           style={StyleSheet.absoluteFill}
           resizeMode="cover"
-          onError={() => setFailed(true)}
+          onError={() => {
+            albumSendLog("render", "native album tile failed", { uri: absolute.slice(0, 120) });
+            setFailed(true);
+          }}
         />
       ) : (
         <Image
@@ -60,7 +64,12 @@ function AlbumTile({
           style={StyleSheet.absoluteFill}
           contentFit="cover"
           cachePolicy={isLocal ? "none" : "memory-disk"}
-          onError={() => setUseNative(true)}
+          onError={() => {
+            albumSendLog("render", "expo-image album tile failed — falling back to native", {
+              uri: absolute.slice(0, 120),
+            });
+            setUseNative(true);
+          }}
         />
       )}
       {overlay ? (

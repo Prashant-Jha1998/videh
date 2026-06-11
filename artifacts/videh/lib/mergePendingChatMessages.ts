@@ -1,4 +1,5 @@
 import type { Message } from "@/context/AppContext";
+import { albumSendLog } from "@/lib/albumSendLog";
 import { parseAlbumMessageContent } from "@/lib/chatAlbumMessage";
 
 const TEMP_MATCH_WINDOW_MS = 60_000;
@@ -12,10 +13,6 @@ function isMediaMessage(m: Message): boolean {
 function isUploadInFlight(m: Message): boolean {
   if (m.uploadFailed || !isMediaMessage(m)) return false;
   if (typeof m.uploadProgress === "number" && m.uploadProgress < 100) return true;
-  // Upload finished but server row not linked yet (still tmp_*).
-  if (m.id.startsWith("tmp_") && typeof m.uploadProgress === "number" && m.uploadProgress >= 100) {
-    return true;
-  }
   return false;
 }
 
@@ -65,11 +62,20 @@ export function collectSupersededTempIds(tempMessages: Message[], serverMessages
 
   for (const tmp of sortedTemps) {
     if (isUploadInFlight(tmp)) continue;
+    if (tmp.uploadFailed) continue;
     for (const s of myServer) {
       if (usedServerIds.has(s.id)) continue;
       if (tempMatchesServer(tmp, s)) {
         usedServerIds.add(s.id);
         superseded.add(tmp.id);
+        if (tmp.type === "album") {
+          albumSendLog("merge", "superseded optimistic album with server row", {
+            tempId: tmp.id,
+            serverId: s.id,
+            tempUrlCount: tmp.albumUrls?.length ?? 0,
+            serverUrlCount: s.albumUrls?.length ?? 0,
+          });
+        }
         break;
       }
     }
@@ -109,7 +115,14 @@ export function collectPendingLocalMessages(
     }
     if (m.id.startsWith("tmp_")) {
       if (isUploadInFlight(m)) return true;
-      return !supersededTmpIds.has(m.id);
+      if (m.uploadFailed) return true;
+      if (supersededTmpIds.has(m.id)) {
+        if (m.type === "album") {
+          albumSendLog("cleanup", "dropping superseded optimistic album", { tempId: m.id });
+        }
+        return false;
+      }
+      return true;
     }
     if (m.senderId === "me" && !serverIds.has(m.id) && now - m.timestamp < RECENT_OUTGOING_KEEP_MS) {
       return true;

@@ -828,6 +828,18 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
       return;
     }
 
+    if (String(type ?? "").toLowerCase() === "album") {
+      let albumUrlCount = 0;
+      try {
+        const parsed = JSON.parse(String(content ?? "")) as { urls?: unknown[] };
+        albumUrlCount = Array.isArray(parsed.urls) ? parsed.urls.length : 0;
+      } catch { /* ignore */ }
+      req.log.info(
+        { chatId, senderId, albumUrlCount, contentBytes: String(content ?? "").length, mediaUrl },
+        "album message db write",
+      );
+    }
+
     const result = await query(`
       INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
