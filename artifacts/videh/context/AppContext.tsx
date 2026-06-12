@@ -753,6 +753,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             if (Platform.OS !== "web") {
               registerPushTokenWithServer(parsed.dbId).catch(() => {});
             }
+            void import("@/lib/reelsFeedCache").then(({ prefetchReelsFeed }) =>
+              prefetchReelsFeed(parsed.dbId!, parsed.sessionToken),
+            );
           }
         }
       } catch {}
@@ -825,6 +828,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           syncDeviceContactsToServer(`${getApiUrl()}`, u.sessionToken).catch(() => 0),
         );
       }
+      void import("@/lib/reelsFeedCache").then(({ prefetchReelsFeed }) =>
+        prefetchReelsFeed(u.dbId!, u.sessionToken),
+      );
     }
   }, [loadChats, loadStatuses, reloadChatListDeleteState]);
 

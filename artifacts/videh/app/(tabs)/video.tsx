@@ -30,6 +30,7 @@ import {
 } from "@/lib/reelsApi";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { headerTopInset } from "@/lib/headerInset";
+import { loadReelsFeedCache, saveReelsFeedCache } from "@/lib/reelsFeedCache";
 
 type FeedRow =
   | { kind: "video"; key: string; video: ReelsVideo }
@@ -85,6 +86,25 @@ function VideoThumb({
       recyclingKey={`thumb-${videoId}`}
       onError={() => setFailed(true)}
     />
+  );
+}
+
+function VideoFeedSkeleton({ mutedColor, softColor }: { mutedColor: string; softColor: string }) {
+  return (
+    <View style={styles.skeletonWrap}>
+      {[0, 1, 2].map((i) => (
+        <View key={i} style={styles.skeletonCard}>
+          <View style={[styles.thumb, { backgroundColor: mutedColor }]} />
+          <View style={styles.infoRow}>
+            <View style={[styles.skeletonAvatar, { backgroundColor: mutedColor }]} />
+            <View style={styles.skeletonLines}>
+              <View style={[styles.skeletonLine, { backgroundColor: mutedColor, width: "88%" }]} />
+              <View style={[styles.skeletonLine, { backgroundColor: softColor, width: "55%" }]} />
+            </View>
+          </View>
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -148,30 +168,66 @@ export default function VideoTabScreen() {
   const loadingMoreRef = useRef(false);
   const loadedOnceRef = useRef(false);
 
-  const loadInitial = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!user?.dbId) return;
-    const showFullLoader = !opts?.silent && !loadedOnceRef.current;
-    if (showFullLoader) setLoading(true);
+  const applyFeed = useCallback((feed: {
+    videos?: ReelsVideo[];
+    trending?: ReelsVideo[];
+    feedAdPlacements?: ReelsFeedAdPlacement[];
+    nextCursor?: ReelsFeedCursor | null;
+  }) => {
+    setVideos(feed.videos ?? []);
+    setAdPlacements(feed.feedAdPlacements ?? []);
+    setTrending(feed.trending ?? []);
+    setNextCursor(feed.nextCursor ?? null);
+  }, []);
 
-    const feedPromise = fetchReelsFeed(user.dbId, null, user.sessionToken);
-    const channelPromise = fetchMyReelsChannel(user.dbId, user.sessionToken, { summary: true });
+  const loadInitial = useCallback(async (opts?: { silent?: boolean }) => {
+    const uid = user?.dbId;
+    if (!uid) {
+      setLoading(false);
+      return;
+    }
+
+    const showBlockingLoader = !opts?.silent && !loadedOnceRef.current;
+    if (showBlockingLoader) {
+      const cached = await loadReelsFeedCache(uid);
+      if (cached?.videos?.length) {
+        applyFeed({
+          videos: cached.videos,
+          trending: cached.trending,
+          feedAdPlacements: cached.adPlacements,
+          nextCursor: cached.nextCursor,
+        });
+        loadedOnceRef.current = true;
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+    }
+
+    const feedPromise = fetchReelsFeed(uid, null, user.sessionToken);
+    const channelPromise = fetchMyReelsChannel(uid, user.sessionToken, { summary: true });
 
     try {
       const feed = await feedPromise;
-      setVideos(feed.videos ?? []);
-      setAdPlacements(feed.feedAdPlacements ?? []);
-      setTrending(feed.trending ?? []);
-      setNextCursor(feed.nextCursor ?? null);
+      applyFeed(feed);
       loadedOnceRef.current = true;
       setLoading(false);
+      if ((feed.videos ?? []).length > 0) {
+        void saveReelsFeedCache(uid, {
+          videos: feed.videos ?? [],
+          trending: feed.trending,
+          adPlacements: feed.feedAdPlacements,
+          nextCursor: feed.nextCursor,
+        });
+      }
 
       const ch = await channelPromise;
       setMyChannel(ch.channel ?? null);
       setHasChannel(Boolean(ch.channel));
     } catch {
-      if (showFullLoader) setLoading(false);
+      setLoading(false);
     }
-  }, [user?.dbId, user?.sessionToken]);
+  }, [user?.dbId, user?.sessionToken, applyFeed]);
 
   const loadMore = useCallback(async () => {
     if (!user?.dbId || !nextCursor || loadingMoreRef.current) return;
@@ -361,9 +417,10 @@ export default function VideoTabScreen() {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         {headerBar}
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
+        <VideoFeedSkeleton
+          mutedColor={colors.muted}
+          softColor={colors.border ?? colors.muted}
+        />
       </View>
     );
   }
@@ -468,6 +525,11 @@ const styles = StyleSheet.create({
   ytTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", lineHeight: 18 },
   ytMeta: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 4 },
   footerLoader: { alignItems: "center", paddingVertical: 20 },
+  skeletonWrap: { paddingBottom: 24 },
+  skeletonCard: { marginBottom: 16 },
+  skeletonAvatar: { width: 36, height: 36, borderRadius: 18 },
+  skeletonLines: { flex: 1, gap: 8, paddingTop: 2 },
+  skeletonLine: { height: 12, borderRadius: 6 },
   fab: {
     position: "absolute",
     right: 20,
