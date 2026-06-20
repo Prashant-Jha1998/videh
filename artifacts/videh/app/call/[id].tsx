@@ -20,7 +20,6 @@ import { GroupCallGrid, type RemoteCallPeer } from "@/components/GroupCallGrid";
 import { useCallSession } from "@/context/CallSessionContext";
 import { useApp } from "@/context/AppContext";
 import type { InCallAudioRoute } from "@/lib/inCallAudio";
-import { CALL_DECLINE_QUICK_MESSAGES } from "@/lib/callDeclineQuickMessages";
 import { phaseLabel } from "@/lib/callState";
 import { createCallLink } from "@/lib/callLinks";
 import { isScreenShareSupported } from "@/lib/screenShare";
@@ -58,8 +57,6 @@ export default function CallScreen() {
     participantCount,
     acceptedCount,
     ringingCount,
-    acceptIncoming,
-    declineIncoming,
     minimizeCall,
     endCall,
     toggleMute,
@@ -89,27 +86,10 @@ export default function CallScreen() {
   const incoming = session?.isIncoming ?? params.incoming === "1";
 
   const pulse = useRef(new Animated.Value(1)).current;
-  const swipeY = useRef(new Animated.Value(0)).current;
-  const acceptedRef = useRef(false);
-  const declineBusyRef = useRef(false);
-
-  const handleDecline = (message?: string) => {
-    if (declineBusyRef.current) return;
-    declineBusyRef.current = true;
-    void declineIncoming(message).finally(() => {
-      declineBusyRef.current = false;
-    });
-  };
+  const pipOffset = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
   useEffect(() => {
     if (ringing) return;
-    acceptedRef.current = false;
-    declineBusyRef.current = false;
-    swipeY.setValue(0);
-  }, [ringing, swipeY]);
-
-  useEffect(() => {
-    if (!ringing) return;
     const anim = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1.15, duration: 800, useNativeDriver: true }),
@@ -118,27 +98,8 @@ export default function CallScreen() {
     );
     anim.start();
     return () => anim.stop();
-  }, [ringing, pulse]);
+  }, [ringing, pulse, joined]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => ringing,
-      onMoveShouldSetPanResponder: () => ringing,
-      onPanResponderMove: (_, g) => {
-        swipeY.setValue(Math.max(-56, Math.min(0, g.dy)));
-      },
-      onPanResponderRelease: (_, g) => {
-        if (g.dy <= -72 && !acceptedRef.current) {
-          acceptedRef.current = true;
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          void acceptIncoming();
-        }
-        Animated.spring(swipeY, { toValue: 0, useNativeDriver: true, friction: 7 }).start();
-      },
-    }),
-  ).current;
-
-  const pipOffset = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const pipResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: () => isVideo && joined,
@@ -201,85 +162,8 @@ export default function CallScreen() {
 
   const isOneToOne = participantCount <= 2;
 
-  if (ringing) {
-    const callTypeLabel = isVideo ? "Incoming video call" : "Incoming voice call";
-    const statusDiffers =
-      Boolean(displayStatus) && displayStatus !== callTypeLabel;
-
-    return (
-      <View
-        style={[
-          styles.container,
-          styles.incomingRoot,
-          { paddingTop: topPad, paddingBottom: Math.max(insets.bottom, 12) + 28 },
-        ]}
-      >
-        <View style={styles.incomingHeader}>
-          <Animated.View style={[styles.avatarRing, { transform: [{ scale: pulse }] }]}>
-            <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
-              <Text style={styles.avatarText}>{initials}</Text>
-            </View>
-          </Animated.View>
-          <Text style={styles.callerName}>{name}</Text>
-          {statusDiffers ? (
-            <Text style={styles.callStatus}>{displayStatus}</Text>
-          ) : (
-            <Text style={styles.incomingSubtitle}>{callTypeLabel}</Text>
-          )}
-        </View>
-
-        <View style={styles.incomingMiddle}>
-          <View style={styles.quickRow}>
-            {CALL_DECLINE_QUICK_MESSAGES.slice(0, 2).map((msg) => (
-              <TouchableOpacity
-                key={msg}
-                style={styles.quickChip}
-                onPress={() => handleDecline(msg)}
-              >
-                <Text style={styles.quickTxt} numberOfLines={2}>
-                  {msg}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.incomingFooter}>
-          <Text style={styles.swipeHint}>Swipe up on Accept to answer</Text>
-          <View style={styles.incomingActions}>
-            <View style={styles.actionItem}>
-              <TouchableOpacity
-                style={styles.declineCircle}
-                onPress={() => handleDecline()}
-                activeOpacity={0.85}
-              >
-                <Ionicons name="close" size={28} color="#fff" />
-              </TouchableOpacity>
-              <Text style={styles.actionLbl}>Decline</Text>
-            </View>
-            <View style={styles.actionItem}>
-              <Animated.View
-                style={[styles.acceptSwipeCol, { transform: [{ translateY: swipeY }] }]}
-                {...panResponder.panHandlers}
-              >
-                <TouchableOpacity
-                  style={styles.acceptBtn}
-                  onPress={() => {
-                    if (acceptedRef.current) return;
-                    acceptedRef.current = true;
-                    void acceptIncoming();
-                  }}
-                  activeOpacity={0.9}
-                >
-                  <Ionicons name="call" size={28} color="#fff" />
-                </TouchableOpacity>
-                <Text style={styles.actionLblGreen}>Accept</Text>
-              </Animated.View>
-            </View>
-          </View>
-        </View>
-      </View>
-    );
+  if (ringing && incoming) {
+    return null;
   }
 
   return (

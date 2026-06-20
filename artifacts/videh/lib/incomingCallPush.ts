@@ -28,10 +28,11 @@ export function parseIncomingCallFromPushData(data: Record<string, unknown>): In
 }
 
 function incomingCallDeepLink(call: IncomingCallInfo & { callerName: string }): string {
+  const callerPart = call.callerId ? `&callerId=${call.callerId}` : "";
   return (
     `videh://call/${call.chatId}?callId=${encodeURIComponent(call.callId)}` +
     `&incoming=1&ringing=1&type=${call.type}&name=${encodeURIComponent(call.callerName)}` +
-    `&channel=${encodeURIComponent(call.channel)}`
+    `&channel=${encodeURIComponent(call.channel)}${callerPart}`
   );
 }
 

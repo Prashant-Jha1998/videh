@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 79,
+      "versionCode": 80,
       "androidStatusBar": {
         "backgroundColor": "#00A884",
         "barStyle": "light-content",
@@ -58,24 +58,33 @@
               "pathPrefix": "/api/reels/go"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ],
       "queries": [
         {
           "intent": {
             "action": "android.intent.action.VIEW",
-            "data": { "scheme": "google.navigation" }
+            "data": {
+              "scheme": "google.navigation"
+            }
           }
         },
         {
           "intent": {
             "action": "android.intent.action.VIEW",
-            "data": { "scheme": "geo" }
+            "data": {
+              "scheme": "geo"
+            }
           }
         },
         {
-          "package": ["com.google.android.apps.maps"]
+          "package": [
+            "com.google.android.apps.maps"
+          ]
         }
       ],
       "permissions": [
@@ -230,13 +239,13 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "prashantjha112",
+    "owner": "mmsbywarroom",
     "extra": {
       "router": {
         "origin": "https://videh.co.in"
       },
       "eas": {
-        "projectId": "72d49bc8-c465-47d0-ba9d-6aa765d6e315"
+        "projectId": "aef28f13-c565-43ac-b69b-690a2b3f0acf"
       }
     }
   }

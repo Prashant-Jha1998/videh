@@ -26,7 +26,7 @@ export type IncomingCallInfo = {
 
 type Props = {
   call: IncomingCallInfo;
-  onAccept: () => void;
+  onAccept: () => void | Promise<void>;
   onDecline: () => void;
   onDeclineWithMessage: (text: string) => void;
 };
@@ -39,6 +39,20 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
   const swipeY = useRef(new Animated.Value(0)).current;
   const acceptedRef = useRef(false);
   const busyRef = useRef(false);
+
+  const runAccept = () => {
+    if (acceptedRef.current || busyRef.current) return;
+    acceptedRef.current = true;
+    busyRef.current = true;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    void Promise.resolve(onAccept())
+      .catch(() => {
+        acceptedRef.current = false;
+      })
+      .finally(() => {
+        busyRef.current = false;
+      });
+  };
 
   const runDecline = (fn: () => void | Promise<void>) => {
     if (busyRef.current) return;
@@ -76,9 +90,7 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
       onPanResponderRelease: (_, g) => {
         const swipedUp = g.dy <= SWIPE_ACCEPT_DY || g.vy < -0.45;
         if (swipedUp && !acceptedRef.current) {
-          acceptedRef.current = true;
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          onAccept();
+          runAccept();
         }
         Animated.spring(swipeY, { toValue: 0, useNativeDriver: true, friction: 7 }).start();
       },
@@ -160,12 +172,7 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
               >
                 <TouchableOpacity
                   style={styles.acceptBtn}
-                  onPress={() => {
-                    if (acceptedRef.current) return;
-                    acceptedRef.current = true;
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                    onAccept();
-                  }}
+                  onPress={runAccept}
                   activeOpacity={0.9}
                 >
                   <Ionicons name="call" size={28} color="#fff" />

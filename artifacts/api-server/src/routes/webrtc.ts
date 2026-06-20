@@ -31,7 +31,7 @@ type CallInvite = {
   callerId: number;
   callerName: string | null;
   participantIds: number[];
-  statuses: Record<number, "ringing" | "accepted" | "declined" | "missed" | "ended" | "busy">;
+  statuses: Record<number, "ringing" | "calling" | "accepted" | "declined" | "missed" | "ended" | "busy">;
   createdAt: number;
   updatedAt: number;
   connectedAt?: number;
@@ -187,7 +187,7 @@ async function releaseStaleCallsForUser(userId: number, exceptCallId?: string): 
     if (exceptCallId && call.callId === exceptCallId) continue;
     if (!isCallParticipant(call, userId)) continue;
     const status = call.statuses[userId];
-    if (status !== "accepted" && status !== "ringing") continue;
+    if (status !== "accepted" && status !== "ringing" && status !== "calling") continue;
     if (!callIsOrphanStale(call)) continue;
     publishCallSignal({
       chatId: call.chatId,
@@ -213,6 +213,14 @@ function userIsOnLiveCall(calls: CallInvite[], userId: number, exceptCallId?: st
     const status = call.statuses[userId];
     if (!status) return false;
     if (status === "ringing") return call.callerId !== userId;
+
+    if (status === "calling") {
+      return call.callerId === userId
+        && call.participantIds.some((id) => {
+          const peer = call.statuses[id];
+          return peer === "ringing" || peer === "accepted";
+        });
+    }
 
     if (status === "accepted") {
       if (call.connectedAt) return true;
@@ -436,7 +444,7 @@ router.post("/calls", async (req: Request, res: Response) => {
         statuses[id] = "ringing";
       }
     });
-    statuses[callerId] = "accepted";
+    statuses[callerId] = "calling";
     const invite: CallInvite = {
       callId,
       channel,
@@ -451,13 +459,19 @@ router.post("/calls", async (req: Request, res: Response) => {
     };
     await saveCall(invite);
     scheduleRingExpiry(callId);
-    publishCallSignal({
-      chatId,
-      userIds: [callerId, ...callableParticipantIds],
-      action: "ringing",
-      payload: serializeIncoming(invite, callerId),
-    });
     const ringingIds = callableParticipantIds.filter((id) => statuses[id] === "ringing");
+    if (ringingIds.length > 0) {
+      publishCallSignal({
+        chatId,
+        userIds: ringingIds,
+        action: "ringing",
+        payload: {
+          ...serializeIncoming(invite, callerId),
+          callerId,
+          action: "ringing",
+        },
+      });
+    }
     const pushTokens = members.rows
       .filter((row: any) => ringingIds.includes(Number(row.user_id)))
       .map((row: any) => row.push_token)
@@ -551,6 +565,10 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
       return;
     }
     call.statuses[userId] = "accepted";
+    if (!call.connectedAt) {
+      call.connectedAt = Date.now();
+      call.statuses[call.callerId] = "accepted";
+    }
   } else {
     call.statuses[userId] = "declined";
   }
@@ -585,9 +603,6 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
       }
     }
   }
-  if (body.action === "accept" && !call.connectedAt) {
-    call.connectedAt = Date.now();
-  }
   call.updatedAt = Date.now();
   publishCallSignal({
     chatId: call.chatId,
@@ -597,6 +612,7 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
       ...serializeIncoming(call, userId),
       callId: call.callId,
       channel: call.channel,
+      callerId: call.callerId,
       action: body.action === "accept" ? "accepted" : "declined",
     },
   });
@@ -605,7 +621,7 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
   } else {
     await saveCall(call);
   }
-  res.json({ success: true, call: serializeIncoming(call, userId) });
+  res.json({ success: true, call: serializeIncoming(call, userId), callerId: call.callerId });
 });
 
 router.get("/calls/:callId/status", async (req: Request, res: Response) => {
@@ -664,7 +680,12 @@ router.post("/calls/:callId/participants", async (req: Request, res: Response) =
     res.status(404).json({ success: false, message: "Call not found." });
     return;
   }
-  if (!requesterId || !isCallParticipant(call, requesterId) || call.statuses[requesterId] !== "accepted") {
+  if (!requesterId || !isCallParticipant(call, requesterId)) {
+    res.status(403).json({ success: false, message: "Only active participants can add people to the call." });
+    return;
+  }
+  const requesterStatus = call.statuses[requesterId];
+  if (requesterStatus !== "accepted" && requesterStatus !== "calling") {
     res.status(403).json({ success: false, message: "Only active participants can add people to the call." });
     return;
   }
@@ -732,17 +753,20 @@ router.post("/calls/:callId/participants", async (req: Request, res: Response) =
     if (addedRinging.length > 0) scheduleRingExpiry(call.callId);
     await saveCall(call);
 
-    const notifyIds = [...new Set([call.callerId, ...call.participantIds, requesterId])];
-    publishCallSignal({
-      chatId: call.chatId,
-      userIds: notifyIds,
-      action: "ringing",
-      payload: {
-        ...serializeIncoming(call, requesterId),
-        addedUserIds: addedRinging,
-        addedBy: requesterId,
-      },
-    });
+    if (addedRinging.length > 0) {
+      publishCallSignal({
+        chatId: call.chatId,
+        userIds: addedRinging,
+        action: "ringing",
+        payload: {
+          ...serializeIncoming(call, call.callerId),
+          callerId: call.callerId,
+          addedUserIds: addedRinging,
+          addedBy: requesterId,
+          action: "ringing",
+        },
+      });
+    }
 
     if (addedRinging.length > 0) {
       const tokenRes = await query(
@@ -764,6 +788,7 @@ router.post("/calls/:callId/participants", async (req: Request, res: Response) =
             chatId: String(call.chatId),
             type: call.type,
             channel: call.channel,
+            callerId: String(call.callerId),
             callerName: adderName,
             kind: "call",
             notificationKind: "incoming_call",
@@ -774,11 +799,12 @@ router.post("/calls/:callId/participants", async (req: Request, res: Response) =
     }
 
     if (busyIds.length > 0) {
+      const notifyIds = [...new Set([call.callerId, ...call.participantIds, requesterId])];
       publishCallSignal({
         chatId: call.chatId,
         userIds: notifyIds,
         action: "busy",
-        payload: { callId: call.callId, busyParticipantIds: busyIds, addedBy: requesterId },
+        payload: { callId: call.callId, busyParticipantIds: busyIds, addedBy: requesterId, callerId: call.callerId },
       });
     }
 
@@ -858,19 +884,20 @@ router.post("/calls/:callId/end", async (req: Request, res: Response) => {
     publishCallSignal({
       chatId: call.chatId,
       userIds: allUserIds,
-      action: wasConnected ? "ended" : "cancelled",
+      action: "ended",
       payload: {
         callId: call.callId,
         chatId: call.chatId,
         type: call.type,
         callerId: call.callerId,
         channel: call.channel,
+        reason: wasConnected ? "hangup" : "cancelled",
       },
     });
     for (const uid of Object.keys(call.statuses)) {
       const id = Number(uid);
       const cur = call.statuses[id];
-      if (cur === "accepted") call.statuses[id] = "ended";
+      if (cur === "accepted" || cur === "calling") call.statuses[id] = "ended";
       else if (cur === "ringing") call.statuses[id] = "missed";
     }
     call.updatedAt = Date.now();

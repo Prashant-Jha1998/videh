@@ -20,7 +20,8 @@ import { AssistantOverlay } from "@/components/AssistantOverlay";
 import { getApiUrl } from "@/lib/api";
 import { parseReelsWatchIdFromUrl } from "@/lib/reelsShare";
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
-import { fetchIncomingCallDetails } from "@/lib/fetchIncomingCallDetails";
+import { shouldPresentIncomingCall } from "@/lib/callRole";
+import { hydrateIncomingCallInfo, hydrateAndValidateIncomingCall } from "@/lib/hydrateIncomingCall";
 import { IncomingCallOverlay, type IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { webrtcAuthHeaders, webrtcFetch } from "@/lib/webrtcApi";
 import {
@@ -198,20 +199,31 @@ function RootLayoutNav() {
     callerId?: number;
     participantCount?: number;
   }) => {
-    const next = toIncomingCallInfo(raw);
+    if (!user?.dbId) return;
+    const partial = toIncomingCallInfo(raw);
+    const callPayload = await hydrateIncomingCallInfo(partial, user.dbId, user.sessionToken);
+    if (!callPayload) return;
+    if (!shouldPresentIncomingCall({
+      userId: user.dbId,
+      callerId: callPayload.callerId,
+      callId: callPayload.callId,
+      activeCall: activeCallSession,
+    })) {
+      return;
+    }
+    const next = callPayload;
     if (dismissedIncomingCallIdsRef.current.has(next.callId)) return;
     if (activeCallIdRef.current === next.callId) return;
     if (activeCallSession?.callId === next.callId) return;
 
-    const callPayload = { ...next, callerName: next.callerName };
     const isRepeatOffer = offeredCallIdRef.current === next.callId || !claimIncomingCallRing(next.callId);
     if (isRepeatOffer) {
       if (dismissedIncomingCallIdsRef.current.has(next.callId)) return;
       if (activeCallSession?.callId === next.callId) return;
       offeredCallIdRef.current = next.callId;
-      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
-      pendingIncomingRef.current = callPayload;
-      presentIncomingCallUi(callPayload, { useNativeSurface: !isAppInForeground() });
+      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
+      pendingIncomingRef.current = next;
+      presentIncomingCallUi(next, { useNativeSurface: !isAppInForeground() });
       scheduleIncomingAutoEnd(next.callId);
       return;
     }
@@ -238,12 +250,9 @@ function RootLayoutNav() {
     const appActive = isAppInForeground();
 
     if (appActive) {
-      pendingIncomingRef.current = callPayload;
-      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
-      if (Platform.OS !== "web") {
-        presentIncomingCall(callPayload);
-      }
-      void startIncomingCallExperience(callPayload);
+      pendingIncomingRef.current = next;
+      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
+      void startIncomingCallExperience(next);
       scheduleIncomingAutoEnd(next.callId);
       return;
     }
@@ -253,13 +262,13 @@ function RootLayoutNav() {
       callerName: next.callerName,
       isVideo: next.type === "video",
     });
-    presentIncomingCallUi(callPayload, { useNativeSurface: true });
-    pendingIncomingRef.current = callPayload;
-    setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
+    presentIncomingCallUi(next, { useNativeSurface: true });
+    pendingIncomingRef.current = next;
+    setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
 
-    void startIncomingCallExperience(callPayload);
+    void startIncomingCallExperience(next);
     if (Platform.OS !== "web") {
-      void showIncomingCallNotification(callPayload);
+      void showIncomingCallNotification(next);
     }
 
     scheduleIncomingAutoEnd(next.callId);
@@ -324,17 +333,17 @@ function RootLayoutNav() {
         }
         void (async () => {
           const callId = String(data.callId);
-          const hydrated =
-            data.channel && Number(data.chatId)
-              ? toIncomingCallInfo({
-                  callId,
-                  channel: String(data.channel),
-                  chatId: Number(data.chatId),
-                  type: String(data.type ?? "audio"),
-                  callerName: String(data.callerName ?? "Videh user"),
-                  participantCount: 2,
-                })
-              : await fetchIncomingCallDetails(callId, user.dbId, user.sessionToken);
+          if (!user?.dbId) return;
+          const partial = toIncomingCallInfo({
+            callId,
+            channel: String(data.channel ?? ""),
+            chatId: Number(data.chatId),
+            type: String(data.type ?? "audio"),
+            callerName: String(data.callerName ?? "Videh user"),
+            participantCount: 2,
+            callerId: Number(data.callerId) > 0 ? Number(data.callerId) : undefined,
+          });
+          const hydrated = await hydrateAndValidateIncomingCall(partial, user.dbId, user.sessionToken);
           if (!hydrated) return;
           clearIncomingAutoEnd();
           dismissIncomingCallUi(hydrated.callId, false);
@@ -360,10 +369,11 @@ function RootLayoutNav() {
             if (!call) return;
             void offerIncomingCall({
               callId: String(data.callId),
-              channel: String(data.channel ?? ""),
-              chatId: Number(data.chatId),
-              type: String(data.type ?? "audio"),
-              callerName: String(data.callerName ?? "Videh user"),
+              channel: String(data.channel ?? call?.channel ?? ""),
+              chatId: Number(data.chatId ?? call?.chatId),
+              type: String(data.type ?? call?.type ?? "audio"),
+              callerName: String(data.callerName ?? call?.callerName ?? "Videh user"),
+              callerId: Number(data.callerId ?? call?.callerId) > 0 ? Number(data.callerId ?? call?.callerId) : undefined,
             });
           })
           .catch(() => {});
@@ -466,6 +476,15 @@ function RootLayoutNav() {
       const action = signal.action ?? "";
       const callId = signal.callId ?? "";
       if (action === "ringing" && callId && user.dbId) {
+        const signalCallerId = signal.callerId;
+        if (!shouldPresentIncomingCall({
+          userId: user.dbId,
+          callerId: signalCallerId,
+          callId,
+          activeCall: activeCallSession,
+        })) {
+          return;
+        }
         if (dismissedIncomingCallIdsRef.current.has(callId)) return;
         if (activeCallIdRef.current === callId) return;
         const callInfo: IncomingCallInfo = {
@@ -515,11 +534,7 @@ function RootLayoutNav() {
       const pending = pendingIncomingRef.current;
       if (pending && canPresentIncomingCallUi()) {
         pendingIncomingRef.current = null;
-        if (Platform.OS !== "web") {
-          presentIncomingCall(pending);
-        } else {
-          setIncomingCall(pending);
-        }
+        setIncomingCall(pending);
         void startIncomingCallExperience(pending);
         scheduleIncomingAutoEnd(pending.callId);
       }
@@ -634,7 +649,14 @@ function RootLayoutNav() {
         type: String(data.type ?? "audio"),
         callerName: String(data.callerName ?? "Videh user"),
         participantCount: 2,
+        callerId: Number(data.callerId) > 0 ? Number(data.callerId) : undefined,
       });
+      if (!user?.dbId || !shouldPresentIncomingCall({
+        userId: user.dbId,
+        callerId: info.callerId,
+        callId: info.callId,
+        activeCall: activeCallSession,
+      })) return;
       if (activeCallIdRef.current === info.callId) return;
       if (dismissedIncomingCallIdsRef.current.has(info.callId)) return;
       if (activeCallSession?.callId === info.callId) return;
@@ -658,12 +680,14 @@ function RootLayoutNav() {
       void loadMessages(String(call.chatId));
       return;
     }
-    dismissIncomingCallUi(call.callId, false);
     try {
       activeCallIdRef.current = call.callId;
       await acceptIncoming(call);
+      dismissIncomingCallUi(call.callId, false);
     } catch {
-      /* keep UI responsive if ringtone/network fails */
+      activeCallIdRef.current = null;
+      setIncomingCall(call);
+      pendingIncomingRef.current = call;
     }
   };
 
@@ -694,7 +718,18 @@ function RootLayoutNav() {
             return;
           }
           const hydrated = user?.dbId
-            ? await fetchIncomingCallDetails(callId, user.dbId, user.sessionToken)
+            ? await hydrateAndValidateIncomingCall(
+                toIncomingCallInfo({
+                  callId,
+                  channel: "",
+                  chatId: 0,
+                  type: "audio",
+                  callerName: "Videh user",
+                  participantCount: 2,
+                }),
+                user.dbId,
+                user.sessionToken,
+              )
             : null;
           if (hydrated) {
             dismissIncomingCallUi(hydrated.callId, false);
@@ -768,14 +803,26 @@ function RootLayoutNav() {
       const incoming = qp.incoming === "1" || qp.incoming === 1;
       const pathChatId = String(parsed.path ?? "").replace(/^\//, "").split("/")[0];
       const chatId = Number(pathChatId) || Number(qp.chatId ?? 0);
-      if (!callId || !incoming) return;
+      if (!callId || !incoming || !user?.dbId) return;
       if (dismissedIncomingCallIdsRef.current.has(callId)) return;
+      const deepCallerId = Number(qp.callerId);
+      if (
+        !shouldPresentIncomingCall({
+          userId: user.dbId,
+          callerId: Number.isFinite(deepCallerId) && deepCallerId > 0 ? deepCallerId : undefined,
+          callId,
+          activeCall: activeCallSession,
+        })
+      ) {
+        return;
+      }
       void offerIncomingCall({
         callId,
         channel: String(qp.channel ?? ""),
         chatId: Number.isFinite(chatId) ? chatId : Number(qp.chatId ?? 0),
         type: String(qp.type ?? "audio"),
         callerName: String(qp.name ?? "Videh user"),
+        callerId: Number.isFinite(deepCallerId) && deepCallerId > 0 ? deepCallerId : undefined,
       });
     };
     void Linking.getInitialURL().then(handleDeepLink);
@@ -827,10 +874,14 @@ function RootLayoutNav() {
         <Stack.Screen name="broadcasts/index" options={{ headerShown: false }} />
         <Stack.Screen name="reels" options={{ headerShown: false }} />
       </Stack>
-      {incomingCall ? (
+      {incomingCall
+      && user?.dbId
+      && incomingCall.callerId
+      && incomingCall.callerId > 0
+      && incomingCall.callerId !== user.dbId ? (
         <IncomingCallOverlay
           call={incomingCall}
-          onAccept={() => { void respondToIncomingCall("accept"); }}
+          onAccept={() => respondToIncomingCall("accept")}
           onDecline={() => { void respondToIncomingCall("decline"); }}
           onDeclineWithMessage={(text) => { void respondToIncomingCall("decline", text); }}
         />

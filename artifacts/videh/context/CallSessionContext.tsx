@@ -28,6 +28,8 @@ import {
   requestDismissIncomingCallUi,
 } from "@/lib/incomingCallUiBridge";
 import { rejectIncomingCall } from "@/lib/rejectIncomingCall";
+import { hydrateAndValidateIncomingCall } from "@/lib/hydrateIncomingCall";
+import { isRemotePartyAccepted } from "@/lib/callRole";
 import { stopIncomingCallExperience } from "@/lib/incomingCallExperience";
 import { dismissIncomingCallNotification } from "@/lib/incomingCallNotification";
 import { resetCallNavigationGuard, runLeaveCallScreen } from "@/lib/callNavigationGuard";
@@ -157,12 +159,22 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [acceptedUserIds, callerId, userId, session?.channel, session?.engineActive, session?.isIncoming, inviteeUserIds]);
 
   /** Start WebRTC only after the other person accepts (WhatsApp-style). */
+  const remotePartyAccepted = useMemo(
+    () =>
+      isRemotePartyAccepted(userId, acceptedUserIds, {
+        isIncoming: session?.isIncoming,
+        engineActive: session?.engineActive,
+        ringing: session?.ringing,
+      }),
+    [userId, session?.isIncoming, session?.engineActive, session?.ringing, acceptedUserIds],
+  );
+
   useEffect(() => {
     if (!session?.callId || session.isIncoming || session.ringing) return;
-    if (acceptedCount > 1 && session.channel && !session.engineActive) {
+    if (remotePartyAccepted && session.channel && !session.engineActive) {
       setSession((prev) => (prev?.callId === session.callId ? { ...prev, engineActive: true } : prev));
     }
-  }, [session?.callId, session?.isIncoming, session?.ringing, session?.channel, session?.engineActive, acceptedCount]);
+  }, [session?.callId, session?.isIncoming, session?.ringing, session?.channel, session?.engineActive, remotePartyAccepted]);
 
   const onCallUserIds = useMemo(() => {
     const ids = new Set<number>(inviteeUserIds);
@@ -176,7 +188,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     ? (callerId && callerId !== userId ? callerId : 0)
     : userId;
   const webrtcReady = Boolean(
-    session?.engineActive && session.channel && callInitiatorId > 0,
+    session?.engineActive
+    && session.channel
+    && callInitiatorId > 0
+    && (session.isIncoming || remotePartyAccepted),
   );
   const engineChannel = webrtcReady ? session!.channel : "";
   const call = useVidehCall(
@@ -190,7 +205,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
   const resetCallParticipantState = useCallback(() => {
     setParticipantCount(2);
-    setAcceptedCount(1);
+    setAcceptedCount(0);
     setRingingCount(0);
     setAcceptedUserIds([]);
     setCallerId(null);
@@ -370,6 +385,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [heldSession, user?.sessionToken, refreshCallLogs]);
 
   const presentIncomingCall = useCallback((callInfo: IncomingCallInfo) => {
+    if (user?.dbId && callInfo.callerId && callInfo.callerId === user.dbId) return;
     wakeScreenForIncomingCall();
     resetCallParticipantState();
     if (callInfo.callerId) setCallerId(callInfo.callerId);
@@ -386,7 +402,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     };
     setSession(next);
     pushCallRoute(next);
-  }, [pushCallRoute, resetCallParticipantState]);
+  }, [pushCallRoute, resetCallParticipantState, user?.dbId]);
 
   const initFromRoute = useCallback((params: RouteParams) => {
     const chatId = params.id ?? "";
@@ -403,7 +419,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
     setSession((prev) => {
       if (prev?.callId && params.callId && prev.callId === params.callId) {
-        return { ...prev, minimized: false, contactName: params.name ?? prev.contactName };
+        const routeIncoming = params.incoming === "1";
+        return {
+          ...prev,
+          minimized: false,
+          contactName: params.name ?? prev.contactName,
+          ...(routeIncoming ? {} : { isIncoming: false, ringing: false }),
+        };
       }
       return {
         chatId,
@@ -449,12 +471,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
               ...prev,
               channel: data.call!.channel!,
               callId: data.call!.callId ?? prev.callId,
-              engineActive: false,
+              isIncoming: false,
               ringing: false,
+              engineActive: false,
             };
           });
           setParticipantCount(data.call!.participantCount ?? 2);
-          setAcceptedCount(data.call!.acceptedCount ?? 1);
+          setAcceptedCount(data.call!.acceptedCount ?? 0);
           setRingingCount(data.call!.ringingCount ?? 0);
           if (data.allInviteesBusy) {
             void (async () => {
@@ -474,48 +497,68 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
   const acceptIncoming = useCallback(async (callInfo?: IncomingCallInfo) => {
     const callId = callInfo?.callId ?? session?.callId;
-    if (!callId || !user?.dbId) return;
+    if (!callId || !user?.dbId) throw new Error("Missing call session");
+
+    let resolved = callInfo;
+    if (resolved) {
+      const hydrated = await hydrateAndValidateIncomingCall(resolved, user.dbId, user.sessionToken);
+      if (hydrated) resolved = hydrated;
+    } else if (session) {
+      const hydrated = await hydrateAndValidateIncomingCall(
+        {
+          callId,
+          channel: session.channel ?? "",
+          chatId: Number(session.chatId),
+          type: session.isVideo ? "video" : "audio",
+          callerName: session.contactName,
+          participantCount: 2,
+        },
+        user.dbId,
+        user.sessionToken,
+      );
+      if (hydrated) resolved = hydrated;
+    }
+
+    const resolvedCallerId = resolved?.callerId;
+    if (!resolvedCallerId || resolvedCallerId <= 0) {
+      throw new Error("Could not identify caller");
+    }
+
+    const channel = resolved?.channel?.trim() || session?.channel?.trim() || "";
+    if (!channel) throw new Error("Call channel unavailable");
 
     await stopIncomingCallExperience(callId);
-
-    let resolvedCallerId = callInfo?.callerId;
-    if (!resolvedCallerId) {
-      try {
-        const res = await webrtcFetch(`/calls/${callId}/status?userId=${user.dbId}`, user.sessionToken);
-        const data = (await res.json()) as { callerId?: number; call?: { callerId?: number } };
-        const cid = Number(data.callerId ?? data.call?.callerId);
-        if (Number.isFinite(cid) && cid > 0) resolvedCallerId = cid;
-      } catch { /* ignore */ }
-    }
-    if (resolvedCallerId) setCallerId(resolvedCallerId);
-
-    if (callInfo) {
-      const next: CallSession = {
-        chatId: String(callInfo.chatId),
-        contactName: callInfo.callerName,
-        isVideo: callInfo.type === "video",
-        channel: callInfo.channel,
-        callId: callInfo.callId,
-        isIncoming: true,
-        ringing: false,
-        minimized: false,
-        engineActive: true,
-      };
-      setSession(next);
-      pushCallRoute(next);
-    }
-
     await stopCallAlert();
-    await webrtcFetch(`/calls/${callId}/respond`, user.sessionToken, {
+
+    const res = await webrtcFetch(`/calls/${callId}/respond`, user.sessionToken, {
       method: "POST",
       body: JSON.stringify({ userId: user.dbId, action: "accept" }),
-    }).catch(() => {});
-    setSession((prev) =>
-      prev && prev.callId === callId
-        ? { ...prev, ringing: false, engineActive: true, minimized: false }
-        : prev,
-    );
-  }, [session?.callId, user?.dbId, user?.sessionToken, pushCallRoute]);
+    });
+    const data = (await res.json()) as { success?: boolean; message?: string; busy?: boolean };
+    if (!res.ok || !data.success) {
+      throw new Error(data.message ?? "Could not accept call");
+    }
+    if (data.busy) {
+      throw new Error("You are already on another call");
+    }
+
+    setCallerId(resolvedCallerId);
+    setAcceptedCount((prev) => Math.max(prev, 2));
+
+    const next: CallSession = {
+      chatId: String(resolved?.chatId ?? session?.chatId ?? ""),
+      contactName: resolved?.callerName ?? session?.contactName ?? "Contact",
+      isVideo: (resolved?.type ?? (session?.isVideo ? "video" : "audio")) === "video",
+      channel,
+      callId,
+      isIncoming: true,
+      ringing: false,
+      minimized: false,
+      engineActive: true,
+    };
+    setSession(next);
+    pushCallRoute(next);
+  }, [session?.callId, session?.chatId, session?.contactName, session?.channel, session?.isVideo, user?.dbId, user?.sessionToken, pushCallRoute]);
 
   const declineIncoming = useCallback(async (declineMessage?: string) => {
     const callId = session?.callId;
@@ -565,7 +608,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!session || session.isIncoming || session.ringing) return;
-    if (call.joined || acceptedCount > 1) {
+    if (call.joined || remotePartyAccepted) {
       void stopCallAlert();
       return;
     }
@@ -633,7 +676,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
             );
           }
 
-          const remoteAccepted = (data.acceptedCount ?? 1) > 1;
+          const remoteAccepted = acceptedUserIds.some((id) => id !== userId) || (data.acceptedCount ?? 1) > 1;
           if (remoteAccepted) {
             void stopCallAlert();
             setStatusHint(null);
@@ -693,7 +736,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     return () => clearInterval(timer);
   }, [session?.callId, session?.engineActive, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleRemoteCallEnd]);
 
-  const callAnswered = acceptedCount > 1 && (call.mediaReady || call.joined);
+  const callAnswered = remotePartyAccepted && (call.mediaReady || call.joined);
 
   useEffect(() => {
     if (!callAnswered) {
@@ -729,13 +772,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         return;
       }
       if (action === "accepted" && callId && sessionCallIdRef.current === callId) {
-        setAcceptedCount((prev) => Math.max(prev, 2));
         void stopCallAlert();
-        setSession((prev) =>
-          prev && prev.callId === callId && !prev.ringing
-            ? { ...prev, engineActive: true }
-            : prev,
-        );
+        setSession((prev) => {
+          if (!prev || prev.callId !== callId || prev.ringing) return prev;
+          if (!prev.isIncoming) {
+            return { ...prev, engineActive: true };
+          }
+          return prev.engineActive ? prev : { ...prev, engineActive: true };
+        });
         return;
       }
       if (action !== "media_type") return;
@@ -781,7 +825,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       if (call.connectionPhase === "reconnecting") return "Reconnecting…";
       return formatDuration(duration);
     }
-    if (call.joined || acceptedCount > 1) {
+    if (call.joined || remotePartyAccepted) {
       if (statusHint) return statusHint;
       return "Connecting…";
     }
@@ -792,7 +836,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (session.isIncoming) return session.isVideo ? "Incoming video call" : "Incoming voice call";
     if (ringingCount > 1) return `Ringing ${ringingCount} people...`;
     return session.isVideo ? "Calling…" : "Ringing…";
-  }, [session, call, duration, statusHint, acceptedCount, ringingCount, callAnswered]);
+  }, [session, call, duration, statusHint, acceptedCount, ringingCount, callAnswered, remotePartyAccepted]);
 
   const value = useMemo<CallSessionContextValue>(
     () => ({
