@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import * as Linking from "expo-linking";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -17,6 +18,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReelsChannelAboutSheet } from "@/components/ReelsChannelAboutSheet";
+import { ReelsOwnerVideoMenu, type OwnerVideoMenuAction } from "@/components/ReelsOwnerVideoMenu";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
@@ -25,6 +27,7 @@ import {
   truncateChannelBio,
 } from "@/lib/channelLinkUtils";
 import {
+  addReelsVideoToPlaylist,
   channelBrandingApiUrl,
   createReelsPlaylist,
   deleteReelsPlaylist,
@@ -41,14 +44,20 @@ import {
   type ReelsPlaylist,
   type ReelsVideo,
 } from "@/lib/reelsApi";
+import { addToPlayQueue, addToWatchLater } from "@/lib/reelsLibrary";
+import { shareReelsVideoLink } from "@/lib/reelsShare";
+import { downloadReelsVideoToApp, saveReelsVideoToDevice } from "@/lib/reelsVideoDownload";
 
 const SCREEN_W = Dimensions.get("window").width;
 const THUMB_H = Math.round((SCREEN_W * 9) / 16);
 const PLAYLIST_THUMB_W = 168;
 const PLAYLIST_THUMB_H = Math.round((PLAYLIST_THUMB_W * 9) / 16);
 
+const OWNER_THUMB_W = 168;
+const OWNER_THUMB_H = Math.round((OWNER_THUMB_W * 9) / 16);
+
 type ChannelTab = "home" | "videos" | "playlists";
-type VideoSort = "latest" | "popular";
+type VideoSort = "latest" | "popular" | "oldest";
 
 export default function ReelsChannelScreen() {
   const { handle: rawHandle } = useLocalSearchParams<{ handle: string }>();
@@ -67,6 +76,10 @@ export default function ReelsChannelScreen() {
   const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
   const [newPlaylistTitle, setNewPlaylistTitle] = useState("");
   const [creatingPlaylist, setCreatingPlaylist] = useState(false);
+  const [menuVideo, setMenuVideo] = useState<ReelsVideo | null>(null);
+  const [playlistPickerVideo, setPlaylistPickerVideo] = useState<ReelsVideo | null>(null);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [addingToPlaylist, setAddingToPlaylist] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.dbId) return;
@@ -100,6 +113,12 @@ export default function ReelsChannelScreen() {
     const list = [...videos];
     if (videoSort === "popular") {
       list.sort((a, b) => b.viewCount - a.viewCount || (b.id - a.id));
+    } else if (videoSort === "oldest") {
+      list.sort((a, b) => {
+        const ta = a.createdAt ? new Date(a.createdAt).getTime() : a.id;
+        const tb = b.createdAt ? new Date(b.createdAt).getTime() : b.id;
+        return ta - tb || a.id - b.id;
+      });
     }
     return list;
   }, [videos, videoSort]);
@@ -129,6 +148,89 @@ export default function ReelsChannelScreen() {
         },
       ],
     );
+  };
+
+  const handleOwnerMenuAction = (action: OwnerVideoMenuAction, item: ReelsVideo) => {
+    if (!user?.dbId || !channel?.isOwner) return;
+    switch (action) {
+      case "promote":
+        void Linking.openURL(`https://ads.videh.co.in/?videoId=${item.id}`).catch(() => {
+          Alert.alert("Promote", "Open ads.videh.co.in to promote this video.");
+        });
+        break;
+      case "edit":
+        router.push({ pathname: "/reels/video/edit/[id]", params: { id: String(item.id) } });
+        break;
+      case "save_to_device":
+        void saveReelsVideoToDevice(item).catch(() => {
+          Alert.alert("Error", "Could not save video to device.");
+        });
+        break;
+      case "delete":
+        confirmDeleteVideo(item);
+        break;
+      case "play_next":
+        void addToPlayQueue(item).then((added) => {
+          Alert.alert(
+            added ? "Added to queue" : "Already in queue",
+            added ? `"${item.title}" will play next.` : "This video is already in your queue.",
+          );
+        });
+        break;
+      case "watch_later":
+        void addToWatchLater(item).then((added) => {
+          Alert.alert(
+            added ? "Saved" : "Already saved",
+            added ? `"${item.title}" added to Watch Later.` : "This video is already in Watch Later.",
+          );
+        });
+        break;
+      case "save_playlist":
+        if (playlists.length === 0) {
+          Alert.alert("No playlists", "Create a playlist first.", [
+            { text: "Cancel", style: "cancel" },
+            { text: "Create", onPress: promptCreatePlaylist },
+          ]);
+        } else {
+          setPlaylistPickerVideo(item);
+        }
+        break;
+      case "download":
+        void downloadReelsVideoToApp(item).catch(() => {
+          Alert.alert("Error", "Download failed.");
+        });
+        break;
+      case "share":
+        void shareReelsVideoLink(item, user.dbId, user.sessionToken);
+        break;
+      case "studio":
+        router.push({ pathname: "/reels/video/edit/[id]", params: { id: String(item.id) } });
+        break;
+      default:
+        break;
+    }
+  };
+
+  const addVideoToPlaylist = async (playlistId: number) => {
+    if (!user?.dbId || !playlistPickerVideo) return;
+    setAddingToPlaylist(true);
+    try {
+      const res = await addReelsVideoToPlaylist(
+        user.dbId,
+        playlistId,
+        playlistPickerVideo.id,
+        user.sessionToken,
+      );
+      if (!res.success) {
+        Alert.alert("Error", res.message ?? "Could not add to playlist.");
+        return;
+      }
+      setPlaylists(res.playlists ?? playlists);
+      setPlaylistPickerVideo(null);
+      Alert.alert("Saved", `"${playlistPickerVideo.title}" added to playlist.`);
+    } finally {
+      setAddingToPlaylist(false);
+    }
   };
 
   const promptCreatePlaylist = () => {
@@ -230,6 +332,7 @@ export default function ReelsChannelScreen() {
               showAboutEntry={showAboutEntry}
               onBack={() => router.back()}
               onEdit={() => router.push("/reels/channel/edit")}
+              onAnalytics={() => setAnalyticsOpen(true)}
               onAbout={() => setAboutOpen(true)}
               onSubscribe={async () => {
                 if (!user?.dbId) return;
@@ -286,8 +389,9 @@ export default function ReelsChannelScreen() {
             channel={channel}
             colors={colors}
             isOwner={Boolean(channel.isOwner)}
+            ownerCompact={Boolean(channel.isOwner) && tab === "videos"}
             onPress={() => router.push({ pathname: "/reels/watch/[id]", params: { id: String(item.id) } })}
-            onDelete={() => confirmDeleteVideo(item)}
+            onMenu={() => setMenuVideo(item)}
           />
         )}
       />
@@ -299,6 +403,76 @@ export default function ReelsChannelScreen() {
         links={links}
         videoCount={videoCount}
       />
+
+      <ReelsOwnerVideoMenu
+        visible={menuVideo != null}
+        videoTitle={menuVideo?.title}
+        onClose={() => setMenuVideo(null)}
+        onAction={(action) => {
+          if (menuVideo) handleOwnerMenuAction(action, menuVideo);
+        }}
+      />
+
+      <Modal
+        visible={analyticsOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAnalyticsOpen(false)}
+      >
+        <View style={styles.modalRoot}>
+          <View style={[styles.modalCard, { backgroundColor: colors.background }]}>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Channel analytics</Text>
+            <Text style={{ color: colors.mutedForeground, marginBottom: 12 }}>
+              Overview for @{channel.handle}
+            </Text>
+            <View style={styles.analyticsGrid}>
+              <AnalyticsStat label="Subscribers" value={formatViewCount(channel.subscriberCount)} colors={colors} />
+              <AnalyticsStat label="Total views" value={formatViewCount(channel.totalViews)} colors={colors} />
+              <AnalyticsStat label="Watch hours" value={formatViewCount(Math.round(channel.totalViewHours))} colors={colors} />
+              <AnalyticsStat label="Videos" value={String(videoCount)} colors={colors} />
+              <AnalyticsStat label="Likes" value={formatViewCount(channel.totalLikes ?? 0)} colors={colors} />
+              <AnalyticsStat label="Comments" value={formatViewCount(channel.totalComments ?? 0)} colors={colors} />
+            </View>
+            <TouchableOpacity onPress={() => setAnalyticsOpen(false)} style={[styles.subBtn, { backgroundColor: colors.muted, alignSelf: "stretch", marginTop: 8 }]}>
+              <Text style={[styles.subBtnText, { color: colors.foreground, textAlign: "center" }]}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={playlistPickerVideo != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPlaylistPickerVideo(null)}
+      >
+        <View style={styles.modalRoot}>
+          <View style={[styles.modalCard, { backgroundColor: colors.background, maxHeight: "70%" }]}>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Save to playlist</Text>
+            <ScrollView style={{ maxHeight: 280 }}>
+              {playlists.map((pl) => (
+                <TouchableOpacity
+                  key={pl.id}
+                  style={[styles.playlistPickRow, { borderBottomColor: colors.border }]}
+                  disabled={addingToPlaylist}
+                  onPress={() => void addVideoToPlaylist(pl.id)}
+                >
+                  <Ionicons name="list" size={20} color={colors.foreground} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold" }} numberOfLines={1}>
+                      {pl.title}
+                    </Text>
+                    <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>{pl.videoCount} videos</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity onPress={() => setPlaylistPickerVideo(null)} style={styles.modalBtn}>
+              <Text style={{ color: colors.mutedForeground, fontFamily: "Inter_600SemiBold" }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={playlistModalOpen} transparent animationType="fade" onRequestClose={() => setPlaylistModalOpen(false)}>
         <View style={styles.modalRoot}>
@@ -375,6 +549,23 @@ function ChannelCover({
   );
 }
 
+function AnalyticsStat({
+  label,
+  value,
+  colors,
+}: {
+  label: string;
+  value: string;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={[styles.analyticsStat, { backgroundColor: colors.muted }]}>
+      <Text style={{ color: colors.foreground, fontFamily: "Inter_700Bold", fontSize: 16 }}>{value}</Text>
+      <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>{label}</Text>
+    </View>
+  );
+}
+
 function ChannelHeader({
   channel,
   colors,
@@ -386,6 +577,7 @@ function ChannelHeader({
   showAboutEntry,
   onBack,
   onEdit,
+  onAnalytics,
   onAbout,
   onSubscribe,
 }: {
@@ -399,6 +591,7 @@ function ChannelHeader({
   showAboutEntry: boolean;
   onBack: () => void;
   onEdit: () => void;
+  onAnalytics: () => void;
   onAbout: () => void;
   onSubscribe: () => void;
 }) {
@@ -469,12 +662,22 @@ function ChannelHeader({
         ) : null}
 
         {channel.isOwner ? (
-          <TouchableOpacity
-            style={[styles.subBtn, { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }]}
-            onPress={onEdit}
-          >
-            <Text style={[styles.subBtnText, { color: colors.foreground }]}>Customize channel</Text>
-          </TouchableOpacity>
+          <View style={styles.ownerActionsRow}>
+            <TouchableOpacity
+              style={[styles.ownerActionBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={onAnalytics}
+            >
+              <Ionicons name="bar-chart-outline" size={18} color={colors.foreground} />
+              <Text style={[styles.ownerActionText, { color: colors.foreground }]}>Analytics</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.ownerActionBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={onEdit}
+            >
+              <Ionicons name="create-outline" size={18} color={colors.foreground} />
+              <Text style={[styles.ownerActionText, { color: colors.foreground }]}>Edit channel</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <TouchableOpacity
             style={[
@@ -551,6 +754,7 @@ function VideoSortChips({
   const chips: { id: VideoSort; label: string }[] = [
     { id: "latest", label: "Latest" },
     { id: "popular", label: "Popular" },
+    { id: "oldest", label: "Oldest" },
   ];
   return (
     <View style={styles.chipsRow}>
@@ -658,16 +862,76 @@ function VideoCard({
   channel,
   colors,
   isOwner,
+  ownerCompact,
   onPress,
-  onDelete,
+  onMenu,
 }: {
   item: ReelsVideo;
   channel: ReelsChannel;
   colors: ReturnType<typeof useColors>;
   isOwner: boolean;
+  ownerCompact?: boolean;
   onPress: () => void;
-  onDelete: () => void;
+  onMenu: () => void;
 }) {
+  if (ownerCompact) {
+    return (
+      <View style={styles.ownerVideoRow}>
+        <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={styles.ownerVideoMain}>
+          <View style={styles.ownerThumbWrap}>
+            {item.thumbnailUrl ? (
+              <Image source={{ uri: item.thumbnailUrl }} style={styles.ownerThumb} contentFit="cover" />
+            ) : (
+              <View style={[styles.ownerThumb, { backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }]}>
+                <Ionicons name="videocam" size={28} color={colors.mutedForeground} />
+              </View>
+            )}
+            <View style={styles.durationBadge}>
+              <Text style={styles.durationText}>{formatDuration(item.durationSeconds)}</Text>
+            </View>
+          </View>
+          <View style={styles.ownerVideoInfo}>
+            <View style={styles.ownerTitleRow}>
+              <Text style={[styles.ownerTitle, { color: colors.foreground }]} numberOfLines={2}>
+                {item.title}
+              </Text>
+              <TouchableOpacity
+                onPress={onMenu}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={styles.menuBtn}
+              >
+                <Ionicons name="ellipsis-vertical" size={18} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            </View>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4 }}>
+              {formatViewCount(item.viewCount)} views{item.createdAt ? ` · ${formatTimeAgo(item.createdAt)}` : ""}
+            </Text>
+            {item.status !== "published" || item.moderationStatus === "pending_scan" || item.moderationStatus === "pending_review" ? (
+              <Text style={{ color: "#e6a700", fontSize: 11, marginTop: 4 }}>
+                {item.moderationStatus === "rejected" ? "Blocked" : "Under review"}
+              </Text>
+            ) : null}
+            <View style={styles.ownerStatsRow}>
+              <Ionicons name="globe-outline" size={14} color={colors.mutedForeground} />
+              <View style={styles.ownerStatItem}>
+                <Ionicons name="thumbs-up-outline" size={14} color={colors.mutedForeground} />
+                <Text style={[styles.ownerStatText, { color: colors.mutedForeground }]}>
+                  {formatViewCount(item.likeCount)}
+                </Text>
+              </View>
+              <View style={styles.ownerStatItem}>
+                <Ionicons name="chatbubble-outline" size={14} color={colors.mutedForeground} />
+                <Text style={[styles.ownerStatText, { color: colors.mutedForeground }]}>
+                  {formatViewCount(item.commentCount)}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.ytCard}>
       <TouchableOpacity onPress={onPress}>
@@ -701,22 +965,20 @@ function VideoCard({
               {formatViewCount(item.viewCount)} views{item.createdAt ? ` · ${formatTimeAgo(item.createdAt)}` : ""}
             </Text>
           </View>
+          {isOwner ? (
+            <TouchableOpacity onPress={onMenu} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="ellipsis-vertical" size={16} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          ) : null}
         </View>
       </TouchableOpacity>
-      <View style={styles.videoFooter}>
-        {item.status !== "published" || item.moderationStatus === "pending_scan" || item.moderationStatus === "pending_review" ? (
+      {item.status !== "published" || item.moderationStatus === "pending_scan" || item.moderationStatus === "pending_review" ? (
+        <View style={styles.videoFooter}>
           <Text style={{ color: "#e6a700", fontSize: 11 }}>
             {item.moderationStatus === "rejected" ? "Blocked" : "Under review"}
           </Text>
-        ) : (
-          <View />
-        )}
-        {isOwner ? (
-          <TouchableOpacity onPress={onDelete} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.deleteIconBtn}>
-            <Ionicons name="trash-outline" size={18} color="#e53935" />
-          </TouchableOpacity>
-        ) : null}
-      </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -770,6 +1032,38 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   deleteIconBtn: { padding: 4 },
+  ownerActionsRow: { flexDirection: "row", gap: 10, marginTop: 14 },
+  ownerActionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  ownerActionText: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
+  ownerVideoRow: { paddingHorizontal: 16, marginBottom: 16 },
+  ownerVideoMain: { flexDirection: "row", gap: 12 },
+  ownerThumbWrap: { position: "relative" },
+  ownerThumb: { width: OWNER_THUMB_W, height: OWNER_THUMB_H, borderRadius: 8 },
+  ownerVideoInfo: { flex: 1, minWidth: 0 },
+  ownerTitleRow: { flexDirection: "row", alignItems: "flex-start", gap: 4 },
+  ownerTitle: { flex: 1, fontFamily: "Inter_600SemiBold", fontSize: 14, lineHeight: 18 },
+  menuBtn: { paddingTop: 2, paddingLeft: 4 },
+  ownerStatsRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 8 },
+  ownerStatItem: { flexDirection: "row", alignItems: "center", gap: 4 },
+  ownerStatText: { fontSize: 12 },
+  analyticsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  analyticsStat: { width: "47%", borderRadius: 10, padding: 12 },
+  playlistPickRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   playlistSection: { paddingHorizontal: 16, paddingTop: 8 },
   playlistEmpty: { padding: 32, alignItems: "center" },
   createPlaylistBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },

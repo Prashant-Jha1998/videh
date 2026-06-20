@@ -39,6 +39,12 @@ import { resolveViewerGeoFromRequest } from "../lib/adsGeo";
 import { pickFeedAdPlacementsForBatch, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
 import { publishReelsVideo } from "../lib/reelsVideoPublish";
 import {
+  countUnreadReelsVideoNotifications,
+  fetchReelsVideoNotifications,
+  hideReelsVideoNotification,
+  markReelsVideoNotificationsRead,
+} from "../lib/reelsNotifications";
+import {
   cdnDeliveryEnabled,
   createPresignedUploadUrl,
   extFromContentType,
@@ -1110,6 +1116,97 @@ router.get("/channel/:handle", async (req: Request, res: Response) => {
   }
 });
 
+function mapVideoNotificationRow(req: Request, row: import("../lib/reelsNotifications").ReelsVideoNotificationRow) {
+  return {
+    id: row.id,
+    videoId: row.videoId,
+    channelId: row.channelId,
+    kind: row.kind,
+    read: row.readAt != null,
+    createdAt: row.createdAt,
+    videoTitle: redactPhoneNumbersInText(row.videoTitle),
+    thumbnailUrl: resolveVideoThumbnailUrl(
+      req,
+      row.videoThumbnailUrl,
+      row.videoId,
+      row.createdAt,
+    ),
+    channelHandle: row.channelHandle,
+    channelDisplayName: row.channelDisplayName?.trim()
+      || (row.channelHandle ? `@${row.channelHandle}` : null),
+    channelAvatarUrl: resolveChannelBrandingPublicUrl(
+      req,
+      row.channelId,
+      row.channelAvatarUrl,
+      "avatar",
+      row.channelUpdatedAt,
+    ),
+  };
+}
+
+router.get("/notifications/unread-count", async (req: Request, res: Response) => {
+  const userId = Number(req.query.userId);
+  if (!userId || !assertSameUser(req, res, userId)) return;
+  try {
+    const count = await countUnreadReelsVideoNotifications(userId);
+    res.json({ success: true, count });
+  } catch (err) {
+    req.log.error({ err }, "reels notifications unread count");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.get("/notifications", async (req: Request, res: Response) => {
+  const userId = Number(req.query.userId);
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+  if (!userId || !assertSameUser(req, res, userId)) return;
+  try {
+    const rows = await fetchReelsVideoNotifications(userId, limit);
+    const notifications = rows.map((row) => mapVideoNotificationRow(req, row));
+    const unreadCount = notifications.filter((n) => !n.read).length;
+    res.json({ success: true, notifications, unreadCount });
+  } catch (err) {
+    req.log.error({ err }, "reels notifications list");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.post("/notifications/read", async (req: Request, res: Response) => {
+  const userId = Number((req.body as { userId?: number }).userId);
+  const notificationIds = (req.body as { notificationIds?: number[] }).notificationIds;
+  if (!userId || !assertSameUser(req, res, userId)) return;
+  try {
+    await markReelsVideoNotificationsRead(userId, notificationIds?.length ? notificationIds : undefined);
+    const count = await countUnreadReelsVideoNotifications(userId);
+    res.json({ success: true, unreadCount: count });
+  } catch (err) {
+    req.log.error({ err }, "reels notifications mark read");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.delete("/notifications/:notificationId", async (req: Request, res: Response) => {
+  const userId = Number(req.query.userId) || Number((req.body as { userId?: number }).userId);
+  const notificationId = Number(req.params.notificationId);
+  if (!userId || !assertSameUser(req, res, userId)) return;
+  if (!notificationId) {
+    res.status(400).json({ success: false, message: "Invalid notification" });
+    return;
+  }
+  try {
+    const removed = await hideReelsVideoNotification(userId, notificationId);
+    if (!removed) {
+      res.status(404).json({ success: false, message: "Notification not found" });
+      return;
+    }
+    const count = await countUnreadReelsVideoNotifications(userId);
+    res.json({ success: true, unreadCount: count });
+  } catch (err) {
+    req.log.error({ err }, "reels notifications hide");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 router.get("/feed", async (req: Request, res: Response) => {
   const viewerId = Number(req.query.userId) || 0;
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 15));
@@ -1921,6 +2018,120 @@ router.post("/videos/:videoId/share", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "reels share");
     res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.patch("/videos/:videoId", async (req: Request, res: Response) => {
+  const videoId = Number(req.params.videoId);
+  const body = req.body as {
+    userId?: number;
+    title?: string;
+    description?: string;
+    hashtags?: string;
+  };
+  const userId = Number(body.userId);
+  if (!videoId) {
+    res.status(400).json({ success: false, message: "Invalid video" });
+    return;
+  }
+  if (!userId || !assertSameUser(req, res, userId)) return;
+  const title = body.title != null ? String(body.title).trim().slice(0, 200) : null;
+  const description = body.description != null ? String(body.description).trim().slice(0, 5000) : null;
+  const hashtags = body.hashtags != null ? parseHashtags(body.hashtags) : null;
+  if (title != null && title.length < 2) {
+    res.status(400).json({ success: false, message: "Title is required." });
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    const owner = await query(
+      `SELECT v.id, v.title, v.description, v.hashtags, c.handle, c.avatar_url, c.updated_at
+       FROM reels_videos v
+       JOIN reels_channels c ON c.id = v.channel_id
+       WHERE v.id = $1 AND c.user_id = $2`,
+      [videoId, userId],
+    );
+    if (!owner.rows.length) {
+      res.status(404).json({ success: false, message: "Video not found" });
+      return;
+    }
+    const current = owner.rows[0] as Record<string, unknown>;
+    const nextTitle = title ?? String(current.title ?? "");
+    const nextDescription = description ?? String(current.description ?? "");
+    const nextHashtags = hashtags ?? (Array.isArray(current.hashtags) ? current.hashtags as string[] : []);
+    const combinedText = [nextTitle, nextDescription, ...nextHashtags.map((h) => `#${h}`)].join(" ");
+    const quickText = scanReelsText(combinedText);
+    if (quickText.blocked) {
+      res.status(403).json({ success: false, message: quickText.reason ?? "Sexual or nudity content is not allowed." });
+      return;
+    }
+    await query(
+      `UPDATE reels_videos
+       SET title = $1, description = $2, hashtags = $3
+       WHERE id = $4`,
+      [nextTitle, nextDescription || null, nextHashtags, videoId],
+    );
+    const refreshed = await query(
+      `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
+              c.avatar_url AS channel_avatar_url, c.updated_at AS channel_updated_at
+       FROM reels_videos v
+       JOIN reels_channels c ON c.id = v.channel_id
+       WHERE v.id = $1`,
+      [videoId],
+    );
+    res.json({
+      success: true,
+      video: mapVideoRow(refreshed.rows[0] as Record<string, unknown>, req),
+    });
+  } catch (err) {
+    req.log.error({ err, videoId }, "reels patch video");
+    res.status(500).json({ success: false, message: "Could not update video." });
+  }
+});
+
+router.post("/videos/:videoId/report", async (req: Request, res: Response) => {
+  const videoId = Number(req.params.videoId);
+  const { userId, reason, details } = req.body as {
+    userId?: number;
+    reason?: string;
+    details?: string;
+  };
+  if (!videoId) {
+    res.status(400).json({ success: false, message: "Invalid video" });
+    return;
+  }
+  if (!userId || !assertSameUser(req, res, userId)) return;
+  const reportReason = String(reason ?? "").trim().slice(0, 120);
+  if (!reportReason) {
+    res.status(400).json({ success: false, message: "Reason required" });
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    await query(`
+      CREATE TABLE IF NOT EXISTS reels_video_reports (
+        id SERIAL PRIMARY KEY,
+        video_id INTEGER NOT NULL REFERENCES reels_videos(id) ON DELETE CASCADE,
+        reporter_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        reason VARCHAR(120) NOT NULL,
+        details TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    const exists = await query(`SELECT id FROM reels_videos WHERE id = $1`, [videoId]);
+    if (!exists.rows.length) {
+      res.status(404).json({ success: false, message: "Video not found" });
+      return;
+    }
+    await query(
+      `INSERT INTO reels_video_reports (video_id, reporter_user_id, reason, details)
+       VALUES ($1, $2, $3, $4)`,
+      [videoId, userId, reportReason, details ? String(details).trim().slice(0, 2000) : null],
+    );
+    res.json({ success: true, message: "Report submitted. Thank you." });
+  } catch (err) {
+    req.log.error({ err, videoId }, "reels report video");
+    res.status(500).json({ success: false, message: "Could not submit report." });
   }
 });
 

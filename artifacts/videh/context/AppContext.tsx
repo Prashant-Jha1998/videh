@@ -17,6 +17,7 @@ import { registerPushTokenWithServer } from "@/lib/pushNotifications";
 import { encodeLocationPayload, mapsUrl as buildMapsUrl } from "@/lib/locationMessage";
 import { safeJsonParse } from "@/lib/safeJson";
 import { loadChatMediaSettings } from "@/lib/chatMediaSettings";
+import { computeClientMessageExpiresAt, isDisappearingMessageExpired } from "@/lib/disappearTimerOptions";
 import { shouldAutoDownload } from "@/lib/chatMediaNetwork";
 import { cacheChatImageUrl, cacheChatVideoUrl } from "@/lib/cacheChatMedia";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
@@ -135,6 +136,10 @@ export interface Message {
   downloadProgress?: number;
   /** Stable on-device copy for documents (open before/without server download). */
   localMediaUri?: string;
+  /** Unix ms when this message auto-deletes (disappearing messages). */
+  expiresAt?: number;
+  /** User chose to keep this message past the disappear timer. */
+  isKept?: boolean;
 }
 
 const OLDER_MESSAGES_PAGE = 40;
@@ -201,6 +206,8 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     uploadProgress: prevLocal?.uploadProgress,
     uploadFailed: prevLocal?.uploadFailed,
     fileSizeBytes: prevLocal?.fileSizeBytes,
+    expiresAt: m.expires_at ? new Date(m.expires_at).getTime() : prevLocal?.expiresAt,
+    isKept: m.is_kept ?? prevLocal?.isKept ?? false,
   };
 }
 
@@ -311,6 +318,7 @@ interface AppContextType {
   muteChat: (chatId: string) => void;
   archiveChat: (chatId: string, archived?: boolean) => void;
   starMessage: (chatId: string, messageId: string) => void;
+  keepMessage: (chatId: string, messageId: string) => Promise<void>;
   forwardMessage: (chatId: string, messageId: string, targetChatId: string) => void;
   starredMessages: Message[];
   updateAvatar: (base64: string, mimeType?: string) => Promise<void>;
@@ -1319,7 +1327,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const parsed = JSON.parse(raw) as {
           chatId?: string | number;
           payload?: {
+            action?: string;
             messageId?: string | number;
+            messageIds?: Array<string | number>;
             content?: string;
             type?: string;
             mediaUrl?: string;
@@ -1328,15 +1338,48 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           };
         };
         const cid = parsed.chatId != null ? String(parsed.chatId) : null;
+        const payload = parsed.payload ?? {};
+        const action = payload.action;
+
+        if (action === "disappear_expired" && cid) {
+          const expiredIds = new Set((payload.messageIds ?? []).map(String));
+          if (expiredIds.size > 0) {
+            setChats((prev) =>
+              prev.map((c) =>
+                c.id === cid
+                  ? { ...c, messages: c.messages.filter((m) => !expiredIds.has(m.id)) }
+                  : c,
+              ),
+            );
+          }
+          return;
+        }
+        if (action === "disappear_kept" && cid && payload.messageId != null) {
+          const keptId = String(payload.messageId);
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === cid
+                ? {
+                    ...c,
+                    messages: c.messages.map((m) =>
+                      m.id === keptId ? { ...m, isKept: true } : m,
+                    ),
+                  }
+                : c,
+            ),
+          );
+          return;
+        }
+
         const messageId =
-          parsed.payload?.messageId != null ? String(parsed.payload.messageId) : undefined;
-        const bodyRaw = parsed.payload?.content?.trim() ?? "";
-        const senderName = parsed.payload?.senderName?.trim();
+          payload.messageId != null ? String(payload.messageId) : undefined;
+        const bodyRaw = payload.content?.trim() ?? "";
+        const senderName = payload.senderName?.trim();
         const senderId =
-          parsed.payload?.senderId != null ? String(parsed.payload.senderId) : undefined;
-        const mediaUrl = parsed.payload?.mediaUrl?.trim();
-        const messageType = normalizeMessageType(parsed.payload?.type, bodyRaw, mediaUrl);
-        const notifyBody = inferChatListPreview(parsed.payload?.type, bodyRaw, mediaUrl);
+          payload.senderId != null ? String(payload.senderId) : undefined;
+        const mediaUrl = payload.mediaUrl?.trim();
+        const messageType = normalizeMessageType(payload.type, bodyRaw, mediaUrl);
+        const notifyBody = inferChatListPreview(payload.type, bodyRaw, mediaUrl);
         if (cid) {
           const signal: ChatMessageSignal = {
             chatId: cid,
@@ -1415,6 +1458,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, [isAuthenticated, applyIncomingMessageHint, scheduleLoadMessagesAfterHint]);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const pruneExpired = () => {
+      setChats((prev) => {
+        let changed = false;
+        const next = prev.map((c) => {
+          if (!(c.disappearAfterSeconds ?? 0)) return c;
+          const filtered = c.messages.filter((m) => !isDisappearingMessageExpired(m));
+          if (filtered.length === c.messages.length) return c;
+          changed = true;
+          return { ...c, messages: filtered };
+        });
+        return changed ? next : prev;
+      });
+    };
+    pruneExpired();
+    const timer = setInterval(pruneExpired, 30_000);
+    return () => clearInterval(timer);
+  }, [isAuthenticated]);
+
   const sendMessage = useCallback((
     chatId: string,
     text: string,
@@ -1424,7 +1487,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!text.trim()) return;
     const u = userRef.current;
     const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    const newMsg: Message = {
+    let newMsg: Message = {
       id: tempId,
       text,
       timestamp: Date.now(),
@@ -1439,13 +1502,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     const chatListPreview = text.length > 120 ? `${text.slice(0, 117).trimEnd()}…` : text;
     const sentAt = Date.now();
-    setChats((prev) =>
-      prev.map((c) =>
+    setChats((prev) => {
+      const chat = prev.find((c) => c.id === chatId);
+      const expiresAt = computeClientMessageExpiresAt(chat?.disappearAfterSeconds ?? null);
+      if (expiresAt) newMsg = { ...newMsg, expiresAt };
+      return prev.map((c) =>
         c.id === chatId
           ? { ...c, messages: [...c.messages, newMsg], lastMessage: chatListPreview, lastMessageTime: sentAt }
-          : c
-      )
-    );
+          : c,
+      );
+    });
     if (sentAt > (chatDeletedAtRef.current[chatId] ?? 0)) {
       void restoreHiddenChatsWithNewActivity([{ id: chatId, lastMessageTime: sentAt }]);
     }
@@ -1479,10 +1545,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
           const mid = data.message.id;
+          const row = data.message as { expires_at?: string; is_kept?: boolean };
           setChats((prev) =>
             prev.map((c) =>
               c.id === chatId
-                ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered" } : m) }
+                ? {
+                    ...c,
+                    messages: c.messages.map((m) =>
+                      m.id === tempId
+                        ? {
+                            ...m,
+                            id: String(mid),
+                            status: "delivered",
+                            expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
+                            isKept: row.is_kept ?? m.isKept,
+                          }
+                        : m,
+                    ),
+                  }
                 : c,
             ),
           );
@@ -2508,6 +2588,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const keepMessage = useCallback(async (chatId: string, messageId: string) => {
+    const u = userRef.current;
+    if (!u?.dbId) return;
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === chatId
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === messageId ? { ...m, isKept: true } : m,
+              ),
+            }
+          : c,
+      ),
+    );
+    const res = await api(`/chats/${chatId}/messages/${messageId}/keep`, {
+      method: "POST",
+      body: JSON.stringify({ userId: u.dbId }),
+    }) as { success?: boolean };
+    if (!res?.success) {
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId
+            ? {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === messageId ? { ...m, isKept: false } : m,
+                ),
+              }
+            : c,
+        ),
+      );
+      throw new Error("keep_failed");
+    }
+  }, []);
+
   const forwardMessage = useCallback((chatId: string, messageId: string, targetChatId: string) => {
     const u = userRef.current;
     const sourceChat = chats.find((c) => c.id === chatId);
@@ -2762,7 +2878,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       user, isAuthenticated, isInitialized, chats, statuses, contacts, callLogs,
       setUser, logout, sendMessage, createGroup, markAsRead, markAllAsRead,
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
-      starMessage, forwardMessage, starredMessages, updateAvatar,
+      starMessage, keepMessage, forwardMessage, starredMessages, updateAvatar,
       createDirectChat, loadMessages, applyIncomingMessageHint, loadOlderMessages, refreshChats, clearAllChatHistory,
       deleteChatsFromList, hideChatsInList, hiddenChatIds, chatDeletedAtMap,
       sendImageMessage, sendPreparedMediaMessage, sendAlbumMessage, consumeViewOnceMessage, sendAudioMessage, sendDocumentMessage, cancelDocumentUpload,

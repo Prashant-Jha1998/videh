@@ -19,3 +19,17 @@ export function isSameDisappearTimer(
   const norm = (v: number | null | undefined) => (v == null || v <= 0 ? null : v);
   return norm(a) === norm(b);
 }
+
+export function computeClientMessageExpiresAt(disappearSeconds: number | null | undefined): number | undefined {
+  if (!disappearSeconds || disappearSeconds <= 0) return undefined;
+  return Date.now() + disappearSeconds * 1000;
+}
+
+export function isDisappearingMessageExpired(msg: {
+  type: string;
+  expiresAt?: number;
+  isKept?: boolean;
+}): boolean {
+  if (msg.type === "system" || msg.isKept || !msg.expiresAt) return false;
+  return msg.expiresAt <= Date.now();
+}

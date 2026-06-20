@@ -72,6 +72,8 @@ export const messages = pgTable("messages", {
   isStarred: boolean("is_starred").notNull().default(false),
   isViewOnce: boolean("is_view_once").notNull().default(false),
   editedAt: timestamp("edited_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  isKept: boolean("is_kept").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

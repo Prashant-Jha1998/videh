@@ -343,6 +343,14 @@ function RootLayoutNav() {
         })();
         return;
       }
+      if (
+        (data?.type === "reels_new_video" || data?.notificationKind === "reels_subscriber")
+        && data?.videoId
+        && isAuthenticated
+      ) {
+        router.push({ pathname: "/reels/watch/[id]", params: { id: String(data.videoId) } } as Href);
+        return;
+      }
       if (data?.callId && isAuthenticated) {
         void fetch(`${getApiUrl()}/api/webrtc/calls/${data.callId}/status?userId=${user?.dbId ?? ""}`)
           .then((res) => res.json())

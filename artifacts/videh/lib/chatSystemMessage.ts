@@ -51,6 +51,10 @@ export function disappearSystemMessageCopy(seconds: number | null): {
   };
 }
 
+export function isDisappearTimerSystemMessage(text: string): boolean {
+  return parseDisappearSystemPayload(text) != null;
+}
+
 export function promotedAdminMessageCopy(
   payload: PromotedAdminPayload,
   viewerUserId?: number,

@@ -11,6 +11,12 @@ import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
 import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
 import { userCanAccessChatMedia } from "../lib/chatMediaAccess";
 import {
+  computeMessageExpiresAt,
+  ensureDisappearingMessageColumns,
+  fetchChatDisappearSeconds,
+  messageDisappearVisibleSql,
+} from "../lib/disappearingMessages";
+import {
   ensurePrivacyColumns,
   getUserPrivacy,
   privacyLabels,
@@ -279,11 +285,13 @@ async function sendMessageForWeb(req: Request, res: Response, chatId: string | n
   }
 
   const messageType = type ?? (mediaUrl ? "image" : "text");
+  await ensureDisappearingMessageColumns();
+  const expiresAt = computeMessageExpiresAt(await fetchChatDisappearSeconds(chatId), messageType);
   const result = await query(
-    `INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING *`,
-    [chatId, userId, trimmedContent || "Attachment", messageType, replyToId ?? null, mediaUrl ?? null, isForwarded ?? false, forwardCount ?? 0, isViewOnce ?? false],
+    [chatId, userId, trimmedContent || "Attachment", messageType, replyToId ?? null, mediaUrl ?? null, isForwarded ?? false, forwardCount ?? 0, isViewOnce ?? false, expiresAt],
   );
   const recipients = (await getChatMemberIds(chatId)).filter((id) => id !== userId);
   if (recipients.length > 0) {
@@ -523,6 +531,7 @@ router.get("/:token/chats/:chatId/messages", async (req: Request, res: Response)
   try {
     const session = await requireLinkedSession(req, res);
     if (!session || !(await requireChatMember(session.userId, chatId, res))) return;
+    await ensureDisappearingMessageColumns();
     const limit = Math.min(Number(req.query.limit ?? 80) || 80, 120);
     const before = typeof req.query.before === "string" ? req.query.before : undefined;
     const result = await query(
@@ -530,6 +539,7 @@ router.get("/:token/chats/:chatId/messages", async (req: Request, res: Response)
         m.id, m.chat_id, m.sender_id, m.content, m.type, m.media_url,
         m.reply_to_id, m.is_deleted, m.is_forwarded, m.forward_count,
         m.is_starred, m.is_view_once, m.edited_at, m.created_at,
+        m.expires_at, m.is_kept,
         u.name AS sender_name, u.avatar_url AS sender_avatar,
         rm.content AS reply_content,
         rm.type AS reply_type,
@@ -551,6 +561,8 @@ router.get("/:token/chats/:chatId/messages", async (req: Request, res: Response)
       LEFT JOIN messages rm ON rm.id = m.reply_to_id
       LEFT JOIN users rm_u ON rm_u.id = rm.sender_id
       WHERE m.chat_id = $1
+        AND m.is_deleted = FALSE
+        AND ${messageDisappearVisibleSql()}
         ${before ? "AND m.created_at < $3" : ""}
       ORDER BY m.created_at DESC
       LIMIT $2`,

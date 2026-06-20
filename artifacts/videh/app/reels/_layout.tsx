@@ -11,6 +11,8 @@ export default function ReelsLayout() {
       <Stack.Screen name="channel/[handle]" />
       <Stack.Screen name="channel/edit" />
       <Stack.Screen name="channel/playlist/[id]" />
+      <Stack.Screen name="video/edit/[id]" />
+      <Stack.Screen name="notifications" />
     </Stack>
   );
 }

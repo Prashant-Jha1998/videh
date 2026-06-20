@@ -4,37 +4,82 @@ import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
+  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ReelsFeedAdCard } from "@/components/ReelsFeedAdCard";
+import { ReelsFeedVideoMenu, type FeedVideoMenuAction } from "@/components/ReelsFeedVideoMenu";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-import { ReelsFeedAdCard } from "@/components/ReelsFeedAdCard";
 import {
+  addReelsVideoToPlaylist,
+  createReelsPlaylist,
   fetchMyReelsChannel,
   fetchReelsFeed,
+  fetchReelsVideoNotificationUnreadCount,
   formatDuration,
   formatTimeAgo,
   formatViewCount,
+  reportReelsVideo,
   type ReelsChannel,
   type ReelsFeedAdPlacement,
   type ReelsFeedCursor,
+  type ReelsPlaylist,
   type ReelsVideo,
 } from "@/lib/reelsApi";
-import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
-import { headerTopInset } from "@/lib/headerInset";
 import { loadReelsFeedCache, saveReelsFeedCache } from "@/lib/reelsFeedCache";
+import {
+  addBlockedChannel,
+  addNotInterestedVideo,
+  addToPlayQueue,
+  addToWatchLater,
+  filterFeedVideos,
+  loadFeedHiddenIds,
+} from "@/lib/reelsLibrary";
+import { shareReelsVideoLink } from "@/lib/reelsShare";
+import { downloadReelsVideoToApp } from "@/lib/reelsVideoDownload";
 
 type FeedRow =
   | { kind: "video"; key: string; video: ReelsVideo }
   | { kind: "ad"; key: string; ad: ReelsFeedAdPlacement["ad"] };
+
+type FeedCategory = "all" | "news" | "podcasts" | "music" | "international";
+
+const FEED_CATEGORIES: { id: FeedCategory | "explore"; label?: string; icon?: keyof typeof Ionicons.glyphMap }[] = [
+  { id: "explore", icon: "compass-outline" },
+  { id: "all", label: "All" },
+  { id: "news", label: "News" },
+  { id: "podcasts", label: "Podcasts" },
+  { id: "music", label: "Music" },
+  { id: "international", label: "International affairs" },
+];
+
+const CATEGORY_KEYWORDS: Record<Exclude<FeedCategory, "all">, string[]> = {
+  news: ["news", "breaking", "headline", "reporter", "politics", "election"],
+  podcasts: ["podcast", "episode", "interview", "talk"],
+  music: ["music", "song", "album", "concert", "cover", "remix", "audio"],
+  international: ["world", "international", "global", "foreign", "diplomacy", "affairs"],
+};
+
+function matchesCategory(video: ReelsVideo, category: FeedCategory): boolean {
+  if (category === "all") return true;
+  const text = [
+    video.title,
+    video.description ?? "",
+    ...(video.hashtags ?? []),
+  ].join(" ").toLowerCase();
+  return CATEGORY_KEYWORDS[category].some((kw) => text.includes(kw));
+}
 
 function buildFeedRows(videos: ReelsVideo[], placements: ReelsFeedAdPlacement[]): FeedRow[] {
   const adAfter = new Map<number, ReelsFeedAdPlacement["ad"]>();
@@ -53,35 +98,30 @@ function buildFeedRows(videos: ReelsVideo[], placements: ReelsFeedAdPlacement[])
 
 const SCREEN_W = Dimensions.get("window").width;
 const THUMB_H = Math.round((SCREEN_W * 9) / 16);
-const TREND_W = Math.round(SCREEN_W * 0.72);
-const TREND_H = Math.round((TREND_W * 9) / 16);
 
 function VideoThumb({
   uri,
   videoId,
-  compact,
   placeholderColor,
   iconColor,
 }: {
   uri: string | null | undefined;
   videoId: number;
-  compact?: boolean;
   placeholderColor: string;
   iconColor: string;
 }) {
   const [failed, setFailed] = useState(false);
-  const style = compact ? styles.trendThumb : styles.thumb;
   if (!uri || failed) {
     return (
-      <View style={[style, styles.thumbPlaceholder, { backgroundColor: placeholderColor }]}>
-        <Ionicons name="videocam" size={compact ? 28 : 40} color={iconColor} />
+      <View style={[styles.thumb, styles.thumbPlaceholder, { backgroundColor: placeholderColor }]}>
+        <Ionicons name="videocam" size={40} color={iconColor} />
       </View>
     );
   }
   return (
     <Image
       source={{ uri }}
-      style={style}
+      style={styles.thumb}
       contentFit="cover"
       recyclingKey={`thumb-${videoId}`}
       onError={() => setFailed(true)}
@@ -112,37 +152,26 @@ function ChannelAvatar({
   uri,
   channelId,
   label,
-  size,
   primaryColor,
 }: {
   uri: string | null | undefined;
   channelId: number;
   label: string;
-  size: number;
   primaryColor: string;
 }) {
   const [failed, setFailed] = useState(false);
   const initial = (label.replace(/^@/, "")[0] ?? "?").toUpperCase();
   if (!uri || failed) {
     return (
-      <View
-        style={{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: primaryColor,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Text style={{ color: "#fff", fontFamily: "Inter_700Bold", fontSize: size * 0.42 }}>{initial}</Text>
+      <View style={[styles.channelAvatar, { backgroundColor: primaryColor }]}>
+        <Text style={{ color: "#fff", fontFamily: "Inter_700Bold", fontSize: 15 }}>{initial}</Text>
       </View>
     );
   }
   return (
     <Image
       source={{ uri }}
-      style={{ width: size, height: size, borderRadius: size / 2 }}
+      style={styles.channelAvatar}
       contentFit="cover"
       recyclingKey={`ch-${channelId}`}
       onError={() => setFailed(true)}
@@ -158,25 +187,52 @@ export default function VideoTabScreen() {
   const [videos, setVideos] = useState<ReelsVideo[]>([]);
   const [adPlacements, setAdPlacements] = useState<ReelsFeedAdPlacement[]>([]);
   const videoCountRef = useRef(0);
-  const [trending, setTrending] = useState<ReelsVideo[]>([]);
   const [nextCursor, setNextCursor] = useState<ReelsFeedCursor | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasChannel, setHasChannel] = useState<boolean | null>(null);
   const [myChannel, setMyChannel] = useState<ReelsChannel | null>(null);
+  const [myPlaylists, setMyPlaylists] = useState<ReelsPlaylist[]>([]);
+  const [feedCategory, setFeedCategory] = useState<FeedCategory>("all");
+  const [menuVideo, setMenuVideo] = useState<ReelsVideo | null>(null);
+  const [playlistPickerVideo, setPlaylistPickerVideo] = useState<ReelsVideo | null>(null);
+  const [createPlaylistVideo, setCreatePlaylistVideo] = useState<ReelsVideo | null>(null);
+  const [newPlaylistTitle, setNewPlaylistTitle] = useState("");
+  const [creatingPlaylist, setCreatingPlaylist] = useState(false);
+  const [addingToPlaylist, setAddingToPlaylist] = useState(false);
+  const [hiddenVideoIds, setHiddenVideoIds] = useState<Set<number>>(new Set());
+  const [hiddenChannelIds, setHiddenChannelIds] = useState<Set<number>>(new Set());
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   const loadingMoreRef = useRef(false);
   const loadedOnceRef = useRef(false);
 
+  const refreshHidden = useCallback(async () => {
+    const hidden = await loadFeedHiddenIds();
+    setHiddenVideoIds(hidden.videoIds);
+    setHiddenChannelIds(hidden.channelIds);
+  }, []);
+
+  const refreshUnreadNotifications = useCallback(async () => {
+    if (!user?.dbId) {
+      setUnreadNotifCount(0);
+      return;
+    }
+    try {
+      const res = await fetchReelsVideoNotificationUnreadCount(user.dbId, user.sessionToken);
+      setUnreadNotifCount(Math.max(0, res.count ?? 0));
+    } catch {
+      setUnreadNotifCount(0);
+    }
+  }, [user?.dbId, user?.sessionToken]);
+
   const applyFeed = useCallback((feed: {
     videos?: ReelsVideo[];
-    trending?: ReelsVideo[];
     feedAdPlacements?: ReelsFeedAdPlacement[];
     nextCursor?: ReelsFeedCursor | null;
   }) => {
     setVideos(feed.videos ?? []);
     setAdPlacements(feed.feedAdPlacements ?? []);
-    setTrending(feed.trending ?? []);
     setNextCursor(feed.nextCursor ?? null);
   }, []);
 
@@ -193,7 +249,6 @@ export default function VideoTabScreen() {
       if (cached?.videos?.length) {
         applyFeed({
           videos: cached.videos,
-          trending: cached.trending,
           feedAdPlacements: cached.adPlacements,
           nextCursor: cached.nextCursor,
         });
@@ -224,10 +279,12 @@ export default function VideoTabScreen() {
       const ch = await channelPromise;
       setMyChannel(ch.channel ?? null);
       setHasChannel(Boolean(ch.channel));
+      setMyPlaylists(ch.playlists ?? []);
+      void refreshHidden();
     } catch {
       setLoading(false);
     }
-  }, [user?.dbId, user?.sessionToken, applyFeed]);
+  }, [user?.dbId, user?.sessionToken, applyFeed, refreshHidden]);
 
   const loadMore = useCallback(async () => {
     if (!user?.dbId || !nextCursor || loadingMoreRef.current) return;
@@ -263,7 +320,9 @@ export default function VideoTabScreen() {
   useFocusEffect(
     useCallback(() => {
       void loadInitial({ silent: loadedOnceRef.current });
-    }, [loadInitial]),
+      void refreshHidden();
+      void refreshUnreadNotifications();
+    }, [loadInitial, refreshHidden, refreshUnreadNotifications]),
   );
 
   const onRefresh = async () => {
@@ -279,59 +338,282 @@ export default function VideoTabScreen() {
   const channelLabel = (v: ReelsVideo) =>
     v.channelDisplayName ?? (v.channelHandle ? `@${v.channelHandle}` : "Channel");
 
-  const renderVideoCard = (item: ReelsVideo, compact = false) => (
-    <TouchableOpacity
-      style={compact ? styles.trendCard : styles.ytCard}
-      onPress={() => openVideo(item)}
-      activeOpacity={0.9}
-    >
-      <View style={styles.thumbWrap}>
-        <VideoThumb
-          uri={item.thumbnailUrl}
-          videoId={item.id}
-          compact={compact}
-          placeholderColor={colors.muted}
-          iconColor={colors.mutedForeground}
-        />
-        <View style={styles.durationBadge}>
-          <Text style={styles.durationText}>{formatDuration(item.durationSeconds)}</Text>
-        </View>
-      </View>
+  const visibleVideos = useMemo(() => {
+    const hidden = { videoIds: hiddenVideoIds, channelIds: hiddenChannelIds };
+    return filterFeedVideos(videos, hidden).filter((v) => matchesCategory(v, feedCategory));
+  }, [videos, hiddenVideoIds, hiddenChannelIds, feedCategory]);
 
-      <View style={compact ? styles.trendInfo : styles.infoRow}>
+  useEffect(() => {
+    videoCountRef.current = visibleVideos.length;
+  }, [visibleVideos.length]);
+
+  const feedRows = useMemo(
+    () => buildFeedRows(visibleVideos, adPlacements),
+    [visibleVideos, adPlacements],
+  );
+
+  const hideVideoFromFeed = (videoId: number) => {
+    setHiddenVideoIds((prev) => new Set([...prev, videoId]));
+  };
+
+  const hideChannelFromFeed = (channelId: number) => {
+    setHiddenChannelIds((prev) => new Set([...prev, channelId]));
+  };
+
+  const promptReport = (video: ReelsVideo) => {
+    if (!user?.dbId) return;
+    Alert.alert("Report video", "Why are you reporting this video?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Spam or misleading",
+        onPress: () => void submitReport(video, "Spam or misleading"),
+      },
+      {
+        text: "Sexual content",
+        onPress: () => void submitReport(video, "Sexual content"),
+      },
+      {
+        text: "Harmful or dangerous",
+        onPress: () => void submitReport(video, "Harmful or dangerous"),
+      },
+      {
+        text: "Hate speech",
+        onPress: () => void submitReport(video, "Hate speech"),
+      },
+    ]);
+  };
+
+  const submitReport = async (video: ReelsVideo, reason: string) => {
+    if (!user?.dbId) return;
+    const res = await reportReelsVideo(video.id, user.dbId, reason, user.sessionToken);
+    if (res.success) {
+      hideVideoFromFeed(video.id);
+      Alert.alert("Report submitted", res.message ?? "Thank you for helping keep Videh safe.");
+    } else {
+      Alert.alert("Error", res.message ?? "Could not submit report.");
+    }
+  };
+
+  const addVideoToPlaylist = async (playlistId: number) => {
+    if (!user?.dbId || !playlistPickerVideo) return;
+    setAddingToPlaylist(true);
+    try {
+      const res = await addReelsVideoToPlaylist(
+        user.dbId,
+        playlistId,
+        playlistPickerVideo.id,
+        user.sessionToken,
+      );
+      if (!res.success) {
+        Alert.alert("Error", res.message ?? "Could not add to playlist.");
+        return;
+      }
+      setMyPlaylists(res.playlists ?? myPlaylists);
+      setPlaylistPickerVideo(null);
+      Alert.alert("Saved", `"${playlistPickerVideo.title}" added to playlist.`);
+    } finally {
+      setAddingToPlaylist(false);
+    }
+  };
+
+  const loadMyPlaylists = useCallback(async () => {
+    if (!user?.dbId) return [];
+    const res = await fetchMyReelsChannel(user.dbId, user.sessionToken);
+    const list = res.playlists ?? [];
+    setMyPlaylists(list);
+    return list;
+  }, [user?.dbId, user?.sessionToken]);
+
+  const promptCreatePlaylist = (video: ReelsVideo) => {
+    setCreatePlaylistVideo(video);
+    setNewPlaylistTitle("");
+  };
+
+  const submitCreatePlaylist = async () => {
+    if (!user?.dbId || !createPlaylistVideo) return;
+    const trimmed = newPlaylistTitle.trim();
+    if (!trimmed) {
+      Alert.alert("Title", "Enter a playlist name.");
+      return;
+    }
+    setCreatingPlaylist(true);
+    try {
+      const res = await createReelsPlaylist(
+        user.dbId,
+        { title: trimmed, videoIds: [createPlaylistVideo.id] },
+        user.sessionToken,
+      );
+      if (!res.success) {
+        Alert.alert("Error", res.message ?? "Could not create playlist.");
+        return;
+      }
+      setMyPlaylists(res.playlists ?? []);
+      setCreatePlaylistVideo(null);
+      Alert.alert("Saved", `"${createPlaylistVideo.title}" added to "${trimmed}".`);
+    } finally {
+      setCreatingPlaylist(false);
+    }
+  };
+
+  const handleMenuAction = (action: FeedVideoMenuAction, video: ReelsVideo) => {
+    if (!user?.dbId) return;
+    switch (action) {
+      case "play_next":
+        void addToPlayQueue(video).then((added) => {
+          Alert.alert(
+            added ? "Added to queue" : "Already in queue",
+            added ? `"${video.title}" will play next.` : "This video is already in your queue.",
+          );
+        });
+        break;
+      case "watch_later":
+        void addToWatchLater(video).then((added) => {
+          Alert.alert(
+            added ? "Saved" : "Already saved",
+            added ? `"${video.title}" added to Watch Later.` : "Already in Watch Later.",
+          );
+        });
+        break;
+      case "save_playlist":
+        void (async () => {
+          const playlists = myPlaylists.length > 0 ? myPlaylists : await loadMyPlaylists();
+          if (playlists.length === 0) {
+            Alert.alert("No playlists", "Create a playlist to save videos.", [
+              { text: "Cancel", style: "cancel" },
+              { text: "Create", onPress: () => promptCreatePlaylist(video) },
+            ]);
+          } else {
+            setPlaylistPickerVideo(video);
+          }
+        })();
+        break;
+      case "download":
+        void downloadReelsVideoToApp(video).catch(() => {
+          Alert.alert("Error", "Download failed.");
+        });
+        break;
+      case "share":
+        void shareReelsVideoLink(video, user.dbId, user.sessionToken);
+        break;
+      case "not_interested":
+        void addNotInterestedVideo(video.id).then(() => {
+          hideVideoFromFeed(video.id);
+          Alert.alert("Got it", "We will show you fewer videos like this.");
+        });
+        break;
+      case "dont_recommend_channel":
+        void addBlockedChannel(video.channelId).then(() => {
+          hideChannelFromFeed(video.channelId);
+          Alert.alert("Got it", `We won't recommend videos from ${channelLabel(video)}.`);
+        });
+        break;
+      case "report":
+        promptReport(video);
+        break;
+      default:
+        break;
+    }
+  };
+
+  const renderVideoCard = (item: ReelsVideo) => (
+    <View style={styles.ytCard}>
+      <TouchableOpacity onPress={() => openVideo(item)} activeOpacity={0.9}>
+        <View style={styles.thumbWrap}>
+          <VideoThumb
+            uri={item.thumbnailUrl}
+            videoId={item.id}
+            placeholderColor={colors.muted}
+            iconColor={colors.mutedForeground}
+          />
+          <View style={styles.durationBadge}>
+            <Text style={styles.durationText}>{formatDuration(item.durationSeconds)}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+
+      <View style={styles.infoRow}>
         <TouchableOpacity
-          onPress={() => item.channelHandle && router.push({ pathname: "/reels/channel/[handle]", params: { handle: item.channelHandle } })}
+          onPress={() =>
+            item.channelHandle &&
+            router.push({ pathname: "/reels/channel/[handle]", params: { handle: item.channelHandle } })
+          }
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <ChannelAvatar
             uri={item.channelAvatarUrl}
             channelId={item.channelId}
             label={channelLabel(item)}
-            size={compact ? 28 : 36}
             primaryColor={colors.primary}
           />
         </TouchableOpacity>
-        <View style={[styles.infoText, compact ? { flex: 1 } : undefined]}>
-          <Text style={[styles.ytTitle, { color: colors.foreground }]} numberOfLines={compact ? 2 : 2}>{item.title}</Text>
+
+        <TouchableOpacity style={styles.infoText} onPress={() => openVideo(item)} activeOpacity={0.85}>
+          <Text style={[styles.ytTitle, { color: colors.foreground }]} numberOfLines={2}>
+            {item.title}
+          </Text>
           <Text style={[styles.ytMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
             {channelLabel(item)} · {formatViewCount(item.viewCount)} views
             {item.createdAt ? ` · ${formatTimeAgo(item.createdAt)}` : ""}
           </Text>
-        </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => setMenuVideo(item)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={styles.menuBtn}
+        >
+          <Ionicons name="ellipsis-vertical" size={18} color={colors.mutedForeground} />
+        </TouchableOpacity>
       </View>
-    </TouchableOpacity>
-  );
-
-  useEffect(() => {
-    videoCountRef.current = videos.length;
-  }, [videos.length]);
-
-  const feedRows = useMemo(
-    () => buildFeedRows(videos, adPlacements),
-    [videos, adPlacements],
+    </View>
   );
 
   const renderItem = ({ item }: { item: FeedRow }) =>
     item.kind === "ad" ? <ReelsFeedAdCard ad={item.ad} /> : renderVideoCard(item.video);
+
+  const categoryChips = (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={[styles.chipsBar, { borderBottomColor: colors.border }]}
+      contentContainerStyle={styles.chipsContent}
+    >
+      {FEED_CATEGORIES.map((cat) => {
+        if (cat.id === "explore") {
+          return (
+            <TouchableOpacity
+              key="explore"
+              style={[styles.chipIcon, { backgroundColor: colors.muted }]}
+              onPress={() => router.push("/reels/search")}
+            >
+              <Ionicons name="compass-outline" size={20} color={colors.foreground} />
+            </TouchableOpacity>
+          );
+        }
+        const active = feedCategory === cat.id;
+        return (
+          <TouchableOpacity
+            key={cat.id}
+            style={[
+              styles.chip,
+              { backgroundColor: active ? colors.foreground : colors.muted },
+            ]}
+            onPress={() => setFeedCategory(cat.id as FeedCategory)}
+          >
+            <Text
+              style={{
+                color: active ? colors.background : colors.foreground,
+                fontFamily: "Inter_600SemiBold",
+                fontSize: 13,
+              }}
+            >
+              {cat.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  );
 
   const listHeader = (
     <>
@@ -344,70 +626,39 @@ export default function VideoTabScreen() {
           <View style={{ flex: 1 }}>
             <Text style={[styles.bannerTitle, { color: colors.foreground }]}>Create your channel</Text>
             <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
-              Upload videos of any length and grow subscribers
+              Upload videos and grow subscribers
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
         </TouchableOpacity>
       ) : null}
-
-      {trending.length > 0 ? (
-        <View style={styles.trendingSection}>
-          <View style={styles.sectionHead}>
-            <Ionicons name="flame" size={18} color={colors.primary} />
-            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Trending</Text>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.trendScroll}>
-            {trending.map((v) => (
-              <View key={`trend-${v.id}`}>{renderVideoCard(v, true)}</View>
-            ))}
-          </ScrollView>
-        </View>
-      ) : null}
-
-      <View style={styles.sectionHead}>
-        <Ionicons name="time-outline" size={18} color={colors.primary} />
-        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Latest</Text>
-      </View>
     </>
   );
 
   const headerBar = (
-    <View style={[styles.header, { paddingTop: headerTopInset(insets) + 8, backgroundColor: colors.headerBg ?? colors.primary }]}>
-      <Text style={styles.headerTitle}>Video</Text>
+    <View style={[styles.header, { paddingTop: insets.top + 6, backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+      <View style={styles.logoRow}>
+        <View style={styles.logoIcon}>
+          <Ionicons name="play" size={14} color="#fff" style={{ marginLeft: 2 }} />
+        </View>
+        <Text style={[styles.logoText, { color: colors.foreground }]}>Videh</Text>
+      </View>
       <View style={styles.headerActions}>
-        <TouchableOpacity onPress={() => router.push("/reels/search")} style={styles.iconBtn}>
-          <Ionicons name="search" size={22} color="#fff" />
-        </TouchableOpacity>
         <TouchableOpacity
-          onPress={() => {
-            if (hasChannel) {
-              router.push({ pathname: "/reels/channel/[handle]", params: { handle: "me" } });
-            } else {
-              router.push("/reels/setup");
-            }
-          }}
-          style={styles.headerAvatarBtn}
+          onPress={() => router.push("/reels/notifications")}
+          style={styles.iconBtn}
         >
-          {myChannel?.avatarUrl ? (
-            <Image
-              source={{ uri: myChannel.avatarUrl }}
-              style={styles.headerAvatar}
-              contentFit="cover"
-            />
-          ) : user?.avatar ? (
-            <Image
-              source={{ uri: resolvePublicAssetUrl(user.avatar) ?? user.avatar }}
-              style={styles.headerAvatar}
-              contentFit="cover"
-            />
-          ) : (
-            <View style={[styles.headerAvatar, styles.headerAvatarFallback, { backgroundColor: "rgba(255,255,255,0.25)" }]}>
-              <Text style={styles.headerAvatarInitial}>
-                {(myChannel?.displayName ?? user?.name ?? "?")[0]?.toUpperCase()}
+          <Ionicons name="notifications-outline" size={24} color={colors.foreground} />
+          {unreadNotifCount > 0 ? (
+            <View style={styles.notifBadge}>
+              <Text style={styles.notifBadgeText}>
+                {unreadNotifCount > 9 ? "9+" : String(unreadNotifCount)}
               </Text>
             </View>
-          )}
+          ) : null}
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.push("/reels/search")} style={styles.iconBtn}>
+          <Ionicons name="search" size={24} color={colors.foreground} />
         </TouchableOpacity>
       </View>
     </View>
@@ -417,6 +668,7 @@ export default function VideoTabScreen() {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         {headerBar}
+        {categoryChips}
         <VideoFeedSkeleton
           mutedColor={colors.muted}
           softColor={colors.border ?? colors.muted}
@@ -428,6 +680,7 @@ export default function VideoTabScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {headerBar}
+      {categoryChips}
 
       <FlatList
         data={feedRows}
@@ -438,7 +691,9 @@ export default function VideoTabScreen() {
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
           <View style={styles.center}>
-            <Text style={{ color: colors.mutedForeground }}>No videos yet. Be the first to post!</Text>
+            <Text style={{ color: colors.mutedForeground }}>
+              {feedCategory === "all" ? "No videos yet. Be the first to post!" : "No videos in this category yet."}
+            </Text>
           </View>
         }
         onEndReached={() => void loadMore()}
@@ -447,47 +702,151 @@ export default function VideoTabScreen() {
           loadingMore ? (
             <View style={styles.footerLoader}>
               <ActivityIndicator color={colors.primary} />
-              <Text style={{ color: colors.mutedForeground, marginTop: 8, fontSize: 12 }}>Loading more videos…</Text>
-            </View>
-          ) : nextCursor ? (
-            <View style={styles.footerLoader}>
-              <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Scroll for more</Text>
-            </View>
-          ) : videos.length > 0 ? (
-            <View style={styles.footerLoader}>
-              <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>You're all caught up for now</Text>
             </View>
           ) : null
         }
       />
 
-      <TouchableOpacity
-        style={[styles.fab, { backgroundColor: colors.primary, bottom: insets.bottom + 72 }]}
-        onPress={() => (hasChannel ? router.push("/reels/upload") : router.push("/reels/setup"))}
+      <ReelsFeedVideoMenu
+        visible={menuVideo != null}
+        videoTitle={menuVideo?.title}
+        onClose={() => setMenuVideo(null)}
+        onAction={(action) => {
+          if (menuVideo) handleMenuAction(action, menuVideo);
+        }}
+      />
+
+      <Modal
+        visible={playlistPickerVideo != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPlaylistPickerVideo(null)}
       >
-        <Ionicons name="add" size={28} color="#fff" />
-      </TouchableOpacity>
+        <View style={styles.modalRoot}>
+          <View style={[styles.modalCard, { backgroundColor: colors.background, maxHeight: "70%" }]}>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Save to playlist</Text>
+            <ScrollView style={{ maxHeight: 280 }}>
+              {myPlaylists.map((pl) => (
+                <TouchableOpacity
+                  key={pl.id}
+                  style={[styles.playlistPickRow, { borderBottomColor: colors.border }]}
+                  disabled={addingToPlaylist}
+                  onPress={() => void addVideoToPlaylist(pl.id)}
+                >
+                  <Ionicons name="list" size={20} color={colors.foreground} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold" }} numberOfLines={1}>
+                      {pl.title}
+                    </Text>
+                    <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>{pl.videoCount} videos</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              onPress={() => {
+                if (playlistPickerVideo) promptCreatePlaylist(playlistPickerVideo);
+              }}
+              style={styles.playlistCreateRow}
+            >
+              <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+              <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>New playlist</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setPlaylistPickerVideo(null)} style={styles.modalCancel}>
+              <Text style={{ color: colors.mutedForeground, fontFamily: "Inter_600SemiBold" }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={createPlaylistVideo != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCreatePlaylistVideo(null)}
+      >
+        <View style={styles.modalRoot}>
+          <View style={[styles.modalCard, { backgroundColor: colors.background }]}>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>New playlist</Text>
+            <TextInput
+              style={[styles.modalInput, { color: colors.foreground, borderColor: colors.border }]}
+              placeholder="Playlist name"
+              placeholderTextColor={colors.mutedForeground}
+              value={newPlaylistTitle}
+              onChangeText={setNewPlaylistTitle}
+              maxLength={200}
+              autoFocus
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity onPress={() => setCreatePlaylistVideo(null)} style={styles.modalCancelBtn}>
+                <Text style={{ color: colors.mutedForeground, fontFamily: "Inter_600SemiBold" }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => void submitCreatePlaylist()}
+                disabled={creatingPlaylist}
+                style={{ opacity: creatingPlaylist ? 0.6 : 1 }}
+              >
+                {creatingPlaylist ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>Create</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
+  center: { alignItems: "center", justifyContent: "center", padding: 32 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  headerTitle: { color: "#fff", fontSize: 20, fontFamily: "Inter_700Bold" },
-  headerActions: { flexDirection: "row", gap: 4 },
-  iconBtn: { padding: 8 },
-  headerAvatarBtn: { padding: 4 },
-  headerAvatar: { width: 32, height: 32, borderRadius: 16 },
-  headerAvatarFallback: { alignItems: "center", justifyContent: "center" },
-  headerAvatarInitial: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 14 },
+  logoRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  logoIcon: {
+    width: 28,
+    height: 20,
+    borderRadius: 4,
+    backgroundColor: "#FF0000",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoText: { fontSize: 20, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
+  headerActions: { flexDirection: "row", alignItems: "center" },
+  iconBtn: { padding: 8, position: "relative" },
+  notifBadge: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    backgroundColor: "#FF0000",
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  notifBadgeText: { color: "#fff", fontSize: 9, fontFamily: "Inter_700Bold" },
+  chipsBar: { borderBottomWidth: StyleSheet.hairlineWidth, maxHeight: 48 },
+  chipsContent: { paddingHorizontal: 12, paddingVertical: 8, gap: 8, alignItems: "center" },
+  chipIcon: {
+    width: 36,
+    height: 32,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 4,
+  },
+  chip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, marginRight: 8 },
   setupBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -498,14 +857,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   bannerTitle: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
-  trendingSection: { marginBottom: 8 },
-  sectionHead: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, marginTop: 8, marginBottom: 8 },
-  sectionTitle: { fontFamily: "Inter_700Bold", fontSize: 16 },
-  trendScroll: { paddingHorizontal: 12, gap: 12 },
-  trendCard: { width: TREND_W, marginRight: 12 },
-  trendThumb: { width: TREND_W, height: TREND_H, borderRadius: 10 },
-  trendInfo: { flexDirection: "row", paddingTop: 8, gap: 8, alignItems: "flex-start" },
-  ytCard: { marginBottom: 16 },
+  ytCard: { marginBottom: 12 },
   thumbWrap: { position: "relative" },
   thumb: { width: SCREEN_W, height: THUMB_H },
   thumbPlaceholder: { alignItems: "center", justifyContent: "center" },
@@ -520,24 +872,30 @@ const styles = StyleSheet.create({
   },
   durationText: { color: "#fff", fontSize: 11, fontFamily: "Inter_600SemiBold" },
   infoRow: { flexDirection: "row", paddingHorizontal: 12, paddingTop: 10, gap: 10, alignItems: "flex-start" },
-  channelAvatar: { width: 36, height: 36, borderRadius: 18 },
-  infoText: { flex: 1 },
-  ytTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", lineHeight: 18 },
+  channelAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  infoText: { flex: 1, minWidth: 0 },
+  ytTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", lineHeight: 18, paddingRight: 4 },
   ytMeta: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 4 },
+  menuBtn: { paddingTop: 2, paddingLeft: 4 },
   footerLoader: { alignItems: "center", paddingVertical: 20 },
   skeletonWrap: { paddingBottom: 24 },
   skeletonCard: { marginBottom: 16 },
   skeletonAvatar: { width: 36, height: 36, borderRadius: 18 },
   skeletonLines: { flex: 1, gap: 8, paddingTop: 2 },
   skeletonLine: { height: 12, borderRadius: 6 },
-  fab: {
-    position: "absolute",
-    right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+  modalRoot: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: 24 },
+  modalCard: { borderRadius: 14, padding: 20 },
+  modalTitle: { fontSize: 18, fontFamily: "Inter_700Bold", marginBottom: 12 },
+  playlistPickRow: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    elevation: 4,
+    gap: 12,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  playlistCreateRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 14 },
+  modalCancel: { alignItems: "center", paddingVertical: 10 },
+  modalInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
+  modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 20, marginTop: 16 },
+  modalCancelBtn: { paddingVertical: 8 },
 });

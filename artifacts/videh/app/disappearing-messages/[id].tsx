@@ -66,7 +66,7 @@ export default function DisappearingMessagesScreen() {
       try {
         await setChatDisappear(id, seconds);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.back();
+        router.replace({ pathname: "/chat/[id]", params: { id } });
       } catch {
         setPending(undefined);
         Alert.alert("Error", "Could not update the message timer. Try again.");

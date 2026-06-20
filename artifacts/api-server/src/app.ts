@@ -214,4 +214,21 @@ cron.schedule("0 * * * *", async () => {
   }
 });
 
+/** Every 5 minutes — delete expired disappearing messages. */
+cron.schedule("*/5 * * * *", async () => {
+  try {
+    const lockKey = "jobs:disappear-messages:lock";
+    if (!(await stateAcquireLock(lockKey, 4 * 60_000))) return;
+    const { purgeExpiredDisappearingMessages } = await import("./lib/disappearingMessages");
+    const deleted = await purgeExpiredDisappearingMessages();
+    if (deleted > 0) {
+      logger.info({ deleted }, "Purged expired disappearing messages");
+    }
+    await stateDelete(lockKey);
+  } catch (err) {
+    await stateDelete("jobs:disappear-messages:lock").catch(() => {});
+    logger.error({ err }, "Disappearing messages purge cron error");
+  }
+});
+
 export default app;

@@ -29,6 +29,13 @@ import {
   mediaFilenameFromUrl,
   userCanAccessChatMedia,
 } from "../lib/chatMediaAccess";
+import {
+  computeMessageExpiresAt,
+  ensureDisappearingMessageColumns,
+  fetchChatDisappearSeconds,
+  messageDisappearVisibleSql,
+} from "../lib/disappearingMessages";
+import { insertChatSystemMessage } from "../lib/chatSystemMessages";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -225,6 +232,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         m.created_at AS last_created_at
         FROM messages m
         WHERE m.chat_id = c.id AND m.type != 'system' AND ${messageVisibleToUserSql("$1")}
+          AND ${messageDisappearVisibleSql()}
           AND ${historySql}
         ORDER BY m.created_at DESC
         LIMIT 1
@@ -237,6 +245,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
           AND m.type != 'system'
           AND m.created_at > cm.last_read_at
           AND ${messageVisibleToUserSql("$1")}
+          AND ${messageDisappearVisibleSql()}
           AND ${historySql}
       ) unread ON TRUE
       LEFT JOIN LATERAL (
@@ -378,6 +387,12 @@ router.post("/direct", async (req: Request, res: Response) => {
     );
     const chatId = chat.rows[0].id;
     await query("INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2), ($1, $3)", [chatId, userId, otherUserId]);
+    if (defaultDisappear && defaultDisappear > 0) {
+      await insertChatSystemMessage(chatId, userId, {
+        kind: "disappear_timer",
+        seconds: defaultDisappear,
+      });
+    }
     res.json({ success: true, chatId });
   } catch (err) {
     req.log.error({ err }, "direct chat error");
@@ -569,6 +584,7 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
     await ensureMessageUserHidesTable();
     await ensureChatMemberHistoryClearedColumn();
     await ensureViewOnceColumns();
+    await ensureDisappearingMessageColumns();
     const viewerId = Number(userId);
     const viewerParam = before ? "$4" : "$3";
     const historySql = messageAfterHistoryClearedSql("cm");
@@ -581,6 +597,7 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
         END AS media_url,
         m.reply_to_id, m.is_deleted, m.is_forwarded, m.forward_count,
         m.is_starred, m.is_view_once, m.view_once_opened_at, m.edited_at, m.created_at,
+        m.expires_at, m.is_kept,
         u.name AS sender_name, u.avatar_url AS sender_avatar,
         rm.content AS reply_content,
         rm.type AS reply_type,
@@ -604,6 +621,7 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
       LEFT JOIN users rm_u ON rm_u.id = rm.sender_id
       WHERE m.chat_id = $1
         AND ${messageVisibleToUserSql(viewerParam)}
+        AND ${messageDisappearVisibleSql()}
         AND ${historySql}
         ${before ? "AND m.created_at < $3" : ""}
       ORDER BY m.created_at DESC
@@ -784,6 +802,7 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     return;
   }
   try {
+    await ensureDisappearingMessageColumns();
     const activityType = type === "video" ? "video_share" : type === "contact" ? "contact_share" : "chat_message";
     const mod = await enforceModerationForActivity(senderId, activityType, {
       content,
@@ -841,11 +860,12 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     }
 
     const result = await query(`
-      INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once, expires_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *
     `, [chatId, senderId, content, type ?? "text", replyToId ?? null, mediaUrl ?? null,
-        isForwarded ?? false, forwardCount ?? 0, isViewOnce ?? false]);
+        isForwarded ?? false, forwardCount ?? 0, isViewOnce ?? false,
+        computeMessageExpiresAt(await fetchChatDisappearSeconds(chatId), type ?? "text")]);
 
     // Mark as delivered for all other members + gather push tokens
     const members = await query(
@@ -940,6 +960,7 @@ router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Re
   }
 
   try {
+    await ensureDisappearingMessageColumns();
     const sourcePerm = await evaluateGroupSendPermission(sourceChatId, senderId);
     const targetPerm = await evaluateGroupSendPermission(targetId, senderId);
     if (!sourcePerm || !targetPerm) {
@@ -1002,10 +1023,18 @@ router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Re
     }
 
     const result = await query(
-      `INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once)
-       VALUES ($1, $2, $3, $4, NULL, $5, TRUE, $6, FALSE)
+      `INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once, expires_at)
+       VALUES ($1, $2, $3, $4, NULL, $5, TRUE, $6, FALSE, $7)
        RETURNING *`,
-      [targetId, senderId, content, messageType, mediaUrl, newForwardCount],
+      [
+        targetId,
+        senderId,
+        content,
+        messageType,
+        mediaUrl,
+        newForwardCount,
+        computeMessageExpiresAt(await fetchChatDisappearSeconds(targetId), messageType),
+      ],
     );
 
     const members = await query(
@@ -1199,6 +1228,50 @@ router.post("/:chatId/messages/:messageId/star", async (req: Request, res: Respo
     }
     res.json({ success: true, isStarred: result.rows[0]?.is_starred });
   } catch (err) {
+    res.status(500).json({ success: false });
+  }
+});
+
+/** Keep a disappearing message so it is not auto-deleted when the timer expires. */
+router.post("/:chatId/messages/:messageId/keep", async (req: Request, res: Response) => {
+  const { chatId, messageId } = req.params;
+  const { userId } = req.body as { userId?: number };
+  if (!userId) {
+    res.status(400).json({ success: false, message: "userId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    await ensureDisappearingMessageColumns();
+    const result = await query(
+      `UPDATE messages m
+       SET is_kept = TRUE
+       WHERE m.id = $1
+         AND m.chat_id = $2
+         AND m.type != 'system'
+         AND m.expires_at IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM chat_members cm
+           WHERE cm.chat_id = m.chat_id AND cm.user_id = $3
+         )
+       RETURNING id, chat_id, expires_at, is_kept`,
+      [messageId, chatId, userId],
+    );
+    if (!result.rows[0]) {
+      res.status(404).json({ success: false, message: "Message not found or not expiring" });
+      return;
+    }
+    const members = await query(`SELECT user_id FROM chat_members WHERE chat_id = $1`, [chatId]);
+    const userIds = members.rows.map((r: { user_id: number }) => Number(r.user_id)).filter(Boolean);
+    publishChatEvent({
+      type: "message",
+      chatId,
+      userIds,
+      payload: { action: "disappear_kept", messageId: String(messageId) },
+    });
+    res.json({ success: true, isKept: true, messageId: String(messageId) });
+  } catch (err) {
+    req.log?.error?.({ err }, "keep disappearing message");
     res.status(500).json({ success: false });
   }
 });
@@ -1617,48 +1690,12 @@ router.put("/:chatId/disappear", async (req: Request, res: Response) => {
 
     await query("UPDATE chats SET disappear_after_seconds = $1 WHERE id = $2", [normalizedSeconds, chatId]);
 
-    const systemContent = JSON.stringify({
+    const { messageId } = await insertChatSystemMessage(chatId, authUserId, {
       kind: "disappear_timer",
       seconds: normalizedSeconds,
     });
-    const msgResult = await query(
-      `INSERT INTO messages (chat_id, sender_id, content, type)
-       VALUES ($1, $2, $3, 'system')
-       RETURNING *`,
-      [chatId, authUserId, systemContent],
-    );
+    const msgResult = await query(`SELECT * FROM messages WHERE id = $1`, [messageId]);
     const message = msgResult.rows[0];
-    const messageId = Number(message.id);
-
-    const members = await query(
-      "SELECT user_id FROM chat_members WHERE chat_id = $1",
-      [chatId],
-    );
-    const memberIds = members.rows
-      .map((row: { user_id: number }) => Number(row.user_id))
-      .filter(Boolean);
-    const recipientIds = memberIds.filter((id) => id !== authUserId);
-    if (recipientIds.length > 0) {
-      await query(
-        `INSERT INTO message_status (message_id, user_id, status)
-         SELECT $1, unnest($2::int[]), 'delivered'
-         ON CONFLICT (message_id, user_id)
-         DO UPDATE SET status = 'delivered', updated_at = NOW()`,
-        [messageId, recipientIds],
-      );
-    }
-
-    publishChatEvent({
-      type: "message",
-      chatId: Array.isArray(chatId) ? chatId[0] ?? "" : chatId,
-      userIds: memberIds,
-      payload: {
-        messageId,
-        content: systemContent,
-        type: "system",
-        senderId: authUserId,
-      },
-    });
 
     res.json({
       success: true,

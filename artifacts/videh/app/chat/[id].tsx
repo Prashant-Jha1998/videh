@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
@@ -92,8 +92,10 @@ import { TypingIndicator } from "@/components/TypingIndicator";
 import { ChatAlbumBubble } from "@/components/ChatAlbumBubble";
 import { MediaProgressRing } from "@/components/MediaProgressRing";
 import { ChatSystemMessageBubble } from "@/components/ChatSystemMessageBubble";
+import { isDisappearTimerSystemMessage } from "@/lib/chatSystemMessage";
 import { GroupWelcomeCard } from "@/components/GroupWelcomeCard";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
+import { isDisappearingMessageExpired } from "@/lib/disappearTimerOptions";
 import { formatChatBubbleTime } from "@/utils/time";
 import {
   isChatNearBottom,
@@ -1062,7 +1064,7 @@ export default function ChatScreen() {
     chats, user, sendMessage, sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage,
     sendDocumentMessage, cancelDocumentUpload, sendContactMessage,
     setTyping, clearTyping, markAsRead, deleteMessage, deleteForEveryone,
-    editMessage, reactToMessage, starMessage, muteChat, createDirectChat,
+    editMessage, reactToMessage, starMessage, keepMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
     loadMessages, loadOlderMessages, forwardMessage, updateLocationOnServer, stopLiveLocationSession, setActiveChatId,
     typingByChatId, reportRemoteTyping, patchChatMessage,
@@ -1268,7 +1270,10 @@ export default function ChatScreen() {
     setDisappearAfterSeconds(chat?.disappearAfterSeconds ?? null);
   }, [chat?.disappearAfterSeconds, chatId]);
   const disappearingOn = (disappearAfterSeconds ?? 0) > 0;
-  const allMessages = chat?.messages ?? [];
+  const allMessages = useMemo(
+    () => (chat?.messages ?? []).filter((m) => !isDisappearingMessageExpired(m)),
+    [chat?.messages],
+  );
   const selectionActive = selectedIds.length > 0;
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
@@ -1287,8 +1292,25 @@ export default function ChatScreen() {
     ? allMessages.filter((m) => m.text.toLowerCase().includes(searchQuery.toLowerCase()))
     : allMessages;
 
-  const listRows = useMemo(() => messagesWithDateRows(messages), [messages]);
-  const listRowsInverted = useMemo(() => messagesWithDateRowsInverted(messages), [messages]);
+  const messagesForDisplay = useMemo(() => {
+    if (searching && searchQuery.trim()) return messages;
+    if (!disappearingOn || !disappearAfterSeconds) return messages;
+    if (messages.some((m) => m.type === "system" && isDisappearTimerSystemMessage(m.text))) {
+      return messages;
+    }
+    const infoBanner: Message = {
+      id: "__disappear_timer_info__",
+      text: JSON.stringify({ kind: "disappear_timer", seconds: disappearAfterSeconds }),
+      type: "system",
+      timestamp: Date.now(),
+      senderId: "system",
+      status: "sent",
+    };
+    return [...messages, infoBanner];
+  }, [messages, searching, searchQuery, disappearingOn, disappearAfterSeconds]);
+
+  const listRows = useMemo(() => messagesWithDateRows(messagesForDisplay), [messagesForDisplay]);
+  const listRowsInverted = useMemo(() => messagesWithDateRowsInverted(messagesForDisplay), [messagesForDisplay]);
   const chatListData = searching ? listRows : listRowsInverted;
   const [composerHeight, setComposerHeight] = useState(56);
   const [readingHistory, setReadingHistory] = useState(false);
@@ -2515,6 +2537,17 @@ export default function ChatScreen() {
         : []),
       ...(!msg.isViewOnce ? [{ text: "Forward", onPress: () => { setForwardSearch(""); setForwardIds([msg.id]); } }] : []),
       { text: "Star", onPress: () => { if (chatId) starMessage(chatId, msg.id); } },
+      ...(disappearingOn && msg.expiresAt && !msg.isKept && msg.type !== "system"
+        ? [{
+            text: "Keep",
+            onPress: () => {
+              if (!chatId) return;
+              void keepMessage(chatId, msg.id).catch(() => {
+                Alert.alert("Keep message", "Could not keep this message. Try again.");
+              });
+            },
+          }]
+        : []),
       { text: "Translate", onPress: () => Alert.alert("Translate to:", "", [
           { text: "à¤¹à¤¿à¤‚à¤¦à¥€ (Hindi)", onPress: () => translateMsg(msg, "hi") },
           { text: "English", onPress: () => translateMsg(msg, "en") },

@@ -369,6 +369,77 @@ export async function fetchReelsFeed(
   return res;
 }
 
+export type ReelsVideoNotification = {
+  id: number;
+  videoId: number;
+  channelId: number;
+  kind: string;
+  read: boolean;
+  createdAt: string;
+  videoTitle: string;
+  thumbnailUrl: string | null;
+  channelHandle: string | null;
+  channelDisplayName: string | null;
+  channelAvatarUrl: string | null;
+};
+
+function normalizeReelsVideoNotification(n: ReelsVideoNotification): ReelsVideoNotification {
+  return {
+    ...n,
+    thumbnailUrl: normalizeReelsMediaUrl(n.thumbnailUrl),
+    channelAvatarUrl: normalizeReelsMediaUrl(n.channelAvatarUrl),
+  };
+}
+
+export async function fetchReelsVideoNotifications(
+  userId: number,
+  sessionToken?: string | null,
+  limit = 50,
+) {
+  const res = await reelsJson<{
+    success: boolean;
+    notifications?: ReelsVideoNotification[];
+    unreadCount?: number;
+    message?: string;
+  }>(`/notifications?userId=${userId}&limit=${limit}`, { sessionToken });
+  if (res.notifications) {
+    res.notifications = res.notifications.map(normalizeReelsVideoNotification);
+  }
+  return res;
+}
+
+export async function fetchReelsVideoNotificationUnreadCount(
+  userId: number,
+  sessionToken?: string | null,
+) {
+  return reelsJson<{ success: boolean; count?: number }>(
+    `/notifications/unread-count?userId=${userId}`,
+    { sessionToken },
+  );
+}
+
+export async function markReelsVideoNotificationsRead(
+  userId: number,
+  sessionToken?: string | null,
+  notificationIds?: number[],
+) {
+  return reelsJson<{ success: boolean; unreadCount?: number }>(
+    "/notifications/read",
+    { method: "POST", body: { userId, notificationIds }, sessionToken },
+  );
+}
+
+export async function hideReelsVideoNotification(
+  userId: number,
+  notificationId: number,
+  sessionToken?: string | null,
+) {
+  return reelsJson<{ success: boolean; unreadCount?: number }>(
+    `/notifications/${notificationId}?userId=${userId}`,
+    { method: "DELETE", body: { userId }, sessionToken },
+  );
+}
+
 export async function searchReels(q: string, userId: number, sessionToken?: string | null) {
   const res = await reelsJson<{ success: boolean; channels: ReelsChannel[]; videos: ReelsVideo[] }>(
     `/search?q=${encodeURIComponent(q)}&userId=${userId}`,
@@ -674,6 +745,47 @@ export async function deleteReelsVideo(
   return reelsJson<{ success: boolean; message?: string }>(
     `/videos/${videoId}?userId=${userId}`,
     { method: "DELETE", sessionToken },
+  );
+}
+
+export async function updateReelsVideo(
+  videoId: number,
+  userId: number,
+  opts: { title?: string; description?: string; hashtags?: string },
+  sessionToken?: string | null,
+) {
+  const res = await reelsJson<{ success: boolean; video?: ReelsVideo; message?: string }>(
+    `/videos/${videoId}`,
+    { method: "PATCH", body: { userId, ...opts }, sessionToken },
+  );
+  if (res.video) res.video = normalizeReelsVideo(res.video);
+  return res;
+}
+
+export async function addReelsVideoToPlaylist(
+  userId: number,
+  playlistId: number,
+  videoId: number,
+  sessionToken?: string | null,
+) {
+  const res = await reelsJson<{ success: boolean; playlists?: ReelsPlaylist[]; message?: string }>(
+    `/channel/me/playlists/${playlistId}/videos`,
+    { method: "POST", body: { userId, videoId }, sessionToken },
+  );
+  if (res.playlists) res.playlists = res.playlists.map(normalizeReelsPlaylist);
+  return res;
+}
+
+export async function reportReelsVideo(
+  videoId: number,
+  userId: number,
+  reason: string,
+  sessionToken?: string | null,
+  details?: string,
+) {
+  return reelsJson<{ success: boolean; message?: string }>(
+    `/videos/${videoId}/report`,
+    { method: "POST", body: { userId, reason, details }, sessionToken },
   );
 }
 
