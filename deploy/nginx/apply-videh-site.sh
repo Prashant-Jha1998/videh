@@ -127,6 +127,17 @@ server {
         proxy_set_header Connection "";
     }
 
+    location ~* \\.(css|js|mjs|webp|png|jpe?g|gif|svg|ico|woff2?|txt|xml)\$ {
+        expires 1y;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        access_log off;
+    }
+
+    location ~* \\.html\$ {
+        expires 1h;
+        add_header Cache-Control "public, max-age=3600, must-revalidate";
+    }
+
     location / {
         ${try_files}
     }
@@ -208,6 +219,17 @@ server {
         proxy_set_header Connection "";
     }
 
+    location ~* \\.(css|js|mjs|webp|png|jpe?g|gif|svg|ico|woff2?|txt|xml)\$ {
+        expires 1y;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        access_log off;
+    }
+
+    location ~* \\.html\$ {
+        expires 1h;
+        add_header Cache-Control "public, max-age=3600, must-revalidate";
+    }
+
     location / {
         ${try_files}
     }
@@ -219,9 +241,16 @@ echo "Syncing Videh landing page (videh.co.in only)..."
 sudo mkdir -p "${SITE_ROOT}"
 sudo rsync -a --delete "${REPO}/deploy/videh-co-in/" "${SITE_ROOT}/"
 ICON_SRC="${REPO}/artifacts/videh/assets/images/videh_icon_foreground.png"
+OPTIMIZE_SCRIPT="${REPO}/deploy/videh-co-in/scripts/optimize-assets.py"
 if [ -f "${ICON_SRC}" ]; then
   sudo cp "${ICON_SRC}" "${SITE_ROOT}/videh_icon_foreground.png"
   echo "Copied favicon/logo to videh.co.in site root"
+fi
+if [ -f "${OPTIMIZE_SCRIPT}" ] && command -v python3 >/dev/null 2>&1; then
+  if python3 "${OPTIMIZE_SCRIPT}" 2>/dev/null; then
+    sudo cp "${REPO}/deploy/videh-co-in/"videh_icon_*.webp "${SITE_ROOT}/" 2>/dev/null || true
+    echo "Regenerated WebP icons for videh.co.in"
+  fi
 fi
 
 echo "Disabling default nginx welcome page..."

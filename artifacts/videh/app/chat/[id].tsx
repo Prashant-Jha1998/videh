@@ -121,10 +121,17 @@ import { ChatEncryptionNotice, UnsavedContactCard } from "@/components/UnsavedCo
 import { dismissGroupWelcome, isGroupWelcomeDismissed } from "@/lib/groupWelcomeDismiss";
 import {
   encodeLocationPayload,
+  formatLiveRemaining,
   formatLiveUntil,
+  isLiveLocationActive,
+  isLiveLocationEnded,
+  locationDisplayAddress,
   mapsUrl,
+  openLocationInMaps,
   parseLegacyLocation,
   parseLocationPayload,
+  rememberMapPreviewUrl,
+  staticMapFallbackUrl,
   staticMapImageUrl,
 } from "@/lib/locationMessage";
 import { loadEnterIsSend, loadMediaVisibilityEnabled } from "@/lib/chatSettings";
@@ -925,28 +932,53 @@ function LocationMessageBubble({
   onStopLive: (msg: Message) => void;
 }) {
   const [mapFailed, setMapFailed] = useState(false);
+  const [mapFallback, setMapFallback] = useState(false);
+  const [, setTick] = useState(0);
   const parsed = parseLocationPayload(item.text);
   const legacy = !parsed ? parseLegacyLocation(item.text) : null;
   const lat = parsed?.lat ?? legacy?.lat ?? 0;
   const lng = parsed?.lng ?? legacy?.lng ?? 0;
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
-  const mapPreview = hasCoords ? staticMapImageUrl(lat, lng, Math.round(W * 0.62 * 2), 360, 15) : "";
-  const isLiveActive = parsed?.mode === "live" && !parsed?.stopped;
+  const mapW = Math.round(W * 0.62 * 2);
+  const mapH = 360;
+  const mapPreview = hasCoords
+    ? (mapFallback
+      ? staticMapFallbackUrl(lat, lng, mapW, mapH, 15)
+      : staticMapImageUrl(lat, lng, mapW, mapH, 15))
+    : "";
+  const liveActive = isLiveLocationActive(parsed);
+  const liveEnded = isLiveLocationEnded(parsed);
   const untilMs = parsed?.until;
-  const title = parsed?.mode === "live" ? "Live location" : "Location";
-  const subtitle =
-    parsed?.stopped
-      ? "Sharing ended"
-      : parsed?.label || (legacy ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : item.text.replace(/^ðŸ“[^\n]*\n?/, "").slice(0, 80));
+  const title = liveEnded
+    ? "Live location ended"
+    : liveActive
+      ? "Live location"
+      : "Location";
+  const address = locationDisplayAddress(parsed, legacy ? item.text : undefined);
+  const footerMuted = colors.mutedForeground;
 
   useEffect(() => {
     setMapFailed(false);
-  }, [mapPreview]);
+    setMapFallback(false);
+  }, [lat, lng]);
+
+  useEffect(() => {
+    if (!liveActive || !untilMs) return;
+    const timer = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(timer);
+  }, [liveActive, untilMs]);
+
+  const openMaps = useCallback(() => {
+    if (!hasCoords) return;
+    void openLocationInMaps(lat, lng);
+  }, [hasCoords, lat, lng]);
 
   return (
     <View style={styles.locationBubbleWrap}>
       <Pressable
-        onPress={() => item.mediaUrl && Linking.openURL(item.mediaUrl).catch(() => {})}
+        onPress={openMaps}
+        accessibilityRole="button"
+        accessibilityLabel={`${title}. ${address}. Open in Maps`}
         style={styles.locationMapPreview}
       >
         <View style={styles.locationMapFallback}>
@@ -962,12 +994,19 @@ function LocationMessageBubble({
             source={{ uri: mapPreview }}
             style={styles.locationMapImg}
             contentFit="cover"
-            onError={() => setMapFailed(true)}
+            onLoad={() => rememberMapPreviewUrl(lat, lng, mapW, mapH, mapPreview)}
+            onError={() => {
+              if (!mapFallback) {
+                setMapFallback(true);
+                return;
+              }
+              setMapFailed(true);
+            }}
           />
         ) : null}
         <View style={styles.locationMapTint} pointerEvents="none" />
         <View style={styles.locationPinWrap} pointerEvents="none">
-          {isLiveActive && userAvatar ? (
+          {liveActive && userAvatar ? (
             <Image source={{ uri: userAvatar }} style={styles.locationAvatarPin} contentFit="cover" />
           ) : (
             <View style={styles.locationPinCircle}>
@@ -977,32 +1016,32 @@ function LocationMessageBubble({
           <View style={styles.locationPinStem} />
         </View>
         <View style={styles.locationMapCredit} pointerEvents="none">
-          <Text style={styles.locationMapCreditText}>{mapFailed ? "Map preview" : "Open map"}</Text>
+          <Text style={styles.locationMapCreditText}>{mapFailed ? "Map preview" : "Open in Maps"}</Text>
         </View>
       </Pressable>
-      {isLiveActive ? (
-        <View style={[styles.locationLiveBar, { borderTopColor: "rgba(0,0,0,0.08)" }]}>
-          <View style={styles.locationLiveIconGroup}>
-            <Ionicons name="radio" size={14} color="#111" />
-            <Ionicons name="location" size={18} color="#111" />
-            <Ionicons name="radio" size={14} color="#111" />
-          </View>
-          <View style={{ flex: 1, marginLeft: 8 }}>
-            <Text style={[styles.locationLiveSmall, { color: colors.mutedForeground }]}>Live until</Text>
-            <Text style={[styles.locationLiveTime, { color: colors.foreground }]}>
-              {untilMs ? formatLiveUntil(untilMs) : "â€”"}
+      <Pressable onPress={openMaps} style={[styles.locationStaticFooter, { backgroundColor: colors.card }]}>
+        <Text style={[styles.locationStaticTitle, { color: colors.foreground }]}>{title}</Text>
+        <Text style={[styles.locationCoords, { color: footerMuted }]} numberOfLines={2}>
+          {address}
+        </Text>
+        {liveActive && untilMs ? (
+          <View style={styles.locationLiveMeta}>
+            <Text style={[styles.locationLiveSmall, { color: footerMuted }]}>
+              Live until {formatLiveUntil(untilMs)}
+            </Text>
+            <Text style={[styles.locationLiveSmall, { color: footerMuted }]}>
+              {formatLiveRemaining(untilMs)}
             </Text>
           </View>
-        </View>
-      ) : (
-        <View style={[styles.locationStaticFooter, { paddingHorizontal: 10, paddingVertical: 8 }]}>
-          <Text style={[styles.locationStaticTitle, { color: colors.foreground }]}>{title}</Text>
-          <Text style={[styles.locationCoords, { color: colors.mutedForeground }]} numberOfLines={2}>
-            {subtitle}
-          </Text>
-        </View>
-      )}
-      {isLiveActive && isMe && chatId ? (
+        ) : null}
+        {hasCoords ? (
+          <View style={styles.locationOpenMapsRow}>
+            <Ionicons name="navigate" size={14} color={colors.primary} />
+            <Text style={[styles.locationOpenMapsText, { color: colors.primary }]}>Open in Maps</Text>
+          </View>
+        ) : null}
+      </Pressable>
+      {liveActive && isMe && chatId ? (
         <TouchableOpacity
           style={[styles.stopShareRow, { borderTopColor: "rgba(0,0,0,0.08)" }]}
           onPress={() => onStopLive(item)}
@@ -4797,9 +4836,18 @@ const styles = StyleSheet.create({
   locationLiveIconGroup: { flexDirection: "row", alignItems: "center", gap: 2 },
   locationLiveSmall: { fontSize: 11, fontFamily: "Inter_400Regular" },
   locationLiveTime: { fontSize: 15, fontFamily: "Inter_700Bold", marginTop: 1 },
-  locationStaticFooter: { backgroundColor: "rgba(255,255,255,0.96)" },
-  locationStaticTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
-  locationCoords: { fontSize: 12, fontFamily: "Inter_400Regular", marginBottom: 2 },
+  locationStaticFooter: {
+    backgroundColor: "rgba(255,255,255,0.96)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(0,0,0,0.06)",
+  },
+  locationStaticTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 3 },
+  locationCoords: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18 },
+  locationLiveMeta: { marginTop: 6, gap: 2 },
+  locationOpenMapsRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8 },
+  locationOpenMapsText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   stopShareRow: { paddingVertical: 12, alignItems: "center", borderTopWidth: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.96)" },
   stopShareText: { color: "#c62828", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   contactCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, minWidth: 220, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },

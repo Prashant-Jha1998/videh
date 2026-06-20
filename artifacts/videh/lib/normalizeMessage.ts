@@ -2,6 +2,7 @@ import { albumChatPreview, parseAlbumMessageContent } from "@/lib/chatAlbumMessa
 import { callMessagePreviewText, parseCallMessageMeta } from "@/lib/callMessage";
 import { contactChatPreview } from "@/lib/contactMessage";
 import { documentChatPreview, isDocumentMessagePayload } from "@/lib/documentMessage";
+import { locationChatPreview } from "@/lib/locationMessage";
 import { stripWaveformMeta } from "@/lib/voiceWaveform";
 import type { Message } from "@/context/AppContext";
 
@@ -119,13 +120,15 @@ export function inferChatListPreview(
     case "contact":
       return contactChatPreview(raw);
     case "location":
-      return "Location";
+      return locationChatPreview(raw);
     case "deleted":
       return "This message was deleted";
     case "system":
       return "";
     default:
       if (isDocumentMessagePayload(raw)) return documentChatPreview(raw);
+      if (looksLikeLocationJson(raw)) return locationChatPreview(raw);
+      if (parseCallMessageMeta(raw)) return callMessagePreviewText(raw);
       return raw.length > 120 ? `${raw.slice(0, 119)}…` : raw || "New message";
   }
 }

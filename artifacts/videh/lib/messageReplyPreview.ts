@@ -5,6 +5,7 @@ import {
 } from "@/lib/callMessage";
 import { parseAlbumMessageContent } from "@/lib/chatAlbumMessage";
 import { contactChatPreview } from "@/lib/contactMessage";
+import { locationChatPreview } from "@/lib/locationMessage";
 import { normalizeMessageType } from "@/lib/normalizeMessage";
 import { stripWaveformMeta } from "@/lib/voiceWaveform";
 
@@ -54,7 +55,7 @@ export function messageReplyPreviewText(msg: MessageReplyPreviewInput): string {
     return content || "Document";
   }
   if (type === "location") {
-    return "Location";
+    return locationChatPreview(content);
   }
   if (content.length > 120) return `${content.slice(0, 119)}…`;
   return content || "Message";

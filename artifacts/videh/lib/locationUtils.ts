@@ -156,7 +156,7 @@ export async function reverseGeocodeLabel(
   const g = geo[0];
   const areaLabel =
     [g?.name, g?.street, g?.district, g?.city].filter(Boolean).join(", ")
-    || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+    || "Near your location";
 
   const rows: { title: string; subtitle: string }[] = [];
   if (g?.name && g.name !== areaLabel) {

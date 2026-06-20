@@ -145,7 +145,16 @@ export function inferListPreview(
     return voiceListPreview(text);
   }
   if (declared === "location" || looksLikeLocationJson(text)) {
-    return "Location";
+    try {
+      const j = JSON.parse(text) as { mode?: string; stopped?: boolean; until?: number; v?: number };
+      if (j?.v === 1 && j.mode === "live") {
+        const ended = j.stopped || (typeof j.until === "number" && j.until <= Date.now());
+        return ended ? "📍 Live location ended" : "📍 Shared live location";
+      }
+    } catch {
+      /* ignore */
+    }
+    return "📍 Shared a location";
   }
 
   if (mediaUrl?.trim()) {

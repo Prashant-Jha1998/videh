@@ -4,7 +4,18 @@ export type ChatMessageSignal = {
   body?: string;
   senderName?: string;
   senderId?: string;
-  messageType?: "text" | "image" | "video" | "audio" | "document";
+  messageType?:
+    | "text"
+    | "image"
+    | "video"
+    | "audio"
+    | "document"
+    | "album"
+    | "location"
+    | "contact"
+    | "call"
+    | "deleted"
+    | "system";
   mediaUrl?: string;
 };
 

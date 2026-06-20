@@ -61,6 +61,23 @@
           "category": ["BROWSABLE", "DEFAULT"]
         }
       ],
+      "queries": [
+        {
+          "intent": {
+            "action": "android.intent.action.VIEW",
+            "data": { "scheme": "google.navigation" }
+          }
+        },
+        {
+          "intent": {
+            "action": "android.intent.action.VIEW",
+            "data": { "scheme": "geo" }
+          }
+        },
+        {
+          "package": ["com.google.android.apps.maps"]
+        }
+      ],
       "permissions": [
         "android.permission.READ_CONTACTS",
         "android.permission.RECORD_AUDIO",

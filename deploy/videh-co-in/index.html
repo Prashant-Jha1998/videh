@@ -19,9 +19,14 @@
     />
     <meta property="og:image" content="https://videh.co.in/videh_icon_foreground.png" />
     <meta name="twitter:card" content="summary" />
-    <link rel="icon" type="image/png" href="/videh_icon_foreground.png" />
-    <link rel="apple-touch-icon" href="/videh_icon_foreground.png" />
-    <link rel="stylesheet" href="/css/site.css" />
+    <link rel="icon" type="image/webp" href="/videh_icon_32.webp" />
+    <link rel="icon" type="image/png" href="/videh_icon_foreground.png" sizes="any" />
+    <link rel="apple-touch-icon" href="/videh_icon_128.webp" />
+    <link rel="preload" href="/css/critical.css" as="style" />
+    <link rel="stylesheet" href="/css/critical.css" />
+    <link rel="preload" href="/css/site.css" as="style" />
+    <link rel="stylesheet" href="/css/site.css" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="/css/site.css" /></noscript>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -42,7 +47,10 @@
       <div class="topbar-inner">
         <a class="brand" href="/">
           <span class="logo-chip" aria-hidden="true">
-            <img src="/videh_icon_foreground.png" alt="" width="32" height="32" />
+            <picture>
+              <source type="image/webp" srcset="/videh_icon_32.webp 1x, /videh_icon_64.webp 2x" />
+              <img src="/videh_icon_foreground.png" alt="" width="32" height="32" decoding="async" />
+            </picture>
           </span>
           Videh
         </a>
@@ -83,7 +91,14 @@
         </div>
         <aside class="hero-card" aria-label="Highlights">
           <div class="logo-hero">
-            <img src="/videh_icon_foreground.png" alt="Videh app icon" width="64" height="64" />
+            <img
+              src="/videh_icon_64.webp"
+              alt="Videh app icon"
+              width="64"
+              height="64"
+              decoding="async"
+              loading="lazy"
+            />
           </div>
           <p style="text-align: center; margin: 0 0 8px; font-weight: 700; font-size: 1.1rem">Videh Messenger</p>
           <p style="text-align: center; margin: 0; opacity: 0.85; font-size: 0.9rem">

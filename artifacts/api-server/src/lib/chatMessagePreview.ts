@@ -48,17 +48,18 @@ function contactPushPreview(raw: string): string {
 }
 
 function locationPushPreview(raw: string): string {
-  if (!raw.startsWith("{")) return "Location";
+  if (!raw.startsWith("{")) return "📍 Shared a location";
   try {
-    const j = JSON.parse(raw) as { mode?: string; label?: string; v?: number };
+    const j = JSON.parse(raw) as { mode?: string; stopped?: boolean; until?: number; v?: number };
     if (j?.v === 1 && j.mode === "live") {
-      return j.label ? `Live location · ${truncate(j.label, 48)}` : "Live location";
+      const ended = j.stopped || (typeof j.until === "number" && j.until <= Date.now());
+      return ended ? "📍 Live location ended" : "📍 Shared live location";
     }
-    if (j?.v === 1 && j.label) return `Location · ${truncate(j.label, 56)}`;
+    if (j?.v === 1) return "📍 Shared a location";
   } catch {
     /* ignore */
   }
-  return "Location";
+  return "📍 Shared a location";
 }
 
 /** Detect internal payloads when message `type` was stored incorrectly as text. */

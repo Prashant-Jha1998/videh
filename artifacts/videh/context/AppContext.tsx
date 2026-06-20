@@ -42,7 +42,6 @@ import {
 } from "@/lib/chatAlbumMessage";
 import { inferChatListPreview, normalizeMessageType } from "@/lib/normalizeMessage";
 import { collectPendingLocalMessages, mergeServerWithPending } from "@/lib/mergePendingChatMessages";
-import { parseLocationPayload } from "@/lib/locationMessage";
 import {
   loadChatMessageCache,
   rememberChatMessagesInStore,
@@ -475,13 +474,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (String(lastMsg.type ?? "").toLowerCase() === "system") return undefined;
     if (lastMsg.is_deleted) return "This message was deleted";
     const preview = inferChatListPreview(lastMsg.type, String(lastMsg.content ?? ""), lastMsg.media_url);
-    if (preview === "Location") {
-      const loc = parseLocationPayload(String(lastMsg.content ?? ""));
-      const isLive = loc?.mode === "live" && !loc?.stopped;
-      const label = loc?.label?.trim();
-      const base = isLive ? "📍 Live location" : "📍 Location";
-      return label ? `${base} · ${label}` : base;
-    }
+    if (preview.startsWith("📍")) return preview;
     if (preview === "Voice message") return "🎤 Voice message";
     return preview || undefined;
   };
@@ -1021,7 +1014,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const serverMessageId = signal.messageId ? String(signal.messageId) : undefined;
     const text = signal.body?.trim();
     const mediaUrl = signal.mediaUrl?.trim();
-    const hintType = signal.messageType ?? (mediaUrl ? "image" : "text");
+    const hintType = normalizeMessageType(signal.messageType, text ?? "", mediaUrl);
     if (!serverMessageId && !text && !mediaUrl) return;
     if (serverMessageId && !text && !mediaUrl) return;
 
@@ -1062,7 +1055,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           status: "delivered",
         };
         const merged = [...msgs, hintMsg].sort((a, b) => a.timestamp - b.timestamp);
-        const preview = text ? inferChatListPreview("text", text) : c.lastMessage;
+        const preview = inferChatListPreview(hintType, text ?? "", mediaUrl);
         const now = Date.now();
         return {
           ...c,
@@ -1337,21 +1330,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const cid = parsed.chatId != null ? String(parsed.chatId) : null;
         const messageId =
           parsed.payload?.messageId != null ? String(parsed.payload.messageId) : undefined;
-        const body = parsed.payload?.content?.trim();
+        const bodyRaw = parsed.payload?.content?.trim() ?? "";
         const senderName = parsed.payload?.senderName?.trim();
         const senderId =
           parsed.payload?.senderId != null ? String(parsed.payload.senderId) : undefined;
-        const rawType = String(parsed.payload?.type ?? "text").toLowerCase();
-        const messageType =
-          rawType === "image" || rawType === "video" || rawType === "audio" || rawType === "document" || rawType === "album"
-            ? rawType
-            : "text";
         const mediaUrl = parsed.payload?.mediaUrl?.trim();
+        const messageType = normalizeMessageType(parsed.payload?.type, bodyRaw, mediaUrl);
+        const notifyBody = inferChatListPreview(parsed.payload?.type, bodyRaw, mediaUrl);
         if (cid) {
           const signal: ChatMessageSignal = {
             chatId: cid,
             messageId,
-            body,
+            body: bodyRaw,
             senderName,
             senderId,
             messageType,
@@ -1368,7 +1358,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           void deliverPremiumChatMessageNotification({
             chatId: cid,
             messageId,
-            body,
+            body: notifyBody,
             senderName,
             reloadChats: uid
               ? async () => {
@@ -2687,6 +2677,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (liveTickRef.current) {
           clearInterval(liveTickRef.current);
           liveTickRef.current = null;
+        }
+        const u = userRef.current;
+        if (u?.dbId) {
+          try {
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const content = encodeLocationPayload({
+              v: 1,
+              mode: "live",
+              lat: loc.coords.latitude,
+              lng: loc.coords.longitude,
+              until: sess.untilMs,
+              comment: sess.comment,
+              stopped: true,
+            });
+            await fetch(`${BASE_URL}/api/chats/${sess.chatId}/messages/${sess.messageId}`, {
+              method: "PUT",
+              headers: authHeaders({ "Content-Type": "application/json" }),
+              body: JSON.stringify({
+                userId: u.dbId,
+                content,
+                mediaUrl: buildMapsUrl(loc.coords.latitude, loc.coords.longitude),
+              }),
+            }).catch(() => {});
+            await loadMessages(sess.chatId);
+          } catch {
+            /* ignore */
+          }
         }
         setLiveLocationSession(null);
         return;

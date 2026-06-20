@@ -9,14 +9,24 @@
       content="Videh privacy overview — what data we collect, how we use it, your controls, and how to request deletion."
     />
     <link rel="canonical" href="https://videh.co.in/privacy.html" />
-    <link rel="icon" type="image/png" href="/videh_icon_foreground.png" />
-    <link rel="stylesheet" href="/css/site.css" />
+    <link rel="icon" type="image/webp" href="/videh_icon_32.webp" />
+    <link rel="icon" type="image/png" href="/videh_icon_foreground.png" sizes="any" />
+    <link rel="apple-touch-icon" href="/videh_icon_128.webp" />
+    <link rel="stylesheet" href="/css/critical.css" />
+    <link rel="preload" href="/css/site.css" as="style" />
+    <link rel="stylesheet" href="/css/site.css" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="/css/site.css" /></noscript>
   </head>
   <body>
     <header class="topbar">
       <div class="topbar-inner">
         <a class="brand" href="/">
-          <span class="logo-chip"><img src="/videh_icon_foreground.png" alt="" width="32" height="32" /></span>
+          <span class="logo-chip">
+            <picture>
+              <source type="image/webp" srcset="/videh_icon_32.webp 1x, /videh_icon_64.webp 2x" />
+              <img src="/videh_icon_foreground.png" alt="" width="32" height="32" decoding="async" />
+            </picture>
+          </span>
           Videh
         </a>
         <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-nav">Menu</button>
