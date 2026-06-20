@@ -62,6 +62,7 @@ import { installGlobalErrorHandlers } from "@/lib/globalErrorHandlers";
 import {
   registerIncomingCallDismissHandler,
   requestDismissCallSession,
+  requestEndCallSession,
 } from "@/lib/incomingCallUiBridge";
 import { rejectIncomingCall } from "@/lib/rejectIncomingCall";
 import { loadCachedSilenceUnknownCallers } from "@/lib/privacySettings";
@@ -161,7 +162,8 @@ function RootLayoutNav() {
     offeredCallIdRef.current = null;
     pendingIncomingRef.current = null;
     void stopIncomingCallExperience(callId, { force: true });
-    requestDismissCallSession(callId);
+    // Only tear down CallSession when declining or clearing stale ring UI — not after accept.
+    if (permanently) requestDismissCallSession(callId);
     setCallWaiting((prev) => (!callId || prev?.callId === callId ? null : prev));
     setIncomingCall((prev) => {
       if (!prev) return null;
@@ -184,11 +186,8 @@ function RootLayoutNav() {
       offeredCallIdRef.current = null;
       pendingIncomingRef.current = null;
       setIncomingCall(null);
-      if (activeCallSession?.callId === callId && activeCallSession.engineActive) {
-        void endCall();
-      }
     }, INCOMING_RING_TIMEOUT_MS);
-  }, [clearIncomingAutoEnd, user?.dbId, user?.sessionToken, endCall, activeCallSession?.callId, activeCallSession?.engineActive]);
+  }, [clearIncomingAutoEnd, user?.dbId, user?.sessionToken]);
 
   const offerIncomingCall = useCallback(async (raw: {
     callId: string;
@@ -326,9 +325,7 @@ function RootLayoutNav() {
         const action = actionId === NOTIFICATION_ACTION_ACCEPT_CALL ? "accept" : "decline";
         if (action === "decline") {
           const callId = String(data.callId);
-          dismissIncomingCallUi(callId, true);
           void rejectIncomingCall({ callId, userId: user.dbId, sessionToken: user.sessionToken });
-          requestDismissCallSession(callId);
           return;
         }
         void (async () => {
@@ -437,10 +434,10 @@ function RootLayoutNav() {
               { headers: webrtcAuthHeaders(user.sessionToken) },
             );
             const statusData = (await statusRes.json()) as { success?: boolean; ended?: boolean };
-            if (
-              (!statusData.success || statusData.ended)
-              && !(activeCallIdRef.current === activeId && activeCallEngineActiveRef.current)
-            ) {
+            if (statusData.ended) {
+              requestEndCallSession(activeId);
+              dismissIncomingCallUi(activeId, true);
+            } else if (!statusData.success) {
               dismissIncomingCallUi(activeId, true);
             }
           } catch {
@@ -508,7 +505,7 @@ function RootLayoutNav() {
           offeredCallIdRef.current = null;
           pendingIncomingRef.current = null;
           clearIncomingAutoEnd();
-          requestDismissCallSession(callId);
+          requestEndCallSession(callId);
           dismissIncomingCallUi(callId, true);
           void loadMessages(String(signal.chatId ?? payload.chatId ?? ""));
         } else {
@@ -669,18 +666,17 @@ function RootLayoutNav() {
     if (!incomingCall || !user?.dbId) return;
     const call = incomingCall;
     if (action === "decline") {
-      dismissIncomingCallUi(call.callId, true);
       await rejectIncomingCall({
         callId: call.callId,
         userId: user.dbId,
         sessionToken: user.sessionToken,
         declineMessage,
       });
-      requestDismissCallSession(call.callId);
       void loadMessages(String(call.chatId));
       return;
     }
     try {
+      clearIncomingAutoEnd();
       activeCallIdRef.current = call.callId;
       await acceptIncoming(call);
       dismissIncomingCallUi(call.callId, false);
@@ -688,6 +684,7 @@ function RootLayoutNav() {
       activeCallIdRef.current = null;
       setIncomingCall(call);
       pendingIncomingRef.current = call;
+      scheduleIncomingAutoEnd(call.callId);
     }
   };
 
@@ -926,6 +923,7 @@ function RootLayoutNav() {
             if (!callWaiting || !user?.dbId) return;
             clearIncomingAutoEnd();
             offeredCallIdRef.current = null;
+            dismissedIncomingCallIdsRef.current.add(callWaiting.callId);
             await declineIncomingCallSilently(callWaiting.callId, user.dbId, user.sessionToken);
             setCallWaiting(null);
           }}

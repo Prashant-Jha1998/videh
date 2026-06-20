@@ -4,6 +4,7 @@ import { applySpeakerRoute, setProximityScreenOff, startInCallSession, stopInCal
 import { buildCallMediaConstraints, getCallMediaSettings } from "@/lib/callMediaSettings";
 import { channelsForCall, loadIceServers, peerIdFromCallChannel } from "@/lib/webrtcIce";
 import { webrtcFetch } from "@/lib/webrtcApi";
+import { callDebug } from "@/lib/callDebug";
 import type { CallUiPhase } from "@/lib/callState";
 import type { RemoteCallPeerStream, VidehCallState } from "./videhCallTypes";
 
@@ -328,6 +329,8 @@ export function useVidehCall(
       rolesRef.current.set(channel, role);
       candidateCursorsRef.current.set(channel, 0);
 
+      callDebug("CREATING_PEER_CONNECTION", { channel, role, uid, videhCallerId });
+
       const pc = new RTCPeerConnection({ iceServers });
       pcsRef.current.set(channel, pc);
       sharedLocalStream.getTracks().forEach((track: any) => pc.addTrack(track, sharedLocalStream));
@@ -355,10 +358,12 @@ export function useVidehCall(
               && session.session?.offer
               && offerRevision > seenOfferRev
             ) {
+              callDebug("RECEIVING_OFFER", { channel: pollChannel, offerRevision, role: activeRole });
               lastOfferRevisionRef.current.set(pollChannel, offerRevision);
               await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.offer));
               const answer = await pcNow.createAnswer();
               await pcNow.setLocalDescription(answer);
+              callDebug("SENDING_ANSWER", { channel: pollChannel, answerRevision: (session.session?.answerRevision ?? 0) + 1 });
               await postJson(`/sessions/${encodeURIComponent(pollChannel)}/answer`, { answer });
               pollSignalOnce(pollChannel);
             }
@@ -369,6 +374,7 @@ export function useVidehCall(
               && session.session?.answer
               && answerRevision > seenAnswerRev
             ) {
+              callDebug("RECEIVING_ANSWER", { channel: pollChannel, answerRevision, role: activeRole });
               lastAnswerRevisionRef.current.set(pollChannel, answerRevision);
               const sig = pcNow.signalingState;
               if (sig === "have-local-offer" || sig === "stable") {
@@ -382,6 +388,7 @@ export function useVidehCall(
               sessionToken,
             ).then((r) => r.json()) as { candidates?: RTCIceCandidateInit[]; next?: number };
             for (const candidate of candidateRes.candidates ?? []) {
+              callDebug("ICE_CANDIDATE_RECEIVED", { channel: pollChannel, role: activeRole });
               await pcNow.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
             }
             candidateCursorsRef.current.set(pollChannel, candidateRes.next ?? since);
@@ -407,6 +414,7 @@ export function useVidehCall(
         if (event.candidate) {
           const candidate = typeof event.candidate.toJSON === "function" ? event.candidate.toJSON() : event.candidate;
           void postJson(`/sessions/${encodeURIComponent(channel)}/candidates`, { role, candidate }).then(() => {
+            callDebug("ICE_CANDIDATE_SENT", { channel, role });
             pollSignalOnce(channel);
           });
         }
@@ -456,6 +464,7 @@ export function useVidehCall(
       if (role === "caller") {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+        callDebug("SENDING_OFFER", { channel, role });
         await postJson(`/sessions/${encodeURIComponent(channel)}/offer`, { offer });
         pollSignalOnce(channel);
       }

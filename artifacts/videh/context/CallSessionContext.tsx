@@ -23,8 +23,10 @@ import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import { chooseInCallAudioRoute, wakeScreenForIncomingCall, type InCallAudioRoute } from "@/lib/inCallAudio";
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
+import { callDebug } from "@/lib/callDebug";
 import {
   registerCallSessionDismissHandler,
+  registerCallSessionEndHandler,
   requestDismissIncomingCallUi,
 } from "@/lib/incomingCallUiBridge";
 import { rejectIncomingCall } from "@/lib/rejectIncomingCall";
@@ -62,6 +64,7 @@ type RouteParams = {
   callId?: string;
   incoming?: string;
   ringing?: string;
+  callerId?: string;
 };
 
 type CallSessionContextValue = {
@@ -203,6 +206,19 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     callInitiatorId,
   );
 
+  useEffect(() => {
+    if (!session?.callId) return;
+    callDebug("WEBRTC_GATE", {
+      callId: session.callId,
+      webrtcReady,
+      engineActive: session.engineActive,
+      remotePartyAccepted,
+      callInitiatorId,
+      channel: session.channel,
+      isIncoming: session.isIncoming,
+    });
+  }, [session?.callId, session?.engineActive, session?.channel, session?.isIncoming, webrtcReady, remotePartyAccepted, callInitiatorId]);
+
   const resetCallParticipantState = useCallback(() => {
     setParticipantCount(2);
     setAcceptedCount(0);
@@ -246,7 +262,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         await dismissIncomingCallNotification(id).catch(() => {});
         endCallKeep(id, "declined");
         clearSession();
-        leaveCallScreen();
+        if (sessionEngineActiveRef.current || sessionRingingRef.current) leaveCallScreen();
       } finally {
         endingCallRef.current = false;
       }
@@ -265,7 +281,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           await webrtcFetch(`/calls/${id}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
         }
         clearSession();
-        leaveCallScreen();
+        if (shouldLeave) leaveCallScreen();
         return;
       }
       if (id) teardownInFlightRef.current.add(id);
@@ -283,7 +299,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         void refreshCallLogs();
         clearSession();
         setHeldSession(null);
-        leaveCallScreen();
+        if (shouldLeave) leaveCallScreen();
       } finally {
         endingCallRef.current = false;
         if (id) teardownInFlightRef.current.delete(id);
@@ -296,12 +312,18 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     void teardownCallLocally();
   }, [teardownCallLocally]);
 
-  const handleRemoteCallEnd = useCallback(
+  /** Overlay / ring UI dismiss — skip if an active in-call session is running. */
+  const handleUiDismissRequest = useCallback(
     (callId?: string) => {
       const id = callId ?? sessionCallIdRef.current ?? undefined;
       if (!id) return;
-      if (sessionCallIdRef.current && sessionCallIdRef.current !== id) return;
-      if (sessionCallIdRef.current === id && sessionRingingRef.current) {
+      if (!sessionCallIdRef.current) return;
+      if (sessionCallIdRef.current !== id) return;
+      if (sessionEngineActiveRef.current && !sessionRingingRef.current) {
+        callDebug("CALL_DISMISS_SKIPPED_ACTIVE", { callId: id });
+        return;
+      }
+      if (sessionRingingRef.current) {
         void dismissIncomingRinging(id);
         return;
       }
@@ -310,7 +332,19 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     [dismissIncomingRinging, teardownCallLocally],
   );
 
-  const pushCallRoute = useCallback((s: CallSession, replace = false) => {
+  /** Server says call ended — always tear down, even mid-call. */
+  const handleServerCallEnded = useCallback(
+    (callId?: string) => {
+      const id = callId ?? sessionCallIdRef.current ?? undefined;
+      if (!id) return;
+      if (sessionCallIdRef.current && sessionCallIdRef.current !== id) return;
+      callDebug("CALL_SERVER_ENDED", { callId: id });
+      void teardownCallLocally(id, { skipServerEnd: true });
+    },
+    [teardownCallLocally],
+  );
+
+  const pushCallRoute = useCallback((s: CallSession, replace = false, routeCallerId?: number) => {
     const route = {
       pathname: "/call/[id]" as const,
       params: {
@@ -321,6 +355,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         callId: s.callId,
         incoming: s.isIncoming ? "1" : "0",
         ringing: s.ringing ? "1" : "0",
+        ...(routeCallerId && routeCallerId > 0 ? { callerId: String(routeCallerId) } : {}),
       },
     };
     if (replace) router.replace(route);
@@ -401,7 +436,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       engineActive: false,
     };
     setSession(next);
-    pushCallRoute(next);
+    pushCallRoute(next, false, callInfo.callerId);
   }, [pushCallRoute, resetCallParticipantState, user?.dbId]);
 
   const initFromRoute = useCallback((params: RouteParams) => {
@@ -416,16 +451,25 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     const ringing = params.ringing === "1";
     const isVideo = params.type === "video";
     const contactName = params.name ?? "Contact";
+    const routeCallerId = Number(params.callerId);
+    if (isIncoming && Number.isFinite(routeCallerId) && routeCallerId > 0) {
+      setCallerId(routeCallerId);
+    }
 
     setSession((prev) => {
       if (prev?.callId && params.callId && prev.callId === params.callId) {
-        const routeIncoming = params.incoming === "1";
-        return {
+        const next = {
           ...prev,
           minimized: false,
           contactName: params.name ?? prev.contactName,
-          ...(routeIncoming ? {} : { isIncoming: false, ringing: false }),
         };
+        if (params.incoming !== "1") {
+          return { ...next, isIncoming: false, ringing: false };
+        }
+        if (prev.engineActive) {
+          return { ...next, isIncoming: true, ringing: false };
+        }
+        return { ...next, isIncoming: true, ringing: params.ringing === "1" };
       }
       return {
         chatId,
@@ -542,8 +586,19 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       throw new Error("You are already on another call");
     }
 
+    callDebug("CALL_ACCEPTED", { callId, userId: user.dbId, callerId: resolvedCallerId, channel });
+
     setCallerId(resolvedCallerId);
     setAcceptedCount((prev) => Math.max(prev, 2));
+    setAcceptedUserIds((prev) => {
+      const ids = new Set(prev);
+      ids.add(user.dbId!);
+      if (resolvedCallerId > 0) ids.add(resolvedCallerId);
+      return [...ids];
+    });
+    dismissedCallIdsRef.current.delete(callId);
+    sessionRingingRef.current = false;
+    sessionEngineActiveRef.current = true;
 
     const next: CallSession = {
       chatId: String(resolved?.chatId ?? session?.chatId ?? ""),
@@ -557,7 +612,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       engineActive: true,
     };
     setSession(next);
-    pushCallRoute(next);
+    callDebug("OPENING_CALL_SCREEN", { callId, chatId: next.chatId, incoming: true, replace: true });
+    pushCallRoute(next, true, resolvedCallerId);
   }, [session?.callId, session?.chatId, session?.contactName, session?.channel, session?.isVideo, user?.dbId, user?.sessionToken, pushCallRoute]);
 
   const declineIncoming = useCallback(async (declineMessage?: string) => {
@@ -657,7 +713,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           if (!data.success || res.status === 404) {
             statusPollMissRef.current += 1;
             if (statusPollMissRef.current >= missLimit) {
-              handleRemoteCallEnd(polledCallId);
+              handleServerCallEnded(polledCallId);
             }
             return;
           }
@@ -666,7 +722,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           setAcceptedCount(data.acceptedCount ?? 1);
           setRingingCount(data.ringingCount ?? 0);
           setParticipantCount((prev) => data.call?.participantCount ?? prev);
-          if (Array.isArray(data.acceptedUserIds)) setAcceptedUserIds(data.acceptedUserIds);
+          const polledAcceptedIds = Array.isArray(data.acceptedUserIds) ? data.acceptedUserIds : [];
+          if (polledAcceptedIds.length > 0) setAcceptedUserIds(polledAcceptedIds);
           if (typeof data.callerId === "number") setCallerId(data.callerId);
           if (data.statuses && typeof data.statuses === "object") {
             setInviteeUserIds(
@@ -676,10 +733,19 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
             );
           }
 
-          const remoteAccepted = acceptedUserIds.some((id) => id !== userId) || (data.acceptedCount ?? 1) > 1;
+          const remoteAccepted =
+            polledAcceptedIds.some((id) => id !== userId) || (data.acceptedCount ?? 1) > 1;
           if (remoteAccepted) {
             void stopCallAlert();
             setStatusHint(null);
+            if (!sessionEngineActiveRef.current && sessionCallIdRef.current === polledCallId) {
+              sessionEngineActiveRef.current = true;
+              setSession((prev) =>
+                prev?.callId === polledCallId && !prev.engineActive
+                  ? { ...prev, engineActive: true }
+                  : prev,
+              );
+            }
           } else if (!call.joined) {
             setStatusHint("Connecting…");
           }
@@ -728,13 +794,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
           if (data.ended) {
             void stopCallAlert();
-            handleRemoteCallEnd(polledCallId);
+            handleServerCallEnded(polledCallId);
           }
         })
         .catch(() => {});
     }, pollMs);
     return () => clearInterval(timer);
-  }, [session?.callId, session?.engineActive, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleRemoteCallEnd]);
+  }, [session?.callId, session?.engineActive, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleServerCallEnded]);
 
   const callAnswered = remotePartyAccepted && (call.mediaReady || call.joined);
 
@@ -768,13 +834,23 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         callId
         && (action === "ended" || action === "declined" || action === "missed" || action === "busy" || action === "cancelled")
       ) {
-        handleRemoteCallEnd(callId);
+        handleServerCallEnded(callId);
         return;
       }
       if (action === "accepted" && callId && sessionCallIdRef.current === callId) {
         void stopCallAlert();
+        const payload = signal as { acceptedUserIds?: number[]; callerId?: number };
+        if (Array.isArray(payload.acceptedUserIds) && payload.acceptedUserIds.length > 0) {
+          setAcceptedUserIds(payload.acceptedUserIds);
+        }
+        if (typeof payload.callerId === "number" && payload.callerId > 0) {
+          setCallerId(payload.callerId);
+        }
+        callDebug("CALL_ACCEPTED", { callId, via: "sse", userId });
         setSession((prev) => {
           if (!prev || prev.callId !== callId || prev.ringing) return prev;
+          sessionEngineActiveRef.current = true;
+          sessionRingingRef.current = false;
           if (!prev.isIncoming) {
             return { ...prev, engineActive: true };
           }
@@ -788,9 +864,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       setSession((prev) => (prev ? { ...prev, isVideo: nextVideo } : prev));
     });
     return unsub;
-  }, [handleRemoteCallEnd]);
+  }, [handleServerCallEnded]);
 
-  useEffect(() => registerCallSessionDismissHandler(handleRemoteCallEnd), [handleRemoteCallEnd]);
+  useEffect(() => registerCallSessionDismissHandler(handleUiDismissRequest), [handleUiDismissRequest]);
+  useEffect(() => registerCallSessionEndHandler(handleServerCallEnded), [handleServerCallEnded]);
 
   const switchCallMediaType = useCallback(
     async (video: boolean) => {

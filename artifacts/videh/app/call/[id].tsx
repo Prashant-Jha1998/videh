@@ -35,6 +35,7 @@ export default function CallScreen() {
     callId?: string;
     incoming?: string;
     ringing?: string;
+    callerId?: string;
   }>();
 
   const {
@@ -78,7 +79,7 @@ export default function CallScreen() {
 
   useEffect(() => {
     initFromRoute(params);
-  }, [params.id, params.callId, params.channel, params.incoming, params.ringing]);
+  }, [params.id, params.callId, params.channel, params.incoming, params.ringing, params.callerId]);
 
   const isVideo = session?.isVideo ?? params.type === "video";
   const name = session?.contactName ?? params.name ?? "Contact";
