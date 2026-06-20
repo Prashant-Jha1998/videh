@@ -421,6 +421,7 @@ export default function ReelsWatchScreen() {
   const showPreRoll = playAllowed && watchPhase === "pre-roll" && adBreaks?.preRoll[preRollIndex];
   const showMidRoll = playAllowed && watchPhase === "mid-roll" && activeMidRoll;
   const showContent = playAllowed && playbackUrl && watchPhase === "content";
+  const showAd = Boolean(showPreRoll || showMidRoll);
 
   const watchTopPad = reelsWatchTopInset(insets);
 
@@ -428,17 +429,23 @@ export default function ReelsWatchScreen() {
     <>
       {watchStatusBar}
       <View style={[styles.container, { backgroundColor: colors.background, paddingTop: watchTopPad }]}>
-      <View style={styles.playerWrap}>
+      <View style={[styles.playerWrap, showAd && styles.playerWrapAd]}>
         {showPreRoll ? (
           <ReelsAdPlayer
             key={`pre-${adBreaks!.preRoll[preRollIndex].id}-${preRollIndex}`}
             ad={adBreaks!.preRoll[preRollIndex]}
+            contentVideoId={video.id}
+            userId={user?.dbId}
+            sessionToken={user?.sessionToken}
             onFinished={(result) => void handlePreRollFinished(adBreaks!.preRoll[preRollIndex], result)}
           />
         ) : showMidRoll ? (
           <ReelsAdPlayer
             key={`mid-${activeMidRoll!.ad.id}-${activeMidRoll!.offsetSeconds}`}
             ad={activeMidRoll!.ad}
+            contentVideoId={video.id}
+            userId={user?.dbId}
+            sessionToken={user?.sessionToken}
             onFinished={(result) => void handleMidRollFinished(activeMidRoll!.ad, result)}
           />
         ) : showContent ? (
@@ -487,6 +494,7 @@ export default function ReelsWatchScreen() {
         ) : null}
       </View>
 
+      {!showAd ? (
       <FlatList
         data={related}
         keyExtractor={(v) => String(v.id)}
@@ -587,6 +595,7 @@ export default function ReelsWatchScreen() {
           </View>
         }
       />
+      ) : null}
 
       {/* Description bottom sheet (YouTube-style) */}
       <Modal visible={descOpen} transparent animationType="slide" onRequestClose={() => setDescOpen(false)}>
@@ -721,6 +730,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   playerWrap: { position: "relative", backgroundColor: "#000" },
+  playerWrapAd: { flex: 1 },
   player: reelsWatchPlayerSize,
   playerLoadingOverlay: {
     ...StyleSheet.absoluteFillObject,

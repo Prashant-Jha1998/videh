@@ -35,6 +35,24 @@ export type ReelsAdBreakItem = {
   adType: "non_skippable" | "skippable";
   placement: "pre_roll" | "mid_roll";
   advertiserName: string;
+  format: ReelsAdFormat;
+  headline: string;
+  description: string;
+  imageUrl: string | null;
+  ctaType: ReelsAdCta;
+  destinationUrl: string | null;
+  playStoreUrl: string | null;
+  appStoreUrl: string | null;
+  appName: string | null;
+  appDeveloper: string | null;
+  appRating: number | null;
+  appReviewCount: string | null;
+  appDownloadCount: string | null;
+  appCategory: string | null;
+  appPriceLabel: string;
+  promoImageUrl: string | null;
+  promoImageUrl2: string | null;
+  sponsoredLabel: string;
 };
 
 export type ReelsMidRollBreak = {
@@ -65,6 +83,15 @@ type CreativeRow = {
   play_store_url?: string | null;
   app_store_url?: string | null;
   app_name?: string | null;
+  app_developer?: string | null;
+  app_rating?: string | null;
+  app_review_count?: string | null;
+  app_download_count?: string | null;
+  app_category?: string | null;
+  app_price_label?: string | null;
+  promo_image_url?: string | null;
+  promo_image_url_2?: string | null;
+  sponsored_label?: string | null;
   company_name?: string;
   campaign_id?: number;
   bid_model?: string;
@@ -102,21 +129,36 @@ function mapFeedAd(row: CreativeRow): ReelsFeedAdItem {
   };
 }
 
+function mapCreativeDetails(row: CreativeRow) {
+  const format = (row.format ?? "video") as ReelsAdFormat;
+  const cta = (row.cta_type ?? "learn_more") as ReelsAdCta;
+  const ratingRaw = row.app_rating != null ? Number(row.app_rating) : null;
+  return {
+    format,
+    headline: row.headline ?? row.title,
+    description: row.description ?? "",
+    imageUrl: resolveAdAssetUrl(row.image_url),
+    ctaType: cta,
+    destinationUrl: row.destination_url ?? null,
+    playStoreUrl: row.play_store_url ?? null,
+    appStoreUrl: row.app_store_url ?? null,
+    appName: row.app_name ?? null,
+    appDeveloper: row.app_developer ?? row.company_name ?? null,
+    appRating: ratingRaw != null && Number.isFinite(ratingRaw) ? ratingRaw : null,
+    appReviewCount: row.app_review_count ?? null,
+    appDownloadCount: row.app_download_count ?? null,
+    appCategory: row.app_category ?? null,
+    appPriceLabel: row.app_price_label ?? "FREE",
+    promoImageUrl: resolveAdAssetUrl(row.promo_image_url),
+    promoImageUrl2: resolveAdAssetUrl(row.promo_image_url_2),
+    sponsoredLabel: row.sponsored_label ?? "Sponsored",
+  };
+}
+
 function mapCreative(row: CreativeRow, placement: "pre_roll" | "mid_roll"): ReelsAdBreakItem {
+  const details = mapCreativeDetails(row);
   const stored = String(row.video_url ?? "");
-  if (!stored) {
-    return {
-      id: Number(row.id),
-      title: row.title,
-      videoUrl: "",
-      durationSeconds: Number(row.duration_seconds) || 30,
-      skipAfterSeconds: row.skip_after_seconds != null ? Number(row.skip_after_seconds) : null,
-      adType: row.ad_type === "skippable" ? "skippable" : "non_skippable",
-      placement,
-      advertiserName: row.company_name ?? "Advertiser",
-    };
-  }
-  const videoUrl = resolveAdVideoUrl(stored);
+  const videoUrl = stored ? resolveAdVideoUrl(stored) : "";
   return {
     id: Number(row.id),
     title: row.title,
@@ -126,6 +168,7 @@ function mapCreative(row: CreativeRow, placement: "pre_roll" | "mid_roll"): Reel
     adType: row.ad_type === "skippable" ? "skippable" : "non_skippable",
     placement,
     advertiserName: row.company_name ?? "Advertiser",
+    ...details,
   };
 }
 
@@ -151,6 +194,9 @@ async function pickCreative(
     `SELECT cr.id, cr.title, cr.video_url, cr.duration_seconds, cr.skip_after_seconds,
             cr.placement, cr.ad_type, cr.format, cr.image_url, cr.headline, cr.description,
             cr.cta_type, cr.destination_url, cr.play_store_url, cr.app_store_url, cr.app_name,
+            cr.app_developer, cr.app_rating, cr.app_review_count, cr.app_download_count,
+            cr.app_category, cr.app_price_label, cr.promo_image_url, cr.promo_image_url_2,
+            cr.sponsored_label,
             adv.company_name, camp.id AS campaign_id, camp.bid_model, camp.bid_amount_inr, adv.balance_inr
      FROM reels_ad_creatives cr
      JOIN reels_ad_campaigns camp ON camp.id = cr.campaign_id
@@ -283,28 +329,51 @@ function clickCostInr(bidModel: string, bidAmount: number, ads: ReelsAdsRules): 
   return ads.feedCpcInr;
 }
 
+function fallbackAdBreakItem(
+  partial: Pick<ReelsAdBreakItem, "id" | "videoUrl" | "durationSeconds" | "skipAfterSeconds" | "adType">,
+): ReelsAdBreakItem {
+  return {
+    title: "Sponsored",
+    placement: "pre_roll",
+    advertiserName: "Videh",
+    format: "video",
+    headline: "Discover Videh Video",
+    description: "Watch, upload, and subscribe on Videh.",
+    imageUrl: null,
+    ctaType: "learn_more",
+    destinationUrl: "https://videh.co.in",
+    playStoreUrl: null,
+    appStoreUrl: null,
+    appName: null,
+    appDeveloper: "Videh",
+    appRating: null,
+    appReviewCount: null,
+    appDownloadCount: null,
+    appCategory: null,
+    appPriceLabel: "FREE",
+    promoImageUrl: null,
+    promoImageUrl2: null,
+    sponsoredLabel: "Sponsored",
+    ...partial,
+  };
+}
+
 function fallbackPreRoll(ads: ReelsAdsRules): ReelsAdBreakItem[] {
   return [
-    {
+    fallbackAdBreakItem({
       id: 0,
-      title: "Sponsored",
       videoUrl: ads.fallbackNonSkipUrl,
       durationSeconds: ads.preRollNonSkipSeconds,
       skipAfterSeconds: null,
       adType: "non_skippable",
-      placement: "pre_roll",
-      advertiserName: "Videh",
-    },
-    {
+    }),
+    fallbackAdBreakItem({
       id: -1,
-      title: "Sponsored",
       videoUrl: ads.fallbackSkippableUrl,
       durationSeconds: ads.preRollSkippableSeconds,
       skipAfterSeconds: ads.preRollSkipAfterSeconds,
       adType: "skippable",
-      placement: "pre_roll",
-      advertiserName: "Videh",
-    },
+    }),
   ];
 }
 
@@ -373,16 +442,13 @@ export async function resolveReelsAdBreaks(opts: {
     const mid = await pickCreative("mid_roll", "non_skippable");
     const ad = mid
       ? mapCreative(mid, "mid_roll")
-      : {
+      : { ...fallbackAdBreakItem({
         id: -2,
-        title: "Sponsored",
         videoUrl: ads.fallbackMidRollUrl,
         durationSeconds: ads.midRollSeconds,
         skipAfterSeconds: null,
-        adType: "non_skippable" as const,
-        placement: "mid_roll" as const,
-        advertiserName: "Videh",
-      };
+        adType: "non_skippable",
+      }), placement: "mid_roll" as const };
     midRoll.push({ offsetSeconds, ad });
   }
 

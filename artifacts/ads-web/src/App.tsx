@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { GoogleSignInButton } from "./components/GoogleSignInButton";
 import { VidehLogo } from "./components/VidehLogo";
 import { BID_MODEL_LABELS, CATEGORY_LABELS, type AdFormatSpec } from "./lib/adFormats";
@@ -131,6 +131,17 @@ export default function App() {
   const [playStoreUrl, setPlayStoreUrl] = useState("");
   const [appStoreUrl, setAppStoreUrl] = useState("");
   const [appName, setAppName] = useState("");
+  const [appDeveloper, setAppDeveloper] = useState("");
+  const [appRating, setAppRating] = useState("");
+  const [appReviewCount, setAppReviewCount] = useState("");
+  const [appDownloadCount, setAppDownloadCount] = useState("");
+  const [appCategory, setAppCategory] = useState("");
+  const [appPriceLabel, setAppPriceLabel] = useState("FREE");
+  const [playStoreLookupStatus, setPlayStoreLookupStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  const [playStoreLookupMessage, setPlayStoreLookupMessage] = useState("");
+  const playStoreLookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [promoImageUrl, setPromoImageUrl] = useState("");
+  const [promoImageUrl2, setPromoImageUrl2] = useState("");
   const [placement, setPlacement] = useState("feed_instream");
   const [topUpAmount, setTopUpAmount] = useState("1000");
   const [walletConfig, setWalletConfig] = useState<WalletConfig | null>(null);
@@ -187,6 +198,69 @@ export default function App() {
     const spec = pricing?.adFormats?.find((f) => f.id === selectedAdFormatId);
     if (spec) applyAdFormat(spec);
   }, [pricing, selectedAdFormatId, applyAdFormat]);
+
+  const lookupPlayStoreDetails = useCallback(async (url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed || adFormat !== "app_install") {
+      setPlayStoreLookupStatus("idle");
+      setPlayStoreLookupMessage("");
+      return;
+    }
+    setPlayStoreLookupStatus("loading");
+    setPlayStoreLookupMessage("Fetching app details from Google Play…");
+    const res = await api<{
+      success: boolean;
+      message?: string;
+      app?: {
+        title: string;
+        developer: string;
+        iconUrl: string | null;
+        rating: number | null;
+        reviewCountLabel: string | null;
+        installsLabel: string | null;
+        category: string | null;
+        priceLabel: string;
+      };
+    }>(`/play-store/lookup?url=${encodeURIComponent(trimmed)}`);
+    if (!res.success || !res.app) {
+      setPlayStoreLookupStatus("error");
+      setPlayStoreLookupMessage(res.message ?? "Could not fetch from Play Store. Fill details manually below.");
+      return;
+    }
+    const a = res.app;
+    setAppName(a.title);
+    setAppDeveloper(a.developer || "");
+    if (a.iconUrl) setImageUrl(a.iconUrl);
+    setAppRating(a.rating != null ? a.rating.toFixed(1) : "");
+    setAppReviewCount(a.reviewCountLabel ?? "");
+    setAppDownloadCount(a.installsLabel ?? "");
+    setAppCategory(a.category ?? "");
+    setAppPriceLabel(a.priceLabel || "FREE");
+    if (!headline.trim()) setHeadline(a.title);
+    setPlayStoreLookupStatus("ok");
+    setPlayStoreLookupMessage("Loaded from Play Store. You can edit any field before submit.");
+  }, [adFormat, headline]);
+
+  useEffect(() => {
+    if (adFormat !== "app_install") {
+      setPlayStoreLookupStatus("idle");
+      setPlayStoreLookupMessage("");
+      return;
+    }
+    if (playStoreLookupTimer.current) clearTimeout(playStoreLookupTimer.current);
+    const trimmed = playStoreUrl.trim();
+    if (!trimmed || trimmed.length < 12) {
+      setPlayStoreLookupStatus("idle");
+      setPlayStoreLookupMessage("");
+      return;
+    }
+    playStoreLookupTimer.current = setTimeout(() => {
+      void lookupPlayStoreDetails(trimmed);
+    }, 700);
+    return () => {
+      if (playStoreLookupTimer.current) clearTimeout(playStoreLookupTimer.current);
+    };
+  }, [playStoreUrl, adFormat, lookupPlayStoreDetails]);
 
   const handleAuth = async () => {
     setError("");
@@ -264,6 +338,14 @@ export default function App() {
         playStoreUrl: playStoreUrl.trim(),
         appStoreUrl: appStoreUrl.trim(),
         appName: appName.trim(),
+        appDeveloper: appDeveloper.trim(),
+        appRating: appRating.trim(),
+        appReviewCount: appReviewCount.trim(),
+        appDownloadCount: appDownloadCount.trim(),
+        appCategory: appCategory.trim(),
+        appPriceLabel: appPriceLabel.trim(),
+        promoImageUrl: promoImageUrl.trim(),
+        promoImageUrl2: promoImageUrl2.trim(),
         placement,
         ctaType: adFormat === "shopping" ? "shop_now" : adFormat === "app_install" ? "install" : "learn_more",
         durationSeconds,
@@ -278,6 +360,10 @@ export default function App() {
     setSuccessMsg(res.message ?? "Ad submitted for Videh admin review.");
     setCreativeTitle(""); setHeadline(""); setDescription("");
     setImageUrl(""); setVideoUrl(""); setDestinationUrl("");
+    setPlayStoreUrl(""); setAppStoreUrl(""); setAppName(""); setAppDeveloper("");
+    setAppRating(""); setAppReviewCount(""); setAppDownloadCount(""); setAppCategory("");
+    setPromoImageUrl(""); setPromoImageUrl2("");
+    setPlayStoreLookupStatus("idle"); setPlayStoreLookupMessage("");
     await loadDash();
   };
 
@@ -737,19 +823,115 @@ export default function App() {
               )}
 
               {adFormat === "app_install" && (
-                <div style={S.grid2}>
-                  <Field label="App name"><input style={S.input} value={appName} onChange={(e) => setAppName(e.target.value)} /></Field>
-                  <Field label="Play Store URL"><input style={S.input} value={playStoreUrl} onChange={(e) => setPlayStoreUrl(e.target.value)} /></Field>
-                  <Field label="App Store URL"><input style={S.input} value={appStoreUrl} onChange={(e) => setAppStoreUrl(e.target.value)} /></Field>
-                </div>
+                <>
+                  <Field label="Play Store URL (auto-fills app details)">
+                    <input
+                      style={S.input}
+                      value={playStoreUrl}
+                      onChange={(e) => setPlayStoreUrl(e.target.value)}
+                      placeholder="https://play.google.com/store/apps/details?id=com.example.app"
+                    />
+                  </Field>
+                  {playStoreLookupStatus !== "idle" ? (
+                    <p style={{
+                      fontSize: 13,
+                      margin: "0 0 10px",
+                      color: playStoreLookupStatus === "error" ? "#d93025" : playStoreLookupStatus === "ok" ? "#188038" : "#5f6368",
+                    }}>
+                      {playStoreLookupMessage}
+                    </p>
+                  ) : (
+                    <p style={{ fontSize: 12, color: "#80868b", margin: "0 0 10px" }}>
+                      Paste Play Store link — rating, reviews, downloads, category auto-fill honge. Agar fetch fail ho to neeche manually bharo.
+                    </p>
+                  )}
+                  <div style={S.grid2}>
+                    <Field label="App name"><input style={S.input} value={appName} onChange={(e) => setAppName(e.target.value)} placeholder="From Play Store or manual" /></Field>
+                    <Field label="Developer name"><input style={S.input} value={appDeveloper} onChange={(e) => setAppDeveloper(e.target.value)} placeholder={advertiser?.company_name ?? "Developer"} /></Field>
+                    <Field label="App Store URL (optional)"><input style={S.input} value={appStoreUrl} onChange={(e) => setAppStoreUrl(e.target.value)} /></Field>
+                    <Field label="App icon URL"><input style={S.input} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="Auto from Play Store" /></Field>
+                    <Field label="Price label"><input style={S.input} value={appPriceLabel} onChange={(e) => setAppPriceLabel(e.target.value)} placeholder="FREE" /></Field>
+                  </div>
+                  <div style={S.grid2}>
+                    <Field label="Rating"><input style={S.input} value={appRating} onChange={(e) => setAppRating(e.target.value)} placeholder="e.g. 4.3" /></Field>
+                    <Field label="Reviews"><input style={S.input} value={appReviewCount} onChange={(e) => setAppReviewCount(e.target.value)} placeholder="e.g. 150K reviews" /></Field>
+                    <Field label="Downloads"><input style={S.input} value={appDownloadCount} onChange={(e) => setAppDownloadCount(e.target.value)} placeholder="e.g. 13M+" /></Field>
+                    <Field label="Category"><input style={S.input} value={appCategory} onChange={(e) => setAppCategory(e.target.value)} placeholder="e.g. Health & Fitness" /></Field>
+                  </div>
+                  <div style={S.grid2}>
+                    <Field label="Promo card image 1"><input style={S.input} value={promoImageUrl} onChange={(e) => setPromoImageUrl(e.target.value)} placeholder="https://..." /></Field>
+                    <Field label="Promo card image 2"><input style={S.input} value={promoImageUrl2} onChange={(e) => setPromoImageUrl2(e.target.value)} placeholder="https://..." /></Field>
+                  </div>
+                </>
               )}
+
+              {["video", "bumper"].includes(adFormat) && (placement === "pre_roll" || placement === "mid_roll" || placement === "any") ? (
+                <div style={S.grid2}>
+                  <Field label="Landing page URL (Learn more)"><input style={S.input} value={destinationUrl} onChange={(e) => setDestinationUrl(e.target.value)} placeholder="https://..." /></Field>
+                  <Field label="Promo card image (optional)"><input style={S.input} value={promoImageUrl} onChange={(e) => setPromoImageUrl(e.target.value)} placeholder="https://..." /></Field>
+                </div>
+              ) : null}
 
               {(adFormat === "image" || placement === "search_promoted" || placement === "channel_banner" || placement === "video_overlay") && (
                 <Field label="Landing page URL"><input style={S.input} value={destinationUrl} onChange={(e) => setDestinationUrl(e.target.value)} /></Field>
               )}
 
               <div style={S.preview}>
-                <div style={S.previewLabel}>Preview (home feed)</div>
+                <div style={S.previewLabel}>Preview (in-stream ad — YouTube style)</div>
+                <div style={S.instreamPreview}>
+                  <div style={S.instreamVideoMock}>
+                    <div style={S.instreamVideoTop}>
+                      <span style={{ flex: 1 }} />
+                      <span style={S.instreamVisit}>Visit advertiser</span>
+                    </div>
+                    <div style={S.instreamVideoBottom}>
+                      <span>Sponsored ⓘ</span>
+                      <span style={S.instreamSkip}>Skip ▶</span>
+                    </div>
+                    <div style={S.instreamProgress} />
+                  </div>
+                  <div style={S.instreamPanel}>
+                    <div style={S.instreamPanelHead}><strong>Sponsored</strong></div>
+                    <div style={S.instreamIdentity}>
+                      {imageUrl ? <img src={imageUrl} alt="" style={S.instreamIcon} /> : <div style={S.instreamIconPlaceholder} />}
+                      <div>
+                        <strong>{adFormat === "app_install" ? (appName || headline || creativeTitle || "App title") : (headline || creativeTitle || "Your headline")}</strong>
+                        <div style={{ color: "#5f6368", fontSize: 13, marginTop: 4 }}>
+                          {adFormat === "app_install" ? (appDeveloper || advertiser?.company_name || "Developer") : (advertiser?.company_name ?? "Advertiser")}
+                        </div>
+                        {adFormat === "app_install" ? (
+                          <div style={{ color: "#5f6368", fontSize: 12, marginTop: 4 }}>Google Play · {appPriceLabel || "FREE"}</div>
+                        ) : null}
+                      </div>
+                    </div>
+                    {adFormat === "app_install" ? (
+                      <div style={S.instreamStats}>
+                        {appRating ? (
+                          <div>
+                            <strong>{appRating} ★</strong>
+                            {appReviewCount ? <div style={S.statSub}>{appReviewCount}</div> : null}
+                          </div>
+                        ) : null}
+                        {appDownloadCount ? <div><strong>{appDownloadCount}</strong><div style={S.statSub}>Downloads</div></div> : null}
+                        {appCategory ? <div><strong>{appCategory}</strong><div style={S.statSub}>Category</div></div> : null}
+                      </div>
+                    ) : null}
+                    <p style={{ color: "#5f6368", fontSize: 13, margin: "10px 0" }}>{description || "Description shown below the video while ad plays."}</p>
+                    <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
+                      {[promoImageUrl, promoImageUrl2].filter(Boolean).map((url) => (
+                        <img key={url} src={url} alt="" style={S.instreamPromo} />
+                      ))}
+                    </div>
+                    <div style={S.instreamActions}>
+                      <span style={S.instreamLearn}>Learn more</span>
+                      <span style={S.instreamInstall}>{adFormat === "app_install" ? "Install" : adFormat === "shopping" ? "Shop now" : "Watch now"}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={S.preview}>
+                <div style={S.previewLabel}>Preview (home feed card)</div>
                 <div style={S.previewCard}>
                   <div style={S.previewSponsored}>Sponsored · {advertiser?.company_name}</div>
                   {imageUrl && <img src={imageUrl} alt="" style={S.previewImg} />}
@@ -987,4 +1169,22 @@ const S: Record<string, React.CSSProperties> = {
   fakeBtnGreen: { display: "inline-block", background: "#01875f", color: "#fff", padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600 },
   fakeBtnBlack: { display: "inline-block", background: "#000", color: "#fff", padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600 },
   payBanner: { background: "#fef7e0", border: "1px solid #f9e6b0", borderRadius: 10, padding: 16, marginBottom: 16 },
+  instreamPreview: { background: "#fff", borderRadius: 12, overflow: "hidden", border: "1px solid #e8eaed", maxWidth: 380 },
+  instreamVideoMock: { height: 180, background: "#111", color: "#fff", position: "relative", display: "flex", flexDirection: "column", justifyContent: "space-between" },
+  instreamVideoTop: { display: "flex", padding: 10, fontSize: 12 },
+  instreamVisit: { fontWeight: 600 },
+  instreamVideoBottom: { display: "flex", justifyContent: "space-between", padding: "0 10px 10px", fontSize: 12, fontWeight: 600 },
+  instreamSkip: { background: "rgba(255,255,255,0.92)", color: "#111", padding: "6px 10px", borderRadius: 4 },
+  instreamProgress: { height: 3, background: "#F2C94C" },
+  instreamPanel: { padding: 14 },
+  instreamPanelHead: { fontSize: 16, marginBottom: 10 },
+  instreamIdentity: { display: "flex", gap: 12, alignItems: "flex-start" },
+  instreamIcon: { width: 52, height: 52, borderRadius: 12, objectFit: "cover" },
+  instreamIconPlaceholder: { width: 52, height: 52, borderRadius: 12, background: "#e8eaed" },
+  instreamStats: { display: "flex", gap: 16, margin: "12px 0", padding: "10px 0", borderTop: "1px solid #e8eaed", borderBottom: "1px solid #e8eaed", fontSize: 13 },
+  statSub: { fontSize: 11, color: "#5f6368", marginTop: 2 },
+  instreamPromo: { width: 96, height: 170, borderRadius: 10, objectFit: "cover", flex: "0 0 auto" },
+  instreamActions: { display: "flex", gap: 10, marginTop: 12 },
+  instreamLearn: { flex: 1, textAlign: "center", background: "#f1f3f4", padding: "10px 0", borderRadius: 24, fontWeight: 600, fontSize: 13 },
+  instreamInstall: { flex: 1, textAlign: "center", background: "#111", color: "#fff", padding: "10px 0", borderRadius: 24, fontWeight: 600, fontSize: 13 },
 };

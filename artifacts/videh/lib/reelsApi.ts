@@ -539,6 +539,24 @@ export type ReelsAdBreakItem = {
   adType: "non_skippable" | "skippable";
   placement: "pre_roll" | "mid_roll";
   advertiserName: string;
+  format?: "video" | "image" | "app_install" | "shopping" | "bumper" | "shorts_video" | "carousel" | "lead_form";
+  headline?: string;
+  description?: string;
+  imageUrl?: string | null;
+  ctaType?: string;
+  destinationUrl?: string | null;
+  playStoreUrl?: string | null;
+  appStoreUrl?: string | null;
+  appName?: string | null;
+  appDeveloper?: string | null;
+  appRating?: number | null;
+  appReviewCount?: string | null;
+  appDownloadCount?: string | null;
+  appCategory?: string | null;
+  appPriceLabel?: string;
+  promoImageUrl?: string | null;
+  promoImageUrl2?: string | null;
+  sponsoredLabel?: string;
 };
 
 export type ReelsMidRollBreak = {

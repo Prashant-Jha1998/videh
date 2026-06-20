@@ -128,4 +128,13 @@ async function ensureReelsAdsV2Columns(): Promise<void> {
   await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS moderation_reason TEXT`);
   await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`);
   await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(120)`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS app_developer VARCHAR(120)`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS app_rating NUMERIC(2, 1)`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS app_review_count VARCHAR(32)`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS app_download_count VARCHAR(32)`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS app_category VARCHAR(80)`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS app_price_label VARCHAR(24) NOT NULL DEFAULT 'FREE'`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS promo_image_url TEXT`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS promo_image_url_2 TEXT`);
+  await query(`ALTER TABLE reels_ad_creatives ADD COLUMN IF NOT EXISTS sponsored_label VARCHAR(40) NOT NULL DEFAULT 'Sponsored'`);
 }

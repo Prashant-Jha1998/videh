@@ -32,6 +32,7 @@ import { getAdvertiserDashboard } from "../lib/adsAnalytics";
 import { getRazorpayConfig } from "../lib/razorpay";
 import { resolveGoogleOAuthClientId, verifyGoogleIdToken } from "../lib/googleIdTokenVerify";
 import { uploadLocalFileToS3, scheduleS3Upload } from "../lib/s3Storage";
+import { enrichAppInstallFieldsFromPlayStore, lookupPlayStoreApp } from "../lib/playStoreLookup";
 
 const router = Router();
 const adsRoutesDir = path.dirname(fileURLToPath(import.meta.url));
@@ -492,6 +493,33 @@ router.post("/campaigns", async (req, res) => {
   }
 });
 
+router.get("/play-store/lookup", async (req, res) => {
+  const user = requireAdsUser(req, res);
+  if (!user) return;
+  const url = String(req.query.url ?? "").trim();
+  if (!url) {
+    res.status(400).json({ success: false, message: "Play Store URL required." });
+    return;
+  }
+  try {
+    const info = await lookupPlayStoreApp(url);
+    if (!info) {
+      res.status(404).json({
+        success: false,
+        message: "Could not read app details from Play Store. Enter details manually.",
+      });
+      return;
+    }
+    res.json({ success: true, app: info });
+  } catch (err) {
+    req.log?.error?.({ err }, "play store lookup");
+    res.status(502).json({
+      success: false,
+      message: "Play Store lookup failed. Enter app details manually.",
+    });
+  }
+});
+
 router.get("/creatives", async (req, res) => {
   const user = requireAdsUser(req, res);
   if (!user) return;
@@ -615,12 +643,52 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
         scheduleS3Upload(path.join(adsUploadsDir, videoFile.filename), videoUrl);
       }
 
+      let appName = body.appName?.trim() || null;
+      let appDeveloper = body.appDeveloper?.trim() || null;
+      let appRating = body.appRating ? Number(body.appRating) : null;
+      let appReviewCount = body.appReviewCount?.trim() || null;
+      let appDownloadCount = body.appDownloadCount?.trim() || null;
+      let appCategory = body.appCategory?.trim() || null;
+      let appPriceLabel = body.appPriceLabel?.trim() || "FREE";
+
+      if (format === "app_install" && body.playStoreUrl?.trim()) {
+        const enriched = await enrichAppInstallFieldsFromPlayStore({
+          playStoreUrl: body.playStoreUrl,
+          appName,
+          appDeveloper,
+          imageUrl: imageUrl || null,
+          appRating: Number.isFinite(appRating) ? appRating : null,
+          appReviewCount,
+          appDownloadCount,
+          appCategory,
+          appPriceLabel,
+        });
+        appName = enriched.appName;
+        appDeveloper = enriched.appDeveloper;
+        if (!imageUrl && enriched.imageUrl) imageUrl = enriched.imageUrl;
+        appRating = enriched.appRating;
+        appReviewCount = enriched.appReviewCount;
+        appDownloadCount = enriched.appDownloadCount;
+        appCategory = enriched.appCategory;
+        appPriceLabel = enriched.appPriceLabel;
+      }
+
+      if (format === "app_install" && !appName) {
+        res.status(400).json({
+          success: false,
+          message: "App name required. Paste Play Store URL to auto-fill or enter manually.",
+        });
+        return;
+      }
+
       const r = await query(
         `INSERT INTO reels_ad_creatives
           (campaign_id, title, format, video_url, image_url, headline, description,
            duration_seconds, skip_after_seconds, placement, ad_type, cta_type,
-           destination_url, play_store_url, app_store_url, app_name, moderation_status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'pending_review') RETURNING *`,
+           destination_url, play_store_url, app_store_url, app_name,
+           app_developer, app_rating, app_review_count, app_download_count, app_category,
+           app_price_label, promo_image_url, promo_image_url_2, sponsored_label, moderation_status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,'pending_review') RETURNING *`,
         [
           campaignId,
           title,
@@ -642,7 +710,16 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
           body.destinationUrl?.trim() || null,
           body.playStoreUrl?.trim() || null,
           body.appStoreUrl?.trim() || null,
-          body.appName?.trim() || null,
+          appName,
+          appDeveloper,
+          appRating,
+          appReviewCount,
+          appDownloadCount,
+          appCategory,
+          appPriceLabel,
+          body.promoImageUrl?.trim() || null,
+          body.promoImageUrl2?.trim() || null,
+          body.sponsoredLabel?.trim() || "Sponsored",
         ],
       );
       res.json({
