@@ -3,6 +3,17 @@ import { Alert, Clipboard, Platform, Share } from "react-native";
 import type { ReelsVideo } from "./reelsApi";
 import { shareReelsVideo } from "./reelsApi";
 
+const CHANNEL_HANDLE_RE = /[a-zA-Z][a-zA-Z0-9_]{2,29}/;
+
+function videoPublicBase(): string {
+  const domain = process.env.EXPO_PUBLIC_VIDEO_DOMAIN?.trim() || "video.videh.co.in";
+  return domain.startsWith("http") ? domain.replace(/\/+$/, "") : `https://${domain}`;
+}
+
+function normalizeChannelHandle(handle: string): string {
+  return handle.replace(/^@+/, "").trim();
+}
+
 /** Parse YouTube-style share URL or videh:// deep link → video id. */
 export function parseReelsWatchIdFromUrl(url: string): string | null {
   if (!url) return null;
@@ -16,7 +27,69 @@ export function parseReelsWatchIdFromUrl(url: string): string | null {
   }
   const pathMatch = String(parsed.path ?? url).match(/reels\/watch\/(\d+)/i);
   if (pathMatch?.[1]) return pathMatch[1];
+  const watchMatch = url.match(/\/watch\/(\d+)/i);
+  if (watchMatch?.[1]) return watchMatch[1];
   return null;
+}
+
+/** Parse channel share URL or videh:// deep link → @handle (without @). */
+export function parseReelsChannelHandleFromUrl(url: string): string | null {
+  if (!url) return null;
+  const goMatch = url.match(/\/api\/reels\/go\/channel\/([a-zA-Z][a-zA-Z0-9_]{2,29})/i);
+  if (goMatch?.[1]) return goMatch[1].toLowerCase();
+
+  const parsed = Linking.parse(url);
+  const host = (parsed.hostname ?? "").toLowerCase();
+  const path = String(parsed.path ?? "").replace(/^\//, "");
+
+  if (host === "reels") {
+    const parts = path.split("/");
+    if (parts[0] === "channel" && parts[1] && CHANNEL_HANDLE_RE.test(parts[1])) {
+      return parts[1].toLowerCase();
+    }
+  }
+
+  const deepMatch = url.match(/reels\/channel\/([a-zA-Z][a-zA-Z0-9_]{2,29})/i);
+  if (deepMatch?.[1]) return deepMatch[1].toLowerCase();
+
+  const atMatch = url.match(/\/@([a-zA-Z][a-zA-Z0-9_]{2,29})(?:[/?#]|$)/i);
+  if (atMatch?.[1]) return atMatch[1].toLowerCase();
+
+  const channelPathMatch = url.match(/\/channel\/([a-zA-Z][a-zA-Z0-9_]{2,29})(?:[/?#]|$)/i);
+  if (channelPathMatch?.[1]) return channelPathMatch[1].toLowerCase();
+
+  return null;
+}
+
+export function reelsChannelShareUrl(handle: string): string {
+  const h = normalizeChannelHandle(handle);
+  return `${videoPublicBase()}/@${encodeURIComponent(h)}`;
+}
+
+export function reelsChannelShareMessage(channel: {
+  handle: string;
+  displayName?: string | null;
+}): string {
+  const label = channel.displayName?.trim() || `@${channel.handle}`;
+  const url = reelsChannelShareUrl(channel.handle);
+  return `Subscribe to ${label} on Videh Video\n${url}`;
+}
+
+export async function shareReelsChannelLink(channel: {
+  handle: string;
+  displayName?: string | null;
+}): Promise<void> {
+  const message = reelsChannelShareMessage(channel);
+  if (Platform.OS === "web") {
+    Clipboard.setString(message);
+    Alert.alert("Link copied", "Paste it in chat or status to share your channel.");
+    return;
+  }
+  try {
+    await Share.share({ message, title: channel.displayName?.trim() || `@${channel.handle}` });
+  } catch {
+    Alert.alert("Share channel", message);
+  }
 }
 
 export function reelsShareUrlForVideo(video: Pick<ReelsVideo, "id" | "shareUrl">): string {

@@ -13,10 +13,10 @@ type Props = {
 
 export function OngoingCallBanner({ contactName, isVideo, durationLabel, onReturn, onEnd }: Props) {
   const insets = useSafeAreaInsets();
-  const bottom = Math.max(insets.bottom, Platform.OS === "ios" ? 8 : 12);
+  const top = insets.top + (Platform.OS === "ios" ? 4 : 8);
 
   return (
-    <View style={[styles.wrap, { bottom }]}>
+    <View style={[styles.wrap, { top }]}>
       <TouchableOpacity style={styles.main} onPress={onReturn} activeOpacity={0.92}>
         <View style={styles.iconWrap}>
           <Ionicons name={isVideo ? "videocam" : "call"} size={20} color="#fff" />

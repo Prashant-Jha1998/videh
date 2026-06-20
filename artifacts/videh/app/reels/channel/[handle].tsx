@@ -45,7 +45,7 @@ import {
   type ReelsVideo,
 } from "@/lib/reelsApi";
 import { addToPlayQueue, addToWatchLater } from "@/lib/reelsLibrary";
-import { shareReelsVideoLink } from "@/lib/reelsShare";
+import { shareReelsChannelLink, shareReelsVideoLink } from "@/lib/reelsShare";
 import { downloadReelsVideoToApp, saveReelsVideoToDevice } from "@/lib/reelsVideoDownload";
 
 const SCREEN_W = Dimensions.get("window").width;
@@ -332,6 +332,12 @@ export default function ReelsChannelScreen() {
               showAboutEntry={showAboutEntry}
               onBack={() => router.back()}
               onEdit={() => router.push("/reels/channel/edit")}
+              onShare={() => {
+                void shareReelsChannelLink({
+                  handle: channel.handle,
+                  displayName: channel.displayName,
+                });
+              }}
               onAnalytics={() => setAnalyticsOpen(true)}
               onAbout={() => setAboutOpen(true)}
               onSubscribe={async () => {
@@ -577,6 +583,7 @@ function ChannelHeader({
   showAboutEntry,
   onBack,
   onEdit,
+  onShare,
   onAnalytics,
   onAbout,
   onSubscribe,
@@ -591,24 +598,31 @@ function ChannelHeader({
   showAboutEntry: boolean;
   onBack: () => void;
   onEdit: () => void;
+  onShare: () => void;
   onAnalytics: () => void;
   onAbout: () => void;
   onSubscribe: () => void;
 }) {
   return (
     <>
-      <View style={styles.coverWrap}>
-        <ChannelCover uri={channel.coverUrl} channelId={channel.id} fallbackColor={colors.primary} />
-        <View style={[styles.headerBar, { paddingTop: insetsTop + 8 }]}>
-          <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+      <View style={[styles.topNav, { paddingTop: insetsTop + 4, backgroundColor: colors.background }]}>
+        <TouchableOpacity onPress={onBack} style={styles.navBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Ionicons name="arrow-back" size={24} color={colors.foreground} />
+        </TouchableOpacity>
+        <View style={styles.navActions}>
+          <TouchableOpacity onPress={onShare} style={styles.navBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="share-outline" size={22} color={colors.foreground} />
           </TouchableOpacity>
           {channel.isOwner ? (
-            <TouchableOpacity onPress={onEdit} style={styles.backBtn}>
-              <Ionicons name="create-outline" size={22} color="#fff" />
+            <TouchableOpacity onPress={onEdit} style={styles.navBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="create-outline" size={22} color={colors.foreground} />
             </TouchableOpacity>
           ) : null}
         </View>
+      </View>
+
+      <View style={styles.coverWrap}>
+        <ChannelCover uri={channel.coverUrl} channelId={channel.id} fallbackColor={colors.primary} />
       </View>
 
       <View style={styles.profile}>
@@ -669,6 +683,13 @@ function ChannelHeader({
             >
               <Ionicons name="bar-chart-outline" size={18} color={colors.foreground} />
               <Text style={[styles.ownerActionText, { color: colors.foreground }]}>Analytics</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.ownerActionBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={onShare}
+            >
+              <Ionicons name="share-outline" size={18} color={colors.foreground} />
+              <Text style={[styles.ownerActionText, { color: colors.foreground }]}>Share channel</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.ownerActionBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
@@ -986,10 +1007,17 @@ function VideoCard({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  coverWrap: { position: "relative" },
+  topNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+  },
+  navActions: { flexDirection: "row", alignItems: "center" },
+  navBtn: { padding: 8 },
+  coverWrap: { width: SCREEN_W },
   cover: { width: SCREEN_W, height: 120 },
-  headerBar: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 12 },
-  backBtn: { padding: 8, backgroundColor: "rgba(0,0,0,0.35)", borderRadius: 20 },
   profile: { paddingHorizontal: 16, paddingBottom: 12, marginTop: -28 },
   avatarRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   avatar: { width: 72, height: 72, borderRadius: 36, borderWidth: 2, borderColor: "#fff" },

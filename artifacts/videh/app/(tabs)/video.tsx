@@ -2,12 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { StatusBar } from "expo-status-bar";
+import * as SystemUI from "expo-system-ui";
 import {
   ActivityIndicator,
   Alert,
   Dimensions,
   FlatList,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -325,6 +328,15 @@ export default function VideoTabScreen() {
     }, [loadInitial, refreshHidden, refreshUnreadNotifications]),
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      void SystemUI.setBackgroundColorAsync(colors.background);
+      return () => {
+        void SystemUI.setBackgroundColorAsync(colors.headerBg ?? colors.primary);
+      };
+    }, [colors.background, colors.headerBg, colors.primary]),
+  );
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadInitial({ silent: true });
@@ -334,6 +346,16 @@ export default function VideoTabScreen() {
   const openVideo = (v: ReelsVideo) => {
     router.push({ pathname: "/reels/watch/[id]", params: { id: String(v.id) } });
   };
+
+  const openProfile = () => {
+    if (myChannel?.handle) {
+      router.push({ pathname: "/reels/channel/[handle]", params: { handle: myChannel.handle } });
+      return;
+    }
+    router.push("/reels/setup");
+  };
+
+  const profileAvatarUri = myChannel?.avatarUrl ?? user?.avatar ?? null;
 
   const channelLabel = (v: ReelsVideo) =>
     v.channelDisplayName ?? (v.channelHandle ? `@${v.channelHandle}` : "Channel");
@@ -575,7 +597,7 @@ export default function VideoTabScreen() {
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      style={[styles.chipsBar, { borderBottomColor: colors.border }]}
+      style={styles.chipsBar}
       contentContainerStyle={styles.chipsContent}
     >
       {FEED_CATEGORIES.map((cat) => {
@@ -636,11 +658,13 @@ export default function VideoTabScreen() {
   );
 
   const headerBar = (
-    <View style={[styles.header, { paddingTop: insets.top + 6, backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+    <View style={[styles.header, { paddingTop: insets.top + 6, borderBottomColor: colors.border }]}>
       <View style={styles.logoRow}>
-        <View style={styles.logoIcon}>
-          <Ionicons name="play" size={14} color="#fff" style={{ marginLeft: 2 }} />
-        </View>
+        <Image
+          source={require("@/assets/images/videh_icon_foreground.png")}
+          style={[styles.logoImage, { tintColor: colors.primary }]}
+          contentFit="contain"
+        />
         <Text style={[styles.logoText, { color: colors.foreground }]}>Videh</Text>
       </View>
       <View style={styles.headerActions}>
@@ -657,6 +681,13 @@ export default function VideoTabScreen() {
             </View>
           ) : null}
         </TouchableOpacity>
+        <TouchableOpacity onPress={openProfile} style={styles.iconBtn}>
+          {profileAvatarUri ? (
+            <Image source={{ uri: profileAvatarUri }} style={styles.profileBtnAvatar} contentFit="cover" />
+          ) : (
+            <Ionicons name="person-circle-outline" size={26} color={colors.foreground} />
+          )}
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => router.push("/reels/search")} style={styles.iconBtn}>
           <Ionicons name="search" size={24} color={colors.foreground} />
         </TouchableOpacity>
@@ -664,11 +695,34 @@ export default function VideoTabScreen() {
     </View>
   );
 
+  const topChrome = (
+    <View
+      style={[
+        styles.topChrome,
+        {
+          backgroundColor: colors.background,
+          borderBottomColor: colors.border,
+        },
+      ]}
+    >
+      {headerBar}
+      {categoryChips}
+    </View>
+  );
+
+  const tabStatusBar = (
+    <StatusBar
+      style={colors.isDark ? "light" : "dark"}
+      backgroundColor={colors.background}
+      translucent={Platform.OS === "android"}
+    />
+  );
+
   if (loading && videos.length === 0) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        {headerBar}
-        {categoryChips}
+        {tabStatusBar}
+        {topChrome}
         <VideoFeedSkeleton
           mutedColor={colors.muted}
           softColor={colors.border ?? colors.muted}
@@ -679,10 +733,11 @@ export default function VideoTabScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {headerBar}
-      {categoryChips}
+      {tabStatusBar}
+      {topChrome}
 
       <FlatList
+        style={styles.feedList}
         data={feedRows}
         keyExtractor={(row) => row.key}
         renderItem={renderItem}
@@ -802,6 +857,12 @@ export default function VideoTabScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  feedList: { flex: 1 },
+  topChrome: {
+    zIndex: 10,
+    elevation: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   center: { alignItems: "center", justifyContent: "center", padding: 32 },
   header: {
     flexDirection: "row",
@@ -809,20 +870,13 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 12,
     paddingBottom: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  logoRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  logoIcon: {
-    width: 28,
-    height: 20,
-    borderRadius: 4,
-    backgroundColor: "#FF0000",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  logoRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  logoImage: { width: 30, height: 30 },
   logoText: { fontSize: 20, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
   headerActions: { flexDirection: "row", alignItems: "center" },
   iconBtn: { padding: 8, position: "relative" },
+  profileBtnAvatar: { width: 28, height: 28, borderRadius: 14 },
   notifBadge: {
     position: "absolute",
     top: 4,
@@ -836,7 +890,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 3,
   },
   notifBadgeText: { color: "#fff", fontSize: 9, fontFamily: "Inter_700Bold" },
-  chipsBar: { borderBottomWidth: StyleSheet.hairlineWidth, maxHeight: 48 },
+  chipsBar: {},
   chipsContent: { paddingHorizontal: 12, paddingVertical: 8, gap: 8, alignItems: "center" },
   chipIcon: {
     width: 36,

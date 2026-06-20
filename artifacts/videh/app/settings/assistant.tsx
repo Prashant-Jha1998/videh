@@ -31,12 +31,21 @@ import {
   type VoiceEnrollmentSample,
 } from "@/lib/voiceEnrollment";
 import { useColors } from "@/hooks/useColors";
+import { HEY_VIDeh_ENABLED } from "@/lib/heyVidehFeature";
+import { HeyVidehComingSoonScreen } from "@/components/HeyVidehComingSoon";
 
 const ENROLLMENT_SAMPLES = 3;
 
 type EnrollPhase = "idle" | "recording" | "review";
 
 export default function AssistantSettingsScreen() {
+  if (!HEY_VIDeh_ENABLED) {
+    return <HeyVidehComingSoonScreen />;
+  }
+  return <AssistantSettingsContent />;
+}
+
+function AssistantSettingsContent() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();

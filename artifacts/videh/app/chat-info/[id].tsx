@@ -26,7 +26,7 @@ import {
 } from "react-native";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
-import { disappearTimerLabel } from "@/lib/disappearTimerOptions";
+import { disappearTimerLabel, isChatDisappearingEnabled } from "@/lib/disappearTimerOptions";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
@@ -691,7 +691,7 @@ export default function ChatInfoScreen() {
                 <Text style={styles.bigAvatarText}>{initials}</Text>
               </View>
             )}
-            {(disappearing ?? 0) > 0 ? <DisappearTimerBadge size={22} variant="profile" /> : null}
+            {isChatDisappearingEnabled(disappearing) ? <DisappearTimerBadge size={22} variant="profile" /> : null}
           </TouchableOpacity>
           <Text style={[styles.contactName, { color: colors.foreground }]}>{name ?? chat?.name}</Text>
           {!isGroup && (

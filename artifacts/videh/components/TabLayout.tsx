@@ -119,7 +119,7 @@ export function ClassicTabLayout() {
         options={{
           title: t("tab.video"),
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "logo-youtube" : "logo-youtube"} size={24} color={color} />
+            <Ionicons name={focused ? "play-circle" : "play-circle-outline"} size={24} color={color} />
           ),
         }}
       />

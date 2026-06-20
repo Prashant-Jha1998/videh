@@ -70,10 +70,13 @@ export async function ensureBusinessSenderUser(
     await query(
       `UPDATE users SET
          name = COALESCE(NULLIF($1, ''), NULLIF(name, ''), 'Business'),
-         avatar_url = CASE WHEN $4 THEN $2 ELSE avatar_url END,
+         avatar_url = CASE
+           WHEN $2 IS NOT NULL AND BTRIM($2) <> '' THEN $2
+           ELSE avatar_url
+         END,
          updated_at = NOW()
        WHERE id = $3`,
-      [label, avatar, existing.id, logoUrl != null],
+      [label, avatar, existing.id],
     );
     return existing.id;
   }

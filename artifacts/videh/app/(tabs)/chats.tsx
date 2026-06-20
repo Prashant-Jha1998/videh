@@ -30,6 +30,8 @@ import { formatTypingLabel } from "@/lib/typingIndicator";
 import { interpolate } from "@/lib/i18n";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
 import { headerTopInset } from "@/lib/headerInset";
+import { isChatDisappearingEnabled } from "@/lib/disappearTimerOptions";
+import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 
 interface BroadcastListRow {
   id: number;
@@ -42,6 +44,67 @@ const MANUAL_UNREAD_KEY = "videh_manual_unread_chat_ids";
 const LOCKED_CHATS_KEY = "videh_locked_chat_ids";
 const CHAT_SHORTCUTS_KEY = "videh_chat_shortcut_ids";
 const CUSTOM_LIST_KEY = "videh_custom_list_chat_ids";
+
+function ChatListAvatar({
+  uri,
+  initials,
+  avatarBg,
+  size,
+  ringInner,
+}: {
+  uri?: string;
+  initials: string;
+  avatarBg: string;
+  size: number;
+  ringInner?: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+  const resolved = resolvePublicAssetUrl(uri);
+  const showPhoto = Boolean(resolved) && !failed;
+
+  if (ringInner) {
+    if (!showPhoto) {
+      return (
+        <View style={[styles.statusRingInnerFallback, { backgroundColor: avatarBg }]}>
+          <Text style={styles.statusRingInnerText}>{initials}</Text>
+        </View>
+      );
+    }
+    return (
+      <Image
+        source={{ uri: resolved }}
+        style={styles.statusRingInnerImg}
+        contentFit="cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <View
+      style={[
+        styles.avatarWrap,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: showPhoto ? "#fff" : avatarBg,
+        },
+      ]}
+    >
+      {showPhoto ? (
+        <Image
+          source={{ uri: resolved }}
+          style={{ width: size, height: size, borderRadius: size / 2 }}
+          contentFit="cover"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <Text style={styles.avatarText}>{initials}</Text>
+      )}
+    </View>
+  );
+}
 
 export default function ChatsScreen() {
   const colors = useColors();
@@ -708,11 +771,7 @@ function ChatRow({
     [chat.isGroup, chat.otherUserId, statuses],
   );
 
-  const hasAvatar = Boolean(chat.avatar);
-  const disappearingOn = (chat.disappearAfterSeconds ?? 0) > 0;
-  const wrapStyle = statusRingSegments
-    ? styles.avatarRingTouchable
-    : [styles.avatarWrap, hasAvatar ? styles.avatarWrapPhoto : { backgroundColor: avatarBg }];
+  const disappearingOn = isChatDisappearingEnabled(chat.disappearAfterSeconds);
 
   return (
     <View style={[styles.row, { borderBottomColor: colors.border }, selected && { backgroundColor: colors.primary + "14" }]}>
@@ -721,21 +780,24 @@ function ChatRow({
         onPress={onAvatarPress}
         activeOpacity={0.85}
       >
-        <View style={[wrapStyle, disappearingOn && styles.avatarWithTimer]}>
+        <View style={[styles.avatarRingTouchable, disappearingOn && styles.avatarWithTimer]}>
           {statusRingSegments ? (
             <StoryRingAvatar segments={statusRingSegments}>
-              {hasAvatar ? (
-                <Image source={{ uri: chat.avatar! }} style={styles.statusRingInnerImg} contentFit="cover" />
-              ) : (
-                <View style={[styles.statusRingInnerFallback, { backgroundColor: avatarBg }]}>
-                  <Text style={styles.statusRingInnerText}>{initials}</Text>
-                </View>
-              )}
+              <ChatListAvatar
+                uri={chat.avatar}
+                initials={initials}
+                avatarBg={avatarBg}
+                size={44}
+                ringInner
+              />
             </StoryRingAvatar>
-          ) : hasAvatar ? (
-            <Image source={{ uri: chat.avatar! }} style={styles.avatarImg} contentFit="cover" />
           ) : (
-            <Text style={styles.avatarText}>{initials}</Text>
+            <ChatListAvatar
+              uri={chat.avatar}
+              initials={initials}
+              avatarBg={avatarBg}
+              size={52}
+            />
           )}
           {disappearingOn ? <DisappearTimerBadge size={14} /> : null}
         </View>

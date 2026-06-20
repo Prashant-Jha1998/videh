@@ -39,6 +39,7 @@ import {
   stopListening,
   stopSpeaking,
 } from "@/lib/assistantSpeech";
+import { HEY_VIDeh_ENABLED } from "@/lib/heyVidehFeature";
 
 type AssistantPhase = "idle" | "listening" | "wake" | "active" | "processing" | "speaking";
 
@@ -343,6 +344,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   submitBufferedCommandRef.current = submitBufferedCommand;
 
   const activateAssistant = useCallback(async (inlineCommand?: string) => {
+    if (!HEY_VIDeh_ENABLED) return;
     if (!user?.sessionToken) {
       setLastError("Please sign in again to use Hey Videh.");
       return;
@@ -430,6 +432,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const startWakeListeningRef = useRef<() => Promise<void>>(async () => {});
 
   const startWakeListening = useCallback(async () => {
+    if (!HEY_VIDeh_ENABLED) return;
     const p = prefsRef.current;
     if (!p?.enabled || !isSpeechRecognitionAvailable()) return;
     if (phaseRef.current !== "idle") return;
@@ -475,6 +478,12 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   startWakeListeningRef.current = startWakeListening;
 
   useEffect(() => {
+    if (!HEY_VIDeh_ENABLED) {
+      void stopListening();
+      listeningRef.current = false;
+      if (wakeRestartTimerRef.current) clearTimeout(wakeRestartTimerRef.current);
+      return;
+    }
     if (!isAuthenticated || !prefs?.enabled) {
       void stopListening();
       listeningRef.current = false;

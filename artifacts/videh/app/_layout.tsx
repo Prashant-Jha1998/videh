@@ -18,7 +18,7 @@ import { UiPreferencesProvider } from "@/context/UiPreferencesContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AssistantOverlay } from "@/components/AssistantOverlay";
 import { getApiUrl } from "@/lib/api";
-import { parseReelsWatchIdFromUrl } from "@/lib/reelsShare";
+import { parseReelsChannelHandleFromUrl, parseReelsWatchIdFromUrl } from "@/lib/reelsShare";
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
 import { shouldPresentIncomingCall } from "@/lib/callRole";
 import { hydrateIncomingCallInfo, hydrateAndValidateIncomingCall } from "@/lib/hydrateIncomingCall";
@@ -776,6 +776,14 @@ function RootLayoutNav() {
     if (Platform.OS === "web") return;
     const openReelsFromUrl = (url: string | null) => {
       if (!url) return;
+      const channelHandle = parseReelsChannelHandleFromUrl(url);
+      if (channelHandle) {
+        router.push({
+          pathname: "/reels/channel/[handle]",
+          params: { handle: channelHandle },
+        } as unknown as Href);
+        return;
+      }
       const videoId = parseReelsWatchIdFromUrl(url);
       if (!videoId) return;
       router.push({ pathname: "/reels/watch/[id]", params: { id: videoId } } as unknown as Href);

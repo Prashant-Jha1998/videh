@@ -12,6 +12,10 @@ export function disappearTimerLabel(seconds: number | null | undefined): string 
   return hit?.label ?? "Custom";
 }
 
+export function isChatDisappearingEnabled(seconds: number | null | undefined): boolean {
+  return typeof seconds === "number" && seconds > 0;
+}
+
 export function isSameDisappearTimer(
   a: number | null | undefined,
   b: number | null | undefined,

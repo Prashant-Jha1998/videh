@@ -262,12 +262,18 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
 
     const viewerId = Number(userId);
     const chats = result.rows;
+    const { lookupBusinessChannelByUserId } = await import("../lib/businessChannelLookup");
     for (const chat of chats) {
       if (chat.is_group || !chat.other_members?.[0]) continue;
       const other = chat.other_members[0];
       const presence = await getPresenceForViewer(viewerId, Number(other.id));
       other.is_online = presence.canSee && presence.isOnline;
       other.last_seen = presence.canSee ? presence.lastSeen : null;
+      const business = await lookupBusinessChannelByUserId(Number(other.id));
+      if (business) {
+        if (business.logoUrl) other.avatar_url = business.logoUrl;
+        if (business.displayName?.trim()) other.name = business.displayName.trim();
+      }
     }
 
     res.json({ success: true, chats });
@@ -379,20 +385,12 @@ router.post("/direct", async (req: Request, res: Response) => {
       return;
     }
 
-    const ownerPrivacy = await getExtendedPrivacy(userId);
-    const defaultDisappear = ownerPrivacy?.default_disappear_seconds ?? null;
     const chat = await query(
-      "INSERT INTO chats (is_group, disappear_after_seconds) VALUES (FALSE, $1) RETURNING id",
-      [defaultDisappear],
+      "INSERT INTO chats (is_group, disappear_after_seconds) VALUES (FALSE, NULL) RETURNING id",
+      [],
     );
     const chatId = chat.rows[0].id;
     await query("INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2), ($1, $3)", [chatId, userId, otherUserId]);
-    if (defaultDisappear && defaultDisappear > 0) {
-      await insertChatSystemMessage(chatId, userId, {
-        kind: "disappear_timer",
-        seconds: defaultDisappear,
-      });
-    }
     res.json({ success: true, chatId });
   } catch (err) {
     req.log.error({ err }, "direct chat error");

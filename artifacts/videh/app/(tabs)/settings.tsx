@@ -18,6 +18,7 @@ import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { ThemedHeader } from "@/components/ThemedHeader";
+import { showHeyVidehComingSoon } from "@/lib/heyVidehFeature";
 
 interface SettingRow {
   icon: string;
@@ -98,7 +99,7 @@ export default function SettingsScreen() {
 
   const rows: SettingRow[] = useMemo(
     () => [
-      { icon: "mic-circle-outline", iconBg: "#00A884", label: t("settings.heyVideh"), value: t("settings.heyVidehSub"), onPress: () => router.push("/settings/assistant" as Href) },
+      { icon: "mic-circle-outline", iconBg: "#00A884", label: t("settings.heyVideh"), value: t("settings.heyVidehSub"), onPress: showHeyVidehComingSoon },
       { icon: "key-outline", iconBg: "#2196F3", label: t("settings.row.account"), value: t("settings.row.accountSub"), onPress: () => router.push("/settings/account") },
       { icon: "lock-closed-outline", iconBg: "#9C27B0", label: t("settings.row.privacy"), value: t("settings.row.privacySub"), onPress: () => router.push("/settings/privacy") },
       { icon: "color-palette-outline", iconBg: "#7C3AED", label: t("settings.appTheme"), value: t("settings.appThemeSub"), onPress: () => router.push("/settings/theme" as Href) },

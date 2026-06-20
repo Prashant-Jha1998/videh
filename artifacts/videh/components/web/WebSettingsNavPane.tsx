@@ -6,6 +6,7 @@ import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { WEB_LIST_PANE_WIDTH } from "@/lib/web/webDesktop";
+import { showHeyVidehComingSoon } from "@/lib/heyVidehFeature";
 
 const ROWS: Array<{ icon: string; iconBg: string; label: string; sub: string; href: string }> = [
   { icon: "mic-circle-outline", iconBg: "#00A884", label: "Hey Videh", sub: "Voice assistant", href: "/settings/assistant" },
@@ -62,7 +63,13 @@ export function WebSettingsNavPane({ width = WEB_LIST_PANE_WIDTH }: Props) {
                 { borderBottomColor: colors.border },
                 active && { backgroundColor: colors.primary + "12" },
               ]}
-              onPress={() => router.push(row.href as never)}
+              onPress={() => {
+                if (row.href === "/settings/assistant") {
+                  showHeyVidehComingSoon();
+                  return;
+                }
+                router.push(row.href as never);
+              }}
               activeOpacity={0.75}
             >
               <View style={[styles.icon, { backgroundColor: row.iconBg }]}>

@@ -55,7 +55,12 @@ import {
   tryRedirectStoredMediaToCdn,
   uploadStoredMediaBatch,
 } from "../lib/s3Storage";
-import { buildReelsVideoDeepLink, buildReelsVideoShareUrl } from "../lib/reelsShareUrl";
+import {
+  buildReelsChannelDeepLink,
+  buildReelsChannelShareUrl,
+  buildReelsVideoDeepLink,
+  buildReelsVideoShareUrl,
+} from "../lib/reelsShareUrl";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -475,6 +480,76 @@ router.get("/videos/:id/thumbnail", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err, videoId }, "reels video thumbnail");
     res.status(500).end();
+  }
+});
+
+/** Channel share landing — opens channel in Videh app or shows download prompt. */
+router.get("/go/channel/:handle", async (req: Request, res: Response) => {
+  const handle = normalizeReelsHandle(req.params.handle);
+  if (!handle) {
+    res.status(400).send("Invalid channel");
+    return;
+  }
+  try {
+    await ensureReelsTables();
+    const row = await query(
+      `SELECT handle, display_name, bio, avatar_url FROM reels_channels WHERE LOWER(handle) = $1 LIMIT 1`,
+      [handle],
+    );
+    if (!row.rows.length) {
+      res.status(404).send("Channel not found");
+      return;
+    }
+    const ch = row.rows[0] as {
+      handle?: string;
+      display_name?: string;
+      bio?: string;
+    };
+    const displayName = String(ch.display_name ?? ch.handle ?? "Videh").replace(/[<>&"]/g, (c) => (
+      { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c] ?? c
+    ));
+    const handleLabel = String(ch.handle ?? handle).replace(/[<>&"]/g, (c) => (
+      { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c] ?? c
+    ));
+    const deepLink = buildReelsChannelDeepLink(handle);
+    const shareUrl = buildReelsChannelShareUrl(handle);
+    res.type("html").send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>@${handleLabel} — Videh</title>
+  <meta property="og:title" content="${displayName}"/>
+  <meta property="og:description" content="Subscribe to @${handleLabel} on Videh Video"/>
+  <meta property="og:url" content="${shareUrl}"/>
+  <meta property="og:type" content="profile"/>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#0b141a;color:#e9edef;margin:0;padding:24px;text-align:center}
+    .card{max-width:420px;margin:40px auto;padding:24px;border-radius:16px;background:#1f2c34}
+    h1{font-size:1.25rem;margin:0 0 8px}
+    p{color:#8696a0;margin:0 0 20px}
+    a.btn{display:inline-block;padding:14px 28px;background:#00a884;color:#fff;text-decoration:none;border-radius:999px;font-weight:700}
+    .muted{font-size:.85rem;margin-top:16px;color:#8696a0}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>${displayName}</h1>
+    <p>@${handleLabel} · Subscribe on Videh Video</p>
+    <a class="btn" href="${deepLink}" id="open">Open in Videh</a>
+    <p class="muted">Don't have the app? Search <strong>Videh Messenger</strong> on Play Store.</p>
+  </div>
+  <script>
+    (function () {
+      var deep = ${JSON.stringify(deepLink)};
+      try { window.location.href = deep; } catch (e) {}
+    })();
+  </script>
+</body>
+</html>`);
+  } catch (err) {
+    req.log.error({ err, handle }, "reels channel go");
+    res.status(500).send("Server error");
   }
 });
 

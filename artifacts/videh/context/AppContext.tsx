@@ -524,7 +524,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         otherUserId: otherUser?.id,
         isKhataNotebook: c.group_description === "videh:khata_notebook",
         disappearAfterSeconds:
-          c.disappear_after_seconds != null ? Number(c.disappear_after_seconds) : null,
+          c.disappear_after_seconds != null && Number(c.disappear_after_seconds) > 0
+            ? Number(c.disappear_after_seconds)
+            : null,
       };
     });
 
@@ -1508,7 +1510,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (expiresAt) newMsg = { ...newMsg, expiresAt };
       return prev.map((c) =>
         c.id === chatId
-          ? { ...c, messages: [...c.messages, newMsg], lastMessage: chatListPreview, lastMessageTime: sentAt }
+          ? {
+              ...c,
+              messages: [...c.messages, newMsg].sort((a, b) => a.timestamp - b.timestamp),
+              lastMessage: chatListPreview,
+              lastMessageTime: sentAt,
+            }
           : c,
       );
     });

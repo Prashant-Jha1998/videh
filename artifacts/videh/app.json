@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 80,
+      "versionCode": 81,
       "androidStatusBar": {
         "backgroundColor": "#00A884",
         "barStyle": "light-content",
@@ -56,6 +56,16 @@
               "scheme": "https",
               "host": "videh.co.in",
               "pathPrefix": "/api/reels/go"
+            },
+            {
+              "scheme": "https",
+              "host": "video.videh.co.in",
+              "pathPrefix": "/@"
+            },
+            {
+              "scheme": "https",
+              "host": "video.videh.co.in",
+              "pathPrefix": "/watch"
             }
           ],
           "category": [

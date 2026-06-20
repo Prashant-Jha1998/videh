@@ -92,10 +92,9 @@ import { TypingIndicator } from "@/components/TypingIndicator";
 import { ChatAlbumBubble } from "@/components/ChatAlbumBubble";
 import { MediaProgressRing } from "@/components/MediaProgressRing";
 import { ChatSystemMessageBubble } from "@/components/ChatSystemMessageBubble";
-import { isDisappearTimerSystemMessage } from "@/lib/chatSystemMessage";
 import { GroupWelcomeCard } from "@/components/GroupWelcomeCard";
 import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
-import { isDisappearingMessageExpired } from "@/lib/disappearTimerOptions";
+import { isChatDisappearingEnabled, isDisappearingMessageExpired } from "@/lib/disappearTimerOptions";
 import { formatChatBubbleTime } from "@/utils/time";
 import {
   isChatNearBottom,
@@ -1269,7 +1268,7 @@ export default function ChatScreen() {
   useEffect(() => {
     setDisappearAfterSeconds(chat?.disappearAfterSeconds ?? null);
   }, [chat?.disappearAfterSeconds, chatId]);
-  const disappearingOn = (disappearAfterSeconds ?? 0) > 0;
+  const disappearingOn = isChatDisappearingEnabled(disappearAfterSeconds);
   const allMessages = useMemo(
     () => (chat?.messages ?? []).filter((m) => !isDisappearingMessageExpired(m)),
     [chat?.messages],
@@ -1293,21 +1292,11 @@ export default function ChatScreen() {
     : allMessages;
 
   const messagesForDisplay = useMemo(() => {
-    if (searching && searchQuery.trim()) return messages;
-    if (!disappearingOn || !disappearAfterSeconds) return messages;
-    if (messages.some((m) => m.type === "system" && isDisappearTimerSystemMessage(m.text))) {
-      return messages;
-    }
-    const infoBanner: Message = {
-      id: "__disappear_timer_info__",
-      text: JSON.stringify({ kind: "disappear_timer", seconds: disappearAfterSeconds }),
-      type: "system",
-      timestamp: Date.now(),
-      senderId: "system",
-      status: "sent",
-    };
-    return [...messages, infoBanner];
-  }, [messages, searching, searchQuery, disappearingOn, disappearAfterSeconds]);
+    return [...messages].sort((a, b) => {
+      if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  }, [messages]);
 
   const listRows = useMemo(() => messagesWithDateRows(messagesForDisplay), [messagesForDisplay]);
   const listRowsInverted = useMemo(() => messagesWithDateRowsInverted(messagesForDisplay), [messagesForDisplay]);
