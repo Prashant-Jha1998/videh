@@ -10,9 +10,11 @@ import {
 export const VIDEH_INCOMING_CALL_BG_TASK = "VIDEH_INCOMING_CALL_BACKGROUND";
 
 TaskManager.defineTask<Notifications.NotificationTaskPayload>(VIDEH_INCOMING_CALL_BG_TASK, ({ data, error }) => {
-  if (error || Platform.OS === "web" || !data) {
+  if (error) {
+    console.warn("[Videh] incoming call background task error", error);
     return;
   }
+  if (Platform.OS === "web" || !data) return;
 
   if ("actionIdentifier" in data) {
     return;
@@ -26,4 +28,6 @@ TaskManager.defineTask<Notifications.NotificationTaskPayload>(VIDEH_INCOMING_CAL
   void presentIncomingCallFromPush(payload, { scheduleLocalNotification: true });
 });
 
-void Notifications.registerTaskAsync(VIDEH_INCOMING_CALL_BG_TASK).catch(() => {});
+void Notifications.registerTaskAsync(VIDEH_INCOMING_CALL_BG_TASK).catch((err) => {
+  console.warn("[Videh] could not register incoming call background task", err);
+});

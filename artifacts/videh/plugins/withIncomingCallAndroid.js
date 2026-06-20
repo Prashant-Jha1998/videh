@@ -99,7 +99,10 @@ function withIncomingCallAndroid(config) {
       const replacement = `${anchor}
 
     // ${FULL_SCREEN_MARKER}
-    if (content.categoryId == "incoming_call") {
+    val incomingCallCategory = content.categoryId == "incoming_call"
+      || content.data?.get("notificationKind") == "incoming_call"
+      || content.data?.get("kind") == "call"
+    if (incomingCallCategory) {
       val incomingCallIntent = createNotificationResponseIntent(
         context,
         notification,
@@ -107,6 +110,10 @@ function withIncomingCallAndroid(config) {
       )
       builder.setFullScreenIntent(incomingCallIntent, true)
       builder.setCategory(NotificationCompat.CATEGORY_CALL)
+      builder.setOngoing(true)
+      builder.setTimeoutAfter(30_000L)
+      builder.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+      builder.setPriority(NotificationCompat.PRIORITY_MAX)
     }`;
       if (contents.includes(anchor)) {
         contents = contents.replace(anchor, replacement);

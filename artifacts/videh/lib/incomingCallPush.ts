@@ -1,11 +1,14 @@
 import * as Linking from "expo-linking";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import type { IncomingCallInfo } from "@/components/IncomingCallOverlay";
-import { setupCallKeep, showCallKeepIncoming } from "@/lib/callKeep";
+import { isCallKeepAvailable, setupCallKeep, showCallKeepIncoming } from "@/lib/callKeep";
 import { wakeScreenForIncomingCall } from "@/lib/inCallAudio";
-import { startIncomingCallExperience } from "@/lib/incomingCallExperience";
-import { displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
+import {
+  presentIncomingCallUi,
+  startIncomingCallExperience,
+} from "@/lib/incomingCallExperience";
 import { showIncomingCallNotification } from "@/lib/incomingCallNotification";
+import { displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
 
 export function isIncomingCallPushData(data: Record<string, unknown> | null | undefined): boolean {
   if (!data?.callId) return false;
@@ -20,6 +23,7 @@ export function parseIncomingCallFromPushData(data: Record<string, unknown>): In
     type: data.type === "video" ? "video" : "audio",
     callerName: String(data.callerName ?? "Videh user"),
     participantCount: Number(data.participantCount ?? 2),
+    callerId: data.callerId != null ? Number(data.callerId) : undefined,
   };
 }
 
@@ -31,29 +35,53 @@ function incomingCallDeepLink(call: IncomingCallInfo & { callerName: string }): 
   );
 }
 
+export type PresentIncomingCallFromPushOptions = {
+  /** Schedule local notification with full-screen intent (Android). Default: true when background. */
+  scheduleLocalNotification?: boolean;
+  /** Skip CallKeep when foreground overlay will handle the call. */
+  skipCallKeep?: boolean;
+};
+
 /** Runs in foreground, background, or headless JS when a call push arrives. */
 export async function presentIncomingCallFromPush(
   data: Record<string, unknown>,
-  options?: { scheduleLocalNotification?: boolean },
+  options?: PresentIncomingCallFromPushOptions,
 ): Promise<void> {
   if (Platform.OS === "web" || !isIncomingCallPushData(data)) return;
 
   const call = parseIncomingCallFromPushData(data);
+
+  const inForeground = AppState.currentState === "active";
   wakeScreenForIncomingCall();
   await setupCallKeep();
-  await startIncomingCallExperience(call);
-  displayNativeIncomingCall({
-    callId: call.callId,
-    callerName: call.callerName,
-    isVideo: call.type === "video",
-  });
-  showCallKeepIncoming(call.callId, call.callerName, call.chatId, call.type === "video");
 
-  if (options?.scheduleLocalNotification !== false) {
+  if (!inForeground) {
+    displayNativeIncomingCall({
+      callId: call.callId,
+      callerName: call.callerName,
+      isVideo: call.type === "video",
+    });
+  }
+
+  const useNativeSurface = !inForeground && !options?.skipCallKeep;
+  if (useNativeSurface) {
+    showCallKeepIncoming(call.callId, call.callerName, call.chatId, call.type === "video");
+  }
+
+  const scheduleLocal =
+    options?.scheduleLocalNotification ?? !inForeground;
+  if (scheduleLocal) {
     await showIncomingCallNotification(call);
   }
 
-  void Linking.openURL(incomingCallDeepLink(call)).catch(() => {});
+  await startIncomingCallExperience(call);
+
+  if (!inForeground) {
+    presentIncomingCallUi(call, { useNativeSurface });
+    if (!isCallKeepAvailable()) {
+      void Linking.openURL(incomingCallDeepLink(call)).catch(() => {});
+    }
+  }
 }
 
 export function extractPushDataFromTaskPayload(

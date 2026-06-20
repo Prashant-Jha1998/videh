@@ -7,7 +7,7 @@ import type { VidehCallState } from "./videhCallTypes";
 export type { VidehCallState } from "./videhCallTypes";
 
 type Role = "caller" | "callee";
-const SIGNAL_POLL_MS = 250;
+const SIGNAL_POLL_MS = 80;
 
 export function useVidehCall(
   baseChannel: string,

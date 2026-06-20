@@ -10,7 +10,7 @@ import type { RemoteCallPeerStream, VidehCallState } from "./videhCallTypes";
 export type { VidehCallState } from "./videhCallTypes";
 
 type Role = "caller" | "callee";
-const SIGNAL_POLL_MS = 250;
+const SIGNAL_POLL_MS = 80;
 const ICE_RESTART_DELAY_MS = 5000;
 const DISCONNECT_GRACE_MS = 4500;
 const CONNECT_STABLE_MS = 1200;
@@ -332,10 +332,83 @@ export function useVidehCall(
       pcsRef.current.set(channel, pc);
       sharedLocalStream.getTracks().forEach((track: any) => pc.addTrack(track, sharedLocalStream));
 
+      function pollSignalOnce(pollChannel: string) {
+        if (pollBusyRef.current.has(pollChannel)) return;
+        pollBusyRef.current.add(pollChannel);
+        void (async () => {
+          try {
+            const pcNow = pcsRef.current.get(pollChannel);
+            if (stopped || !pcNow) return;
+            const activeRole = rolesRef.current.get(pollChannel) ?? "caller";
+            const session = await webrtcFetch(`/sessions/${encodeURIComponent(pollChannel)}`, sessionToken).then((r) => r.json()) as {
+              session?: {
+                offer?: RTCSessionDescriptionInit | null;
+                answer?: RTCSessionDescriptionInit | null;
+                offerRevision?: number;
+                answerRevision?: number;
+              };
+            };
+            const offerRevision = session.session?.offerRevision ?? 0;
+            const seenOfferRev = lastOfferRevisionRef.current.get(pollChannel) ?? -1;
+            if (
+              activeRole === "callee"
+              && session.session?.offer
+              && offerRevision > seenOfferRev
+            ) {
+              lastOfferRevisionRef.current.set(pollChannel, offerRevision);
+              await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.offer));
+              const answer = await pcNow.createAnswer();
+              await pcNow.setLocalDescription(answer);
+              await postJson(`/sessions/${encodeURIComponent(pollChannel)}/answer`, { answer });
+              pollSignalOnce(pollChannel);
+            }
+            const answerRevision = session.session?.answerRevision ?? 0;
+            const seenAnswerRev = lastAnswerRevisionRef.current.get(pollChannel) ?? -1;
+            if (
+              activeRole === "caller"
+              && session.session?.answer
+              && answerRevision > seenAnswerRev
+            ) {
+              lastAnswerRevisionRef.current.set(pollChannel, answerRevision);
+              const sig = pcNow.signalingState;
+              if (sig === "have-local-offer" || sig === "stable") {
+                await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.answer));
+              }
+            }
+
+            const since = candidateCursorsRef.current.get(pollChannel) ?? 0;
+            const candidateRes = await webrtcFetch(
+              `/sessions/${encodeURIComponent(pollChannel)}/candidates?role=${activeRole}&since=${since}`,
+              sessionToken,
+            ).then((r) => r.json()) as { candidates?: RTCIceCandidateInit[]; next?: number };
+            for (const candidate of candidateRes.candidates ?? []) {
+              await pcNow.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+            }
+            candidateCursorsRef.current.set(pollChannel, candidateRes.next ?? since);
+          } catch (e: any) {
+            if (stopped) return;
+            const msg = e?.message ?? "Call signaling error";
+            const pcNow = pcsRef.current.get(pollChannel);
+            const connected = pcNow?.connectionState === "connected";
+            if (connected || isBenignSignalingError(msg)) return;
+            setError(msg);
+            const t = pollTimersRef.current.get(pollChannel);
+            if (t) {
+              clearInterval(t);
+              pollTimersRef.current.delete(pollChannel);
+            }
+          } finally {
+            pollBusyRef.current.delete(pollChannel);
+          }
+        })();
+      }
+
       pc.onicecandidate = (event: any) => {
         if (event.candidate) {
           const candidate = typeof event.candidate.toJSON === "function" ? event.candidate.toJSON() : event.candidate;
-          void postJson(`/sessions/${encodeURIComponent(channel)}/candidates`, { role, candidate });
+          void postJson(`/sessions/${encodeURIComponent(channel)}/candidates`, { role, candidate }).then(() => {
+            pollSignalOnce(channel);
+          });
         }
       };
       const noteRemoteStream = (stream: any) => {
@@ -384,6 +457,7 @@ export function useVidehCall(
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await postJson(`/sessions/${encodeURIComponent(channel)}/offer`, { offer });
+        pollSignalOnce(channel);
       }
 
       if (connectGen !== connectGenRef.current || stopped) {
@@ -391,76 +465,9 @@ export function useVidehCall(
         return;
       }
 
-      const pollTimer = setInterval(() => {
-        if (pollBusyRef.current.has(channel)) return;
-        pollBusyRef.current.add(channel);
-        void (async () => {
-          try {
-            const pcNow = pcsRef.current.get(channel);
-            if (stopped || !pcNow) return;
-            const activeRole = rolesRef.current.get(channel) ?? "caller";
-            const session = await webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken).then((r) => r.json()) as {
-              session?: {
-                offer?: RTCSessionDescriptionInit | null;
-                answer?: RTCSessionDescriptionInit | null;
-                offerRevision?: number;
-                answerRevision?: number;
-              };
-            };
-            const offerRevision = session.session?.offerRevision ?? 0;
-            const seenOfferRev = lastOfferRevisionRef.current.get(channel) ?? -1;
-            if (
-              activeRole === "callee"
-              && session.session?.offer
-              && offerRevision > seenOfferRev
-            ) {
-              lastOfferRevisionRef.current.set(channel, offerRevision);
-              await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.offer));
-              const answer = await pcNow.createAnswer();
-              await pcNow.setLocalDescription(answer);
-              await postJson(`/sessions/${encodeURIComponent(channel)}/answer`, { answer });
-            }
-            const answerRevision = session.session?.answerRevision ?? 0;
-            const seenAnswerRev = lastAnswerRevisionRef.current.get(channel) ?? -1;
-            if (
-              activeRole === "caller"
-              && session.session?.answer
-              && answerRevision > seenAnswerRev
-            ) {
-              lastAnswerRevisionRef.current.set(channel, answerRevision);
-              const sig = pcNow.signalingState;
-              if (sig === "have-local-offer" || sig === "stable") {
-                await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.answer));
-              }
-            }
-
-            const since = candidateCursorsRef.current.get(channel) ?? 0;
-            const candidateRes = await webrtcFetch(
-              `/sessions/${encodeURIComponent(channel)}/candidates?role=${activeRole}&since=${since}`,
-              sessionToken,
-            ).then((r) => r.json()) as { candidates?: RTCIceCandidateInit[]; next?: number };
-            for (const candidate of candidateRes.candidates ?? []) {
-              await pcNow.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
-            }
-            candidateCursorsRef.current.set(channel, candidateRes.next ?? since);
-          } catch (e: any) {
-            if (stopped) return;
-            const msg = e?.message ?? "Call signaling error";
-            const pcNow = pcsRef.current.get(channel);
-            const connected = pcNow?.connectionState === "connected";
-            if (connected || isBenignSignalingError(msg)) return;
-            setError(msg);
-            const t = pollTimersRef.current.get(channel);
-            if (t) {
-              clearInterval(t);
-              pollTimersRef.current.delete(channel);
-            }
-          } finally {
-            pollBusyRef.current.delete(channel);
-          }
-        })();
-      }, SIGNAL_POLL_MS);
+      const pollTimer = setInterval(() => pollSignalOnce(channel), SIGNAL_POLL_MS);
       pollTimersRef.current.set(channel, pollTimer);
+      pollSignalOnce(channel);
     };
 
     const ensureLocalStream = async () => {

@@ -3,10 +3,14 @@ import { AppState, Platform } from "react-native";
 import type { IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { dismissIncomingCallNotification } from "@/lib/incomingCallNotification";
 import { stopCallAlert, startIncomingCallAlert } from "@/lib/callRingtone";
-import { dismissNativeIncomingCall } from "@/lib/videhNativeCallUi";
+import { dismissNativeIncomingCall, displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
 import { endCallKeep, showCallKeepIncoming } from "@/lib/callKeep";
 
 let ringingCallId: string | null = null;
+
+export function isAppInForeground(): boolean {
+  return AppState.currentState === "active";
+}
 
 export function getRingingCallId(): string | null {
   return ringingCallId;
@@ -19,13 +23,21 @@ export function claimIncomingCallRing(callId: string): boolean {
   return true;
 }
 
-/** One ringtone only — user's premium call sound from settings. */
+/** Foreground: expo-av premium tone. Background: native InCallManager + notification channel sound. */
 export async function startIncomingCallExperience(call: IncomingCallInfo & { callerName: string }): Promise<void> {
   if (Platform.OS === "web") return;
   if (ringingCallId !== call.callId) {
     ringingCallId = call.callId;
   }
-  await startIncomingCallAlert();
+  if (isAppInForeground()) {
+    await startIncomingCallAlert();
+    return;
+  }
+  displayNativeIncomingCall({
+    callId: call.callId,
+    callerName: call.callerName,
+    isVideo: call.type === "video",
+  });
 }
 
 export async function stopIncomingCallExperience(callId?: string, opts?: { force?: boolean }): Promise<void> {
@@ -41,16 +53,26 @@ export async function stopIncomingCallExperience(callId?: string, opts?: { force
   }
 }
 
-export function presentIncomingCallUi(call: IncomingCallInfo & { callerName: string }): {
+/**
+ * WhatsApp-style surfaces:
+ * - Foreground: in-app overlay only (CallKeep hidden).
+ * - Background/killed path: CallKeep system UI + optional deep link when no CallKeep.
+ */
+export function presentIncomingCallUi(
+  call: IncomingCallInfo & { callerName: string },
+  opts?: { useNativeSurface?: boolean },
+): {
   setIncoming: boolean;
   broughtToForeground: boolean;
 } {
-  showCallKeepIncoming(call.callId, call.callerName, call.chatId, call.type === "video");
+  const inBackground = !isAppInForeground();
+  const useNative = opts?.useNativeSurface ?? inBackground;
 
-  const state = AppState.currentState;
-  const inBackground = state === "background" || state === "inactive";
+  if (useNative) {
+    showCallKeepIncoming(call.callId, call.callerName, call.chatId, call.type === "video");
+  }
 
-  if (inBackground && Platform.OS !== "web") {
+  if (inBackground && Platform.OS !== "web" && !useNative) {
     const deepLink =
       `videh://call/${call.chatId}?callId=${encodeURIComponent(call.callId)}` +
       `&incoming=1&ringing=1&type=${call.type}&name=${encodeURIComponent(call.callerName)}` +

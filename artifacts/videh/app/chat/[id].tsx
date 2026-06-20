@@ -3858,15 +3858,15 @@ export default function ChatScreen() {
             {!searching && (
               <>
                 <TouchableOpacity
-                  style={[styles.headerBtn, (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe)) && { opacity: 0.45 }]}
-                  disabled={!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe)}
+                  style={[styles.headerBtn, (chat?.isGroup || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))) && { opacity: 0.45 }]}
+                  disabled={Boolean(chat?.isGroup) || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))}
                   onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })}
                 >
                   <Ionicons name="videocam-outline" size={22} color="#fff" />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.headerBtn, (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe)) && { opacity: 0.45 }]}
-                  disabled={!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe)}
+                  style={[styles.headerBtn, (chat?.isGroup || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))) && { opacity: 0.45 }]}
+                  disabled={Boolean(chat?.isGroup) || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))}
                   onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })}
                 >
                   <Ionicons name="call-outline" size={22} color="#fff" />

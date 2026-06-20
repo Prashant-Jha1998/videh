@@ -5,6 +5,7 @@ let InCallManager: {
   start: (opts: { media: string; auto?: boolean; ringback?: string }) => void;
   stop: () => void;
   stopRingtone: () => void;
+  startRingtone: (ringtone: string, vibratePattern?: number[]) => void;
 } | null = null;
 
 try {
@@ -19,12 +20,13 @@ export type NativeIncomingCallPayload = {
   isVideo: boolean;
 };
 
-/** Wake screen only — ringtone is played via premium call sound (expo-av), not InCallManager. */
+/** Wake screen + native ringtone (works when JS is backgrounded; notification channel backs this up). */
 export function displayNativeIncomingCall(_payload: NativeIncomingCallPayload): void {
   wakeScreenForIncomingCall();
   if (!InCallManager || Platform.OS === "web") return;
   try {
     InCallManager.stopRingtone();
+    InCallManager.startRingtone("_DEFAULT_", [1000, 500, 1000, 500]);
   } catch {
     /* ignore */
   }

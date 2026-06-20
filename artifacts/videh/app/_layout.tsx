@@ -39,6 +39,7 @@ import {
   endCallKeep,
   setupCallKeep,
   setCallKeepHandlers,
+  bringCallKeepToForeground,
 } from "@/lib/callKeep";
 import type { CallKeepHandlerPayload } from "@/lib/callKeepBridge";
 import { displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
@@ -51,6 +52,7 @@ import { isIncomingCallPushData, presentIncomingCallFromPush } from "@/lib/incom
 import {
   claimIncomingCallRing,
   getRingingCallId,
+  isAppInForeground,
   presentIncomingCallUi,
   startIncomingCallExperience,
   stopIncomingCallExperience,
@@ -209,7 +211,7 @@ function RootLayoutNav() {
       offeredCallIdRef.current = next.callId;
       setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
       pendingIncomingRef.current = callPayload;
-      presentIncomingCallUi(callPayload);
+      presentIncomingCallUi(callPayload, { useNativeSurface: !isAppInForeground() });
       scheduleIncomingAutoEnd(next.callId);
       return;
     }
@@ -221,7 +223,7 @@ function RootLayoutNav() {
       && activeCallSession.callId !== next.callId
     ) {
       setCallWaiting(next);
-      presentIncomingCallUi(next);
+      presentIncomingCallUi(next, { useNativeSurface: !isAppInForeground() });
       void startIncomingCallExperience(next);
       scheduleIncomingAutoEnd(next.callId);
       return;
@@ -233,25 +235,30 @@ function RootLayoutNav() {
       return;
     }
 
-    const appActive = AppState.currentState === "active";
-    if (!appActive) {
-      displayNativeIncomingCall({
-        callId: next.callId,
-        callerName: next.callerName,
-        isVideo: next.type === "video",
-      });
+    const appActive = isAppInForeground();
+
+    if (appActive) {
+      pendingIncomingRef.current = callPayload;
+      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
+      if (Platform.OS !== "web") {
+        presentIncomingCall(callPayload);
+      }
+      void startIncomingCallExperience(callPayload);
+      scheduleIncomingAutoEnd(next.callId);
+      return;
     }
 
-    presentIncomingCallUi(next);
+    displayNativeIncomingCall({
+      callId: next.callId,
+      callerName: next.callerName,
+      isVideo: next.type === "video",
+    });
+    presentIncomingCallUi(callPayload, { useNativeSurface: true });
     pendingIncomingRef.current = callPayload;
-    if (Platform.OS !== "web" && appActive) {
-      presentIncomingCall(callPayload);
-    } else {
-      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
-    }
+    setIncomingCall((prev) => (prev?.callId === next.callId ? prev : callPayload));
 
     void startIncomingCallExperience(callPayload);
-    if (Platform.OS !== "web" && !appActive) {
+    if (Platform.OS !== "web") {
       void showIncomingCallNotification(callPayload);
     }
 
@@ -390,7 +397,7 @@ function RootLayoutNav() {
     let cancelled = false;
     const pollMs = () => {
       const state = AppState.currentState;
-      return state === "active" ? 1500 : 800;
+      return state === "active" ? 2500 : 5000;
     };
     const poll = async () => {
       try {
@@ -518,8 +525,26 @@ function RootLayoutNav() {
       handleNotification: async (notification) => {
         const data = notification.request.content.data as Record<string, unknown> | undefined;
         const isCall = isIncomingCallPushData(data);
-        if (isCall && data && AppState.currentState !== "active") {
-          void presentIncomingCallFromPush(data, { scheduleLocalNotification: false });
+        const inForeground = isAppInForeground();
+
+        if (isCall && data && !inForeground) {
+          void presentIncomingCallFromPush(data, { scheduleLocalNotification: true });
+          return {
+            shouldShowAlert: false,
+            shouldPlaySound: false,
+            shouldShowBanner: false,
+            shouldShowList: false,
+            shouldSetBadge: false,
+          };
+        }
+        if (isCall && inForeground) {
+          return {
+            shouldShowAlert: false,
+            shouldPlaySound: false,
+            shouldShowBanner: false,
+            shouldShowList: false,
+            shouldSetBadge: false,
+          };
         }
         const isChatMessage =
           data?.notificationKind === "chat_message"
@@ -646,6 +671,7 @@ function RootLayoutNav() {
         if (!callId || !user?.dbId) return;
         void (async () => {
           clearIncomingAutoEnd();
+          bringCallKeepToForeground();
           await stopIncomingCallExperience(callId);
           const waiting = callWaiting;
           if (waiting?.callId === callId) {

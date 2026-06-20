@@ -42,7 +42,8 @@ type CallInvite = {
 const router = Router();
 router.use(requireAuth);
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
-const RING_TIMEOUT_MS = 45 * 1000;
+/** Keep in sync with videh `INCOMING_RING_TIMEOUT_MS` (30s). */
+const RING_TIMEOUT_MS = 30 * 1000;
 /** Connected calls stay alive while clients poll status; orphan after brief silence (crash / force-quit). */
 const CONNECTED_CALL_IDLE_MS = 2 * 60 * 1000;
 const ringExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -78,6 +79,17 @@ async function expireRingingCall(callId: string): Promise<void> {
     return;
   }
   call.updatedAt = Date.now();
+  publishCallSignal({
+    chatId: call.chatId,
+    userIds: [call.callerId, ...call.participantIds],
+    action: "missed",
+    payload: {
+      callId: call.callId,
+      chatId: call.chatId,
+      type: call.type,
+      channel: call.channel,
+    },
+  });
   if (isCallEnded(call)) await finalizeCall(call);
   else await saveCall(call);
 }
@@ -351,6 +363,22 @@ router.post("/calls", async (req: Request, res: Response) => {
   }
 
   try {
+    const chatRow = await query(
+      `SELECT is_group FROM chats WHERE id = $1`,
+      [chatId],
+    );
+    if (!chatRow.rows[0]) {
+      res.status(404).json({ success: false, message: "Chat not found." });
+      return;
+    }
+    if (chatRow.rows[0].is_group) {
+      res.status(400).json({
+        success: false,
+        message: "Group calls are not supported yet. Start a voice or video call from a personal chat.",
+      });
+      return;
+    }
+
     const members = await query(
       `SELECT cm.user_id, u.name, u.push_token
        FROM chat_members cm

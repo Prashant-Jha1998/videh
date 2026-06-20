@@ -7,6 +7,7 @@ import {
   EXPO_INCOMING_CALL_CATEGORY_ID,
 } from "./expoPush";
 import { fcmMessageSoundAndroid, fcmMessageSoundIos } from "./soundPrefsDb";
+import { splitFcmTokensByPlatform } from "./pushTokens";
 
 let initAttempted = false;
 
@@ -62,6 +63,23 @@ function stringifyData(data: Record<string, unknown>): Record<string, string> {
   return out;
 }
 
+const CALL_RING_TTL_MS = 30_000;
+
+async function sendFcmMulticast(
+  messaging: admin.messaging.Messaging,
+  tokens: string[],
+  message: admin.messaging.MulticastMessage,
+): Promise<void> {
+  if (tokens.length === 0) return;
+  const res = await messaging.sendEachForMulticast({ ...message, tokens });
+  if (res.failureCount > 0) {
+    const errors = res.responses
+      .map((r, i) => (r.success ? null : { token: tokens[i]?.slice(0, 12), error: r.error?.message }))
+      .filter(Boolean);
+    console.error("FCM partial failure", errors);
+  }
+}
+
 /** Send via Firebase Cloud Messaging (Android FCM / iOS APNs). */
 export async function sendFcmChatPush(
   to: string | string[],
@@ -115,21 +133,51 @@ export async function sendFcmChatPush(
   const chatTag = options?.threadId?.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
 
   try {
-    const res = await messaging.sendEachForMulticast({
-      tokens,
+    if (options?.isCall) {
+      const { android, ios } = splitFcmTokensByPlatform(tokens);
+
+      // Android: data-only wakes JS → CallKeep + local full-screen notification (WhatsApp-style).
+      await sendFcmMulticast(messaging, android, {
+        data: dataPayload,
+        android: {
+          priority: "high",
+          ttl: CALL_RING_TTL_MS,
+        },
+      });
+
+      // iOS: time-sensitive alert + content-available so CallKeep can register incoming call.
+      await sendFcmMulticast(messaging, ios, {
+        notification: { title, body },
+        data: dataPayload,
+        apns: {
+          headers: { "apns-priority": "10", "apns-push-type": "alert" },
+          payload: {
+            aps: {
+              sound: iosSound,
+              alert: { title, body },
+              "interruption-level": "time-sensitive",
+              "content-available": 1,
+              category: categoryId ?? EXPO_INCOMING_CALL_CATEGORY_ID,
+            },
+          },
+        },
+      });
+
+      return;
+    }
+
+    await sendFcmMulticast(messaging, tokens, {
       notification: { title, body },
       data: dataPayload,
       android: {
         priority: "high",
-        ...(options?.isCall ? { ttl: 45_000 } : {}),
         notification: {
           channelId,
           sound: androidSound,
           priority: "high" as const,
           visibility: "public" as const,
-          ...(options?.isCall && callId ? { tag: `videh_call_${callId}` } : {}),
           ...(options?.imageUrl ? { imageUrl: options.imageUrl } : {}),
-          ...(chatTag && !options?.isCall ? { tag: chatTag } : {}),
+          ...(chatTag ? { tag: chatTag } : {}),
         },
       },
       apns: {
@@ -137,17 +185,10 @@ export async function sendFcmChatPush(
           aps: {
             sound: iosSound,
             alert: { title, body },
-            ...(options?.isCall ? { "interruption-level": "time-sensitive" } : {}),
           },
         },
       },
     });
-    if (res.failureCount > 0) {
-      const errors = res.responses
-        .map((r, i) => (r.success ? null : { token: tokens[i]?.slice(0, 12), error: r.error?.message }))
-        .filter(Boolean);
-      console.error("FCM partial failure", errors);
-    }
   } catch (err) {
     console.error("FCM push error", err);
   }

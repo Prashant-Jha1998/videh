@@ -199,6 +199,8 @@ export default function CallScreen() {
       ? `Ringing ${ringingCount} people...`
       : phaseLabel("outgoing_ringing", isVideo));
 
+  const isOneToOne = participantCount <= 2;
+
   if (ringing) {
     const callTypeLabel = isVideo ? "Incoming video call" : "Incoming voice call";
     const statusDiffers =
@@ -286,7 +288,7 @@ export default function CallScreen() {
         <TouchableOpacity style={styles.backBtn} onPress={minimizeCall}>
           <Ionicons name="chevron-down" size={28} color="rgba(255,255,255,0.8)" />
         </TouchableOpacity>
-        {joined ? (
+        {joined && !isOneToOne ? (
           <TouchableOpacity
             style={styles.addPersonBtn}
             onPress={() => setAddPeopleOpen(true)}
@@ -298,7 +300,7 @@ export default function CallScreen() {
         ) : null}
       </View>
       <Text style={styles.callTypeLabel}>{isVideo ? "Videh video call" : "Videh voice call"}</Text>
-      {participantCount > 2 && (
+      {!isOneToOne && participantCount > 2 && (
         <View style={styles.conferencePill}>
           <Ionicons name="people" size={13} color="#d9fdd3" />
           <Text style={styles.conferenceText}>
@@ -309,7 +311,7 @@ export default function CallScreen() {
 
       {isVideo ? (
         <View style={styles.videoContainer}>
-          {participantCount > 2 && gridPeers.length > 1 ? (
+          {!isOneToOne && participantCount > 2 && gridPeers.length > 1 ? (
             <GroupCallGrid peers={gridPeers} placeholderColor={avatarBg} />
           ) : remoteStreamUrl ? (
             <VidehRemoteView nativeId={remoteVideoId} streamUrl={remoteStreamUrl} style={styles.remoteVideo} />
@@ -457,6 +459,7 @@ export default function CallScreen() {
         </TouchableOpacity>
       </View>
 
+      {!isOneToOne ? (
       <AddCallParticipantModal
         visible={addPeopleOpen}
         onClose={() => setAddPeopleOpen(false)}
@@ -475,6 +478,7 @@ export default function CallScreen() {
           }
         }}
       />
+      ) : null}
     </View>
   );
 }

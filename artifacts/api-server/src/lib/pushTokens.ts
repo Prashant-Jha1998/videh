@@ -30,6 +30,21 @@ function pushTokenKind(token: string): "expo" | "webpush" | "fcm" | null {
   return null;
 }
 
+/** iOS APNs device tokens are 64 hex chars; Android FCM tokens are longer/different. */
+export function isLikelyIosApnsToken(token: string): boolean {
+  return /^[a-f0-9]{64}$/i.test(token);
+}
+
+export function splitFcmTokensByPlatform(tokens: string[]): { android: string[]; ios: string[] } {
+  const android: string[] = [];
+  const ios: string[] = [];
+  for (const token of tokens) {
+    if (isLikelyIosApnsToken(token)) ios.push(token);
+    else android.push(token);
+  }
+  return { android, ios };
+}
+
 export function splitPushTokens(tokens: string[]): { fcm: string[]; webpush: string[]; expo: string[] } {
   const fcm: string[] = [];
   const webpush: string[] = [];

@@ -3,6 +3,7 @@ import {
   dispatchCallKeepAnswer,
   dispatchCallKeepEnd,
   registerCallKeepMeta,
+  resolveCallKeepUuid,
   unregisterCallKeep,
 } from "@/lib/callKeepBridge";
 
@@ -21,6 +22,7 @@ let RNCallKeep: {
   startCall: (uuid: string, handle: string, contactIdentifier: string, hasVideo: boolean) => void;
   endCall: (uuid: string) => void;
   reportEndCallWithUUID: (uuid: string, reason: number) => void;
+  backToForeground?: () => void;
   addEventListener: (event: string, handler: (p: { callUUID: string }) => void) => void;
   removeEventListener: (event: string) => void;
 } | null = null;
@@ -108,9 +110,18 @@ export function startCallKeepOutgoing(
   }
 }
 
+export function bringCallKeepToForeground(): void {
+  if (!RNCallKeep?.backToForeground) return;
+  try {
+    RNCallKeep.backToForeground();
+  } catch {
+    /* ignore */
+  }
+}
+
 export function endCallKeep(callId: string, reason: "declined" | "remote" = "remote"): void {
   if (!RNCallKeep) return;
-  const uuid = callId;
+  const uuid = resolveCallKeepUuid(callId);
   try {
     const code = reason === "declined" ? END_CALL_REASONS.DECLINED : END_CALL_REASONS.REMOTE_ENDED;
     RNCallKeep.reportEndCallWithUUID(uuid, code);

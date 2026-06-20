@@ -1,3 +1,5 @@
+import { callIdToCallKeepUuid } from "@/lib/callKeepUuid";
+
 export type CallKeepHandlerPayload = {
   callUUID: string;
   callId?: string;
@@ -18,15 +20,23 @@ export function setCallKeepHandlers(next: Handlers): void {
   handlers = next;
 }
 
+export function resolveCallKeepUuid(callId: string): string {
+  return callIdToCallKeepUuid(callId);
+}
+
+export function resolveCallIdFromUuid(callUUID: string): string | undefined {
+  return callIdByUuid.get(callUUID) ?? metaByUuid.get(callUUID)?.callId;
+}
+
 export function registerCallKeepMeta(callId: string, meta: { chatId?: number }): string {
-  const uuid = callId;
+  const uuid = callIdToCallKeepUuid(callId);
   callIdByUuid.set(uuid, callId);
   metaByUuid.set(uuid, { callId, chatId: meta.chatId != null ? String(meta.chatId) : undefined });
   return uuid;
 }
 
 export function unregisterCallKeep(callId: string): void {
-  const uuid = callId;
+  const uuid = callIdToCallKeepUuid(callId);
   callIdByUuid.delete(uuid);
   metaByUuid.delete(uuid);
 }

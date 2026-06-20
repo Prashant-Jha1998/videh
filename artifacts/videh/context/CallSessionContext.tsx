@@ -19,6 +19,7 @@ import {
   stopCallAlert,
 } from "@/lib/callRingtone";
 import { addUsersToOngoingCall } from "@/lib/callParticipants";
+import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import { chooseInCallAudioRoute, wakeScreenForIncomingCall, type InCallAudioRoute } from "@/lib/inCallAudio";
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
@@ -151,8 +152,17 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       acceptedUserIds.filter((peerId) => peerId > 0 && peerId !== userId),
     );
     if (session.isIncoming && callerId && callerId !== userId) ids.add(callerId);
+    if (!session.isIncoming && inviteeUserIds.length === 1) ids.add(inviteeUserIds[0]!);
     return [...ids];
-  }, [acceptedUserIds, callerId, userId, session?.channel, session?.engineActive, session?.isIncoming]);
+  }, [acceptedUserIds, callerId, userId, session?.channel, session?.engineActive, session?.isIncoming, inviteeUserIds]);
+
+  /** Start WebRTC only after the other person accepts (WhatsApp-style). */
+  useEffect(() => {
+    if (!session?.callId || session.isIncoming || session.ringing) return;
+    if (acceptedCount > 1 && session.channel && !session.engineActive) {
+      setSession((prev) => (prev?.callId === session.callId ? { ...prev, engineActive: true } : prev));
+    }
+  }, [session?.callId, session?.isIncoming, session?.ringing, session?.channel, session?.engineActive, acceptedCount]);
 
   const onCallUserIds = useMemo(() => {
     const ids = new Set<number>(inviteeUserIds);
@@ -404,7 +414,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         isIncoming,
         ringing: isIncoming && ringing,
         minimized: false,
-        engineActive: isIncoming ? !ringing && Boolean(params.channel) : Boolean(params.channel),
+        engineActive: isIncoming ? !ringing && Boolean(params.channel) : false,
       };
     });
 
@@ -420,22 +430,26 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         .then((res) => res.json())
         .then((data: {
           success?: boolean;
+          message?: string;
           allInviteesBusy?: boolean;
+          participantIds?: number[];
           call?: { channel?: string; callId?: string; participantCount?: number; acceptedCount?: number; ringingCount?: number };
         }) => {
           if (!data.success || !data.call?.channel) {
             outgoingCallInitRef.current = null;
+            if (data.message) setStatusHint(data.message);
             return;
           }
           if (data.call?.callId) sessionCallIdRef.current = data.call.callId;
           if (user.dbId) setCallerId(user.dbId);
+          if (Array.isArray(data.participantIds)) setInviteeUserIds(data.participantIds);
           setSession((prev) => {
             if (!prev || prev.chatId !== chatId) return prev;
             return {
               ...prev,
               channel: data.call!.channel!,
               callId: data.call!.callId ?? prev.callId,
-              engineActive: true,
+              engineActive: false,
               ringing: false,
             };
           });
@@ -566,7 +580,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         }
         onCallEnded();
       })();
-    }, 60000);
+    }, INCOMING_RING_TIMEOUT_MS);
     return () => {
       clearTimeout(timeout);
       void stopCallAlert();
@@ -577,8 +591,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (!session?.callId || !userId || !session.engineActive || session.ringing) return;
     const polledCallId = session.callId;
     statusPollMissRef.current = 0;
-    const pollMs = call.joined ? 500 : 1000;
-    const missLimit = call.joined ? 1 : 3;
+    const pollMs = call.joined ? 800 : 500;
+    const missLimit = call.joined ? 6 : 4;
     const timer = setInterval(() => {
       void webrtcFetch(`/calls/${polledCallId}/status?userId=${userId}`, user?.sessionToken)
         .then(async (res) => {
@@ -654,6 +668,19 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
               })();
               return;
             }
+            if ((data.missedCount ?? 0) > 0 && (data.ringingCount ?? 0) === 0 && !remoteAccepted) {
+              if (busyEndHandledRef.current === polledCallId) return;
+              busyEndHandledRef.current = polledCallId;
+              endedTonePlayed.current = true;
+              void (async () => {
+                try {
+                  await stopCallAlert();
+                  await playCallUnavailableTone();
+                  onCallEnded();
+                } catch { /* ignore */ }
+              })();
+              return;
+            }
           }
 
           if (data.ended) {
@@ -666,7 +693,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     return () => clearInterval(timer);
   }, [session?.callId, session?.engineActive, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleRemoteCallEnd]);
 
-  const callAnswered = acceptedCount > 1;
+  const callAnswered = acceptedCount > 1 && (call.mediaReady || call.joined);
 
   useEffect(() => {
     if (!callAnswered) {
@@ -699,6 +726,16 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         && (action === "ended" || action === "declined" || action === "missed" || action === "busy" || action === "cancelled")
       ) {
         handleRemoteCallEnd(callId);
+        return;
+      }
+      if (action === "accepted" && callId && sessionCallIdRef.current === callId) {
+        setAcceptedCount((prev) => Math.max(prev, 2));
+        void stopCallAlert();
+        setSession((prev) =>
+          prev && prev.callId === callId && !prev.ringing
+            ? { ...prev, engineActive: true }
+            : prev,
+        );
         return;
       }
       if (action !== "media_type") return;
