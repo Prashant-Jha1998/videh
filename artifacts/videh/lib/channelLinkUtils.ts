@@ -17,7 +17,7 @@ export function linkIconName(url: string): ComponentProps<typeof Ionicons>["name
   if (lower.includes("facebook.com") || lower.includes("fb.com")) return "logo-facebook";
   if (lower.includes("twitter.com") || lower.includes("x.com")) return "logo-twitter";
   if (lower.includes("telegram.") || lower.includes("t.me")) return "paper-plane-outline";
-  if (lower.includes("youtube.com") || lower.includes("youtu.be")) return "logo-youtube";
+  if (lower.includes("youtube.com") || lower.includes("youtu.be")) return "play-circle-outline";
   return "globe-outline";
 }
 

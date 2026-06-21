@@ -320,7 +320,7 @@ export default function ReelsUploadScreen() {
         imageUri={thumbCropUri ?? ""}
         aspectRatio={REELS_THUMB_ASPECT}
         title="Thumbnail"
-        hint="Drag to position · 16:9 YouTube-style frame"
+        hint="Drag to position · 16:9 widescreen frame"
         onCancel={() => setThumbCropUri(null)}
         onDone={(rect) => void onThumbCropDone(rect)}
       />

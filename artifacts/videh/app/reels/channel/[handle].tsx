@@ -860,7 +860,7 @@ function PlaylistsSection({
             )}
             <View style={styles.playlistCountBadge}>
               <Text style={styles.playlistCountText}>{pl.videoCount}</Text>
-              <Ionicons name="logo-youtube" size={10} color="#fff" />
+              <Ionicons name="play" size={10} color="#fff" />
             </View>
           </View>
           <View style={{ flex: 1 }}>

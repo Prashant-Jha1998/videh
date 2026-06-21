@@ -180,7 +180,7 @@ img { max-width: 100%; display: block; }
   .yt-grid { grid-template-columns: repeat(4, 1fr); }
 }
 
-/* Video card — YouTube style */
+/* Video card */
 .yt-video-card { cursor: default; }
 .yt-thumb {
   position: relative; border-radius: 12px; overflow: hidden;
@@ -403,7 +403,7 @@ img { max-width: 100%; display: block; }
 .channel-list small { display: block; color: var(--yt-muted); }
 .section-title { margin: 0 0 14px; font-size: 1.1rem; }
 
-/* YouTube Studio upload wizard */
+/* Studio upload wizard */
 .yt-upload-page {
   min-height: 100vh; display: flex; flex-direction: column;
   align-items: center; justify-content: center; padding: 40px 20px;

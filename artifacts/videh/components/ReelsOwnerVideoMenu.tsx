@@ -42,7 +42,7 @@ const MENU_ITEMS: MenuItem[] = [
   { id: "save_playlist", label: "Save to playlist", icon: "bookmark-outline" },
   { id: "download", label: "Download video", icon: "download-outline" },
   { id: "share", label: "Share", icon: "share-social-outline" },
-  { id: "studio", label: "Edit advanced settings in Studio", icon: "logo-youtube" },
+  { id: "studio", label: "Edit advanced settings in Studio", icon: "options-outline" },
 ];
 
 type Props = {

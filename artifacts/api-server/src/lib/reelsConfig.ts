@@ -205,7 +205,7 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
     summary: [
       "Pre-roll: 6s bumper, 30s non-skippable, 60s skippable (skip after 5s)",
       "Mid-roll: 30s ads during long videos (8+ min)",
-      "Home feed: sponsored cards between videos at natural random spacing (like YouTube)",
+      "Home feed: sponsored cards between videos at natural random spacing",
       "Shorts: vertical video ads in swipe feed",
       "Display: search promoted, channel banner, video overlay (rolling out)",
       "Billing: CPM · CPC · CPI · CPV — wallet charged automatically",

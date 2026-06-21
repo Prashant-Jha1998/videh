@@ -877,7 +877,7 @@ export default function App() {
               )}
 
               <div style={S.preview}>
-                <div style={S.previewLabel}>Preview (in-stream ad — YouTube style)</div>
+                <div style={S.previewLabel}>Preview (in-stream ad)</div>
                 <div style={S.instreamPreview}>
                   <div style={S.instreamVideoMock}>
                     <div style={S.instreamVideoTop}>

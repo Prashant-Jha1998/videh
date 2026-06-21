@@ -452,7 +452,7 @@ function ReelsWatchPlayerInner({
               );
             })}
             <Text style={styles.sheetFoot}>
-              This selection only applies to the current video. Each video remembers its own quality, like YouTube.
+              This selection only applies to the current video. Each video remembers its own quality setting.
               {" "}
               Current: {activeQualityLabel}.
             </Text>
