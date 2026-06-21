@@ -19,8 +19,9 @@ export function isCallCaller(userId: number, callerId?: number): boolean {
 export function isRemotePartyAccepted(
   userId: number,
   acceptedUserIds: number[],
-  opts?: { isIncoming?: boolean; engineActive?: boolean; ringing?: boolean },
+  opts?: { isIncoming?: boolean; engineActive?: boolean; ringing?: boolean; acceptedCount?: number },
 ): boolean {
   if (opts?.isIncoming) return Boolean(opts.engineActive && !opts.ringing);
+  if ((opts?.acceptedCount ?? 0) > 1) return true;
   return acceptedUserIds.some((id) => id !== userId);
 }

@@ -8,7 +8,7 @@ export function webrtcAuthHeaders(sessionToken?: string | null): Record<string, 
 }
 
 /** Default per-request timeout so a hung request fails fast instead of piling up. */
-const WEBRTC_FETCH_TIMEOUT_MS = 8000;
+const WEBRTC_FETCH_TIMEOUT_MS = 20000;
 
 export async function webrtcFetch(
   path: string,
@@ -21,8 +21,8 @@ export async function webrtcFetch(
   try {
     return await fetch(`${getApiUrl()}/api/webrtc${path}`, {
       cache: "no-store",
-      signal: controller.signal,
       ...init,
+      signal: init?.signal ?? controller.signal,
       headers: {
         ...webrtcAuthHeaders(sessionToken),
         "Cache-Control": "no-cache",

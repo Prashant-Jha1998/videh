@@ -5,7 +5,7 @@ import * as Linking from "expo-linking";
 import { type Href, Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, Platform } from "react-native";
+import { Alert, AppState, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -17,6 +17,7 @@ import { OngoingCallBanner } from "@/components/OngoingCallBanner";
 import { UiPreferencesProvider } from "@/context/UiPreferencesContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AssistantOverlay } from "@/components/AssistantOverlay";
+import { callDebug } from "@/lib/callDebug";
 import { getApiUrl } from "@/lib/api";
 import { parseReelsChannelHandleFromUrl, parseReelsWatchIdFromUrl } from "@/lib/reelsShare";
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
@@ -680,8 +681,11 @@ function RootLayoutNav() {
       activeCallIdRef.current = call.callId;
       await acceptIncoming(call);
       dismissIncomingCallUi(call.callId, false);
-    } catch {
+    } catch (err: any) {
       activeCallIdRef.current = null;
+      const message = err?.message ?? "Could not accept call";
+      callDebug("CALL_ACCEPT_FAILED", { callId: call.callId, message });
+      Alert.alert("Call failed", message);
       setIncomingCall(call);
       pendingIncomingRef.current = call;
       scheduleIncomingAutoEnd(call.callId);

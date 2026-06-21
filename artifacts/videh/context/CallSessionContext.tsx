@@ -168,8 +168,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         isIncoming: session?.isIncoming,
         engineActive: session?.engineActive,
         ringing: session?.ringing,
+        acceptedCount,
       }),
-    [userId, session?.isIncoming, session?.engineActive, session?.ringing, acceptedUserIds],
+    [userId, session?.isIncoming, session?.engineActive, session?.ringing, acceptedUserIds, acceptedCount],
   );
 
   useEffect(() => {
@@ -579,12 +580,24 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       method: "POST",
       body: JSON.stringify({ userId: user.dbId, action: "accept" }),
     });
-    const data = (await res.json()) as { success?: boolean; message?: string; busy?: boolean };
+    const data = (await res.json()) as {
+      success?: boolean;
+      message?: string;
+      busy?: boolean;
+      call?: { acceptedCount?: number; acceptedUserIds?: number[] };
+    };
     if (!res.ok || !data.success) {
       throw new Error(data.message ?? "Could not accept call");
     }
     if (data.busy) {
       throw new Error("You are already on another call");
+    }
+
+    if (typeof data.call?.acceptedCount === "number") {
+      setAcceptedCount(data.call.acceptedCount);
+    }
+    if (Array.isArray(data.call?.acceptedUserIds) && data.call.acceptedUserIds.length > 0) {
+      setAcceptedUserIds(data.call.acceptedUserIds);
     }
 
     callDebug("CALL_ACCEPTED", { callId, userId: user.dbId, callerId: resolvedCallerId, channel });
@@ -688,10 +701,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [session?.callId, session?.isIncoming, session?.ringing, call.joined, acceptedCount, user?.sessionToken, onCallEnded]);
 
   useEffect(() => {
-    if (!session?.callId || !userId || !session.engineActive || session.ringing) return;
+    if (!session?.callId || !userId || session.ringing) return;
+    // Outgoing calls: poll from ring until callee accepts (engineActive may still be false).
+    // Incoming calls: poll only after accept (engineActive true).
+    if (session.isIncoming && !session.engineActive) return;
     const polledCallId = session.callId;
     statusPollMissRef.current = 0;
-    const pollMs = call.joined ? 800 : 500;
+    const pollMs = call.joined ? 800 : session.engineActive ? 500 : 400;
     const missLimit = call.joined ? 6 : 4;
     const timer = setInterval(() => {
       void webrtcFetch(`/calls/${polledCallId}/status?userId=${userId}`, user?.sessionToken)
@@ -801,7 +817,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         .catch(() => {});
     }, pollMs);
     return () => clearInterval(timer);
-  }, [session?.callId, session?.engineActive, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleServerCallEnded]);
+  }, [session?.callId, session?.engineActive, session?.isIncoming, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleServerCallEnded]);
 
   const callAnswered = call.connectionPhase === "connected";
 
@@ -840,9 +856,23 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       }
       if (action === "accepted" && callId && sessionCallIdRef.current === callId) {
         void stopCallAlert();
-        const payload = signal as { acceptedUserIds?: number[]; callerId?: number };
+        const payload = signal as {
+          acceptedUserIds?: number[];
+          callerId?: number;
+          acceptedCount?: number;
+        };
+        if (typeof payload.acceptedCount === "number") {
+          setAcceptedCount(payload.acceptedCount);
+        }
         if (Array.isArray(payload.acceptedUserIds) && payload.acceptedUserIds.length > 0) {
           setAcceptedUserIds(payload.acceptedUserIds);
+        } else if ((payload.acceptedCount ?? 0) > 1) {
+          setAcceptedUserIds((prev) => {
+            const ids = new Set(prev);
+            if (userId) ids.add(userId);
+            if (typeof payload.callerId === "number" && payload.callerId > 0) ids.add(payload.callerId);
+            return [...ids];
+          });
         }
         if (typeof payload.callerId === "number" && payload.callerId > 0) {
           setCallerId(payload.callerId);
@@ -865,7 +895,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       setSession((prev) => (prev ? { ...prev, isVideo: nextVideo } : prev));
     });
     return unsub;
-  }, [handleServerCallEnded]);
+  }, [handleServerCallEnded, userId]);
 
   useEffect(() => registerCallSessionDismissHandler(handleUiDismissRequest), [handleUiDismissRequest]);
   useEffect(() => registerCallSessionEndHandler(handleServerCallEnded), [handleServerCallEnded]);

@@ -360,6 +360,13 @@
     await stateDelete(sessionKey(call.channel));
   }
 
+  function acceptedUserIdsFromCall(call: CallInvite): number[] {
+    return Object.entries(call.statuses)
+      .filter(([, status]) => status === "accepted")
+      .map(([id]) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+  }
+
   function serializeIncoming(call: CallInvite, userId: number) {
     const acceptedCount = Object.values(call.statuses).filter((status) => status === "accepted").length;
     const ringingCount = Object.values(call.statuses).filter((status) => status === "ringing").length;
@@ -375,6 +382,7 @@
       callerName: call.callerName ?? "Videh user",
       participantCount: call.participantIds.length + 1,
       acceptedCount,
+      acceptedUserIds: acceptedUserIdsFromCall(call),
       ringingCount,
       busyCount,
       declinedCount,
