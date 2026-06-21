@@ -33,7 +33,6 @@ import {
 } from "@/lib/incomingCallUiBridge";
 import { rejectIncomingCall } from "@/lib/rejectIncomingCall";
 import { fetchIncomingCallDetails } from "@/lib/fetchIncomingCallDetails";
-import { hydrateAndValidateIncomingCall } from "@/lib/hydrateIncomingCall";
 import { isRemotePartyAccepted } from "@/lib/callRole";
 import { stopIncomingCallExperience } from "@/lib/incomingCallExperience";
 import { dismissIncomingCallNotification } from "@/lib/incomingCallNotification";
@@ -620,38 +619,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     const callId = callInfo?.callId ?? session?.callId;
     if (!callId || !user?.dbId) throw new Error("Missing call session");
 
-    let resolved = callInfo;
-    if (resolved) {
-      const hydrated = await hydrateAndValidateIncomingCall(resolved, user.dbId, user.sessionToken);
-      if (hydrated) resolved = hydrated;
-    } else if (session) {
-      const hydrated = await hydrateAndValidateIncomingCall(
-        {
-          callId,
-          channel: session.channel ?? "",
-          chatId: Number(session.chatId),
-          type: session.isVideo ? "video" : "audio",
-          callerName: session.contactName,
-          participantCount: 2,
-        },
-        user.dbId,
-        user.sessionToken,
-      );
-      if (hydrated) resolved = hydrated;
-    }
-
-    const resolvedCallerId = resolved?.callerId;
-    if (!resolvedCallerId || resolvedCallerId <= 0) {
-      throw new Error("Could not identify caller");
-    }
-
-    const channel = resolved?.channel?.trim() || session?.channel?.trim() || "";
-    if (!channel) throw new Error("Call channel unavailable");
-
-    const live = await fetchIncomingCallDetails(callId, user.dbId, user.sessionToken);
-    if (!live) {
-      throw new Error("Call expired — ask them to call again.");
-    }
+    callDebug("CALL_ACCEPT_START", { callId, userId: user.dbId, callerId: callInfo?.callerId });
 
     await stopIncomingCallExperience(callId);
     await stopCallAlert();
@@ -666,7 +634,16 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       success?: boolean;
       message?: string;
       busy?: boolean;
-      call?: { acceptedCount?: number; acceptedUserIds?: number[] };
+      callerId?: number;
+      call?: {
+        channel?: string;
+        chatId?: number;
+        type?: string;
+        callerName?: string;
+        callerId?: number;
+        acceptedCount?: number;
+        acceptedUserIds?: number[];
+      };
     };
     if (!res.ok || !data.success) {
       const msg = data.message ?? "Could not accept call";
@@ -676,6 +653,30 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     }
     if (data.busy) {
       throw new Error("You are already on another call");
+    }
+
+    let resolvedCallerId = Number(data.callerId ?? data.call?.callerId ?? callInfo?.callerId ?? 0);
+    let channel = String(data.call?.channel ?? callInfo?.channel ?? session?.channel ?? "").trim();
+    let chatId = Number(data.call?.chatId ?? callInfo?.chatId ?? session?.chatId ?? 0);
+    let callerName = String(data.call?.callerName ?? callInfo?.callerName ?? session?.contactName ?? "Contact");
+    const isVideo = (data.call?.type ?? callInfo?.type ?? (session?.isVideo ? "video" : "audio")) === "video";
+
+    if (!channel || !resolvedCallerId) {
+      const details = await fetchIncomingCallDetails(callId, user.dbId, user.sessionToken);
+      if (details) {
+        channel = channel || details.channel.trim();
+        chatId = chatId || details.chatId;
+        callerName = callerName || details.callerName;
+        if (!resolvedCallerId && details.callerId) resolvedCallerId = details.callerId;
+      }
+    }
+
+    if (!channel) throw new Error("Call channel unavailable");
+    if (!resolvedCallerId || resolvedCallerId <= 0) {
+      throw new Error("Could not identify caller");
+    }
+    if (resolvedCallerId === user.dbId) {
+      throw new Error("Cannot accept your own call");
     }
 
     if (typeof data.call?.acceptedCount === "number") {
@@ -700,9 +701,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     sessionEngineActiveRef.current = true;
 
     const next: CallSession = {
-      chatId: String(resolved?.chatId ?? session?.chatId ?? ""),
-      contactName: resolved?.callerName ?? session?.contactName ?? "Contact",
-      isVideo: (resolved?.type ?? (session?.isVideo ? "video" : "audio")) === "video",
+      chatId: String(chatId || session?.chatId || ""),
+      contactName: callerName,
+      isVideo,
       channel,
       callId,
       isIncoming: true,

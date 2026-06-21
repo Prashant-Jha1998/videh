@@ -6,8 +6,8 @@ export function shouldPresentIncomingCall(opts: {
   activeCall?: { callId?: string; isIncoming?: boolean } | null;
 }): boolean {
   const { userId, callerId, callId, activeCall } = opts;
-  if (!callerId || callerId <= 0) return false;
-  if (callerId === userId) return false;
+  if (!callId) return false;
+  if (callerId && callerId > 0 && callerId === userId) return false;
   if (activeCall?.callId === callId && activeCall.isIncoming === false) return false;
   return true;
 }

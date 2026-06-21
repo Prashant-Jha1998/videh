@@ -23,7 +23,6 @@ import { parseReelsChannelHandleFromUrl, parseReelsWatchIdFromUrl } from "@/lib/
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
 import { shouldPresentIncomingCall } from "@/lib/callRole";
 import { hydrateIncomingCallInfo, hydrateAndValidateIncomingCall } from "@/lib/hydrateIncomingCall";
-import { fetchIncomingCallDetails } from "@/lib/fetchIncomingCallDetails";
 import { IncomingCallOverlay, type IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { webrtcAuthHeaders, webrtcFetch } from "@/lib/webrtcApi";
 import { normalizeCallNetworkError } from "@/lib/videhCall/signalingClient";
@@ -210,18 +209,15 @@ function RootLayoutNav() {
     const partial = toIncomingCallInfo(raw);
     const callPayload = await hydrateIncomingCallInfo(partial, user.dbId, user.sessionToken);
     if (!callPayload) return;
-    const live = await fetchIncomingCallDetails(callPayload.callId, user.dbId, user.sessionToken);
-    if (!live) return;
-    const merged = { ...callPayload, ...live, callerName: callPayload.callerName || live.callerName };
     if (!shouldPresentIncomingCall({
       userId: user.dbId,
-      callerId: merged.callerId,
-      callId: merged.callId,
+      callerId: callPayload.callerId,
+      callId: callPayload.callId,
       activeCall: activeCallSession,
     })) {
       return;
     }
-    const next = merged;
+    const next = callPayload;
     if (dismissedIncomingCallIdsRef.current.has(next.callId)) return;
     if (activeCallIdRef.current === next.callId) return;
     if (activeCallSession?.callId === next.callId) return;
@@ -357,12 +353,15 @@ function RootLayoutNav() {
             participantCount: 2,
             callerId: Number(data.callerId) > 0 ? Number(data.callerId) : undefined,
           });
-          const hydrated = await hydrateAndValidateIncomingCall(partial, user.dbId, user.sessionToken);
-          if (!hydrated) return;
           clearIncomingAutoEnd();
-          dismissIncomingCallUi(hydrated.callId, false);
-          activeCallIdRef.current = hydrated.callId;
-          await acceptIncoming(hydrated);
+          dismissIncomingCallUi(callId, false);
+          activeCallIdRef.current = callId;
+          try {
+            await acceptIncoming(partial);
+          } catch (err: any) {
+            const message = normalizeCallNetworkError(err).message ?? "Could not accept call";
+            Alert.alert("Call failed", message);
+          }
         })();
         return;
       }
@@ -706,6 +705,7 @@ function RootLayoutNav() {
     try {
       clearIncomingAutoEnd();
       activeCallIdRef.current = call.callId;
+      callDebug("CALL_ACCEPT_TAP", { callId: call.callId, callerId: call.callerId });
       await acceptIncoming(call);
       dismissIncomingCallUi(call.callId, false);
     } catch (err: any) {
@@ -763,7 +763,26 @@ function RootLayoutNav() {
           if (hydrated) {
             dismissIncomingCallUi(hydrated.callId, false);
             activeCallIdRef.current = hydrated.callId;
-            await acceptIncoming(hydrated);
+            try {
+              await acceptIncoming(hydrated);
+            } catch (err: any) {
+              const message = normalizeCallNetworkError(err).message ?? "Could not accept call";
+              Alert.alert("Call failed", message);
+            }
+          } else {
+            try {
+              await acceptIncoming(toIncomingCallInfo({
+                callId,
+                channel: "",
+                chatId: 0,
+                type: "audio",
+                callerName: "Videh user",
+                participantCount: 2,
+              }));
+            } catch (err: any) {
+              const message = normalizeCallNetworkError(err).message ?? "Could not accept call";
+              Alert.alert("Call failed", message);
+            }
           }
         })();
       },
@@ -921,12 +940,11 @@ function RootLayoutNav() {
       </Stack>
       {incomingCall
       && user?.dbId
-      && incomingCall.callerId
-      && incomingCall.callerId > 0
+      && incomingCall.callId
       && incomingCall.callerId !== user.dbId ? (
         <IncomingCallOverlay
           call={{ ...incomingCall, avatarUrl: incomingCallAvatar }}
-          onAccept={() => respondToIncomingCall("accept")}
+          onAccept={() => { void respondToIncomingCall("accept"); }}
           onDecline={() => { void respondToIncomingCall("decline"); }}
           onDeclineWithMessage={(text) => { void respondToIncomingCall("decline", text); }}
         />

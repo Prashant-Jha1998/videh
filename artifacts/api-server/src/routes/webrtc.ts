@@ -242,7 +242,10 @@
 
       const status = call.statuses[userId];
       if (!status) return false;
-      if (status === "ringing") return call.callerId !== userId;
+      if (status === "ringing") {
+        if (callIsOrphanStale(call)) return false;
+        return call.callerId !== userId;
+      }
 
       if (status === "calling") {
         return call.callerId === userId
@@ -584,6 +587,7 @@
     if (!assertSameUser(req, res, userId)) return;
 
     if (body.action === "accept") {
+      req.log?.info?.({ callId: call.callId, userId }, "webrtc call accept");
       if (call.statuses[userId] !== "ringing") {
         const msg = call.statuses[userId] === "missed"
           ? "Call expired — ask them to call again."
