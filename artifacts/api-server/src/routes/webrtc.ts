@@ -42,8 +42,10 @@
   const router = Router();
   router.use(requireAuth);
   const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
-  /** Keep in sync with videh `INCOMING_RING_TIMEOUT_MS` (30s). */
-  const RING_TIMEOUT_MS = 30 * 1000;
+  /** Keep in sync with videh `INCOMING_RING_TIMEOUT_MS` (45s). */
+  const RING_TIMEOUT_MS = 45 * 1000;
+  /** Accepted but WebRTC never connected — release ghost calls blocking new invites. */
+  const NEGOTIATE_IDLE_MS = 90 * 1000;
   /** Connected calls stay alive while clients poll status; orphan after brief silence (crash / force-quit). */
   const CONNECTED_CALL_IDLE_MS = 2 * 60 * 1000;
   const ringExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -53,7 +55,7 @@
     const idleMs = Date.now() - call.updatedAt;
     if (!call.connectedAt) {
       const accepted = Object.values(call.statuses).some((s) => s === "accepted");
-      if (accepted) return idleMs > CONNECTED_CALL_IDLE_MS;
+      if (accepted) return idleMs > NEGOTIATE_IDLE_MS;
       return idleMs > RING_TIMEOUT_MS;
     }
     return idleMs > CONNECTED_CALL_IDLE_MS;
@@ -252,6 +254,7 @@
 
       if (status === "accepted") {
         if (call.connectedAt) return true;
+        if (Date.now() - call.updatedAt > NEGOTIATE_IDLE_MS) return false;
         if (call.callerId === userId) {
           return call.participantIds.some((id) => {
             const peer = call.statuses[id];
@@ -575,14 +578,17 @@
     const body = req.body as { userId?: number; action?: "accept" | "decline"; declineMessage?: string };
     const userId = Number(body.userId);
     if (!call || !userId || !call.statuses[userId]) {
-      res.status(404).json({ success: false, message: "Call not found." });
+      res.status(404).json({ success: false, message: "Call expired — ask them to call again." });
       return;
     }
     if (!assertSameUser(req, res, userId)) return;
 
     if (body.action === "accept") {
       if (call.statuses[userId] !== "ringing") {
-        res.status(409).json({ success: false, message: "Call is no longer ringing." });
+        const msg = call.statuses[userId] === "missed"
+          ? "Call expired — ask them to call again."
+          : "Call is no longer ringing.";
+        res.status(409).json({ success: false, message: msg });
         return;
       }
       await releaseStaleCallsForUser(userId, call.callId);

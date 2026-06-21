@@ -25,10 +25,13 @@ export async function fetchIncomingCallDetails(
         callerName?: string;
         callerId?: number;
         participantCount?: number;
+        status?: string | null;
       };
       callerId?: number;
     };
     if (!data.success || data.ended || !data.call?.channel) return null;
+    const calleeStatus = data.call.status;
+    if (calleeStatus && calleeStatus !== "ringing") return null;
     const resolvedCallerId = Number(data.callerId ?? data.call.callerId);
     return {
       callId: String(data.call.callId ?? callId),

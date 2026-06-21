@@ -23,6 +23,7 @@ import { parseReelsChannelHandleFromUrl, parseReelsWatchIdFromUrl } from "@/lib/
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
 import { shouldPresentIncomingCall } from "@/lib/callRole";
 import { hydrateIncomingCallInfo, hydrateAndValidateIncomingCall } from "@/lib/hydrateIncomingCall";
+import { fetchIncomingCallDetails } from "@/lib/fetchIncomingCallDetails";
 import { IncomingCallOverlay, type IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { webrtcAuthHeaders, webrtcFetch } from "@/lib/webrtcApi";
 import { normalizeCallNetworkError } from "@/lib/videhCall/signalingClient";
@@ -209,15 +210,18 @@ function RootLayoutNav() {
     const partial = toIncomingCallInfo(raw);
     const callPayload = await hydrateIncomingCallInfo(partial, user.dbId, user.sessionToken);
     if (!callPayload) return;
+    const live = await fetchIncomingCallDetails(callPayload.callId, user.dbId, user.sessionToken);
+    if (!live) return;
+    const merged = { ...callPayload, ...live, callerName: callPayload.callerName || live.callerName };
     if (!shouldPresentIncomingCall({
       userId: user.dbId,
-      callerId: callPayload.callerId,
-      callId: callPayload.callId,
+      callerId: merged.callerId,
+      callId: merged.callId,
       activeCall: activeCallSession,
     })) {
       return;
     }
-    const next = callPayload;
+    const next = merged;
     if (dismissedIncomingCallIdsRef.current.has(next.callId)) return;
     if (activeCallIdRef.current === next.callId) return;
     if (activeCallSession?.callId === next.callId) return;
@@ -523,7 +527,13 @@ function RootLayoutNav() {
           offeredCallIdRef.current = null;
           pendingIncomingRef.current = null;
           clearIncomingAutoEnd();
-          requestEndCallSession(callId);
+          const skipEndSession =
+            (action === "missed" || action === "cancelled")
+            && activeCallEngineActiveRef.current
+            && activeCallIdRef.current === callId;
+          if (!skipEndSession) {
+            requestEndCallSession(callId);
+          }
           dismissIncomingCallUi(callId, true);
           void loadMessages(String(signal.chatId ?? payload.chatId ?? ""));
         } else {
@@ -702,10 +712,11 @@ function RootLayoutNav() {
       activeCallIdRef.current = null;
       const message = normalizeCallNetworkError(err).message ?? "Could not accept call";
       callDebug("CALL_ACCEPT_FAILED", { callId: call.callId, message });
+      dismissedIncomingCallIdsRef.current.add(call.callId);
+      dismissIncomingCallUi(call.callId, true);
       Alert.alert("Call failed", message);
-      setIncomingCall(call);
-      pendingIncomingRef.current = call;
-      scheduleIncomingAutoEnd(call.callId);
+      pendingIncomingRef.current = null;
+      setIncomingCall(null);
     }
   };
 

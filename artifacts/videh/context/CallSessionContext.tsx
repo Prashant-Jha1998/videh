@@ -20,7 +20,7 @@ import {
   stopCallAlert,
 } from "@/lib/callRingtone";
 import { addUsersToOngoingCall } from "@/lib/callParticipants";
-import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
+import { CONNECTING_TIMEOUT_MS, INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import { videhSignalingPost } from "@/lib/videhCall/signalingClient";
 import { chooseInCallAudioRoute, wakeScreenForIncomingCall, type InCallAudioRoute } from "@/lib/inCallAudio";
@@ -32,6 +32,7 @@ import {
   requestDismissIncomingCallUi,
 } from "@/lib/incomingCallUiBridge";
 import { rejectIncomingCall } from "@/lib/rejectIncomingCall";
+import { fetchIncomingCallDetails } from "@/lib/fetchIncomingCallDetails";
 import { hydrateAndValidateIncomingCall } from "@/lib/hydrateIncomingCall";
 import { isRemotePartyAccepted } from "@/lib/callRole";
 import { stopIncomingCallExperience } from "@/lib/incomingCallExperience";
@@ -647,6 +648,11 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     const channel = resolved?.channel?.trim() || session?.channel?.trim() || "";
     if (!channel) throw new Error("Call channel unavailable");
 
+    const live = await fetchIncomingCallDetails(callId, user.dbId, user.sessionToken);
+    if (!live) {
+      throw new Error("Call expired — ask them to call again.");
+    }
+
     await stopIncomingCallExperience(callId);
     await stopCallAlert();
 
@@ -663,7 +669,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       call?: { acceptedCount?: number; acceptedUserIds?: number[] };
     };
     if (!res.ok || !data.success) {
-      throw new Error(data.message ?? "Could not accept call");
+      const msg = data.message ?? "Could not accept call";
+      throw new Error(/not found|expired|no longer ringing/i.test(msg)
+        ? "Call expired — ask them to call again."
+        : msg);
     }
     if (data.busy) {
       throw new Error("You are already on another call");
@@ -761,7 +770,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     void startOutgoingRingback();
     const timeout = setTimeout(() => {
       void (async () => {
-        if (call.joined) return;
+        if (call.joined || remotePartyAccepted) return;
         await stopCallAlert();
         await playCallUnavailableTone();
         if (session.callId) {
@@ -774,7 +783,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       clearTimeout(timeout);
       void stopCallAlert();
     };
-  }, [session?.callId, session?.isIncoming, session?.ringing, call.joined, acceptedCount, user?.sessionToken, showUnreachableOutcome]);
+  }, [session?.callId, session?.isIncoming, session?.ringing, call.joined, remotePartyAccepted, acceptedCount, user?.sessionToken, showUnreachableOutcome]);
 
   useEffect(() => {
     if (!session?.callId || !userId || session.ringing) return;
@@ -895,6 +904,23 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     return () => clearInterval(timer);
   }, [session?.callId, session?.engineActive, session?.isIncoming, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleServerCallEnded, showUnreachableOutcome]);
 
+  useEffect(() => {
+    if (!session?.callId || !session.engineActive || session.ringing || call.joined) return;
+    if (!remotePartyAccepted) return;
+    const callId = session.callId;
+    const timer = setTimeout(() => {
+      if (sessionCallIdRef.current !== callId || endingCallRef.current) return;
+      callDebug("CONNECTING_TIMEOUT", { callId });
+      void (async () => {
+        await webrtcFetch(`/calls/${callId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
+        setStatusHint("Could not connect — check internet and try again.");
+        await playCallUnavailableTone();
+        void teardownCallLocally(callId, { skipServerEnd: true });
+      })();
+    }, CONNECTING_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [session?.callId, session?.engineActive, session?.ringing, remotePartyAccepted, call.joined, user?.sessionToken, teardownCallLocally]);
+
   const callAnswered = call.connectionPhase === "connected";
 
   useEffect(() => {
@@ -927,6 +953,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         callId
         && (action === "ended" || action === "declined" || action === "missed" || action === "busy" || action === "cancelled")
       ) {
+        if (
+          (action === "missed" || action === "cancelled")
+          && sessionEngineActiveRef.current
+          && sessionCallIdRef.current === callId
+          && !sessionRingingRef.current
+        ) {
+          return;
+        }
         handleServerCallEnded(callId);
         return;
       }
