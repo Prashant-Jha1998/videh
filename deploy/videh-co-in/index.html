@@ -3,14 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Videh — Secure Messaging, Calls &amp; More | India</title>
+    <title>Videh Messenger — Official App | Chat, Calls &amp; Video | videh.co.in</title>
     <meta
       name="description"
-      content="Videh is India's secure messaging app with private chat, HD voice and video calls, Videh Video channels with creator monetization, Videh Ads for businesses, 24-hour status, broadcasts, Khata ledger, SOS safety, and Videh Web."
+      content="Official Videh Messenger app at videh.co.in — India's secure messaging app with private chat, HD voice and video calls, Videh Video, Videh Web, Videh Ads, and Developer API. Free on Android."
     />
-    <meta name="keywords" content="Videh, messaging app India, secure chat, video call, Videh Video, creator monetization, Videh Ads, group chat, Videh Web" />
+    <meta name="keywords" content="Videh Messenger, Videh, Videh app, videh.co.in, official Videh, Videh messaging app, secure chat India, video call app, Videh Video, Videh Web, Indian messenger app" />
+    <meta name="author" content="Videh Messenger" />
+    <meta name="application-name" content="Videh Messenger" />
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large" />
     <link rel="canonical" href="https://videh.co.in/" />
+    <link rel="home" href="https://videh.co.in/" title="Videh Messenger official site" />
+    <link rel="alternate" hreflang="en-in" href="https://videh.co.in/" />
+    <link rel="alternate" hreflang="x-default" href="https://videh.co.in/" />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Videh" />
+    <meta property="og:locale" content="en_IN" />
     <meta property="og:url" content="https://videh.co.in/" />
     <meta property="og:title" content="Videh — India's Secure Messaging App" />
     <meta
@@ -30,13 +38,94 @@
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "Videh",
-        "applicationCategory": "CommunicationApplication",
-        "operatingSystem": "Android, Web",
-        "description": "Secure messaging with chat, calls, status, and privacy-focused features for users in India.",
-        "url": "https://videh.co.in/",
-        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "INR" }
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://videh.co.in/#organization",
+            "name": "Videh Messenger",
+            "legalName": "Videh",
+            "url": "https://videh.co.in/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://videh.co.in/videh_icon_foreground.png",
+              "width": 512,
+              "height": 512
+            },
+            "email": "support@videh.co.in",
+            "description": "Official Videh Messenger — secure chat, voice and video calls, and Videh Video for users in India.",
+            "areaServed": { "@type": "Country", "name": "India" }
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://videh.co.in/#website",
+            "name": "Videh Messenger",
+            "alternateName": ["Videh", "Videh App", "videh.co.in", "Videh messaging app", "Videh messenger app"],
+            "url": "https://videh.co.in/",
+            "publisher": { "@id": "https://videh.co.in/#organization" },
+            "inLanguage": "en-IN"
+          },
+          {
+            "@type": "WebPage",
+            "@id": "https://videh.co.in/#webpage",
+            "url": "https://videh.co.in/",
+            "name": "Videh Messenger — Official Site",
+            "description": "Official website of the Videh Messenger app — download, Videh Web, Videh Video, Ads, and Developer portal.",
+            "isPartOf": { "@id": "https://videh.co.in/#website" },
+            "about": { "@id": "https://videh.co.in/#organization" },
+            "inLanguage": "en-IN"
+          },
+          {
+            "@type": "ItemList",
+            "name": "Videh products",
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Videh Web", "url": "https://videh.co.in/web.html" },
+              { "@type": "ListItem", "position": 2, "name": "Videh Video", "url": "https://videh.co.in/video.html" },
+              { "@type": "ListItem", "position": 3, "name": "Videh Ads", "url": "https://videh.co.in/ads.html" },
+              { "@type": "ListItem", "position": 4, "name": "Videh Developer", "url": "https://videh.co.in/developer.html" },
+              { "@type": "ListItem", "position": 5, "name": "Download Videh", "url": "https://videh.co.in/download.html" }
+            ]
+          },
+          {
+            "@type": "SoftwareApplication",
+            "name": "Videh Messenger",
+            "applicationCategory": "CommunicationApplication",
+            "operatingSystem": "Android, Web",
+            "description": "Secure messaging with chat, calls, Videh Video, status, and privacy-focused features for users in India.",
+            "url": "https://videh.co.in/download.html",
+            "downloadUrl": "https://videh.co.in/download.html",
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "INR" },
+            "publisher": { "@id": "https://videh.co.in/#organization" }
+          },
+          {
+            "@type": "FAQPage",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "What is Videh Messenger?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Videh Messenger is India's secure messaging app for private chat, voice and video calls, status stories, group tools, and Videh Video channels. The official website is videh.co.in."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Where is the official Videh app website?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "The official Videh Messenger website is https://videh.co.in — download the Android app, open Videh Web, Videh Video, Videh Ads, or the Developer portal from here."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Is Videh free to use?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. Videh Messenger is free to download and use for messaging, calls, and standard features on Android."
+                }
+              }
+            ]
+          }
+        ]
       }
     </script>
   </head>
@@ -45,11 +134,11 @@
 
     <header class="topbar">
       <div class="topbar-inner">
-        <a class="brand" href="/">
+        <a class="brand" href="/" title="Videh Messenger — official site">
           <span class="logo-chip" aria-hidden="true">
             <picture>
               <source type="image/webp" srcset="/videh_icon_32.webp 1x, /videh_icon_64.webp 2x" />
-              <img src="/videh_icon_foreground.png" alt="" width="32" height="32" decoding="async" />
+              <img src="/videh_icon_foreground.png" alt="Videh Messenger logo" width="32" height="32" decoding="async" />
             </picture>
           </span>
           Videh
@@ -58,12 +147,11 @@
         <nav id="site-nav" class="nav" aria-label="Main navigation">
           <a href="#about">About</a>
           <a href="#features">Features</a>
-          <a href="#videh-video">Videh Video</a>
-          <a href="#security">Security</a>
-          <a href="#how-it-works">How it works</a>
+          <a href="/web.html">Videh Web</a>
+          <a href="/video.html">Videh Video</a>
+          <a href="/ads.html">Videh Ads</a>
+          <a href="/developer.html">Developer</a>
           <a href="#faq">FAQ</a>
-          <a href="https://video.videh.co.in/" rel="noopener">Videh Video</a>
-          <a href="https://web.videh.co.in/" rel="noopener">Videh Web</a>
           <a class="cta" href="/download.html">Download</a>
         </nav>
       </div>
@@ -72,12 +160,12 @@
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-inner">
         <div>
-          <span class="hero-badge">🇮🇳 Built for everyday communication in India</span>
-          <h1 id="hero-title">Messaging that stays private, fast, and familiar</h1>
+          <span class="hero-badge">✓ Official Videh Messenger · videh.co.in · Made in India</span>
+          <h1 id="hero-title">Videh Messenger — secure chat, calls &amp; video</h1>
           <p class="hero-lead">
-            Videh brings together private chats, crystal-clear voice and video calls, Videh Video channels,
-            status stories, broadcast lists, group tools like Khata, emergency SOS alerts, and a full desktop
-            experience through Videh Web — without selling your private chats for ads.
+            <strong>Videh Messenger</strong> (videh.co.in) is the official app for private chats, crystal-clear voice
+            and video calls, Videh Video channels, status stories, broadcast lists, group tools like Khata, emergency
+            SOS alerts, and desktop sync through Videh Web — without selling your private chats for ads.
           </p>
           <ul class="hero-points">
             <li>End-to-end encrypted connections for messages and calls in transit</li>
@@ -131,14 +219,42 @@
       </div>
     </div>
 
+    <section class="products-bar" aria-label="Videh products">
+      <div class="wrap">
+        <div class="products-grid">
+          <a class="product-tile" href="/web.html">
+            <span class="product-icon" aria-hidden="true">🌐</span>
+            <strong>Videh Web</strong>
+            <span>Chat from desktop — link your phone via QR</span>
+          </a>
+          <a class="product-tile" href="/video.html">
+            <span class="product-icon" aria-hidden="true">🎬</span>
+            <strong>Videh Video</strong>
+            <span>Watch, upload, and grow your channel</span>
+          </a>
+          <a class="product-tile" href="/ads.html">
+            <span class="product-icon" aria-hidden="true">📢</span>
+            <strong>Videh Ads</strong>
+            <span>Run video ads for your business</span>
+          </a>
+          <a class="product-tile" href="/developer.html">
+            <span class="product-icon" aria-hidden="true">⚙️</span>
+            <strong>Developer</strong>
+            <span>Business API, templates &amp; integrations</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
     <main id="main">
       <section id="about">
         <div class="wrap">
           <div class="section-head">
-            <h2>About Videh</h2>
+            <h2>About Videh Messenger</h2>
             <p>
-              Videh is a modern messenger designed for friends, families, and small teams across India.
-              Whether you are coordinating a wedding, running a neighbourhood group, or staying in touch
+              <strong>Videh Messenger</strong> is the official messaging app at
+              <a href="https://videh.co.in/">videh.co.in</a> — built for friends, families, and small teams across
+              India. Whether you are coordinating a wedding, running a neighbourhood group, or staying in touch
               with family abroad, Videh keeps conversations organized with receipts, media sharing, calls,
               and optional tools like shared expense tracking — all in one place.
             </p>
@@ -527,21 +643,21 @@
             <p>Official Videh services and policies — all in one place.</p>
           </div>
           <div class="sitelinks">
-            <a class="sitelink" href="https://video.videh.co.in/" rel="noopener">
-              <strong>Videh Video Web</strong>
-              <span>Watch, upload, and manage your channel — same account as the Videh app.</span>
-            </a>
-            <a class="sitelink" href="https://web.videh.co.in/" rel="noopener">
+            <a class="sitelink" href="/web.html">
               <strong>Videh Web</strong>
               <span>Link your phone and chat from desktop or tablet browser.</span>
             </a>
-            <a class="sitelink" href="https://ads.videh.co.in/" rel="noopener">
-              <strong>Videh Ads</strong>
-              <span>Run pre-roll, mid-roll, and feed video ads on Videh Video — admin-approved campaigns.</span>
+            <a class="sitelink" href="/video.html">
+              <strong>Videh Video</strong>
+              <span>Watch, upload, and manage your channel — same account as the Videh app.</span>
             </a>
-            <a class="sitelink" href="#creator-program">
-              <strong>Creator Program</strong>
-              <span>500 subscribers, 2,000 watch hours, and 5 videos to qualify for monetization.</span>
+            <a class="sitelink" href="/ads.html">
+              <strong>Videh Ads</strong>
+              <span>Run pre-roll, mid-roll, and feed video ads on Videh Video.</span>
+            </a>
+            <a class="sitelink" href="/developer.html">
+              <strong>Videh Developer</strong>
+              <span>Business messaging API, templates, and webhook integrations.</span>
             </a>
             <a class="sitelink" href="/download.html">
               <strong>Download Android app</strong>
@@ -578,6 +694,24 @@
             <p>Answers to the most common questions about Videh.</p>
           </div>
           <div class="faq">
+            <details open>
+              <summary>What is Videh Messenger?</summary>
+              <p>
+                <strong>Videh Messenger</strong> is India's secure messaging and video app. Download it on Android,
+                use <a href="/web.html">Videh Web</a> on desktop, watch and upload on
+                <a href="/video.html">Videh Video</a>, and manage business tools at
+                <a href="/developer.html">Developer</a> and <a href="/ads.html">Videh Ads</a>.
+                The only official website is <strong>videh.co.in</strong>.
+              </p>
+            </details>
+            <details>
+              <summary>Where is the official Videh app website?</summary>
+              <p>
+                The official site is <a href="https://videh.co.in/">https://videh.co.in</a> (Videh Messenger).
+                Download the app from our <a href="/download.html">download page</a> or search
+                <strong>Videh Messenger</strong> on Google Play — not other unrelated brands that use the word Videh.
+              </p>
+            </details>
             <details>
               <summary>Is Videh free to use?</summary>
               <p>
@@ -687,11 +821,11 @@
           <h4>Product</h4>
           <ul>
             <li><a href="#features">Features</a></li>
-            <li><a href="#videh-video">Videh Video</a></li>
-            <li><a href="https://ads.videh.co.in/" rel="noopener">Videh Ads</a></li>
+            <li><a href="/web.html">Videh Web</a></li>
+            <li><a href="/video.html">Videh Video</a></li>
+            <li><a href="/ads.html">Videh Ads</a></li>
+            <li><a href="/developer.html">Developer</a></li>
             <li><a href="/download.html">Download</a></li>
-            <li><a href="https://video.videh.co.in/" rel="noopener">Videh Video Web</a></li>
-            <li><a href="https://web.videh.co.in/" rel="noopener">Videh Web</a></li>
           </ul>
         </div>
         <div>
@@ -711,7 +845,7 @@
         </div>
       </div>
       <p class="footer-bottom">
-        © <span id="y"></span> Videh ·
+        © <span id="y"></span> Videh Messenger · Official site: <a href="https://videh.co.in/">videh.co.in</a> ·
         <a href="/sitemap.xml">Sitemap</a>
       </p>
     </footer>
