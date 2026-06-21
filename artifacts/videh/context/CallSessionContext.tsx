@@ -196,6 +196,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     if (!session?.callId || session.isIncoming || session.ringing) return;
     if (remotePartyAccepted && session.channel && !session.engineActive) {
+      // FIX: Also update the ref immediately so webrtcReady computes true
+      // in the same synchronous pass, avoiding a one-render delay.
+      sessionEngineActiveRef.current = true;
       setSession((prev) => (prev?.callId === session.callId ? { ...prev, engineActive: true } : prev));
     }
   }, [session?.callId, session?.isIncoming, session?.ringing, session?.channel, session?.engineActive, remotePartyAccepted]);
@@ -273,6 +276,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     outgoingCallInitRef.current = null;
     busyEndHandledRef.current = null;
     negotiateBumpedForCallRef.current = null;
+    // FIX: Also clear the engine active ref so the next call starts clean.
+    sessionEngineActiveRef.current = false;
+    sessionRingingRef.current = false;
     if (dismissedCallIdsRef.current.size > 48) {
       dismissedCallIdsRef.current = new Set([...dismissedCallIdsRef.current].slice(-24));
     }
@@ -595,6 +601,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       outgoingCallInitRef.current = outgoingKey;
 
       void (async () => {
+        // FIX: Clear any lingering stale call from previous session before dialing.
         const lingerId = sessionCallIdRef.current;
         if (lingerId) {
           await webrtcFetch(`/calls/${lingerId}/end`, user.sessionToken, { method: "POST" }).catch(() => {});
@@ -673,6 +680,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       message?: string;
       busy?: boolean;
       callerId?: number;
+      // FIX: Server now returns acceptedUserIds directly in respond response.
+      acceptedUserIds?: number[];
+      acceptedCount?: number;
       call?: {
         channel?: string;
         chatId?: number;
@@ -717,26 +727,36 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       throw new Error("Cannot accept your own call");
     }
 
-    if (typeof data.call?.acceptedCount === "number") {
-      setAcceptedCount(data.call.acceptedCount);
+    // FIX: Use acceptedUserIds from top-level response first (new field),
+    // then fall back to call.acceptedUserIds for backward compatibility.
+    const serverAcceptedUserIds = data.acceptedUserIds ?? data.call?.acceptedUserIds ?? [];
+    const serverAcceptedCount = data.acceptedCount ?? data.call?.acceptedCount ?? 0;
+
+    if (serverAcceptedCount > 0) {
+      setAcceptedCount(serverAcceptedCount);
     }
-    if (Array.isArray(data.call?.acceptedUserIds) && data.call.acceptedUserIds.length > 0) {
-      setAcceptedUserIds(data.call.acceptedUserIds);
+    if (serverAcceptedUserIds.length > 0) {
+      setAcceptedUserIds(serverAcceptedUserIds);
     }
 
-    callDebug("CALL_ACCEPTED", { callId, userId: user.dbId, callerId: resolvedCallerId, channel });
+    callDebug("CALL_ACCEPTED", { callId, userId: user.dbId, callerId: resolvedCallerId, channel, serverAcceptedUserIds });
 
     setCallerId(resolvedCallerId);
-    setAcceptedCount((prev) => Math.max(prev, 2));
+    // FIX: Set acceptedUserIds to include both this user and the caller immediately.
+    // This ensures remotePartyAccepted becomes true before setSession(engineActive:true)
+    // so webrtcReady is true in the very next render.
     setAcceptedUserIds((prev) => {
-      const ids = new Set(prev);
+      const ids = new Set([...prev, ...serverAcceptedUserIds]);
       ids.add(user.dbId!);
       if (resolvedCallerId > 0) ids.add(resolvedCallerId);
       return [...ids];
     });
+    setAcceptedCount((prev) => Math.max(prev, serverAcceptedCount > 0 ? serverAcceptedCount : 2));
     dismissedCallIdsRef.current.delete(callId);
     negotiateBumpedForCallRef.current = null;
     sessionRingingRef.current = false;
+    // FIX: Set ref immediately before setSession so that if any effect fires
+    // synchronously, it sees the correct engineActive state.
     sessionEngineActiveRef.current = true;
 
     const next: CallSession = {
@@ -882,6 +902,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
             void stopCallAlert();
             setStatusHint(null);
             if (!sessionEngineActiveRef.current && sessionCallIdRef.current === polledCallId) {
+              // FIX: Set ref first, then state — prevents the old "one render delay"
+              // that caused webrtcReady to be false for one extra render cycle.
               sessionEngineActiveRef.current = true;
               setSession((prev) =>
                 prev?.callId === polledCallId && !prev.engineActive
@@ -1010,6 +1032,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         if (typeof signal.acceptedCount === "number") {
           setAcceptedCount(signal.acceptedCount);
         }
+        // FIX: acceptedUserIds now comes directly in the SSE payload (we added it
+        // to publishCallSignal in webrtc.ts). Use it to immediately unblock WebRTC.
         if (Array.isArray(signal.acceptedUserIds) && signal.acceptedUserIds.length > 0) {
           setAcceptedUserIds(signal.acceptedUserIds);
         } else if ((signal.acceptedCount ?? 0) > 0 && userId) {
@@ -1023,7 +1047,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         if (typeof signal.callerId === "number" && signal.callerId > 0) {
           setCallerId(signal.callerId);
         }
-        callDebug("CALL_ACCEPTED", {
+        callDebug("CALL_ACCEPTED_SSE", {
           callId,
           via: "sse",
           userId,
@@ -1033,6 +1057,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         setSession((prev) => {
           if (!prev || prev.callId !== callId) return prev;
           if (prev.isIncoming && prev.ringing) return prev;
+          // FIX: Set ref before state update.
           sessionEngineActiveRef.current = true;
           sessionRingingRef.current = false;
           return prev.engineActive ? prev : { ...prev, engineActive: true, ringing: false };
