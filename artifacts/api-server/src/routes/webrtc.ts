@@ -66,6 +66,25 @@
     return idleMs > CONNECTED_CALL_IDLE_MS;
   }
 
+  /** Never-connected calls must not block the next dial (repeat calls). */
+  function isNegotiateGhost(call: CallInvite): boolean {
+    if (call.connectedAt || isCallEnded(call)) return false;
+    return Object.values(call.statuses).some(
+      (s) => s === "accepted" || s === "calling" || s === "ringing",
+    );
+  }
+
+  function shouldReleaseCallForUser(call: CallInvite, userId: number): boolean {
+    if (!isCallParticipant(call, userId)) return false;
+    const status = call.statuses[userId];
+    if (!status || status === "declined" || status === "missed" || status === "ended" || status === "busy") {
+      return false;
+    }
+    if (callIsOrphanStale(call)) return true;
+    if (isNegotiateGhost(call)) return true;
+    return false;
+  }
+
   function clearRingExpiryTimer(callId: string): void {
     const t = ringExpiryTimers.get(callId);
     if (t) {
@@ -295,10 +314,7 @@
     const live = await listActiveCalls();
     for (const call of live) {
       if (exceptCallId && call.callId === exceptCallId) continue;
-      if (!isCallParticipant(call, userId)) continue;
-      const status = call.statuses[userId];
-      if (status !== "accepted" && status !== "ringing" && status !== "calling") continue;
-      if (!callIsOrphanStale(call)) continue;
+      if (!shouldReleaseCallForUser(call, userId)) continue;
       publishCallSignal({
         chatId: call.chatId,
         userIds: [call.callerId, ...call.participantIds],
@@ -337,6 +353,7 @@
 
       if (status === "accepted") {
         if (call.connectedAt) return true;
+        if (isNegotiateGhost(call)) return false;
         if (Date.now() - call.updatedAt > NEGOTIATE_IDLE_MS) return false;
         if (call.callerId === userId) {
           return call.participantIds.some((id) => {
@@ -546,7 +563,7 @@
       for (const stale of liveCalls) {
         if (stale.chatId !== chatId) continue;
         if (stale.callerId !== callerId && !stale.participantIds.includes(callerId)) continue;
-        if (callIsOrphanStale(stale)) await finalizeCall(stale);
+        if (isNegotiateGhost(stale) || callIsOrphanStale(stale)) await finalizeCall(stale);
       }
       const refreshedLive = await listActiveCalls();
 
@@ -1071,9 +1088,13 @@
     if (!assertSameUser(req, res, userId)) return;
 
     let session = await getSession(channel);
+    const linkedCall = await findCallByChannel(channel);
     let role: Role = "caller";
-    if (!session) {
-      const iAmVidehCaller = videhCallerId === userId;
+    const iAmVidehCaller = videhCallerId === userId;
+    if (!session || !linkedCall) {
+      if (session && !linkedCall) {
+        await stateDelete(sessionKey(channel));
+      }
       session = {
         channel,
         type: body.type === "video" ? "video" : "audio",

@@ -17,6 +17,7 @@ export function useVidehCall(
   sessionToken?: string | null,
   videhCallerId = 0,
   _callId: string | null = null,
+  _negotiateBump = 0,
 ): VidehCallState {
   const channels = channelsForCall(baseChannel, uid, remotePeerIds);
   const primaryChannel = channels[0] ?? "";

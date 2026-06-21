@@ -44,6 +44,7 @@ export function useVidehCall(
   sessionToken?: string | null,
   videhCallerId = 0,
   callId: string | null = null,
+  negotiateBump = 0,
 ): VidehCallState {
   const channels = channelsForCall(baseChannel, uid, remotePeerIds);
   const primaryChannel = channels[0] ?? "";
@@ -276,6 +277,8 @@ export function useVidehCall(
     const connectGen = ++connectGenRef.current;
     let stopped = false;
     let localStream: any = null;
+    stopAllSignaling();
+    closeAllPeerConnections(false);
 
     const postJson = async (path: string, body: unknown) => {
       await webrtcFetch(path, sessionToken, { method: "POST", body: JSON.stringify(body) });
@@ -330,10 +333,18 @@ export function useVidehCall(
     const connectChannel = async (channel: string, sharedLocalStream: any, iceServers: RTCIceServer[]) => {
       if (connectGen !== connectGenRef.current || stopped) return;
       if (pcsRef.current.has(channel)) {
+        const existing = pcsRef.current.get(channel);
         const existingTimer = pollTimersRef.current.get(channel);
-        if (existingTimer) return;
-        pcsRef.current.get(channel)?.close?.();
+        const state = existing?.connectionState as string | undefined;
+        const alive = existing && state !== "closed" && state !== "failed";
+        if (existingTimer && alive) return;
+        existing?.close?.();
         pcsRef.current.delete(channel);
+        if (existingTimer) {
+          clearInterval(existingTimer);
+          pollTimersRef.current.delete(channel);
+          pollRatesRef.current.delete(channel);
+        }
       }
       const {
         RTCPeerConnection,
@@ -662,19 +673,12 @@ export function useVidehCall(
       stopped = true;
       stopAllSignaling();
       closeAllPeerConnections(false);
-    };
-  }, [primaryChannel, uid, isVideo, channelsKey, sessionToken, videhCallerId, callId, stopAllSignaling, closeAllPeerConnections]);
-
-  useEffect(() => {
-    return () => {
-      setProximityScreenOff(false);
-      void stopInCallSession();
-      stopAllSignaling();
-      closeAllPeerConnections(false);
       localStreamRef.current?.getTracks?.().forEach((track: any) => track.stop());
       localStreamRef.current = null;
+      setLocalStreamUrl(undefined);
+      void stopInCallSession();
     };
-  }, [primaryChannel, uid, stopAllSignaling, closeAllPeerConnections]);
+  }, [primaryChannel, uid, isVideo, channelsKey, sessionToken, videhCallerId, callId, negotiateBump, stopAllSignaling, closeAllPeerConnections]);
 
   return {
     joined,

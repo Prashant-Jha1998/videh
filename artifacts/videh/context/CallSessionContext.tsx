@@ -157,6 +157,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const dismissedCallIdsRef = useRef<Set<string>>(new Set());
   const sessionRingingRef = useRef(false);
   const sessionEngineActiveRef = useRef(false);
+  const negotiateBumpedForCallRef = useRef<string | null>(null);
+  const [negotiateBump, setNegotiateBump] = useState(0);
 
   useEffect(() => {
     sessionCallIdRef.current = session?.callId ?? null;
@@ -224,7 +226,19 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     user?.sessionToken,
     callInitiatorId,
     session?.callId ?? null,
+    negotiateBump,
   );
+
+  const resetLocalCallMedia = useCallback(async () => {
+    await call.leave().catch(() => {});
+    outgoingCallInitRef.current = null;
+  }, [call]);
+
+  const bumpNegotiation = useCallback((forCallId: string) => {
+    if (!forCallId || negotiateBumpedForCallRef.current === forCallId) return;
+    negotiateBumpedForCallRef.current = forCallId;
+    setNegotiateBump((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     if (!session?.callId) return;
@@ -257,6 +271,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     endingCallRef.current = false;
     outgoingCallInitRef.current = null;
     busyEndHandledRef.current = null;
+    negotiateBumpedForCallRef.current = null;
+    if (dismissedCallIdsRef.current.size > 48) {
+      dismissedCallIdsRef.current = new Set([...dismissedCallIdsRef.current].slice(-24));
+    }
     resetCallParticipantState();
     resetCallNavigationGuard();
     setCallOutcome(null);
@@ -571,57 +589,63 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       if (outgoingCallInitRef.current === outgoingKey && sessionCallIdRef.current) return;
       outgoingCallInitRef.current = outgoingKey;
 
-      void videhSignalingPost(
-        "/calls",
-        { chatId: Number(chatId), type: isVideo ? "video" : "audio" },
-        user.sessionToken,
-        { timeoutMs: 45000, retries: 3 },
-      )
-        .then((res) => res.json())
-        .then((data: {
+      void (async () => {
+        const lingerId = sessionCallIdRef.current;
+        if (lingerId) {
+          await webrtcFetch(`/calls/${lingerId}/end`, user.sessionToken, { method: "POST" }).catch(() => {});
+        }
+        await resetLocalCallMedia();
+
+        const res = await videhSignalingPost(
+          "/calls",
+          { chatId: Number(chatId), type: isVideo ? "video" : "audio" },
+          user.sessionToken,
+          { timeoutMs: 45000, retries: 3 },
+        );
+        const data = (await res.json()) as {
           success?: boolean;
           message?: string;
           allInviteesBusy?: boolean;
           participantIds?: number[];
           call?: { channel?: string; callId?: string; participantCount?: number; acceptedCount?: number; ringingCount?: number };
-        }) => {
-          if (!data.success || !data.call?.channel) {
-            outgoingCallInitRef.current = null;
-            if (data.message) setStatusHint(data.message);
-            return;
-          }
-          if (data.call?.callId) sessionCallIdRef.current = data.call.callId;
-          if (user.dbId) setCallerId(user.dbId);
-          if (Array.isArray(data.participantIds)) setInviteeUserIds(data.participantIds);
-          setSession((prev) => {
-            if (!prev || prev.chatId !== chatId) return prev;
-            return {
-              ...prev,
-              channel: data.call!.channel!,
-              callId: data.call!.callId ?? prev.callId,
-              isIncoming: false,
-              ringing: false,
-              engineActive: true,
-            };
-          });
-          setParticipantCount(data.call!.participantCount ?? 2);
-          setAcceptedCount(data.call!.acceptedCount ?? 0);
-          setRingingCount(data.call!.ringingCount ?? 0);
-          if (data.allInviteesBusy) {
-            void (async () => {
-              if (busyEndHandledRef.current === data.call?.callId) return;
-              busyEndHandledRef.current = data.call?.callId ?? "busy";
-              await stopCallAlert();
-              await playCallBusyTone();
-              void showUnreachableOutcome("busy");
-            })();
-          }
-        })
-        .catch(() => {
+        };
+        if (!data.success || !data.call?.channel) {
           outgoingCallInitRef.current = null;
+          if (data.message) setStatusHint(data.message);
+          return;
+        }
+        if (data.call?.callId) sessionCallIdRef.current = data.call.callId;
+        negotiateBumpedForCallRef.current = null;
+        if (user.dbId) setCallerId(user.dbId);
+        if (Array.isArray(data.participantIds)) setInviteeUserIds(data.participantIds);
+        setSession((prev) => {
+          if (!prev || prev.chatId !== chatId) return prev;
+          return {
+            ...prev,
+            channel: data.call!.channel!,
+            callId: data.call!.callId ?? prev.callId,
+            isIncoming: false,
+            ringing: false,
+            engineActive: true,
+          };
         });
+        setParticipantCount(data.call!.participantCount ?? 2);
+        setAcceptedCount(data.call!.acceptedCount ?? 0);
+        setRingingCount(data.call!.ringingCount ?? 0);
+        if (data.allInviteesBusy) {
+          void (async () => {
+            if (busyEndHandledRef.current === data.call?.callId) return;
+            busyEndHandledRef.current = data.call?.callId ?? "busy";
+            await stopCallAlert();
+            await playCallBusyTone();
+            void showUnreachableOutcome("busy");
+          })();
+        }
+      })().catch(() => {
+        outgoingCallInitRef.current = null;
+      });
     }
-  }, [user?.dbId, user?.sessionToken, onCallEnded, leaveCallScreen]);
+  }, [user?.dbId, user?.sessionToken, onCallEnded, leaveCallScreen, resetLocalCallMedia, showUnreachableOutcome]);
 
   const acceptIncoming = useCallback(async (callInfo?: IncomingCallInfo) => {
     const callId = callInfo?.callId ?? session?.callId;
@@ -629,6 +653,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
     callDebug("CALL_ACCEPT_START", { callId, userId: user.dbId, callerId: callInfo?.callerId });
 
+    await resetLocalCallMedia();
     await stopIncomingCallExperience(callId);
     await stopCallAlert();
 
@@ -705,6 +730,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       return [...ids];
     });
     dismissedCallIdsRef.current.delete(callId);
+    negotiateBumpedForCallRef.current = null;
     sessionRingingRef.current = false;
     sessionEngineActiveRef.current = true;
 
@@ -721,9 +747,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       callerUserId: resolvedCallerId,
     };
     setSession(next);
+    bumpNegotiation(callId);
     callDebug("OPENING_CALL_SCREEN", { callId, chatId: next.chatId, incoming: true, replace: true });
     pushCallRoute(next, true, resolvedCallerId);
-  }, [session?.callId, session?.chatId, session?.contactName, session?.channel, session?.isVideo, user?.dbId, user?.sessionToken, pushCallRoute]);
+  }, [session?.callId, session?.chatId, session?.contactName, session?.channel, session?.isVideo, user?.dbId, user?.sessionToken, pushCallRoute, resetLocalCallMedia, bumpNegotiation]);
 
   const declineIncoming = useCallback(async (declineMessage?: string) => {
     const callId = session?.callId;
@@ -850,6 +877,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           if (remoteAccepted) {
             void stopCallAlert();
             setStatusHint(null);
+            if (typeof data.callerId === "number" && data.callerId === userId) {
+              bumpNegotiation(polledCallId);
+            }
             if (!sessionEngineActiveRef.current && sessionCallIdRef.current === polledCallId) {
               sessionEngineActiveRef.current = true;
               setSession((prev) =>
@@ -912,7 +942,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         .catch(() => {});
     }, pollMs);
     return () => clearInterval(timer);
-  }, [session?.callId, session?.engineActive, session?.isIncoming, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleServerCallEnded, showUnreachableOutcome]);
+  }, [session?.callId, session?.engineActive, session?.isIncoming, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleServerCallEnded, showUnreachableOutcome, bumpNegotiation]);
 
   useEffect(() => {
     if (!session?.callId || !session.engineActive || session.ringing || call.joined) return;
@@ -998,6 +1028,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           setCallerId(payload.callerId);
         }
         callDebug("CALL_ACCEPTED", { callId, via: "sse", userId });
+        if (typeof payload.callerId === "number" && payload.callerId === userId) {
+          bumpNegotiation(callId);
+        }
         setSession((prev) => {
           if (!prev || prev.callId !== callId || prev.ringing) return prev;
           sessionEngineActiveRef.current = true;
@@ -1015,7 +1048,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       setSession((prev) => (prev ? { ...prev, isVideo: nextVideo } : prev));
     });
     return unsub;
-  }, [handleServerCallEnded, userId]);
+  }, [handleServerCallEnded, userId, bumpNegotiation]);
 
   useEffect(() => registerCallSessionDismissHandler(handleUiDismissRequest), [handleUiDismissRequest]);
   useEffect(() => registerCallSessionEndHandler(handleServerCallEnded), [handleServerCallEnded]);
