@@ -18,7 +18,7 @@ const SIGNAL_POLL_MS = 250;
 const SIGNAL_POLL_CONNECTED_MS = 1500;
 const ICE_RESTART_DELAY_MS = 5000;
 const DISCONNECT_GRACE_MS = 4500;
-const CONNECT_STABLE_MS = 1200;
+const CONNECT_STABLE_MS = 350;
 
 /** 0 = single shared call channel (no _peer_ suffix on server invite channel). */
 const SINGLE_PEER_KEY = 0;
@@ -146,6 +146,7 @@ export function useVidehCall(
     const reconnecting = states.some((s) => s === "disconnected" || s === "connecting");
     const hasMedia = hasRemoteMediaRef.current || remotePeersRef.current.size > 0;
     const now = Date.now();
+    const stableFor = connectedSinceRef.current ? now - connectedSinceRef.current : 0;
 
     if (connected > 0 || hasMedia) {
       if (disconnectGraceTimerRef.current) {
@@ -153,11 +154,11 @@ export function useVidehCall(
         disconnectGraceTimerRef.current = null;
       }
       if (!connectedSinceRef.current) connectedSinceRef.current = now;
-      const stableFor = now - connectedSinceRef.current;
-      const showLive = mediaReadyLatchRef.current || hasMedia || stableFor >= CONNECT_STABLE_MS;
+      const liveStableFor = now - connectedSinceRef.current;
+      const showLive = mediaReadyLatchRef.current || hasMedia || liveStableFor >= CONNECT_STABLE_MS;
       if (showLive) {
         if (hasMedia) markRemoteMedia();
-        else if (!mediaReadyLatchRef.current && stableFor >= CONNECT_STABLE_MS) {
+        else if (!mediaReadyLatchRef.current && liveStableFor >= CONNECT_STABLE_MS) {
           mediaReadyLatchRef.current = true;
           setMediaReady(true);
         }
@@ -197,13 +198,17 @@ export function useVidehCall(
       setRemoteStreamUrl(pick.streamUrl);
       setHasRemoteVideo(peerList.some((p) => p.hasVideo));
     }
-    if (connected > 0) {
+    const mediaConnected = hasMedia || mediaReadyLatchRef.current;
+    if (connected > 0 || mediaConnected) {
       setError(null);
-      setConnectionPhase("connected");
-      if (!isVideo) setProximityScreenOff(true);
-      if (!connectedNotifiedRef.current && callIdRef.current && sessionToken) {
+      const readyToShow = connected > 0 || hasMedia || (mediaConnected && stableFor >= CONNECT_STABLE_MS);
+      if (readyToShow) {
+        setConnectionPhase("connected");
+        if (!isVideo) setProximityScreenOff(true);
+      }
+      if (readyToShow && !connectedNotifiedRef.current && callIdRef.current && sessionToken) {
         connectedNotifiedRef.current = true;
-        callDebug("PEER_CONNECTION_CONNECTED", { channel: primaryChannel, callId: callIdRef.current });
+        callDebug("PEER_CONNECTION_CONNECTED", { channel: primaryChannel, callId: callIdRef.current, viaMedia: mediaConnected && connected === 0 });
         void webrtcFetch(`/calls/${callIdRef.current}/connected`, sessionToken, {
           method: "POST",
           body: JSON.stringify({ userId: uid }),

@@ -211,11 +211,12 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const callInitiatorId = session?.isIncoming
     ? (session.callerUserId ?? (callerId && callerId !== userId ? callerId : 0))
     : userId;
-  /** WebRTC starts when channel + initiator are known; caller posts offer while ringing, callee after accept. */
+  /** WebRTC starts only after the other party accepts — avoids orphan offers and negotiate races. */
   const webrtcReady = Boolean(
     session?.engineActive
     && session.channel
-    && callInitiatorId > 0,
+    && callInitiatorId > 0
+    && remotePartyAccepted,
   );
   const engineChannel = webrtcReady ? session!.channel : "";
   const call = useVidehCall(
@@ -751,7 +752,6 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       callerUserId: resolvedCallerId,
     };
     setSession(next);
-    bumpNegotiation(callId);
     callDebug("OPENING_CALL_SCREEN", { callId, chatId: next.chatId, incoming: true, replace: true });
     pushCallRoute(next, true, resolvedCallerId);
   }, [session?.callId, session?.chatId, session?.contactName, session?.channel, session?.isVideo, user?.dbId, user?.sessionToken, pushCallRoute, resetLocalCallMedia, bumpNegotiation]);
@@ -881,9 +881,6 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           if (remoteAccepted) {
             void stopCallAlert();
             setStatusHint(null);
-            if (typeof data.callerId === "number" && data.callerId === userId) {
-              bumpNegotiation(polledCallId);
-            }
             if (!sessionEngineActiveRef.current && sessionCallIdRef.current === polledCallId) {
               sessionEngineActiveRef.current = true;
               setSession((prev) =>
@@ -1032,9 +1029,6 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           setCallerId(payload.callerId);
         }
         callDebug("CALL_ACCEPTED", { callId, via: "sse", userId });
-        if (typeof payload.callerId === "number" && payload.callerId === userId) {
-          bumpNegotiation(callId);
-        }
         setSession((prev) => {
           if (!prev || prev.callId !== callId || prev.ringing) return prev;
           sessionEngineActiveRef.current = true;

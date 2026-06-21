@@ -22,10 +22,17 @@ const TURN_FALLBACK: IceServerConfig[] = [
   },
 ];
 
-/** STUN-only by default (no TURN). Set TURN_URL only if you run your own relay. */
+/** STUN-only by default (no TURN). Set TURN_URL or VIDEOH_DOMAIN for self-hosted coturn. */
 export function getIceServers(): IceServerConfig[] {
   const servers: IceServerConfig[] = [...STUN_FALLBACK];
-  const turnUrl = process.env["TURN_URL"]?.trim();
+  let turnUrl = process.env["TURN_URL"]?.trim();
+  if (!turnUrl) {
+    const host = process.env["VIDEOH_DOMAIN"]?.trim() || process.env["EXPO_PUBLIC_DOMAIN"]?.trim();
+    if (host) {
+      const bare = host.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+      turnUrl = `turn:${bare}:3478`;
+    }
+  }
   if (turnUrl) {
     servers.push({
       urls: turnUrl,
