@@ -1139,6 +1139,7 @@
     session.offerRevision = (session.offerRevision ?? 0) + 1;
     session.updatedAt = Date.now();
     await saveSession(session);
+    req.log?.info?.({ channel, offerRevision: session.offerRevision, iceRestart: Boolean(body.iceRestart) }, "webrtc offer posted");
     res.json({ success: true, offerRevision: session.offerRevision });
   });
 

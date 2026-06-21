@@ -295,33 +295,39 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const teardownCallLocally = useCallback(
     async (endedCallId?: string, opts?: { skipServerEnd?: boolean }) => {
       const id = endedCallId ?? sessionCallIdRef.current ?? undefined;
-      const shouldLeave = sessionEngineActiveRef.current || sessionRingingRef.current;
+      const activeCallId = sessionCallIdRef.current;
+      const targetsActiveCall = !activeCallId || !id || activeCallId === id;
+      const shouldLeaveUi = targetsActiveCall && (sessionEngineActiveRef.current || sessionRingingRef.current);
       if (id) dismissedCallIdsRef.current.add(id);
       requestDismissIncomingCallUi(id);
       if (id && teardownInFlightRef.current.has(id)) {
         if (!opts?.skipServerEnd) {
           await webrtcFetch(`/calls/${id}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
         }
-        clearSession();
-        if (shouldLeave) leaveCallScreen();
+        if (targetsActiveCall) {
+          clearSession();
+          if (shouldLeaveUi) leaveCallScreen();
+        }
         return;
       }
       if (id) teardownInFlightRef.current.add(id);
       endingCallRef.current = true;
       try {
         await stopCallAlert();
-        setVideoCallPipEnabled(false);
+        if (targetsActiveCall) setVideoCallPipEnabled(false);
         if (id) {
           endCallKeep(id);
           if (!opts?.skipServerEnd) {
             await webrtcFetch(`/calls/${id}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
           }
         }
-        if (shouldLeave) await call.leave();
-        void refreshCallLogs();
-        clearSession();
-        setHeldSession(null);
-        if (shouldLeave) leaveCallScreen();
+        if (targetsActiveCall) {
+          if (shouldLeaveUi) await call.leave();
+          void refreshCallLogs();
+          clearSession();
+          setHeldSession(null);
+          if (shouldLeaveUi) leaveCallScreen();
+        }
       } finally {
         endingCallRef.current = false;
         if (id) teardownInFlightRef.current.delete(id);
@@ -562,7 +568,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
     if (!isIncoming && !params.channel && user?.dbId) {
       const outgoingKey = `${chatId}:${isVideo ? "video" : "audio"}`;
-      if (outgoingCallInitRef.current === outgoingKey) return;
+      if (outgoingCallInitRef.current === outgoingKey && sessionCallIdRef.current) return;
       outgoingCallInitRef.current = outgoingKey;
 
       void videhSignalingPost(

@@ -266,7 +266,12 @@ export function useVidehCall(
   );
 
   useEffect(() => {
-    if (!primaryChannel || !uid || videhCallerId <= 0) return;
+    if (!primaryChannel || !uid || videhCallerId <= 0) {
+      return () => {
+        stopAllSignaling();
+        closeAllPeerConnections(false);
+      };
+    }
 
     const connectGen = ++connectGenRef.current;
     let stopped = false;
@@ -595,7 +600,14 @@ export function useVidehCall(
     };
 
     const ensureLocalStream = async () => {
-      if (localStreamRef.current) return localStreamRef.current;
+      const existing = localStreamRef.current;
+      if (existing) {
+        const hasVideo = (existing.getVideoTracks?.().length ?? 0) > 0;
+        if (!isVideo || hasVideo) return existing;
+        existing.getTracks?.().forEach((track: any) => track.stop());
+        localStreamRef.current = null;
+        setLocalStreamUrl(undefined);
+      }
       if (Platform.OS === "android") {
         const perms: string[] = [PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
         if (isVideo) perms.push(PermissionsAndroid.PERMISSIONS.CAMERA);
@@ -651,7 +663,7 @@ export function useVidehCall(
       stopAllSignaling();
       closeAllPeerConnections(false);
     };
-  }, [primaryChannel, uid, isVideo, channelsKey, sessionToken, videhCallerId, stopAllSignaling, closeAllPeerConnections]);
+  }, [primaryChannel, uid, isVideo, channelsKey, sessionToken, videhCallerId, callId, stopAllSignaling, closeAllPeerConnections]);
 
   useEffect(() => {
     return () => {
@@ -722,6 +734,7 @@ export function useVidehCall(
     shareScreen: async () => false,
     stopScreenShare: async () => {},
     leave: async () => {
+      connectGenRef.current += 1;
       setProximityScreenOff(false);
       stopAllSignaling();
       closeAllPeerConnections(true);
