@@ -18,6 +18,10 @@ import { enforceAllOverdueBillingHolds } from "./lib/developerBilling";
 
 const app: Express = express();
 app.set("trust proxy", 1);
+// Disable ETag globally: polling endpoints (WebRTC signaling, call status) must
+// never return 304 with an empty body, which would hide the SDP offer/answer and
+// stall call setup. APIs do not benefit from conditional GET caching here.
+app.set("etag", false);
 
 app.use(
   pinoHttp({

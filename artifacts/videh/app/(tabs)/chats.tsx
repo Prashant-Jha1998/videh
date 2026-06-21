@@ -186,7 +186,7 @@ export default function ChatsScreen() {
   );
 
   const filteredBroadcasts = broadcastLists.filter((b) =>
-    b.name.toLowerCase().includes(search.toLowerCase()),
+    b.recipient_count > 0 && b.name.toLowerCase().includes(search.toLowerCase()),
   );
 
   const openChat = (chat: Chat) => {

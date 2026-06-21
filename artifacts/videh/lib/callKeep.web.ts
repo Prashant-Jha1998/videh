@@ -19,6 +19,11 @@ export function startCallKeepOutgoing(
   _isVideo: boolean,
 ): void {}
 
+export function endCallKeep(
+  _callId: string,
+  _reason: "declined" | "remote" = "remote",
+): void {}
+
 export function bringCallKeepToForeground(): void {}
 
 export { setCallKeepHandlers } from "@/lib/callKeepBridge";
