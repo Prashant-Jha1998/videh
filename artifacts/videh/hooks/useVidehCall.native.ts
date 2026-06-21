@@ -11,7 +11,10 @@ import type { RemoteCallPeerStream, VidehCallState } from "./videhCallTypes";
 export type { VidehCallState } from "./videhCallTypes";
 
 type Role = "caller" | "callee";
-const SIGNAL_POLL_MS = 80;
+/** Fast poll while the call is still negotiating (offer/answer/ICE exchange). */
+const SIGNAL_POLL_MS = 250;
+/** Slow poll once connected — only needed to catch ICE restarts / renegotiation. */
+const SIGNAL_POLL_CONNECTED_MS = 1500;
 const ICE_RESTART_DELAY_MS = 5000;
 const DISCONNECT_GRACE_MS = 4500;
 const CONNECT_STABLE_MS = 1200;
@@ -49,11 +52,13 @@ export function useVidehCall(
   const rolesRef = useRef<Map<string, Role>>(new Map());
   const candidateCursorsRef = useRef<Map<string, number>>(new Map());
   const pollTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  const pollRatesRef = useRef<Map<string, number>>(new Map());
   const iceRestartTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const iceRestartInFlightRef = useRef<Set<string>>(new Set());
   const lastOfferRevisionRef = useRef<Map<string, number>>(new Map());
   const lastAnswerRevisionRef = useRef<Map<string, number>>(new Map());
   const pollBusyRef = useRef<Set<string>>(new Set());
+  const pollFailCountsRef = useRef<Map<string, number>>(new Map());
   const offerProcessingRef = useRef<Set<string>>(new Set());
   const connectedNotifiedRef = useRef(false);
   const callIdRef = useRef(callId);
@@ -216,7 +221,9 @@ export function useVidehCall(
   const stopAllSignaling = useCallback(() => {
     for (const timer of pollTimersRef.current.values()) clearInterval(timer);
     pollTimersRef.current.clear();
+    pollRatesRef.current.clear();
     pollBusyRef.current.clear();
+    pollFailCountsRef.current.clear();
     for (const timer of iceRestartTimersRef.current.values()) clearTimeout(timer);
     iceRestartTimersRef.current.clear();
     iceRestartInFlightRef.current.clear();
@@ -478,18 +485,39 @@ export function useVidehCall(
               }
               candidateCursorsRef.current.set(pollChannel, candidateRes.next ?? since);
             }
+            // Successful poll — reset failure streak and clear any transient error banner.
+            if ((pollFailCountsRef.current.get(pollChannel) ?? 0) > 0) {
+              pollFailCountsRef.current.set(pollChannel, 0);
+              setError((prev) => (prev && prev !== "NATIVE_WEBRTC_UNAVAILABLE" ? null : prev));
+            }
           } catch (e: any) {
             if (stopped) return;
             const msg = e?.message ?? "Call signaling error";
             const pcNow = pcsRef.current.get(pollChannel);
             const connected = pcNow?.connectionState === "connected";
             if (connected || isBenignSignalingError(msg)) return;
-            callDebug("SIGNAL_POLL_ERROR", { channel: pollChannel, role: rolesRef.current.get(pollChannel), message: msg });
-            setError(msg);
+            const fails = (pollFailCountsRef.current.get(pollChannel) ?? 0) + 1;
+            pollFailCountsRef.current.set(pollChannel, fails);
+            callDebug("SIGNAL_POLL_ERROR", { channel: pollChannel, role: rolesRef.current.get(pollChannel), message: msg, fails });
+            // Only surface a hard error after several consecutive failures so a single
+            // network blip during connection setup does not flash a scary banner.
+            if (fails >= 6) setError(msg);
           } finally {
             pollBusyRef.current.delete(pollChannel);
           }
         })();
+      }
+
+      function schedulePoll(pollChannel: string, intervalMs: number) {
+        if (stopped || connectGen !== connectGenRef.current) return;
+        if (pollRatesRef.current.get(pollChannel) === intervalMs && pollTimersRef.current.has(pollChannel)) {
+          return;
+        }
+        const existing = pollTimersRef.current.get(pollChannel);
+        if (existing) clearInterval(existing);
+        pollRatesRef.current.set(pollChannel, intervalMs);
+        const timer = setInterval(() => pollSignalOnce(pollChannel), intervalMs);
+        pollTimersRef.current.set(pollChannel, timer);
       }
 
       pc.onicecandidate = (event: any) => {
@@ -533,13 +561,17 @@ export function useVidehCall(
             iceRestartTimersRef.current.delete(channel);
           }
           setError(null);
+          schedulePoll(channel, SIGNAL_POLL_CONNECTED_MS);
         } else if (state === "failed") {
           const t = iceRestartTimersRef.current.get(channel);
           if (t) {
             clearTimeout(t);
             iceRestartTimersRef.current.delete(channel);
           }
+          schedulePoll(channel, SIGNAL_POLL_MS);
           scheduleIceRestart(channel, pc, role);
+        } else if (state === "disconnected" || state === "connecting") {
+          schedulePoll(channel, SIGNAL_POLL_MS);
         }
         refreshAggregate();
       };
@@ -557,8 +589,7 @@ export function useVidehCall(
         return;
       }
 
-      const pollTimer = setInterval(() => pollSignalOnce(channel), SIGNAL_POLL_MS);
-      pollTimersRef.current.set(channel, pollTimer);
+      schedulePoll(channel, SIGNAL_POLL_MS);
       pollSignalOnce(channel);
     };
 
@@ -595,6 +626,7 @@ export function useVidehCall(
           if (!active.has(channel)) {
             clearInterval(timer);
             pollTimersRef.current.delete(channel);
+            pollRatesRef.current.delete(channel);
             pcsRef.current.get(channel)?.close?.();
             pcsRef.current.delete(channel);
             webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken, { method: "DELETE" }).catch(() => {});
