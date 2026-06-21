@@ -3,12 +3,20 @@ export function shouldPresentIncomingCall(opts: {
   userId: number;
   callerId?: number;
   callId: string;
-  activeCall?: { callId?: string; isIncoming?: boolean } | null;
+  activeCall?: { callId?: string; isIncoming?: boolean; engineActive?: boolean; ringing?: boolean } | null;
 }): boolean {
   const { userId, callerId, callId, activeCall } = opts;
-  if (!callId) return false;
-  if (callerId && callerId > 0 && callerId === userId) return false;
+  if (!callId || !userId) return false;
+  if (!callerId || callerId <= 0) return false;
+  if (callerId === userId) return false;
   if (activeCall?.callId === callId && activeCall.isIncoming === false) return false;
+  if (
+    activeCall?.callId === callId
+    && activeCall.isIncoming === false
+    && (activeCall.engineActive || !activeCall.ringing)
+  ) {
+    return false;
+  }
   return true;
 }
 

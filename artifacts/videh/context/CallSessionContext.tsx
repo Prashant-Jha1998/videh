@@ -33,7 +33,7 @@ import {
 } from "@/lib/incomingCallUiBridge";
 import { rejectIncomingCall } from "@/lib/rejectIncomingCall";
 import { fetchIncomingCallDetails } from "@/lib/fetchIncomingCallDetails";
-import { isRemotePartyAccepted } from "@/lib/callRole";
+import { isRemotePartyAccepted, isCallCaller } from "@/lib/callRole";
 import { stopIncomingCallExperience } from "@/lib/incomingCallExperience";
 import { dismissIncomingCallNotification } from "@/lib/incomingCallNotification";
 import { resetCallNavigationGuard, runLeaveCallScreen } from "@/lib/callNavigationGuard";
@@ -520,7 +520,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   }, [heldSession, user?.sessionToken, refreshCallLogs]);
 
   const presentIncomingCall = useCallback((callInfo: IncomingCallInfo) => {
-    if (user?.dbId && callInfo.callerId && callInfo.callerId === user.dbId) return;
+    if (!callInfo.callerId || callInfo.callerId <= 0) return;
+    if (user?.dbId && isCallCaller(user.dbId, callInfo.callerId)) return;
     wakeScreenForIncomingCall();
     resetCallParticipantState();
     if (callInfo.callerId) setCallerId(callInfo.callerId);
@@ -563,6 +564,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           minimized: false,
           contactName: params.name ?? prev.contactName,
         };
+        if (!prev.isIncoming) {
+          return { ...next, isIncoming: false, ringing: false };
+        }
         if (params.incoming !== "1") {
           return { ...next, isIncoming: false, ringing: false };
         }

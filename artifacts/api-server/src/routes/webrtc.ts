@@ -662,7 +662,9 @@
     if (!assertSameUser(req, res, userId)) return;
     const calls = (await Promise.all((await stateKeys("webrtc:call:")).map((key) => stateGetJson<CallInvite>(key))))
       .filter((call): call is CallInvite => Boolean(call));
-    const ringing = calls.filter((call) => call.statuses[userId] === "ringing");
+    const ringing = calls.filter(
+      (call) => call.statuses[userId] === "ringing" && call.callerId !== userId,
+    );
     for (const call of ringing) {
       call.updatedAt = Date.now();
       await saveCall(call);

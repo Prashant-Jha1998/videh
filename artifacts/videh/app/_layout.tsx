@@ -21,8 +21,8 @@ import { callDebug } from "@/lib/callDebug";
 import { getApiUrl } from "@/lib/api";
 import { parseReelsChannelHandleFromUrl, parseReelsWatchIdFromUrl } from "@/lib/reelsShare";
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
-import { shouldPresentIncomingCall } from "@/lib/callRole";
-import { hydrateIncomingCallInfo, hydrateAndValidateIncomingCall } from "@/lib/hydrateIncomingCall";
+import { shouldPresentIncomingCall, isCallCaller } from "@/lib/callRole";
+import { hydrateAndValidateIncomingCall } from "@/lib/hydrateIncomingCall";
 import { IncomingCallOverlay, type IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { webrtcAuthHeaders, webrtcFetch } from "@/lib/webrtcApi";
 import { normalizeCallNetworkError } from "@/lib/videhCall/signalingClient";
@@ -146,6 +146,7 @@ function RootLayoutNav() {
   const offeredCallIdRef = useRef<string | null>(null);
   const activeCallIdRef = useRef<string | null>(null);
   const activeCallEngineActiveRef = useRef(false);
+  const activeCallIsOutgoingRef = useRef(false);
   const dismissedIncomingCallIdsRef = useRef<Set<string>>(new Set());
   const respondToIncomingCallRef = useRef<(action: "accept" | "decline", msg?: string) => void>(() => {});
   const handledLaunchCallNotificationRef = useRef(false);
@@ -207,7 +208,7 @@ function RootLayoutNav() {
   }) => {
     if (!user?.dbId) return;
     const partial = toIncomingCallInfo(raw);
-    const callPayload = await hydrateIncomingCallInfo(partial, user.dbId, user.sessionToken);
+    const callPayload = await hydrateAndValidateIncomingCall(partial, user.dbId, user.sessionToken);
     if (!callPayload) return;
     if (!shouldPresentIncomingCall({
       userId: user.dbId,
@@ -219,13 +220,14 @@ function RootLayoutNav() {
     }
     const next = callPayload;
     if (dismissedIncomingCallIdsRef.current.has(next.callId)) return;
-    if (activeCallIdRef.current === next.callId) return;
-    if (activeCallSession?.callId === next.callId) return;
+    if (activeCallIdRef.current === next.callId && activeCallIsOutgoingRef.current) return;
+    if (activeCallSession?.callId === next.callId && activeCallSession.isIncoming === false) return;
 
     const isRepeatOffer = offeredCallIdRef.current === next.callId || !claimIncomingCallRing(next.callId);
     if (isRepeatOffer) {
       if (dismissedIncomingCallIdsRef.current.has(next.callId)) return;
-      if (activeCallSession?.callId === next.callId) return;
+      if (activeCallIdRef.current === next.callId && activeCallIsOutgoingRef.current) return;
+      if (activeCallSession?.callId === next.callId && activeCallSession.isIncoming === false) return;
       offeredCallIdRef.current = next.callId;
       setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
       pendingIncomingRef.current = next;
@@ -288,6 +290,7 @@ function RootLayoutNav() {
     activeCallSession?.callId,
     activeCallSession?.engineActive,
     activeCallSession?.ringing,
+    activeCallSession?.isIncoming,
     chats,
     scheduleIncomingAutoEnd,
     presentIncomingCall,
@@ -300,7 +303,19 @@ function RootLayoutNav() {
     activeCallEngineActiveRef.current = Boolean(
       activeCallSession?.engineActive && !activeCallSession?.ringing,
     );
-  }, [activeCallSession?.callId, activeCallSession?.engineActive, activeCallSession?.ringing]);
+    activeCallIsOutgoingRef.current = Boolean(
+      activeCallSession?.callId
+      && activeCallSession.isIncoming === false,
+    );
+    if (
+      activeCallSession?.callId
+      && activeCallSession.isIncoming === false
+      && incomingCall?.callId === activeCallSession.callId
+    ) {
+      dismissIncomingCallUi(activeCallSession.callId, false);
+      setIncomingCall(null);
+    }
+  }, [activeCallSession?.callId, activeCallSession?.engineActive, activeCallSession?.ringing, activeCallSession?.isIncoming, incomingCall?.callId, dismissIncomingCallUi]);
 
   // Navigate to chat when notification is tapped
   useEffect(() => {
@@ -468,7 +483,9 @@ function RootLayoutNav() {
         }
         const pollCallId = String(next.callId ?? "");
         if (dismissedIncomingCallIdsRef.current.has(pollCallId)) return;
-        if (activeCallSession?.callId === pollCallId) return;
+        if (Number(next.callerId) === user.dbId) return;
+        if (activeCallIdRef.current === pollCallId && activeCallIsOutgoingRef.current) return;
+        if (activeCallSession?.callId === pollCallId && activeCallSession.isIncoming === false) return;
         void offerIncomingCall({
           callId: next.callId,
           channel: next.channel,
@@ -549,7 +566,7 @@ function RootLayoutNav() {
       offeredCallIdRef.current = null;
       void stopIncomingCallExperience();
     };
-  }, [isAuthenticated, user?.dbId, user?.sessionToken, activeCallSession?.callId, offerIncomingCall, dismissIncomingCallUi]);
+  }, [isAuthenticated, user?.dbId, user?.sessionToken, activeCallSession?.callId, activeCallSession?.isIncoming, offerIncomingCall, dismissIncomingCallUi]);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -941,7 +958,7 @@ function RootLayoutNav() {
       {incomingCall
       && user?.dbId
       && incomingCall.callId
-      && incomingCall.callerId !== user.dbId ? (
+      && !isCallCaller(user.dbId, incomingCall.callerId) ? (
         <IncomingCallOverlay
           call={{ ...incomingCall, avatarUrl: incomingCallAvatar }}
           onAccept={() => { void respondToIncomingCall("accept"); }}
