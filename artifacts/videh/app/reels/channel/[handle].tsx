@@ -49,6 +49,10 @@ import { shareReelsChannelLink, shareReelsVideoLink } from "@/lib/reelsShare";
 import { downloadReelsVideoToApp, saveReelsVideoToDevice } from "@/lib/reelsVideoDownload";
 
 const SCREEN_W = Dimensions.get("window").width;
+const COVER_H = 120;
+const COVER_H_MARGIN = 16;
+const COVER_RADIUS = 12;
+const COVER_W = SCREEN_W - COVER_H_MARGIN * 2;
 const THUMB_H = Math.round((SCREEN_W * 9) / 16);
 const PLAYLIST_THUMB_W = 168;
 const PLAYLIST_THUMB_H = Math.round((PLAYLIST_THUMB_W * 9) / 16);
@@ -626,7 +630,7 @@ function ChannelHeader({
       </View>
 
       <View style={styles.profile}>
-        <View style={styles.avatarRow}>
+        <View style={styles.avatarOverlapRow}>
           {channel.avatarUrl ? (
             <Image
               source={{ uri: channel.avatarUrl }}
@@ -638,13 +642,14 @@ function ChannelHeader({
               <Text style={{ color: "#fff", fontSize: 28, fontFamily: "Inter_700Bold" }}>@</Text>
             </View>
           )}
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.displayName, { color: colors.foreground }]}>{displayLabel}</Text>
-            <Text style={{ color: colors.mutedForeground, fontSize: 14 }}>@{channel.handle}</Text>
-            <Text style={{ color: colors.mutedForeground, fontSize: 13, marginTop: 4 }}>
-              {formatViewCount(channel.subscriberCount)} subscribers · {formatVideoCountLabel(videoCount)}
-            </Text>
-          </View>
+        </View>
+
+        <View style={styles.channelMeta}>
+          <Text style={[styles.displayName, { color: colors.foreground }]}>{displayLabel}</Text>
+          <Text style={{ color: colors.mutedForeground, fontSize: 14 }}>@{channel.handle}</Text>
+          <Text style={{ color: colors.mutedForeground, fontSize: 13, marginTop: 4 }}>
+            {formatViewCount(channel.subscriberCount)} subscribers · {formatVideoCountLabel(videoCount)}
+          </Text>
         </View>
 
         {bioPreview ? (
@@ -1016,10 +1021,16 @@ const styles = StyleSheet.create({
   },
   navActions: { flexDirection: "row", alignItems: "center" },
   navBtn: { padding: 8 },
-  coverWrap: { width: SCREEN_W },
-  cover: { width: SCREEN_W, height: 120 },
-  profile: { paddingHorizontal: 16, paddingBottom: 12, marginTop: -28 },
-  avatarRow: { flexDirection: "row", alignItems: "center", gap: 14 },
+  coverWrap: {
+    marginHorizontal: COVER_H_MARGIN,
+    borderRadius: COVER_RADIUS,
+    overflow: "hidden",
+    height: COVER_H,
+  },
+  cover: { width: COVER_W, height: COVER_H },
+  profile: { paddingHorizontal: 16, paddingBottom: 12 },
+  avatarOverlapRow: { marginTop: -36, marginBottom: 4 },
+  channelMeta: { marginTop: 4 },
   avatar: { width: 72, height: 72, borderRadius: 36, borderWidth: 2, borderColor: "#fff" },
   displayName: { fontSize: 20, fontFamily: "Inter_700Bold" },
   bio: { fontSize: 13, lineHeight: 19, marginTop: 10 },
