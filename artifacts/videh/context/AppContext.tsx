@@ -635,7 +635,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const data = await api(`/chats/user/${dbUserId}`) as { success: boolean; chats: any[] };
       if (!data.success || !data.chats) return;
-      const mapped = mapDbChats(data.chats);
+      const mapped = mapDbChats(data.chats).filter(
+        (c) => Boolean(c.lastMessageTime) || Boolean(c.lastMessage),
+      );
       await restoreHiddenChatsWithNewActivity(
         mapped
           .filter((c) => typeof c.lastMessageTime === "number" && c.lastMessageTime > 0)
@@ -963,24 +965,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!data.success || !data.chatId) throw new Error("Failed to create chat");
 
     const realId = String(data.chatId);
-
-    // Add or update in local state
-    setChats((prev) => {
-      const idx = prev.findIndex((c) => c.id === realId);
-      if (idx !== -1) return prev;
-      return [{
-        id: realId,
-        name: otherName,
-        avatar: otherAvatar,
-        unreadCount: 0,
-        isGroup: false,
-        messages: [],
-        isPinned: false,
-        isMuted: false,
-        otherUserId,
-      }, ...prev];
-    });
-
     return realId;
   }, [chats]);
 

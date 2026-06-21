@@ -257,6 +257,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         JOIN users u ON u.id = cm2.user_id
         WHERE cm2.chat_id = c.id AND cm2.user_id != $1::int
       ) other_members ON TRUE
+      WHERE last_msg.last_message IS NOT NULL
       ORDER BY last_msg.last_created_at DESC NULLS LAST
     `, [userId]);
 

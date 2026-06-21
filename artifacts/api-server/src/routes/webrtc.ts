@@ -556,6 +556,7 @@
   });
 
   router.get("/calls/incoming/:userId", async (req: Request, res: Response) => {
+    res.setHeader("Cache-Control", "no-store");
     await cleanupSessions();
     const userId = Number(req.params.userId);
     if (!assertSameUser(req, res, userId)) return;

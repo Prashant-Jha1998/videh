@@ -69,11 +69,16 @@ import { rejectIncomingCall } from "@/lib/rejectIncomingCall";
 import { loadCachedSilenceUnknownCallers } from "@/lib/privacySettings";
 import type { Chat } from "@/context/AppContext";
 
-function isKnownCaller(chatId: number, chatList: Chat[]): boolean {
+function isKnownCaller(chatId: number, callerId: number | undefined, chatList: Chat[]): boolean {
+  if (callerId && callerId > 0) {
+    const byPeer = chatList.find((c) => !c.isGroup && c.otherUserId === callerId);
+    if (byPeer && (Boolean(byPeer.lastMessage) || (byPeer.messages?.length ?? 0) > 0)) {
+      return true;
+    }
+  }
   const chat = chatList.find((c) => c.id === String(chatId));
   if (!chat) return false;
   if (chat.isGroup) return true;
-  if (!chat.otherUserId) return false;
   return Boolean(chat.lastMessage) || (chat.messages?.length ?? 0) > 0;
 }
 
@@ -242,8 +247,13 @@ function RootLayoutNav() {
     }
 
     const silenceUnknown = await loadCachedSilenceUnknownCallers();
-    if (silenceUnknown && user?.dbId && !isKnownCaller(Number(next.chatId), chats)) {
-      await declineIncomingCallSilently(next.callId, user.dbId, user.sessionToken);
+    const knownCaller = isKnownCaller(Number(next.chatId), next.callerId, chats);
+    if (silenceUnknown && user?.dbId && !knownCaller) {
+      // Still show the call UI — only skip the loud ringtone for unknown callers.
+      pendingIncomingRef.current = next;
+      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
+      presentIncomingCallUi(next, { useNativeSurface: !isAppInForeground() });
+      scheduleIncomingAutoEnd(next.callId);
       return;
     }
 
@@ -252,6 +262,7 @@ function RootLayoutNav() {
     if (appActive) {
       pendingIncomingRef.current = next;
       setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
+      presentIncomingCallUi(next, { useNativeSurface: false });
       void startIncomingCallExperience(next);
       scheduleIncomingAutoEnd(next.callId);
       return;
@@ -413,12 +424,17 @@ function RootLayoutNav() {
     let cancelled = false;
     const pollMs = () => {
       const state = AppState.currentState;
-      return state === "active" ? 2500 : 5000;
+      return state === "active" ? 800 : 1500;
     };
     const poll = async () => {
       try {
-        const res = await fetch(`${getApiUrl()}/api/webrtc/calls/incoming/${user.dbId}`, {
-          headers: webrtcAuthHeaders(user.sessionToken),
+        const res = await fetch(`${getApiUrl()}/api/webrtc/calls/incoming/${user.dbId}?_=${Date.now()}`, {
+          cache: "no-store",
+          headers: {
+            ...webrtcAuthHeaders(user.sessionToken),
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
         });
         const data = await res.json() as { success?: boolean; calls?: any[] };
         if (cancelled) return;
@@ -449,7 +465,7 @@ function RootLayoutNav() {
         const pollCallId = String(next.callId ?? "");
         if (dismissedIncomingCallIdsRef.current.has(pollCallId)) return;
         if (activeCallSession?.callId === pollCallId) return;
-        await offerIncomingCall({
+        void offerIncomingCall({
           callId: next.callId,
           channel: next.channel,
           chatId: next.chatId,
