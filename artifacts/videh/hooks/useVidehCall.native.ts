@@ -649,7 +649,7 @@ export function useVidehCall(
     return () => {
       stopped = true;
       stopAllSignaling();
-      closeAllPeerConnections(true);
+      closeAllPeerConnections(false);
     };
   }, [primaryChannel, uid, isVideo, channelsKey, sessionToken, videhCallerId, stopAllSignaling, closeAllPeerConnections]);
 
@@ -658,7 +658,7 @@ export function useVidehCall(
       setProximityScreenOff(false);
       void stopInCallSession();
       stopAllSignaling();
-      closeAllPeerConnections(true);
+      closeAllPeerConnections(false);
       localStreamRef.current?.getTracks?.().forEach((track: any) => track.stop());
       localStreamRef.current = null;
     };

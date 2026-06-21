@@ -40,6 +40,9 @@
   };
 
   const router = Router();
+  router.get("/ice-config", (_req: Request, res: Response) => {
+    res.json({ success: true, iceServers: getIceServers() });
+  });
   router.use(requireAuth);
   const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
   /** Keep in sync with videh `INCOMING_RING_TIMEOUT_MS` (45s). */
@@ -49,6 +52,8 @@
   /** Connected calls stay alive while clients poll status; orphan after brief silence (crash / force-quit). */
   const CONNECTED_CALL_IDLE_MS = 2 * 60 * 1000;
   const ringExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const RING_REMINDER_MS = 12_000;
+  const ringReminderTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   function callIsOrphanStale(call: CallInvite): boolean {
     if (isCallEnded(call)) return true;
@@ -67,6 +72,81 @@
       clearTimeout(t);
       ringExpiryTimers.delete(callId);
     }
+    clearRingReminderTimers(callId);
+  }
+
+  function clearRingReminderTimers(callId: string): void {
+    const t = ringReminderTimers.get(callId);
+    if (t) {
+      clearInterval(t);
+      ringReminderTimers.delete(callId);
+    }
+  }
+
+  async function sendRingReminder(callId: string): Promise<void> {
+    const call = await getCall(callId);
+    if (!call) {
+      clearRingReminderTimers(callId);
+      return;
+    }
+    const ringingIds = call.participantIds.filter((id) => call.statuses[id] === "ringing");
+    if (ringingIds.length === 0) {
+      clearRingReminderTimers(callId);
+      return;
+    }
+    call.updatedAt = Date.now();
+    await saveCall(call);
+    publishCallSignal({
+      chatId: call.chatId,
+      userIds: ringingIds,
+      action: "ringing",
+      payload: {
+        ...serializeIncoming(call, call.callerId),
+        callerId: call.callerId,
+        action: "ringing",
+      },
+    });
+    try {
+      const members = await query(
+        `SELECT cm.user_id, u.push_token FROM chat_members cm
+         JOIN users u ON u.id = cm.user_id WHERE cm.chat_id = $1`,
+        [call.chatId],
+      );
+      const pushTokens = members.rows
+        .filter((row: { user_id: number; push_token: string | null }) => ringingIds.includes(Number(row.user_id)))
+        .map((row: { push_token: string | null }) => row.push_token)
+        .filter((t: unknown): t is string => isValidPushToken(t));
+      if (pushTokens.length > 0) {
+        await sendChatPush(
+          pushTokens,
+          call.type === "video" ? "Video call" : "Voice call",
+          `${call.callerName ?? "Videh user"} is calling`,
+          {
+            callId: call.callId,
+            chatId: String(call.chatId),
+            type: call.type,
+            channel: call.channel,
+            callerId: String(call.callerId),
+            callerName: call.callerName ?? "Videh user",
+            kind: "call",
+            notificationKind: "incoming_call",
+          },
+          { categoryId: EXPO_INCOMING_CALL_CATEGORY_ID, threadId: `call-${call.callId}`, isCall: true },
+        );
+      }
+    } catch (err) {
+      console.error("ring reminder push", err);
+    }
+  }
+
+  function scheduleRingReminders(callId: string): void {
+    clearRingReminderTimers(callId);
+    ringReminderTimers.set(
+      callId,
+      setInterval(() => {
+        void sendRingReminder(callId);
+      }, RING_REMINDER_MS),
+    );
   }
 
   async function expireRingingCall(callId: string): Promise<void> {
@@ -398,10 +478,6 @@
     };
   }
 
-  router.get("/ice-config", (_req: Request, res: Response) => {
-    res.json({ success: true, iceServers: getIceServers() });
-  });
-
   router.post("/calls", async (req: Request, res: Response) => {
     await cleanupSessions();
     const body = req.body as { chatId?: number; type?: "audio" | "video" };
@@ -501,6 +577,7 @@
       };
       await saveCall(invite);
       scheduleRingExpiry(callId);
+      scheduleRingReminders(callId);
       const ringingIds = callableParticipantIds.filter((id) => statuses[id] === "ringing");
       if (ringingIds.length > 0) {
         publishCallSignal({
@@ -568,8 +645,12 @@
     if (!assertSameUser(req, res, userId)) return;
     const calls = (await Promise.all((await stateKeys("webrtc:call:")).map((key) => stateGetJson<CallInvite>(key))))
       .filter((call): call is CallInvite => Boolean(call));
-    const incoming = calls
-      .filter((call) => call.statuses[userId] === "ringing")
+    const ringing = calls.filter((call) => call.statuses[userId] === "ringing");
+    for (const call of ringing) {
+      call.updatedAt = Date.now();
+      await saveCall(call);
+    }
+    const incoming = ringing
       .sort((a, b) => b.createdAt - a.createdAt)
       .map((call) => serializeIncoming(call, userId));
     res.json({ success: true, calls: incoming });
@@ -1072,6 +1153,7 @@
     session.answerRevision = (session.answerRevision ?? 0) + 1;
     session.updatedAt = Date.now();
     await saveSession(session);
+    req.log?.info?.({ channel, answerRevision: session.answerRevision }, "webrtc answer posted");
     void markCallConnectedByChannel(channel);
     res.json({ success: true, answerRevision: session.answerRevision });
   });

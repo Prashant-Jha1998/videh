@@ -56,6 +56,8 @@ export type CallSession = {
   minimized: boolean;
   engineActive: boolean;
   onHold?: boolean;
+  /** Videh invite caller — set on accept so WebRTC starts on first frame. */
+  callerUserId?: number;
 };
 
 type RouteParams = {
@@ -205,7 +207,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
   /** Videh call initiator — must be set before WebRTC starts (wrong id = no audio). */
   const callInitiatorId = session?.isIncoming
-    ? (callerId && callerId !== userId ? callerId : 0)
+    ? (session.callerUserId ?? (callerId && callerId !== userId ? callerId : 0))
     : userId;
   /** WebRTC starts when channel + initiator are known; caller posts offer while ringing, callee after accept. */
   const webrtcReady = Boolean(
@@ -710,6 +712,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       ringing: false,
       minimized: false,
       engineActive: true,
+      callerUserId: resolvedCallerId,
     };
     setSession(next);
     callDebug("OPENING_CALL_SCREEN", { callId, chatId: next.chatId, incoming: true, replace: true });

@@ -428,7 +428,7 @@ function RootLayoutNav() {
     let cancelled = false;
     const pollMs = () => {
       const state = AppState.currentState;
-      return state === "active" ? 800 : 1500;
+      return state === "active" ? 800 : 500;
     };
     const poll = async () => {
       try {
