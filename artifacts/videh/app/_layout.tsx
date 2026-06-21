@@ -839,6 +839,14 @@ function RootLayoutNav() {
     return () => sub.remove();
   }, [isAuthenticated, router, offerIncomingCall]);
 
+  const incomingCallAvatar = incomingCall
+    ? chats.find(
+        (c) =>
+          String(c.id) === String(incomingCall.chatId)
+          || (incomingCall.callerId != null && c.otherUserId === incomingCall.callerId),
+      )?.avatar ?? incomingCall.avatarUrl ?? null
+    : null;
+
   return (
     <>
       <AppStatusBar />
@@ -889,7 +897,7 @@ function RootLayoutNav() {
       && incomingCall.callerId > 0
       && incomingCall.callerId !== user.dbId ? (
         <IncomingCallOverlay
-          call={incomingCall}
+          call={{ ...incomingCall, avatarUrl: incomingCallAvatar }}
           onAccept={() => respondToIncomingCall("accept")}
           onDecline={() => { void respondToIncomingCall("decline"); }}
           onDeclineWithMessage={(text) => { void respondToIncomingCall("decline", text); }}

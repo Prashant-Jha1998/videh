@@ -13,8 +13,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { VidehLocalView, VidehRemoteView } from "@/components/VidehVideoView";
+import { CallOutcomeScreen } from "@/components/CallOutcomeScreen";
 import { AddCallParticipantModal } from "@/components/AddCallParticipantModal";
 import { GroupCallGrid, type RemoteCallPeer } from "@/components/GroupCallGrid";
 import { useCallSession } from "@/context/CallSessionContext";
@@ -70,6 +72,10 @@ export default function CallScreen() {
     setInCallAudioRoute,
     shareScreen,
     stopScreenShare,
+    callOutcome,
+    outcomeSnapshot,
+    dismissCallOutcome,
+    redialFromOutcome,
   } = useCallSession();
   const { chats, user } = useApp();
 
@@ -162,9 +168,59 @@ export default function CallScreen() {
       : phaseLabel("outgoing_ringing", isVideo));
 
   const isOneToOne = participantCount <= 2;
+  const contactAvatar = useMemo(() => {
+    const chatId = session?.chatId ?? params.id;
+    const chat = chats.find((c) => String(c.id) === String(chatId));
+    return chat?.avatar ?? null;
+  }, [chats, session?.chatId, params.id]);
+
+  if (callOutcome && outcomeSnapshot) {
+    return (
+      <CallOutcomeScreen
+        contactName={outcomeSnapshot.contactName}
+        avatarUrl={contactAvatar}
+        outcome={callOutcome}
+        onCancel={dismissCallOutcome}
+        onCallAgain={redialFromOutcome}
+        onVoiceMessage={() => {
+          dismissCallOutcome();
+          router.replace({ pathname: "/chat/[id]", params: { id: outcomeSnapshot.chatId } });
+        }}
+      />
+    );
+  }
 
   if (ringing && incoming) {
     return null;
+  }
+
+  const outgoingRinging = !incoming && !joined && !callAnswered && !error;
+
+  if (outgoingRinging && isOneToOne && !isVideo) {
+    return (
+      <View style={[styles.waRoot, { paddingTop: topPad, paddingBottom: insets.bottom + 28 }]}>
+        <View style={styles.waTop}>
+          <Text style={styles.waName}>{name}</Text>
+          <Text style={styles.waStatus}>{displayStatus}</Text>
+        </View>
+        <View style={styles.waCenter}>
+          {contactAvatar ? (
+            <Animated.View style={{ transform: [{ scale: pulse }] }}>
+              <Image source={{ uri: contactAvatar }} style={styles.waAvatarImg} contentFit="cover" />
+            </Animated.View>
+          ) : (
+            <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: pulse }] }]}>
+              <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
+                <Text style={styles.avatarText}>{initials}</Text>
+              </View>
+            </Animated.View>
+          )}
+        </View>
+        <TouchableOpacity style={styles.endBtn} onPress={() => void endCall()} activeOpacity={0.85}>
+          <Ionicons name="call" size={28} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
+        </TouchableOpacity>
+      </View>
+    );
   }
 
   return (
@@ -381,6 +437,39 @@ function ControlBtn({ icon, label, onPress, active }: { icon: string; label: str
 
 const styles = StyleSheet.create({
   container: { flex: 1, alignItems: "center" },
+  waRoot: {
+    flex: 1,
+    backgroundColor: "#0B141A",
+    alignItems: "center",
+  },
+  waTop: {
+    alignItems: "center",
+    paddingHorizontal: 28,
+    marginTop: 12,
+  },
+  waName: {
+    color: "#F0F2F5",
+    fontSize: 26,
+    fontFamily: "Inter_700Bold",
+    textAlign: "center",
+  },
+  waStatus: {
+    color: "#8696A0",
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+    marginTop: 6,
+    textAlign: "center",
+  },
+  waCenter: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  waAvatarImg: {
+    width: 168,
+    height: 168,
+    borderRadius: 84,
+  },
   incomingRoot: { backgroundColor: "#0B141A", justifyContent: "flex-start" },
   incomingHeader: {
     flex: 1,

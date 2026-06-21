@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import { Platform } from "react-native";
 import type { IncomingCallInfo } from "@/components/IncomingCallOverlay";
+import type { CallOutcome } from "@/components/CallOutcomeScreen";
 import { useApp } from "@/context/AppContext";
 import { useVidehCall } from "@/hooks/useVidehCall";
 import {
@@ -110,6 +111,10 @@ type CallSessionContextValue = {
   endHeldCall: () => Promise<void>;
   shareScreen: () => Promise<boolean>;
   stopScreenShare: () => Promise<void>;
+  callOutcome: CallOutcome | null;
+  outcomeSnapshot: { contactName: string; chatId: string; isVideo: boolean } | null;
+  dismissCallOutcome: () => void;
+  redialFromOutcome: () => void;
 };
 
 const CallSessionContext = createContext<CallSessionContextValue | null>(null);
@@ -133,6 +138,12 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const [inviteeUserIds, setInviteeUserIds] = useState<number[]>([]);
   const [statusHint, setStatusHint] = useState<string | null>(null);
   const [duration, setDuration] = useState(0);
+  const [callOutcome, setCallOutcome] = useState<CallOutcome | null>(null);
+  const [outcomeSnapshot, setOutcomeSnapshot] = useState<{
+    contactName: string;
+    chatId: string;
+    isVideo: boolean;
+  } | null>(null);
   const endedTonePlayed = useRef(false);
   const endingCallRef = useRef(false);
   const teardownInFlightRef = useRef<Set<string>>(new Set());
@@ -241,6 +252,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     busyEndHandledRef.current = null;
     resetCallParticipantState();
     resetCallNavigationGuard();
+    setCallOutcome(null);
+    setOutcomeSnapshot(null);
   }, [resetCallParticipantState]);
 
   const leaveCallScreen = useCallback(() => {
@@ -313,6 +326,60 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const onCallEnded = useCallback(() => {
     void teardownCallLocally();
   }, [teardownCallLocally]);
+
+  const showUnreachableOutcome = useCallback(
+    async (outcome: CallOutcome) => {
+      const snap = session;
+      if (!snap || snap.isIncoming || snap.ringing) {
+        void teardownCallLocally();
+        return;
+      }
+      if (call.joined || call.connectionPhase === "connected") {
+        void teardownCallLocally(undefined, { skipServerEnd: true });
+        return;
+      }
+      await stopCallAlert();
+      await call.leave();
+      setOutcomeSnapshot({
+        contactName: snap.contactName,
+        chatId: snap.chatId,
+        isVideo: snap.isVideo,
+      });
+      setCallOutcome(outcome);
+      sessionEngineActiveRef.current = false;
+      setSession((prev) => (prev ? { ...prev, engineActive: false } : prev));
+      void refreshCallLogs();
+    },
+    [session, call, teardownCallLocally, refreshCallLogs],
+  );
+
+  const dismissCallOutcome = useCallback(() => {
+    setCallOutcome(null);
+    setOutcomeSnapshot(null);
+    clearSession();
+    leaveCallScreen();
+  }, [clearSession, leaveCallScreen]);
+
+  const redialFromOutcome = useCallback(() => {
+    const snap = outcomeSnapshot;
+    if (!snap) return;
+    setCallOutcome(null);
+    setOutcomeSnapshot(null);
+    endedTonePlayed.current = false;
+    busyEndHandledRef.current = null;
+    outgoingCallInitRef.current = null;
+    clearSession();
+    router.replace({
+      pathname: "/call/[id]",
+      params: {
+        id: snap.chatId,
+        name: snap.contactName,
+        type: snap.isVideo ? "video" : "audio",
+        incoming: "0",
+        ringing: "0",
+      },
+    });
+  }, [outcomeSnapshot, clearSession, router]);
 
   /** Overlay / ring UI dismiss — skip if an active in-call session is running. */
   const handleUiDismissRequest = useCallback(
@@ -531,7 +598,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
               busyEndHandledRef.current = data.call?.callId ?? "busy";
               await stopCallAlert();
               await playCallBusyTone();
-              onCallEnded();
+              void showUnreachableOutcome("busy");
             })();
           }
         })
@@ -691,14 +758,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         if (session.callId) {
           await webrtcFetch(`/calls/${session.callId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
         }
-        onCallEnded();
+        void showUnreachableOutcome("no_answer");
       })();
     }, INCOMING_RING_TIMEOUT_MS);
     return () => {
       clearTimeout(timeout);
       void stopCallAlert();
     };
-  }, [session?.callId, session?.isIncoming, session?.ringing, call.joined, acceptedCount, user?.sessionToken, onCallEnded]);
+  }, [session?.callId, session?.isIncoming, session?.ringing, call.joined, acceptedCount, user?.sessionToken, showUnreachableOutcome]);
 
   useEffect(() => {
     if (!session?.callId || !userId || session.ringing) return;
@@ -776,7 +843,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
                 try {
                   await stopCallAlert();
                   await playCallBusyTone();
-                  onCallEnded();
+                  void showUnreachableOutcome("busy");
                 } catch { /* ignore */ }
               })();
               return;
@@ -789,7 +856,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
                 try {
                   await stopCallAlert();
                   await playCallUnavailableTone();
-                  onCallEnded();
+                  void showUnreachableOutcome("declined");
                 } catch { /* ignore */ }
               })();
               return;
@@ -802,7 +869,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
                 try {
                   await stopCallAlert();
                   await playCallUnavailableTone();
-                  onCallEnded();
+                  void showUnreachableOutcome("no_answer");
                 } catch { /* ignore */ }
               })();
               return;
@@ -817,7 +884,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         .catch(() => {});
     }, pollMs);
     return () => clearInterval(timer);
-  }, [session?.callId, session?.engineActive, session?.isIncoming, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleServerCallEnded]);
+  }, [session?.callId, session?.engineActive, session?.isIncoming, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleServerCallEnded, showUnreachableOutcome]);
 
   const callAnswered = call.connectionPhase === "connected";
 
@@ -988,6 +1055,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       endHeldCall,
       shareScreen: () => call.shareScreen(),
       stopScreenShare: () => call.stopScreenShare(),
+      callOutcome,
+      outcomeSnapshot,
+      dismissCallOutcome,
+      redialFromOutcome,
     }),
     [
       session,
@@ -997,6 +1068,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       participantCount,
       acceptedCount,
       ringingCount,
+      callOutcome,
+      outcomeSnapshot,
+      dismissCallOutcome,
+      redialFromOutcome,
       initFromRoute,
       presentIncomingCall,
       acceptIncoming,
