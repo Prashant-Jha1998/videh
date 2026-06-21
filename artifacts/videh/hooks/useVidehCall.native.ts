@@ -366,7 +366,16 @@ export function useVidehCall(
           videhCallerId,
         }),
       });
-      const sessionData = await sessionRes.json() as { success?: boolean; role?: Role };
+      const sessionData = await sessionRes.json() as {
+        success?: boolean;
+        role?: Role;
+        session?: {
+          offer?: RTCSessionDescriptionInit | null;
+          answer?: RTCSessionDescriptionInit | null;
+          offerRevision?: number;
+          answerRevision?: number;
+        };
+      };
       if (connectGen !== connectGenRef.current || stopped) return;
       if (!sessionData.success || !sessionData.role) throw new Error("Could not start call signaling.");
       const role = sessionData.role;

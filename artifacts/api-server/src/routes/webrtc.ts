@@ -1152,7 +1152,20 @@ router.post("/sessions", async (req: Request, res: Response) => {
   }
   await saveSession(session);
 
-  res.json({ success: true, role, session: { channel: session.channel, type: session.type, hasOffer: Boolean(session.offer), hasAnswer: Boolean(session.answer) } });
+  res.json({
+    success: true,
+    role,
+    session: {
+      channel: session.channel,
+      type: session.type,
+      hasOffer: Boolean(session.offer),
+      hasAnswer: Boolean(session.answer),
+      offer: role === "callee" ? (session.offer ?? null) : null,
+      answer: role === "caller" ? (session.answer ?? null) : null,
+      offerRevision: session.offerRevision ?? 0,
+      answerRevision: session.answerRevision ?? 0,
+    },
+  });
 });
 
 router.get("/sessions/:channel", async (req: Request, res: Response) => {

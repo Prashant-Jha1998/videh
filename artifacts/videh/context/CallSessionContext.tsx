@@ -577,8 +577,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         if (params.incoming !== "1") {
           return { ...next, isIncoming: false, ringing: false };
         }
-        if (prev.engineActive) {
-          return { ...next, isIncoming: true, ringing: false };
+        if (prev.engineActive || (params.ringing !== "1" && Boolean(params.channel || prev.channel))) {
+          sessionEngineActiveRef.current = true;
+          sessionRingingRef.current = false;
+          return { ...next, isIncoming: true, ringing: false, engineActive: true };
         }
         return { ...next, isIncoming: true, ringing: params.ringing === "1" };
       }
