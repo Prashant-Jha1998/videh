@@ -56,7 +56,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
   if (!userId || !assertSameUser(req, res, userId)) return;
   try {
     const result = await query(
-      `SELECT bl.*, COUNT(br.id)::int as recipient_count
+      `SELECT bl.*, COUNT(br.user_id)::int as recipient_count
        FROM broadcast_lists bl
        LEFT JOIN broadcast_recipients br ON br.list_id = bl.id
        WHERE bl.creator_id = $1

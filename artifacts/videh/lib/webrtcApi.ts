@@ -13,9 +13,12 @@ export async function webrtcFetch(
   init?: RequestInit,
 ): Promise<Response> {
   return fetch(`${getApiUrl()}/api/webrtc${path}`, {
+    cache: "no-store",
     ...init,
     headers: {
       ...webrtcAuthHeaders(sessionToken),
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
       ...(init?.headers as Record<string, string> | undefined),
     },
   });

@@ -204,6 +204,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     webrtcReady ? remotePeerIds : [],
     user?.sessionToken,
     callInitiatorId,
+    session?.callId ?? null,
   );
 
   useEffect(() => {
@@ -802,16 +803,16 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     return () => clearInterval(timer);
   }, [session?.callId, session?.engineActive, session?.ringing, userId, call.joined, user?.sessionToken, onCallEnded, handleServerCallEnded]);
 
-  const callAnswered = remotePartyAccepted && (call.mediaReady || call.joined);
+  const callAnswered = call.connectionPhase === "connected";
 
   useEffect(() => {
-    if (!callAnswered) {
+    if (call.connectionPhase !== "connected") {
       setDuration(0);
       return;
     }
     const t = setInterval(() => setDuration((d) => d + 1), 1000);
     return () => clearInterval(t);
-  }, [callAnswered]);
+  }, [call.connectionPhase]);
 
   useEffect(() => {
     if (!session?.engineActive || session.ringing || !call.joined) {
@@ -898,9 +899,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (callAnswered) {
       return formatDuration(duration);
     }
-    if (call.mediaReady) {
-      if (call.connectionPhase === "reconnecting") return "Reconnecting…";
-      return formatDuration(duration);
+    if (call.connectionPhase === "reconnecting") {
+      return "Reconnecting…";
     }
     if (call.joined || remotePartyAccepted) {
       if (statusHint) return statusHint;

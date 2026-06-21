@@ -39,6 +39,7 @@ export function useVidehCall(
   remotePeerIds: number[] = [],
   sessionToken?: string | null,
   videhCallerId = 0,
+  callId: string | null = null,
 ): VidehCallState {
   const channels = channelsForCall(baseChannel, uid, remotePeerIds);
   const primaryChannel = channels[0] ?? "";
@@ -53,6 +54,10 @@ export function useVidehCall(
   const lastOfferRevisionRef = useRef<Map<string, number>>(new Map());
   const lastAnswerRevisionRef = useRef<Map<string, number>>(new Map());
   const pollBusyRef = useRef<Set<string>>(new Set());
+  const offerProcessingRef = useRef<Set<string>>(new Set());
+  const connectedNotifiedRef = useRef(false);
+  const callIdRef = useRef(callId);
+  callIdRef.current = callId;
   const connectGenRef = useRef(0);
   const mountedRef = useRef(true);
   const speakerOnRef = useRef(!isVideo ? false : true);
@@ -189,6 +194,14 @@ export function useVidehCall(
       setError(null);
       setConnectionPhase("connected");
       if (!isVideo) setProximityScreenOff(true);
+      if (!connectedNotifiedRef.current && callIdRef.current && sessionToken) {
+        connectedNotifiedRef.current = true;
+        callDebug("PEER_CONNECTION_CONNECTED", { channel: primaryChannel, callId: callIdRef.current });
+        void webrtcFetch(`/calls/${callIdRef.current}/connected`, sessionToken, {
+          method: "POST",
+          body: JSON.stringify({ userId: uid }),
+        }).catch(() => {});
+      }
     } else if (failed) {
       setConnectionPhase("failed");
     } else if (reconnecting && pcs.length > 0) {
@@ -224,6 +237,8 @@ export function useVidehCall(
       remotePeersRef.current.clear();
       lastOfferRevisionRef.current.clear();
       lastAnswerRevisionRef.current.clear();
+      offerProcessingRef.current.clear();
+      connectedNotifiedRef.current = false;
       if (disconnectGraceTimerRef.current) {
         clearTimeout(disconnectGraceTimerRef.current);
         disconnectGraceTimerRef.current = null;
@@ -329,7 +344,7 @@ export function useVidehCall(
       rolesRef.current.set(channel, role);
       candidateCursorsRef.current.set(channel, 0);
 
-      callDebug("CREATING_PEER_CONNECTION", { channel, role, uid, videhCallerId });
+      callDebug("CREATING_PEER_CONNECTION", { channel, role, uid, videhCallerId, callId: callIdRef.current });
 
       const pc = new RTCPeerConnection({ iceServers });
       pcsRef.current.set(channel, pc);
@@ -342,8 +357,17 @@ export function useVidehCall(
           try {
             const pcNow = pcsRef.current.get(pollChannel);
             if (stopped || !pcNow) return;
-            const activeRole = rolesRef.current.get(pollChannel) ?? "caller";
-            const session = await webrtcFetch(`/sessions/${encodeURIComponent(pollChannel)}`, sessionToken).then((r) => r.json()) as {
+            const activeRole = rolesRef.current.get(pollChannel) ?? role;
+            const sessionRes = await webrtcFetch(
+              `/sessions/${encodeURIComponent(pollChannel)}?_=${Date.now()}`,
+              sessionToken,
+            );
+            if (sessionRes.status === 304 || sessionRes.status === 204) {
+              callDebug("SESSION_POLL_NOT_MODIFIED", { channel: pollChannel, status: sessionRes.status, role: activeRole });
+            } else if (!sessionRes.ok) {
+              throw new Error(`Session poll failed (${sessionRes.status})`);
+            } else {
+            const session = await sessionRes.json() as {
               session?: {
                 offer?: RTCSessionDescriptionInit | null;
                 answer?: RTCSessionDescriptionInit | null;
@@ -353,19 +377,77 @@ export function useVidehCall(
             };
             const offerRevision = session.session?.offerRevision ?? 0;
             const seenOfferRev = lastOfferRevisionRef.current.get(pollChannel) ?? -1;
+            const hasOffer = Boolean(session.session?.offer);
+            callDebug("SESSION_POLL", {
+              channel: pollChannel,
+              activeRole,
+              offerRevision,
+              seenOfferRev,
+              hasOffer,
+              willProcessOffer: activeRole === "callee" && hasOffer && offerRevision > seenOfferRev,
+              signalingState: pcNow.signalingState,
+            });
+            if (activeRole === "callee" && hasOffer && offerRevision <= seenOfferRev) {
+              callDebug("OFFER_ALREADY_SEEN", { channel: pollChannel, offerRevision, seenOfferRev });
+            }
             if (
               activeRole === "callee"
-              && session.session?.offer
+              && hasOffer
               && offerRevision > seenOfferRev
+              && !offerProcessingRef.current.has(pollChannel)
             ) {
-              callDebug("RECEIVING_OFFER", { channel: pollChannel, offerRevision, role: activeRole });
-              lastOfferRevisionRef.current.set(pollChannel, offerRevision);
-              await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.offer));
-              const answer = await pcNow.createAnswer();
-              await pcNow.setLocalDescription(answer);
-              callDebug("SENDING_ANSWER", { channel: pollChannel, answerRevision: (session.session?.answerRevision ?? 0) + 1 });
-              await postJson(`/sessions/${encodeURIComponent(pollChannel)}/answer`, { answer });
-              pollSignalOnce(pollChannel);
+              offerProcessingRef.current.add(pollChannel);
+              try {
+                callDebug("RECEIVING_OFFER", { channel: pollChannel, offerRevision, role: activeRole });
+                callDebug("SETTING_REMOTE_DESCRIPTION", { channel: pollChannel, type: "offer", role: activeRole });
+                try {
+                  await pcNow.setRemoteDescription(new RTCSessionDescription(session.session!.offer!));
+                } catch (e: any) {
+                  callDebug("SET_REMOTE_DESCRIPTION_FAILED", {
+                    channel: pollChannel,
+                    role: activeRole,
+                    message: e?.message ?? String(e),
+                  });
+                  throw e;
+                }
+                callDebug("CREATING_ANSWER", { channel: pollChannel, role: activeRole });
+                let answer: RTCSessionDescriptionInit;
+                try {
+                  answer = await pcNow.createAnswer();
+                  await pcNow.setLocalDescription(answer);
+                } catch (e: any) {
+                  callDebug("CREATE_ANSWER_FAILED", {
+                    channel: pollChannel,
+                    role: activeRole,
+                    message: e?.message ?? String(e),
+                  });
+                  throw e;
+                }
+                callDebug("SENDING_ANSWER", {
+                  channel: pollChannel,
+                  answerRevision: (session.session?.answerRevision ?? 0) + 1,
+                  role: activeRole,
+                });
+                try {
+                  await postJson(`/sessions/${encodeURIComponent(pollChannel)}/answer`, { answer });
+                } catch (e: any) {
+                  callDebug("SEND_ANSWER_FAILED", {
+                    channel: pollChannel,
+                    role: activeRole,
+                    message: e?.message ?? String(e),
+                  });
+                  throw e;
+                }
+                lastOfferRevisionRef.current.set(pollChannel, offerRevision);
+                callDebug("ANSWER_SENT", { channel: pollChannel, role: activeRole, offerRevision });
+                pollSignalOnce(pollChannel);
+              } finally {
+                offerProcessingRef.current.delete(pollChannel);
+              }
+            } else if (activeRole === "callee" && !hasOffer) {
+              callDebug("CALLEE_WAITING_FOR_OFFER", { channel: pollChannel, role: activeRole });
+            } else if (activeRole !== "callee" && hasOffer) {
+              callDebug("OFFER_IGNORED_NOT_CALLEE", { channel: pollChannel, activeRole });
             }
             const answerRevision = session.session?.answerRevision ?? 0;
             const seenAnswerRev = lastAnswerRevisionRef.current.get(pollChannel) ?? -1;
@@ -381,29 +463,29 @@ export function useVidehCall(
                 await pcNow.setRemoteDescription(new RTCSessionDescription(session.session.answer));
               }
             }
+            }
 
             const since = candidateCursorsRef.current.get(pollChannel) ?? 0;
-            const candidateRes = await webrtcFetch(
-              `/sessions/${encodeURIComponent(pollChannel)}/candidates?role=${activeRole}&since=${since}`,
+            const candidateResRaw = await webrtcFetch(
+              `/sessions/${encodeURIComponent(pollChannel)}/candidates?role=${activeRole}&since=${since}&_=${Date.now()}`,
               sessionToken,
-            ).then((r) => r.json()) as { candidates?: RTCIceCandidateInit[]; next?: number };
-            for (const candidate of candidateRes.candidates ?? []) {
-              callDebug("ICE_CANDIDATE_RECEIVED", { channel: pollChannel, role: activeRole });
-              await pcNow.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+            );
+            if (candidateResRaw.ok && candidateResRaw.status !== 304) {
+              const candidateRes = await candidateResRaw.json() as { candidates?: RTCIceCandidateInit[]; next?: number };
+              for (const candidate of candidateRes.candidates ?? []) {
+                callDebug("ICE_CANDIDATE_RECEIVED", { channel: pollChannel, role: activeRole });
+                await pcNow.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+              }
+              candidateCursorsRef.current.set(pollChannel, candidateRes.next ?? since);
             }
-            candidateCursorsRef.current.set(pollChannel, candidateRes.next ?? since);
           } catch (e: any) {
             if (stopped) return;
             const msg = e?.message ?? "Call signaling error";
             const pcNow = pcsRef.current.get(pollChannel);
             const connected = pcNow?.connectionState === "connected";
             if (connected || isBenignSignalingError(msg)) return;
+            callDebug("SIGNAL_POLL_ERROR", { channel: pollChannel, role: rolesRef.current.get(pollChannel), message: msg });
             setError(msg);
-            const t = pollTimersRef.current.get(pollChannel);
-            if (t) {
-              clearInterval(t);
-              pollTimersRef.current.delete(pollChannel);
-            }
           } finally {
             pollBusyRef.current.delete(pollChannel);
           }
@@ -444,6 +526,7 @@ export function useVidehCall(
       pc.onconnectionstatechange = () => {
         const state = pc.connectionState;
         if (state === "connected") {
+          callDebug("PEER_CONNECTION_CONNECTED", { channel, role, uid });
           const t = iceRestartTimersRef.current.get(channel);
           if (t) {
             clearTimeout(t);
