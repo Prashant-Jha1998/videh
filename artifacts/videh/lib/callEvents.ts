@@ -7,6 +7,8 @@ export type CallSignalPayload = {
   callerName?: string;
   participantCount?: number;
   callerId?: number;
+  acceptedCount?: number;
+  acceptedUserIds?: number[];
 };
 
 /** Normalize SSE / realtime payloads (fields may be nested under `payload`). */
@@ -17,6 +19,10 @@ export function resolveCallSignal(raw: Record<string, unknown>): CallSignalPaylo
       : undefined;
   const merged = { ...nested, ...raw };
   const callId = merged.callId ?? merged.call_id;
+  const acceptedUserIdsRaw = merged.acceptedUserIds;
+  const acceptedUserIds = Array.isArray(acceptedUserIdsRaw)
+    ? acceptedUserIdsRaw.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)
+    : undefined;
   return {
     action: String(merged.action ?? ""),
     callId: callId != null ? String(callId) : undefined,
@@ -27,6 +33,8 @@ export function resolveCallSignal(raw: Record<string, unknown>): CallSignalPaylo
     participantCount:
       merged.participantCount != null ? Number(merged.participantCount) : undefined,
     callerId: merged.callerId != null ? Number(merged.callerId) : undefined,
+    acceptedCount: merged.acceptedCount != null ? Number(merged.acceptedCount) : undefined,
+    acceptedUserIds: acceptedUserIds?.length ? acceptedUserIds : undefined,
   };
 }
 

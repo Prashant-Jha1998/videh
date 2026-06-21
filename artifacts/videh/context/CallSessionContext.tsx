@@ -631,7 +631,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
             callId: data.call!.callId ?? prev.callId,
             isIncoming: false,
             ringing: false,
-            engineActive: true,
+            engineActive: false,
           };
         });
         setParticipantCount(data.call!.participantCount ?? 2);
@@ -1007,36 +1007,35 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       }
       if (action === "accepted" && callId && sessionCallIdRef.current === callId) {
         void stopCallAlert();
-        const payload = signal as {
-          acceptedUserIds?: number[];
-          callerId?: number;
-          acceptedCount?: number;
-        };
-        if (typeof payload.acceptedCount === "number") {
-          setAcceptedCount(payload.acceptedCount);
+        if (typeof signal.acceptedCount === "number") {
+          setAcceptedCount(signal.acceptedCount);
         }
-        if (Array.isArray(payload.acceptedUserIds) && payload.acceptedUserIds.length > 0) {
-          setAcceptedUserIds(payload.acceptedUserIds);
-        } else if ((payload.acceptedCount ?? 0) > 1) {
+        if (Array.isArray(signal.acceptedUserIds) && signal.acceptedUserIds.length > 0) {
+          setAcceptedUserIds(signal.acceptedUserIds);
+        } else if ((signal.acceptedCount ?? 0) > 0 && userId) {
           setAcceptedUserIds((prev) => {
             const ids = new Set(prev);
-            if (userId) ids.add(userId);
-            if (typeof payload.callerId === "number" && payload.callerId > 0) ids.add(payload.callerId);
+            ids.add(userId);
+            if (typeof signal.callerId === "number" && signal.callerId > 0) ids.add(signal.callerId);
             return [...ids];
           });
         }
-        if (typeof payload.callerId === "number" && payload.callerId > 0) {
-          setCallerId(payload.callerId);
+        if (typeof signal.callerId === "number" && signal.callerId > 0) {
+          setCallerId(signal.callerId);
         }
-        callDebug("CALL_ACCEPTED", { callId, via: "sse", userId });
+        callDebug("CALL_ACCEPTED", {
+          callId,
+          via: "sse",
+          userId,
+          acceptedUserIds: signal.acceptedUserIds,
+          acceptedCount: signal.acceptedCount,
+        });
         setSession((prev) => {
-          if (!prev || prev.callId !== callId || prev.ringing) return prev;
+          if (!prev || prev.callId !== callId) return prev;
+          if (prev.isIncoming && prev.ringing) return prev;
           sessionEngineActiveRef.current = true;
           sessionRingingRef.current = false;
-          if (!prev.isIncoming) {
-            return { ...prev, engineActive: true };
-          }
-          return prev.engineActive ? prev : { ...prev, engineActive: true };
+          return prev.engineActive ? prev : { ...prev, engineActive: true, ringing: false };
         });
         return;
       }

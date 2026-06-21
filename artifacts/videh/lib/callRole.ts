@@ -30,6 +30,5 @@ export function isRemotePartyAccepted(
   opts?: { isIncoming?: boolean; engineActive?: boolean; ringing?: boolean; acceptedCount?: number },
 ): boolean {
   if (opts?.isIncoming) return Boolean(opts.engineActive && !opts.ringing);
-  if ((opts?.acceptedCount ?? 0) > 1) return true;
   return acceptedUserIds.some((id) => id !== userId);
 }
