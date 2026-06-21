@@ -473,7 +473,7 @@ function RootLayoutNav() {
             if (statusData.ended) {
               requestEndCallSession(activeId);
               dismissIncomingCallUi(activeId, true);
-            } else if (!statusData.success) {
+            } else if (!statusData.success && statusRes.status !== 404) {
               dismissIncomingCallUi(activeId, true);
             }
           } catch {

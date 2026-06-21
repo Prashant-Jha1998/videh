@@ -12,12 +12,14 @@ export async function hydrateIncomingCallInfo(
   const needsHydrate = !info.callerId || info.callerId <= 0 || !info.channel.trim();
   if (needsHydrate) {
     const details = await fetchIncomingCallDetails(info.callId, userId, sessionToken);
-    if (!details) return null;
-    info = {
-      ...info,
-      ...details,
-      callerName: info.callerName || details.callerName,
-    };
+    if (details) {
+      info = {
+        ...info,
+        ...details,
+        callerName: info.callerName || details.callerName,
+      };
+    }
+    // Push/SSE may already carry channel + callerId while status hits another worker (404).
   }
   if (!info.callerId || info.callerId <= 0 || !info.channel.trim()) return null;
   return info;
