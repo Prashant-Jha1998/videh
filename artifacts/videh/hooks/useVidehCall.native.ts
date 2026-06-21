@@ -4,6 +4,7 @@ import { applySpeakerRoute, setProximityScreenOff, startInCallSession, stopInCal
 import { buildCallMediaConstraints, getCallMediaSettings } from "@/lib/callMediaSettings";
 import { channelsForCall, loadIceServers, peerIdFromCallChannel } from "@/lib/webrtcIce";
 import { webrtcFetch } from "@/lib/webrtcApi";
+import { normalizeCallNetworkError } from "@/lib/videhCall/signalingClient";
 import { callDebug } from "@/lib/callDebug";
 import type { CallUiPhase } from "@/lib/callState";
 import type { RemoteCallPeerStream, VidehCallState } from "./videhCallTypes";
@@ -501,7 +502,7 @@ export function useVidehCall(
             callDebug("SIGNAL_POLL_ERROR", { channel: pollChannel, role: rolesRef.current.get(pollChannel), message: msg, fails });
             // Only surface a hard error after several consecutive failures so a single
             // network blip during connection setup does not flash a scary banner.
-            if (fails >= 6) setError(msg);
+            if (fails >= 6) setError(normalizeCallNetworkError(e).message);
           } finally {
             pollBusyRef.current.delete(pollChannel);
           }
@@ -638,7 +639,7 @@ export function useVidehCall(
         if (msg.includes("Cannot find module") || msg.includes("TurboModuleRegistry") || msg.includes("NativeModules")) {
           setError("NATIVE_WEBRTC_UNAVAILABLE");
         } else {
-          setError(msg || "Failed to start native self-hosted call.");
+          setError(normalizeCallNetworkError(e).message || "Failed to start native self-hosted call.");
         }
       }
     };

@@ -22,6 +22,7 @@ import {
 import { addUsersToOngoingCall } from "@/lib/callParticipants";
 import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
 import { webrtcFetch } from "@/lib/webrtcApi";
+import { videhSignalingPost } from "@/lib/videhCall/signalingClient";
 import { chooseInCallAudioRoute, wakeScreenForIncomingCall, type InCallAudioRoute } from "@/lib/inCallAudio";
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
 import { callDebug } from "@/lib/callDebug";
@@ -168,7 +169,11 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       acceptedUserIds.filter((peerId) => peerId > 0 && peerId !== userId),
     );
     if (session.isIncoming && callerId && callerId !== userId) ids.add(callerId);
-    if (!session.isIncoming && inviteeUserIds.length === 1) ids.add(inviteeUserIds[0]!);
+    if (!session.isIncoming) {
+      for (const peerId of inviteeUserIds) {
+        if (peerId > 0 && peerId !== userId) ids.add(peerId);
+      }
+    }
     return [...ids];
   }, [acceptedUserIds, callerId, userId, session?.channel, session?.engineActive, session?.isIncoming, inviteeUserIds]);
 
@@ -202,11 +207,11 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const callInitiatorId = session?.isIncoming
     ? (callerId && callerId !== userId ? callerId : 0)
     : userId;
+  /** WebRTC starts when channel + initiator are known; caller posts offer while ringing, callee after accept. */
   const webrtcReady = Boolean(
     session?.engineActive
     && session.channel
-    && callInitiatorId > 0
-    && (session.isIncoming || remotePartyAccepted),
+    && callInitiatorId > 0,
   );
   const engineChannel = webrtcReady ? session!.channel : "";
   const call = useVidehCall(
@@ -549,7 +554,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         isIncoming,
         ringing: isIncoming && ringing,
         minimized: false,
-        engineActive: isIncoming ? !ringing && Boolean(params.channel) : false,
+        engineActive: isIncoming ? !ringing && Boolean(params.channel) : Boolean(params.channel),
       };
     });
 
@@ -558,10 +563,12 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       if (outgoingCallInitRef.current === outgoingKey) return;
       outgoingCallInitRef.current = outgoingKey;
 
-      void webrtcFetch("/calls", user.sessionToken, {
-        method: "POST",
-        body: JSON.stringify({ chatId: Number(chatId), type: isVideo ? "video" : "audio" }),
-      })
+      void videhSignalingPost(
+        "/calls",
+        { chatId: Number(chatId), type: isVideo ? "video" : "audio" },
+        user.sessionToken,
+        { timeoutMs: 45000, retries: 3 },
+      )
         .then((res) => res.json())
         .then((data: {
           success?: boolean;
@@ -586,7 +593,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
               callId: data.call!.callId ?? prev.callId,
               isIncoming: false,
               ringing: false,
-              engineActive: false,
+              engineActive: true,
             };
           });
           setParticipantCount(data.call!.participantCount ?? 2);
@@ -643,10 +650,12 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     await stopIncomingCallExperience(callId);
     await stopCallAlert();
 
-    const res = await webrtcFetch(`/calls/${callId}/respond`, user.sessionToken, {
-      method: "POST",
-      body: JSON.stringify({ userId: user.dbId, action: "accept" }),
-    });
+    const res = await videhSignalingPost(
+      `/calls/${callId}/respond`,
+      { userId: user.dbId, action: "accept" },
+      user.sessionToken,
+      { timeoutMs: 45000, retries: 3 },
+    );
     const data = (await res.json()) as {
       success?: boolean;
       message?: string;

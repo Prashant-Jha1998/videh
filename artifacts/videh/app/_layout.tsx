@@ -25,6 +25,7 @@ import { shouldPresentIncomingCall } from "@/lib/callRole";
 import { hydrateIncomingCallInfo, hydrateAndValidateIncomingCall } from "@/lib/hydrateIncomingCall";
 import { IncomingCallOverlay, type IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { webrtcAuthHeaders, webrtcFetch } from "@/lib/webrtcApi";
+import { normalizeCallNetworkError } from "@/lib/videhCall/signalingClient";
 import {
   ensureVidehNotificationSetup,
   NOTIFICATION_ACTION_ACCEPT_CALL,
@@ -699,7 +700,7 @@ function RootLayoutNav() {
       dismissIncomingCallUi(call.callId, false);
     } catch (err: any) {
       activeCallIdRef.current = null;
-      const message = err?.message ?? "Could not accept call";
+      const message = normalizeCallNetworkError(err).message ?? "Could not accept call";
       callDebug("CALL_ACCEPT_FAILED", { callId: call.callId, message });
       Alert.alert("Call failed", message);
       setIncomingCall(call);
