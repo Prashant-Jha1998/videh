@@ -1,4 +1,5 @@
 import type { Request } from "express";
+import path from "node:path";
 import { query } from "./db";
 import { resolveStoredMediaUrl } from "./mediaStorage";
 import {
@@ -9,6 +10,7 @@ import {
 import { evaluateChannelMonetization } from "./reelsMonetization";
 import { notifySubscribersNewVideo } from "./reelsNotifications";
 import { scheduleS3Upload, uploadLocalFileToS3 } from "./s3Storage";
+import { auditFromRequest, linkS3UploadEntity } from "./s3MediaAudit";
 
 export type PublishReelsVideoInput = {
   req: Request;
@@ -101,11 +103,30 @@ export async function publishReelsVideo(input: PublishReelsVideoInput): Promise<
     ?? input.videoUrl;
 
   if (input.videoPath) {
-    scheduleS3Upload(input.videoPath, input.videoUrl);
+    scheduleS3Upload(input.videoPath, input.videoUrl, auditFromRequest(input.req, {
+      sourceApp: "reels",
+      sourceContext: "video_publish",
+      uploaderType: "user",
+      uploaderUserId: input.userId,
+      entityType: "reels_video",
+      entityId: videoId,
+      originalFilename: path.basename(input.videoPath),
+    }));
   }
   if (input.thumbPath && input.thumbnailUrl) {
-    await uploadLocalFileToS3(input.thumbPath, input.thumbnailUrl);
+    await uploadLocalFileToS3(input.thumbPath, input.thumbnailUrl, auditFromRequest(input.req, {
+      sourceApp: "reels",
+      sourceContext: "video_thumbnail",
+      uploaderType: "user",
+      uploaderUserId: input.userId,
+      entityType: "reels_video",
+      entityId: videoId,
+      originalFilename: path.basename(input.thumbPath),
+    }));
   }
+
+  void linkS3UploadEntity(input.videoUrl, "reels_video", videoId);
+  if (input.thumbnailUrl) void linkS3UploadEntity(input.thumbnailUrl, "reels_video", videoId);
 
   if (input.deferModeration) {
     void runModerationAndNotify(input, videoId, channelId, channelHandle, title, videoPublicUrl);

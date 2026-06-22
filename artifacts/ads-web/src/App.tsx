@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AdsShell } from "./components/AdsShell";
 import { GoogleSignInButton } from "./components/GoogleSignInButton";
+import { MediaUploadField } from "./components/MediaUploadField";
 import { VidehLogo } from "./components/VidehLogo";
 import { BID_MODEL_LABELS, CATEGORY_LABELS, type AdFormatSpec } from "./lib/adFormats";
 import { adsRequest, adsSignOut } from "./lib/adsClient";
@@ -117,6 +118,11 @@ export default function App() {
   const [description, setDescription] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [promoFile1, setPromoFile1] = useState<File | null>(null);
+  const [promoFile2, setPromoFile2] = useState<File | null>(null);
+  const [submittingAd, setSubmittingAd] = useState(false);
   const [destinationUrl, setDestinationUrl] = useState("");
   const [playStoreUrl, setPlayStoreUrl] = useState("");
   const [appStoreUrl, setAppStoreUrl] = useState("");
@@ -140,6 +146,11 @@ export default function App() {
   const [creatives, setCreatives] = useState<AdCreative[]>([]);
   const [successMsg, setSuccessMsg] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+
+  const imagePreviewSrc = useObjectUrl(imageFile) || imageUrl;
+  const videoPreviewSrc = useObjectUrl(videoFile) || videoUrl;
+  const promoPreview1 = useObjectUrl(promoFile1) || promoImageUrl;
+  const promoPreview2 = useObjectUrl(promoFile2) || promoImageUrl2;
 
   const loadDash = useCallback(async () => {
     const me = await api<{ success: boolean; advertiser?: Advertiser }>("/me");
@@ -220,7 +231,10 @@ export default function App() {
     const a = res.app;
     setAppName(a.title);
     setAppDeveloper(a.developer || "");
-    if (a.iconUrl) setImageUrl(a.iconUrl);
+    if (a.iconUrl) {
+      setImageUrl(a.iconUrl);
+      setImageFile(null);
+    }
     setAppRating(a.rating != null ? a.rating.toFixed(1) : "");
     setAppReviewCount(a.reviewCountLabel ?? "");
     setAppDownloadCount(a.installsLabel ?? "");
@@ -318,48 +332,59 @@ export default function App() {
   const createCreative = async () => {
     if (!selectedCampaign || !creativeTitle.trim()) return;
     setError("");
-    const res = await api<{ success: boolean; message?: string; code?: string }>(`/campaigns/${selectedCampaign}/creatives`, {
-      method: "POST",
-      body: JSON.stringify({
-        title: creativeTitle.trim(),
-        adFormatId: selectedAdFormatId,
-        format: adFormat,
-        adType,
-        headline: headline.trim() || creativeTitle.trim(),
-        description: description.trim(),
-        imageUrl: imageUrl.trim(),
-        videoUrl: videoUrl.trim(),
-        destinationUrl: destinationUrl.trim(),
-        playStoreUrl: playStoreUrl.trim(),
-        appStoreUrl: appStoreUrl.trim(),
-        appName: appName.trim(),
-        appDeveloper: appDeveloper.trim(),
-        appRating: appRating.trim(),
-        appReviewCount: appReviewCount.trim(),
-        appDownloadCount: appDownloadCount.trim(),
-        appCategory: appCategory.trim(),
-        appPriceLabel: appPriceLabel.trim(),
-        promoImageUrl: promoImageUrl.trim(),
-        promoImageUrl2: promoImageUrl2.trim(),
-        placement,
-        ctaType: adFormat === "shopping" ? "shop_now" : adFormat === "app_install" ? "install" : "learn_more",
-        durationSeconds,
-        skipAfterSeconds: adType === "skippable" ? 5 : undefined,
-      }),
-    });
-    if (!res.success) {
-      setError(res.message ?? "Could not publish ad");
-      if (res.code === "PAYMENT_REQUIRED") setNav("billing");
-      return;
+    setSubmittingAd(true);
+    try {
+      const fd = new FormData();
+      fd.append("title", creativeTitle.trim());
+      fd.append("adFormatId", selectedAdFormatId);
+      fd.append("format", adFormat);
+      fd.append("adType", adType);
+      fd.append("headline", headline.trim() || creativeTitle.trim());
+      fd.append("description", description.trim());
+      fd.append("destinationUrl", destinationUrl.trim());
+      fd.append("playStoreUrl", playStoreUrl.trim());
+      fd.append("appStoreUrl", appStoreUrl.trim());
+      fd.append("appName", appName.trim());
+      fd.append("appDeveloper", appDeveloper.trim());
+      fd.append("appRating", appRating.trim());
+      fd.append("appReviewCount", appReviewCount.trim());
+      fd.append("appDownloadCount", appDownloadCount.trim());
+      fd.append("appCategory", appCategory.trim());
+      fd.append("appPriceLabel", appPriceLabel.trim());
+      fd.append("placement", placement);
+      fd.append("ctaType", adFormat === "shopping" ? "shop_now" : adFormat === "app_install" ? "install" : "learn_more");
+      fd.append("durationSeconds", String(durationSeconds));
+      if (adType === "skippable") fd.append("skipAfterSeconds", "5");
+      if (videoFile) fd.append("video", videoFile);
+      else if (videoUrl.trim()) fd.append("videoUrl", videoUrl.trim());
+      if (imageFile) fd.append("image", imageFile);
+      else if (imageUrl.trim()) fd.append("imageUrl", imageUrl.trim());
+      if (promoFile1) fd.append("promoImage1", promoFile1);
+      else if (promoImageUrl.trim()) fd.append("promoImageUrl", promoImageUrl.trim());
+      if (promoFile2) fd.append("promoImage2", promoFile2);
+      else if (promoImageUrl2.trim()) fd.append("promoImageUrl2", promoImageUrl2.trim());
+
+      const res = await api<{ success: boolean; message?: string; code?: string }>(
+        `/campaigns/${selectedCampaign}/creatives`,
+        { method: "POST", body: fd },
+      );
+      if (!res.success) {
+        setError(res.message ?? "Could not publish ad");
+        if (res.code === "PAYMENT_REQUIRED") setNav("billing");
+        return;
+      }
+      setSuccessMsg(res.message ?? "Ad submitted for Videh admin review.");
+      setCreativeTitle(""); setHeadline(""); setDescription("");
+      setImageUrl(""); setVideoUrl(""); setDestinationUrl("");
+      setImageFile(null); setVideoFile(null); setPromoFile1(null); setPromoFile2(null);
+      setPlayStoreUrl(""); setAppStoreUrl(""); setAppName(""); setAppDeveloper("");
+      setAppRating(""); setAppReviewCount(""); setAppDownloadCount(""); setAppCategory("");
+      setPromoImageUrl(""); setPromoImageUrl2("");
+      setPlayStoreLookupStatus("idle"); setPlayStoreLookupMessage("");
+      await loadDash();
+    } finally {
+      setSubmittingAd(false);
     }
-    setSuccessMsg(res.message ?? "Ad submitted for Videh admin review.");
-    setCreativeTitle(""); setHeadline(""); setDescription("");
-    setImageUrl(""); setVideoUrl(""); setDestinationUrl("");
-    setPlayStoreUrl(""); setAppStoreUrl(""); setAppName(""); setAppDeveloper("");
-    setAppRating(""); setAppReviewCount(""); setAppDownloadCount(""); setAppCategory("");
-    setPromoImageUrl(""); setPromoImageUrl2("");
-    setPlayStoreLookupStatus("idle"); setPlayStoreLookupMessage("");
-    await loadDash();
   };
 
   const payWithRazorpay = async () => {
@@ -744,10 +769,14 @@ export default function App() {
             </Panel>
             <Panel title="Create ad">
               {!canPublish ? (
-                <p style={S.err}>Pay and add funds before publishing ads.</p>
+                <p className="ads-sub ads-sub--error">Pay and add funds before publishing ads.</p>
               ) : null}
-              {successMsg ? <p style={{ color: "#188038", fontSize: 14 }}>{successMsg}</p> : null}
-              <p style={{ ...S.sub, marginBottom: 10 }}>Ad format choose karo — professional video platform jaisi saari placements available hain.</p>
+              {successMsg ? <p className="ads-success-msg">{successMsg}</p> : null}
+              {error && nav === "ads" ? <p className="ads-sub ads-sub--error">{error}</p> : null}
+
+              <div className="ads-create-layout">
+                <div className="ads-create-form">
+              <p className="ads-sub" style={{ marginBottom: 12 }}>Choose ad format and upload your creative assets.</p>
               <AdFormatsCatalog
                 formats={pricing?.adFormats ?? []}
                 compact
@@ -773,9 +802,17 @@ export default function App() {
 
               {["video", "bumper", "shorts_video"].includes(adFormat) ? (
                 <>
-                  <Field label={`Video URL (MP4) — max ${durationSeconds}s`}>
-                    <input style={S.input} value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="https://..." />
-                  </Field>
+                  <MediaUploadField
+                    label={`Video (MP4) — max ${durationSeconds}s`}
+                    accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
+                    hint="MP4/WebM. Max 500 MB. Stored on Videh secure cloud (AWS S3)."
+                    file={videoFile}
+                    onFileChange={setVideoFile}
+                    urlValue={videoUrl}
+                    onUrlChange={setVideoUrl}
+                    previewType="video"
+                    previewSrc={videoPreviewSrc}
+                  />
                   <Field label="Duration (seconds)">
                     <input style={S.input} type="number" min={adFormat === "bumper" ? 6 : 5} max={durationSeconds} value={durationSeconds} onChange={(e) => setDurationSeconds(Number(e.target.value))} />
                   </Field>
@@ -783,11 +820,30 @@ export default function App() {
               ) : null}
 
               {!["video", "bumper", "shorts_video"].includes(adFormat) ? (
-                <Field label="Image URL"><input style={S.input} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." /></Field>
+                <MediaUploadField
+                  label="Ad image"
+                  accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                  hint="JPG, PNG or WebP. Uploaded to Videh secure cloud (AWS S3)."
+                  file={imageFile}
+                  onFileChange={setImageFile}
+                  urlValue={imageUrl}
+                  onUrlChange={setImageUrl}
+                  previewType="image"
+                  previewSrc={imagePreviewSrc}
+                />
               ) : null}
 
               {adFormat === "video" && placement === "feed_instream" ? (
-                <Field label="Thumbnail image (optional)"><input style={S.input} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." /></Field>
+                <MediaUploadField
+                  label="Thumbnail image (optional)"
+                  accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                  file={imageFile}
+                  onFileChange={setImageFile}
+                  urlValue={imageUrl}
+                  onUrlChange={setImageUrl}
+                  previewType="image"
+                  previewSrc={imagePreviewSrc}
+                />
               ) : null}
 
               {(adFormat === "shopping" || adFormat === "carousel") && (
@@ -824,26 +880,63 @@ export default function App() {
                     <Field label="App name"><input style={S.input} value={appName} onChange={(e) => setAppName(e.target.value)} placeholder="From Play Store or manual" /></Field>
                     <Field label="Developer name"><input style={S.input} value={appDeveloper} onChange={(e) => setAppDeveloper(e.target.value)} placeholder={advertiser?.company_name ?? "Developer"} /></Field>
                     <Field label="App Store URL (optional)"><input style={S.input} value={appStoreUrl} onChange={(e) => setAppStoreUrl(e.target.value)} /></Field>
-                    <Field label="App icon URL"><input style={S.input} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="Auto from Play Store" /></Field>
-                    <Field label="Price label"><input style={S.input} value={appPriceLabel} onChange={(e) => setAppPriceLabel(e.target.value)} placeholder="FREE" /></Field>
                   </div>
+                  <MediaUploadField
+                    label="App icon"
+                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                    hint="Auto-filled from Play Store, or upload your own."
+                    file={imageFile}
+                    onFileChange={setImageFile}
+                    urlValue={imageUrl}
+                    onUrlChange={setImageUrl}
+                    previewType="image"
+                    previewSrc={imagePreviewSrc}
+                  />
                   <div style={S.grid2}>
                     <Field label="Rating"><input style={S.input} value={appRating} onChange={(e) => setAppRating(e.target.value)} placeholder="e.g. 4.3" /></Field>
                     <Field label="Reviews"><input style={S.input} value={appReviewCount} onChange={(e) => setAppReviewCount(e.target.value)} placeholder="e.g. 150K reviews" /></Field>
                     <Field label="Downloads"><input style={S.input} value={appDownloadCount} onChange={(e) => setAppDownloadCount(e.target.value)} placeholder="e.g. 13M+" /></Field>
                     <Field label="Category"><input style={S.input} value={appCategory} onChange={(e) => setAppCategory(e.target.value)} placeholder="e.g. Health & Fitness" /></Field>
+                    <Field label="Price label"><input style={S.input} value={appPriceLabel} onChange={(e) => setAppPriceLabel(e.target.value)} placeholder="FREE" /></Field>
                   </div>
-                  <div style={S.grid2}>
-                    <Field label="Promo card image 1"><input style={S.input} value={promoImageUrl} onChange={(e) => setPromoImageUrl(e.target.value)} placeholder="https://..." /></Field>
-                    <Field label="Promo card image 2"><input style={S.input} value={promoImageUrl2} onChange={(e) => setPromoImageUrl2(e.target.value)} placeholder="https://..." /></Field>
+                  <div className="ads-form-grid-2">
+                    <MediaUploadField
+                      label="Promo card image 1"
+                      accept="image/jpeg,image/png,image/webp"
+                      file={promoFile1}
+                      onFileChange={setPromoFile1}
+                      urlValue={promoImageUrl}
+                      onUrlChange={setPromoImageUrl}
+                      previewType="image"
+                      previewSrc={promoPreview1}
+                    />
+                    <MediaUploadField
+                      label="Promo card image 2"
+                      accept="image/jpeg,image/png,image/webp"
+                      file={promoFile2}
+                      onFileChange={setPromoFile2}
+                      urlValue={promoImageUrl2}
+                      onUrlChange={setPromoImageUrl2}
+                      previewType="image"
+                      previewSrc={promoPreview2}
+                    />
                   </div>
                 </>
               )}
 
               {["video", "bumper"].includes(adFormat) && (placement === "pre_roll" || placement === "mid_roll" || placement === "any") ? (
-                <div style={S.grid2}>
+                <div className="ads-form-grid-2">
                   <Field label="Landing page URL (Learn more)"><input style={S.input} value={destinationUrl} onChange={(e) => setDestinationUrl(e.target.value)} placeholder="https://..." /></Field>
-                  <Field label="Promo card image (optional)"><input style={S.input} value={promoImageUrl} onChange={(e) => setPromoImageUrl(e.target.value)} placeholder="https://..." /></Field>
+                  <MediaUploadField
+                    label="Promo card image (optional)"
+                    accept="image/jpeg,image/png,image/webp"
+                    file={promoFile1}
+                    onFileChange={setPromoFile1}
+                    urlValue={promoImageUrl}
+                    onUrlChange={setPromoImageUrl}
+                    previewType="image"
+                    previewSrc={promoPreview1}
+                  />
                 </div>
               ) : null}
 
@@ -851,83 +944,100 @@ export default function App() {
                 <Field label="Landing page URL"><input style={S.input} value={destinationUrl} onChange={(e) => setDestinationUrl(e.target.value)} /></Field>
               )}
 
-              <div style={S.preview}>
-                <div style={S.previewLabel}>Preview (in-stream ad)</div>
-                <div style={S.instreamPreview}>
-                  <div style={S.instreamVideoMock}>
-                    <div style={S.instreamVideoTop}>
-                      <span style={{ flex: 1 }} />
-                      <span style={S.instreamVisit}>Visit advertiser</span>
+              <button type="button" className="ads-submit-btn" disabled={!canPublish || submittingAd} onClick={() => void createCreative()}>
+                {submittingAd ? "Uploading…" : "Submit for review"}
+              </button>
+              <p className="ads-form-note">
+                Ad public tab tak nahi dikhega jab tak Videh admin approve na kare.
+              </p>
+                </div>
+
+                <aside className="ads-create-previews" aria-label="Ad previews">
+              <div className="ads-preview-block">
+                <div className="ads-preview-label">Preview — in-stream ad</div>
+                <div className="ads-instream-preview">
+                  <div className="ads-instream-video">
+                    {videoPreviewSrc ? (
+                      <video src={videoPreviewSrc} className="ads-instream-video-el" muted playsInline loop autoPlay />
+                    ) : (
+                      <div className="ads-instream-video-placeholder" />
+                    )}
+                    <div className="ads-instream-overlay" aria-hidden="true">
+                      <div className="ads-instream-video-top">
+                        <span className="ads-instream-spacer" />
+                        <span className="ads-instream-visit">Visit advertiser</span>
+                      </div>
+                      <div className="ads-instream-bottom-block">
+                        <div className="ads-instream-video-bottom">
+                          <span className="ads-instream-sponsored">Sponsored ⓘ</span>
+                          <span className="ads-instream-skip">Skip ad ▶</span>
+                        </div>
+                        <div className="ads-instream-progress" role="presentation">
+                          <div className="ads-instream-progress-fill" />
+                        </div>
+                      </div>
                     </div>
-                    <div style={S.instreamVideoBottom}>
-                      <span>Sponsored ⓘ</span>
-                      <span style={S.instreamSkip}>Skip ▶</span>
-                    </div>
-                    <div style={S.instreamProgress} />
                   </div>
-                  <div style={S.instreamPanel}>
-                    <div style={S.instreamPanelHead}><strong>Sponsored</strong></div>
-                    <div style={S.instreamIdentity}>
-                      {imageUrl ? <img src={imageUrl} alt="" style={S.instreamIcon} /> : <div style={S.instreamIconPlaceholder} />}
+                  <div className="ads-instream-panel">
+                    <div className="ads-instream-panel-head"><strong>Sponsored</strong></div>
+                    <div className="ads-instream-identity">
+                      {imagePreviewSrc ? <img src={imagePreviewSrc} alt="" className="ads-instream-icon" /> : <div className="ads-instream-icon-ph" />}
                       <div>
                         <strong>{adFormat === "app_install" ? (appName || headline || creativeTitle || "App title") : (headline || creativeTitle || "Your headline")}</strong>
-                        <div style={{ color: "#5f6368", fontSize: 13, marginTop: 4 }}>
+                        <div className="ads-preview-muted">
                           {adFormat === "app_install" ? (appDeveloper || advertiser?.company_name || "Developer") : (advertiser?.company_name ?? "Advertiser")}
                         </div>
                         {adFormat === "app_install" ? (
-                          <div style={{ color: "#5f6368", fontSize: 12, marginTop: 4 }}>Google Play · {appPriceLabel || "FREE"}</div>
+                          <div className="ads-preview-muted" style={{ fontSize: 12, marginTop: 4 }}>Google Play · {appPriceLabel || "FREE"}</div>
                         ) : null}
                       </div>
                     </div>
                     {adFormat === "app_install" ? (
-                      <div style={S.instreamStats}>
+                      <div className="ads-instream-stats">
                         {appRating ? (
                           <div>
                             <strong>{appRating} ★</strong>
-                            {appReviewCount ? <div style={S.statSub}>{appReviewCount}</div> : null}
+                            {appReviewCount ? <div className="ads-stat-sub">{appReviewCount}</div> : null}
                           </div>
                         ) : null}
-                        {appDownloadCount ? <div><strong>{appDownloadCount}</strong><div style={S.statSub}>Downloads</div></div> : null}
-                        {appCategory ? <div><strong>{appCategory}</strong><div style={S.statSub}>Category</div></div> : null}
+                        {appDownloadCount ? <div><strong>{appDownloadCount}</strong><div className="ads-stat-sub">Downloads</div></div> : null}
+                        {appCategory ? <div><strong>{appCategory}</strong><div className="ads-stat-sub">Category</div></div> : null}
                       </div>
                     ) : null}
-                    <p style={{ color: "#5f6368", fontSize: 13, margin: "10px 0" }}>{description || "Description shown below the video while ad plays."}</p>
-                    <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
-                      {[promoImageUrl, promoImageUrl2].filter(Boolean).map((url) => (
-                        <img key={url} src={url} alt="" style={S.instreamPromo} />
+                    <p className="ads-preview-muted" style={{ margin: "10px 0" }}>{description || "Description shown below the video while ad plays."}</p>
+                    <div className="ads-promo-row">
+                      {[promoPreview1, promoPreview2].filter(Boolean).map((url) => (
+                        <img key={url} src={url} alt="" className="ads-promo-thumb" />
                       ))}
                     </div>
-                    <div style={S.instreamActions}>
-                      <span style={S.instreamLearn}>Learn more</span>
-                      <span style={S.instreamInstall}>{adFormat === "app_install" ? "Install" : adFormat === "shopping" ? "Shop now" : "Watch now"}</span>
+                    <div className="ads-instream-actions">
+                      <span className="ads-btn-learn">Learn more</span>
+                      <span className="ads-btn-cta">{adFormat === "app_install" ? "Install" : adFormat === "shopping" ? "Shop now" : "Watch now"}</span>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div style={S.preview}>
-                <div style={S.previewLabel}>Preview (home feed card)</div>
-                <div style={S.previewCard}>
-                  <div style={S.previewSponsored}>Sponsored · {advertiser?.company_name}</div>
-                  {imageUrl && <img src={imageUrl} alt="" style={S.previewImg} />}
-                  <div style={S.previewBody}>
+              <div className="ads-preview-block">
+                <div className="ads-preview-label">Preview — home feed card</div>
+                <div className="ads-feed-preview">
+                  <div className="ads-preview-sponsored">Sponsored · {advertiser?.company_name}</div>
+                  {imagePreviewSrc ? <img src={imagePreviewSrc} alt="" className="ads-feed-preview-img" /> : <div className="ads-feed-preview-img-ph" />}
+                  <div className="ads-feed-preview-body">
                     <strong>{headline || creativeTitle || "Your headline"}</strong>
-                    <p style={{ margin: "6px 0", color: "#5f6368", fontSize: 13 }}>{description || "Description"}</p>
+                    <p className="ads-preview-muted">{description || "Description"}</p>
                     {adFormat === "app_install" && (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {playStoreUrl && <span style={S.fakeBtnGreen}>Get it on Play Store</span>}
-                        {appStoreUrl && <span style={S.fakeBtnBlack}>Download on App Store</span>}
+                      <div className="ads-feed-btns">
+                        {playStoreUrl && <span className="ads-fake-btn ads-fake-btn--green">Get it on Play Store</span>}
+                        {appStoreUrl && <span className="ads-fake-btn ads-fake-btn--black">Download on App Store</span>}
                       </div>
                     )}
-                    {adFormat === "shopping" && <span style={S.fakeBtnTeal}>Shop Now</span>}
+                    {adFormat === "shopping" && <span className="ads-fake-btn ads-fake-btn--teal">Shop Now</span>}
                   </div>
                 </div>
               </div>
-
-              <button type="button" style={S.primary} disabled={!canPublish} onClick={() => void createCreative()}>Submit for review</button>
-              <p style={{ fontSize: 12, color: "#80868b", marginTop: 10 }}>
-                Ad public tab tak nahi dikhega jab tak Videh admin approve na kare.
-              </p>
+                </aside>
+              </div>
             </Panel>
             </>
           )}
@@ -1048,6 +1158,20 @@ function AdFormatsCatalog({
       })}
     </Panel>
   );
+}
+
+function useObjectUrl(file: File | null): string {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    if (!file) {
+      setUrl("");
+      return;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    setUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
+  return url;
 }
 
 function fmtDate(iso?: string | null): string {

@@ -33,6 +33,7 @@ import { getAdvertiserDashboard } from "../lib/adsAnalytics";
 import { getRazorpayConfig } from "../lib/razorpay";
 import { resolveGoogleOAuthClientId, verifyGoogleIdToken } from "../lib/googleIdTokenVerify";
 import { uploadLocalFileToS3, scheduleS3Upload } from "../lib/s3Storage";
+import { auditFromRequest, linkS3UploadEntity } from "../lib/s3MediaAudit";
 import { enrichAppInstallFieldsFromPlayStore, lookupPlayStoreApp } from "../lib/playStoreLookup";
 
 const router = Router();
@@ -64,6 +65,8 @@ const adMediaUpload = multer({
 }).fields([
   { name: "video", maxCount: 1 },
   { name: "image", maxCount: 1 },
+  { name: "promoImage1", maxCount: 1 },
+  { name: "promoImage2", maxCount: 1 },
 ]);
 
 function requireAdsUser(req: Request, res: Response) {
@@ -100,6 +103,42 @@ router.get("/config", (_req, res) => {
 router.post("/logout", (_req, res) => {
   clearAdsPortalCookie(res);
   res.json({ success: true });
+});
+
+router.post("/upload", (req, res) => {
+  adUpload.single("file")(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      res.status(400).json({ success: false, message: "Upload failed" });
+      return;
+    }
+    const user = requireAdsUser(req, res);
+    if (!user) return;
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ success: false, message: "Choose a file to upload" });
+      return;
+    }
+    const url = `/uploads/reels/ads/${file.filename}`;
+    const audit = auditFromRequest(req, {
+      sourceApp: "ads_portal",
+      sourceContext: "ad_media_upload",
+      uploaderType: "advertiser",
+      uploaderAdvertiserId: user.advertiserId,
+      uploaderEmail: user.email,
+      originalFilename: file.originalname,
+    });
+    try {
+      const localPath = path.join(adsUploadsDir, file.filename);
+      if (file.mimetype.startsWith("video/")) {
+        scheduleS3Upload(localPath, url, audit);
+      } else {
+        await uploadLocalFileToS3(localPath, url, audit);
+      }
+      res.json({ success: true, url });
+    } catch {
+      res.status(500).json({ success: false, message: "Upload failed" });
+    }
+  });
 });
 
 router.get("/me", async (req, res) => {
@@ -604,13 +643,24 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
     const allowedFormats = ["video", "image", "app_install", "shopping", "bumper", "shorts_video", "carousel", "lead_form"];
     const format = specFromId?.format
       ?? (allowedFormats.includes(String(body.format)) ? String(body.format) : "image");
-    const files = req.files as { video?: Express.Multer.File[]; image?: Express.Multer.File[] } | undefined;
+    const files = req.files as {
+      video?: Express.Multer.File[];
+      image?: Express.Multer.File[];
+      promoImage1?: Express.Multer.File[];
+      promoImage2?: Express.Multer.File[];
+    } | undefined;
     let videoUrl = String(body.videoUrl ?? "").trim();
     let imageUrl = String(body.imageUrl ?? "").trim();
+    let promoImageUrl = String(body.promoImageUrl ?? "").trim();
+    let promoImageUrl2 = String(body.promoImageUrl2 ?? "").trim();
     const imageFile = files?.image?.[0];
     const videoFile = files?.video?.[0];
+    const promoFile1 = files?.promoImage1?.[0];
+    const promoFile2 = files?.promoImage2?.[0];
     if (videoFile) videoUrl = `/uploads/reels/ads/${videoFile.filename}`;
     if (imageFile) imageUrl = `/uploads/reels/ads/${imageFile.filename}`;
+    if (promoFile1) promoImageUrl = `/uploads/reels/ads/${promoFile1.filename}`;
+    if (promoFile2) promoImageUrl2 = `/uploads/reels/ads/${promoFile2.filename}`;
 
     const needsVideo = specFromId?.requiresVideo ?? ["video", "bumper", "shorts_video"].includes(format);
     const needsImage = specFromId?.requiresImage ?? !needsVideo;
@@ -655,11 +705,42 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
         res.status(404).json({ success: false, message: "Campaign not found" });
         return;
       }
+      const auditBase = auditFromRequest(req, {
+        sourceApp: "ads_portal",
+        sourceContext: "ad_creative",
+        uploaderType: "advertiser",
+        uploaderAdvertiserId: user.advertiserId,
+        uploaderEmail: user.email,
+        entityType: "ad_creative",
+        metadata: { campaignId, adFormat: format, placement },
+      });
       if (imageFile && imageUrl) {
-        await uploadLocalFileToS3(path.join(adsUploadsDir, imageFile.filename), imageUrl);
+        await uploadLocalFileToS3(path.join(adsUploadsDir, imageFile.filename), imageUrl, {
+          ...auditBase,
+          originalFilename: imageFile.originalname,
+          metadata: { campaignId, adFormat: format, placement, field: "image" },
+        });
       }
       if (videoFile && videoUrl) {
-        scheduleS3Upload(path.join(adsUploadsDir, videoFile.filename), videoUrl);
+        scheduleS3Upload(path.join(adsUploadsDir, videoFile.filename), videoUrl, {
+          ...auditBase,
+          originalFilename: videoFile.originalname,
+          metadata: { campaignId, adFormat: format, placement, field: "video" },
+        });
+      }
+      if (promoFile1 && promoImageUrl) {
+        await uploadLocalFileToS3(path.join(adsUploadsDir, promoFile1.filename), promoImageUrl, {
+          ...auditBase,
+          originalFilename: promoFile1.originalname,
+          metadata: { campaignId, adFormat: format, placement, field: "promo_image_1" },
+        });
+      }
+      if (promoFile2 && promoImageUrl2) {
+        await uploadLocalFileToS3(path.join(adsUploadsDir, promoFile2.filename), promoImageUrl2, {
+          ...auditBase,
+          originalFilename: promoFile2.originalname,
+          metadata: { campaignId, adFormat: format, placement, field: "promo_image_2" },
+        });
       }
 
       let appName = body.appName?.trim() || null;
@@ -736,11 +817,16 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
           appDownloadCount,
           appCategory,
           appPriceLabel,
-          body.promoImageUrl?.trim() || null,
-          body.promoImageUrl2?.trim() || null,
+          promoImageUrl || null,
+          promoImageUrl2 || null,
           body.sponsoredLabel?.trim() || "Sponsored",
         ],
       );
+      const creativeId = Number((r.rows[0] as { id: number }).id);
+      if (videoUrl) void linkS3UploadEntity(videoUrl, "ad_creative", creativeId);
+      if (imageUrl) void linkS3UploadEntity(imageUrl, "ad_creative", creativeId);
+      if (promoImageUrl) void linkS3UploadEntity(promoImageUrl, "ad_creative", creativeId);
+      if (promoImageUrl2) void linkS3UploadEntity(promoImageUrl2, "ad_creative", creativeId);
       res.json({
         success: true,
         creative: r.rows[0],

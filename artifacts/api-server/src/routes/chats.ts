@@ -15,6 +15,7 @@ import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
 import { assertSameUser, getAuthUserId, requireAuth } from "../lib/auth";
 import { publicMediaUrl, resolveStoredMediaUrl } from "../lib/mediaStorage";
 import { tryRedirectStoredMediaToCdn, uploadLocalFileToS3 } from "../lib/s3Storage";
+import { auditFromRequest } from "../lib/s3MediaAudit";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
 import {
   ensureChatMemberHistoryClearedColumn,
@@ -547,7 +548,15 @@ router.post("/media", requireAuth, chatMediaUpload.single("file"), async (req: R
     await ensureChatMediaTable();
     const mimeType = mimeFromFilename(req.file.filename, req.file.mimetype);
     const uploadsRel = `/uploads/chats/${req.file.filename}`;
-    await uploadLocalFileToS3(req.file.path, uploadsRel);
+    const userId = getAuthUserId(req);
+    await uploadLocalFileToS3(req.file.path, uploadsRel, auditFromRequest(req, {
+      sourceApp: "chat",
+      sourceContext: "message_attachment",
+      uploaderType: "user",
+      uploaderUserId: userId,
+      originalFilename: req.file.originalname,
+      metadata: { filename: req.file.filename },
+    }));
     await query(
       `INSERT INTO chat_media_files (filename, mime_type, size_bytes, data)
        VALUES ($1, $2, $3, NULL)

@@ -3,6 +3,10 @@ import path from "node:path";
 import type { Request, Response } from "express";
 import { logger } from "./logger";
 import {
+  recordS3MediaUpload,
+  type S3UploadAuditMeta,
+} from "./s3MediaAudit";
+import {
   cdnDeliveryConfigured,
   publicMediaUrl,
   storedUploadFileExists,
@@ -192,8 +196,14 @@ async function s3Client() {
   return new S3Client({ region: s3Region() });
 }
 
+export type { S3UploadAuditMeta } from "./s3MediaAudit";
+
 /** Upload a local file to S3 using the `/uploads/...` path stored in the database. */
-export async function uploadLocalFileToS3(localPath: string, uploadsRel: string): Promise<boolean> {
+export async function uploadLocalFileToS3(
+  localPath: string,
+  uploadsRel: string,
+  audit?: S3UploadAuditMeta,
+): Promise<boolean> {
   if (!isS3MediaEnabled()) return false;
   const rel = uploadsRelPathFromStoredUrl(uploadsRel);
   if (!rel || !fs.existsSync(localPath)) return false;
@@ -212,6 +222,7 @@ export async function uploadLocalFileToS3(localPath: string, uploadsRel: string)
       }),
     );
     logger.info({ key, bytes: fs.statSync(localPath).size }, "S3 upload complete");
+    recordS3MediaUpload(uploadsRel, { localPath, audit });
 
     if (process.env["S3_DELETE_LOCAL_AFTER_UPLOAD"] === "1") {
       try {
@@ -227,17 +238,21 @@ export async function uploadLocalFileToS3(localPath: string, uploadsRel: string)
   }
 }
 
-export function scheduleS3Upload(localPath: string, uploadsRel: string): void {
+export function scheduleS3Upload(
+  localPath: string,
+  uploadsRel: string,
+  audit?: S3UploadAuditMeta,
+): void {
   if (!isS3MediaEnabled()) return;
-  void uploadLocalFileToS3(localPath, uploadsRel);
+  void uploadLocalFileToS3(localPath, uploadsRel, audit);
 }
 
 /** Upload one or more local files to S3 and wait for completion. */
 export async function uploadStoredMediaBatch(
-  items: Array<{ localPath: string; uploadsRel: string }>,
+  items: Array<{ localPath: string; uploadsRel: string; audit?: S3UploadAuditMeta }>,
 ): Promise<void> {
   if (!items.length || !isS3MediaEnabled()) return;
-  await Promise.all(items.map((item) => uploadLocalFileToS3(item.localPath, item.uploadsRel)));
+  await Promise.all(items.map((item) => uploadLocalFileToS3(item.localPath, item.uploadsRel, item.audit)));
 }
 
 export async function deleteS3ObjectByUploadsRel(uploadsRel: unknown): Promise<void> {

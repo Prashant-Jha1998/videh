@@ -55,6 +55,7 @@ import {
   tryRedirectStoredMediaToCdn,
   uploadStoredMediaBatch,
 } from "../lib/s3Storage";
+import { auditFromRequest, linkS3UploadEntity, recordDirectS3Upload } from "../lib/s3MediaAudit";
 import {
   buildReelsChannelDeepLink,
   buildReelsChannelShareUrl,
@@ -1564,12 +1565,28 @@ router.post("/videos/complete", async (req: Request, res: Response) => {
       res.status(400).json({ success: false, message: "Video not found on storage. Upload may have failed — try again." });
       return;
     }
+    let thumbHead: { size: number; contentType?: string } | null = null;
     if (thumbnailUploadsRel) {
-      const thumbHead = await headS3ObjectByUploadsRel(thumbnailUploadsRel);
+      thumbHead = await headS3ObjectByUploadsRel(thumbnailUploadsRel);
       if (!thumbHead) {
         res.status(400).json({ success: false, message: "Thumbnail not found on storage." });
         return;
       }
+    }
+
+    const reelsAudit = auditFromRequest(req, {
+      sourceApp: "reels",
+      sourceContext: "video_direct_upload",
+      uploaderType: "user",
+      uploaderUserId: userId,
+      entityType: "reels_video",
+    });
+    recordDirectS3Upload(videoUploadsRel, videoHead, reelsAudit);
+    if (thumbnailUploadsRel && thumbHead) {
+      recordDirectS3Upload(thumbnailUploadsRel, thumbHead, {
+        ...reelsAudit,
+        sourceContext: "video_thumbnail_direct",
+      });
     }
 
     const published = await publishReelsVideo({
@@ -1585,6 +1602,9 @@ router.post("/videos/complete", async (req: Request, res: Response) => {
       videoPath: null,
       deferModeration: true,
     });
+
+    void linkS3UploadEntity(videoUploadsRel, "reels_video", published.videoId);
+    if (thumbnailUploadsRel) void linkS3UploadEntity(thumbnailUploadsRel, "reels_video", published.videoId);
 
     if (published.modResult?.action === "reject") {
       res.status(403).json({
