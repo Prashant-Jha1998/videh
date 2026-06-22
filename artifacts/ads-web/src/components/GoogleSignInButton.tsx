@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { adsPortalConfig } from "../lib/adsClient";
 
 type GoogleAccountsId = {
   initialize: (config: {
@@ -67,10 +68,9 @@ export function GoogleSignInButton({ mode, disabled, onCredential }: Props) {
     let cancelled = false;
     void (async () => {
       try {
-        const r = await fetch("/api/ads-portal/config", { credentials: "include" });
-        const d = (await r.json()) as { googleSignInEnabled?: boolean; googleClientId?: string };
+        const d = await adsPortalConfig();
         if (cancelled) return;
-        if (!r.ok || !d.googleSignInEnabled || !d.googleClientId) {
+        if (!d.googleSignInEnabled || !d.googleClientId) {
           setEnabled(false);
           setReady(true);
           return;

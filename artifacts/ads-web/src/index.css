@@ -1,3 +1,5 @@
+@import "./styles/ads-dashboard.css";
+
 * { box-sizing: border-box; }
 body {
   margin: 0;

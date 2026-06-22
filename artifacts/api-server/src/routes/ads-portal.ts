@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { query } from "../lib/db";
 import {
   adsPortalSessionConfigured,
+  clearAdsPortalCookie,
   getAdsPortalUser,
   issueAdsPortalToken,
   setAdsPortalCookie,
@@ -74,6 +75,19 @@ function requireAdsUser(req: Request, res: Response) {
   return user;
 }
 
+/** Session is httpOnly cookie — never expose bearer token in production JSON. */
+function authJson(
+  res: Response,
+  body: Record<string, unknown>,
+): void {
+  if (process.env.NODE_ENV === "production") {
+    const { token: _token, ...safe } = body;
+    res.json(safe);
+    return;
+  }
+  res.json(body);
+}
+
 router.get("/config", (_req, res) => {
   const googleClientId = resolveGoogleOAuthClientId();
   res.json({
@@ -81,6 +95,11 @@ router.get("/config", (_req, res) => {
     googleSignInEnabled: Boolean(googleClientId),
     googleClientId: googleClientId ?? undefined,
   });
+});
+
+router.post("/logout", (_req, res) => {
+  clearAdsPortalCookie(res);
+  res.json({ success: true });
 });
 
 router.get("/me", async (req, res) => {
@@ -134,7 +153,7 @@ router.post("/register", async (req, res) => {
       companyName: row.company_name,
     });
     setAdsPortalCookie(res, token);
-    res.json({ success: true, token, advertiser: row });
+    authJson(res, { success: true, token, advertiser: row });
   } catch (err: unknown) {
     const msg = String((err as { code?: string })?.code) === "23505" ? "Email already registered" : "Registration failed";
     res.status(400).json({ success: false, message: msg });
@@ -240,7 +259,7 @@ router.post("/google", async (req, res) => {
       companyName: row.company_name,
     });
     setAdsPortalCookie(res, token);
-    res.json({
+    authJson(res, {
       success: true,
       token,
       advertiser: { id: row.id, email: row.email, company_name: row.company_name, balance_inr: row.balance_inr },
@@ -265,7 +284,7 @@ router.post("/login", async (req, res) => {
     companyName: row.company_name,
   });
   setAdsPortalCookie(res, token);
-  res.json({
+  authJson(res, {
     success: true,
     token,
     advertiser: { id: row.id, email: row.email, company_name: row.company_name, balance_inr: row.balance_inr },

@@ -392,23 +392,27 @@
             </p>
           </div>
 
-          <div class="threshold-grid" aria-label="Creator monetization thresholds">
-            <div class="threshold">
+          <div class="creator-metrics" aria-label="Creator monetization thresholds">
+            <article class="creator-metric">
+              <span class="creator-metric-icon" aria-hidden="true">👥</span>
               <strong>500</strong>
               <span>Subscribers required</span>
-            </div>
-            <div class="threshold">
-              <strong>2,000</strong>
+            </article>
+            <article class="creator-metric creator-metric--highlight">
+              <span class="creator-metric-icon" aria-hidden="true">⏱</span>
+              <strong>4,000</strong>
               <span>Watch hours (last 12 months)</span>
-            </div>
-            <div class="threshold">
+            </article>
+            <article class="creator-metric">
+              <span class="creator-metric-icon" aria-hidden="true">🎬</span>
               <strong>5</strong>
               <span>Public videos on channel</span>
-            </div>
-            <div class="threshold">
+            </article>
+            <article class="creator-metric">
+              <span class="creator-metric-icon" aria-hidden="true">💰</span>
               <strong>35%</strong>
               <span>Creator revenue share</span>
-            </div>
+            </article>
           </div>
 
           <div class="grid-2" style="margin-top: 32px">
@@ -436,37 +440,64 @@
             </article>
           </div>
 
-          <div id="creator-program" class="creator-panel">
-            <div class="creator-panel-head">
-              <h3>Videh Creator Program — monetization rules</h3>
-              <p>
+          <section id="creator-program" class="creator-program" aria-labelledby="creator-program-title">
+            <header class="creator-program-hero">
+              <p class="creator-program-kicker">Videh Creator Program</p>
+              <h3 id="creator-program-title">Monetization rules &amp; eligibility</h3>
+              <p class="creator-program-lead">
                 Ads may run on your videos only after your channel qualifies and passes review.
-                Private chats stay ad-free; monetization applies to public Videh Video content only.
+                Private chats stay ad-free — monetization applies to public Videh Video content only.
               </p>
-            </div>
-            <div class="grid-2">
-              <div>
-                <h4>Eligibility requirements</h4>
-                <ul class="rule-checklist">
+            </header>
+
+            <div class="creator-rules-grid">
+              <article class="creator-rule-card">
+                <header class="creator-rule-head">
+                  <span class="creator-rule-icon" aria-hidden="true">✓</span>
+                  <h4>Eligibility requirements</h4>
+                </header>
+                <ul class="creator-rule-list">
                   <li>At least <strong>500 subscribers</strong> on your channel</li>
-                  <li>At least <strong>2,000 valid watch hours</strong> in the last 12 months</li>
+                  <li>At least <strong>4,000 valid watch hours</strong> in the last 12 months</li>
                   <li>At least <strong>5 public videos</strong> published on your channel</li>
                   <li>Channel in <strong>good standing</strong> — low fraud score and no active policy strikes</li>
                   <li>Videh may <strong>review your channel</strong> before ads run on your videos</li>
                 </ul>
-              </div>
-              <div>
-                <h4>How earnings work</h4>
-                <ul class="rule-checklist">
+              </article>
+              <article class="creator-rule-card">
+                <header class="creator-rule-head">
+                  <span class="creator-rule-icon creator-rule-icon--earn" aria-hidden="true">₹</span>
+                  <h4>How earnings work</h4>
+                </header>
+                <ul class="creator-rule-list">
                   <li>Eligible creators receive <strong>35% revenue share</strong> from ads shown on their videos</li>
                   <li>Watch hours count when viewers watch at least <strong>30 seconds</strong> of a published video</li>
                   <li>Fake views, bot subscribers, and spam comments reduce visibility and can block monetization</li>
                   <li>Monetization status appears on your channel in the Videh app once you qualify</li>
                   <li>Full legal terms: <a href="/terms.html">Terms of Service</a> · <a href="/privacy.html">Privacy policy</a></li>
                 </ul>
-              </div>
+              </article>
             </div>
-          </div>
+
+            <aside class="creator-reach-card" aria-label="How Videh ranks videos">
+              <div class="creator-reach-head">
+                <span class="creator-reach-icon" aria-hidden="true">📈</span>
+                <div>
+                  <h4>How Videh recommends your videos</h4>
+                  <p>
+                    Likes tell Videh your video is worth showing to more people.
+                    Comments boost engagement and help your content reach new viewers.
+                    Watch time still matters — but authentic likes and comments weigh more in ranking.
+                  </p>
+                </div>
+              </div>
+            </aside>
+
+            <div class="creator-program-actions">
+              <a class="btn btn-brand" href="https://video.videh.co.in/" rel="noopener">Open Videh Video</a>
+              <a class="btn btn-ghost" href="https://ads.videh.co.in/" rel="noopener">Advertise on Videh</a>
+            </div>
+          </section>
 
           <div class="grid-2" style="margin-top: 32px">
             <article class="card">
@@ -617,7 +648,7 @@
                 </tr>
                 <tr>
                   <td>Creator monetization (ads on your videos)</td>
-                  <td>500 subs + 2,000 watch hrs</td>
+                  <td>500 subs + 4,000 watch hrs</td>
                   <td>Varies by platform</td>
                 </tr>
                 <tr>
@@ -762,7 +793,7 @@
               <summary>How do I monetize my Videh Video channel?</summary>
               <p>
                 Join the Videh Creator Program when your channel has at least <strong>500 subscribers</strong>,
-                <strong>2,000 valid watch hours</strong> in the last 12 months, and at least <strong>5 public videos</strong>,
+                <strong>4,000 valid watch hours</strong> in the last 12 months, and at least <strong>5 public videos</strong>,
                 with good standing (no policy strikes, low fraud score). Videh may review your channel before ads run.
                 Eligible creators earn a <strong>35% revenue share</strong> from ads on their videos.
                 <a href="#creator-program">See monetization rules</a>.

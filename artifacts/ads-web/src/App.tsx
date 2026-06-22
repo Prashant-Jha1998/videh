@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AdsShell } from "./components/AdsShell";
 import { GoogleSignInButton } from "./components/GoogleSignInButton";
 import { VidehLogo } from "./components/VidehLogo";
 import { BID_MODEL_LABELS, CATEGORY_LABELS, type AdFormatSpec } from "./lib/adFormats";
+import { adsRequest, adsSignOut } from "./lib/adsClient";
 import { openAdsRazorpayCheckout } from "./lib/razorpayCheckout";
-
-const API = "/api/ads-portal";
 
 type Advertiser = { id: number; email: string; company_name: string; balance_inr?: string };
 type Campaign = {
@@ -64,17 +64,7 @@ type PaymentRow = {
 };
 
 async function api<T>(path: string, opts?: RequestInit): Promise<T> {
-  const token = localStorage.getItem("videh_ads_token");
-  const res = await fetch(`${API}${path}`, {
-    ...opts,
-    credentials: "include",
-    headers: {
-      ...(opts?.body && !(opts.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts?.headers ?? {}),
-    },
-  });
-  return res.json() as Promise<T>;
+  return adsRequest<T>(path, opts);
 }
 
 const OBJECTIVE_LABELS: Record<string, string> = {
@@ -270,9 +260,15 @@ export default function App() {
       method: "POST", body: JSON.stringify(body),
     });
     if (!res.success) { setError(res.message ?? "Failed"); return; }
-    if (res.token) localStorage.setItem("videh_ads_token", res.token);
     await loadDash();
   };
+
+  const handleSignOut = useCallback(async () => {
+    await adsSignOut();
+    setScreen("auth");
+    setAdvertiser(null);
+    setDashboard(null);
+  }, []);
 
   const handleGoogleAuth = useCallback(async (credential: string) => {
     setAuthBusy(true);
@@ -286,7 +282,6 @@ export default function App() {
         setError(res.message ?? "Google sign-in failed");
         return;
       }
-      if (res.token) localStorage.setItem("videh_ads_token", res.token);
       await loadDash();
     } finally {
       setAuthBusy(false);
@@ -435,8 +430,9 @@ export default function App() {
 
   if (screen === "auth") {
     return (
-      <div style={S.authWrap}>
-        <div style={S.authCard}>
+      <div className="ads-auth-wrap">
+        <div className="ads-auth-card">
+          <span className="ads-auth-badge">🔒 Secure advertiser portal</span>
           <div style={S.logoRow}>
             <VidehLogo size={40} />
             <div>
@@ -474,36 +470,15 @@ export default function App() {
   const canPublish = balance > 0 || walletConfig?.isDemoAccount;
 
   return (
-    <div style={S.shell}>
-      <aside style={S.sidebar}>
-        <div style={S.logoRow}>
-          <VidehLogo size={36} />
-          <strong>Videh Ads</strong>
-        </div>
-        <nav style={S.nav}>
-          {(["overview", "campaigns", "ads", "billing"] as Nav[]).map((id) => (
-            <button key={id} type="button" style={nav === id ? S.navOn : S.navBtn} onClick={() => setNav(id)}>
-              {id === "overview" ? "Overview" : id === "campaigns" ? "Campaigns" : id === "ads" ? "Ads & assets" : "Billing"}
-            </button>
-          ))}
-        </nav>
-        <div style={S.sideFoot}>
-          <div style={S.balancePill}>₹{balance.toLocaleString("en-IN")}</div>
-          <button type="button" style={S.ghost} onClick={() => { localStorage.removeItem("videh_ads_token"); setScreen("auth"); }}>Sign out</button>
-        </div>
-      </aside>
-
-      <div style={S.mainCol}>
-        <header style={S.topBar}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 20 }}>{advertiser?.company_name}</h2>
-            <p style={S.sub}>Run ads on Videh home feed and video player</p>
-          </div>
-        </header>
-
-        <main style={S.main}>
+    <AdsShell
+      nav={nav}
+      onNav={setNav}
+      companyName={advertiser?.company_name ?? "Videh Ads"}
+      balance={balance}
+      onSignOut={() => void handleSignOut()}
+    >
           {!isFunded ? (
-            <div style={S.payBanner}>
+            <div className="ads-pay-banner">
               <strong>Payment required</strong>
               <p style={{ margin: "6px 0 10px", fontSize: 14 }}>
                 Add at least ₹{minPay.toLocaleString("en-IN")} via Razorpay (UPI / card / netbanking) before creating campaigns.
@@ -514,7 +489,7 @@ export default function App() {
 
           {nav === "overview" && (
             <>
-              <div style={S.statGrid}>
+              <div className="ads-stat-grid">
                 <Stat label="Running campaigns" value={String(dashboard?.summary.running_campaigns ?? 0)} />
                 <Stat label="Total campaigns" value={String(dashboard?.summary.total_campaigns ?? 0)} />
                 <Stat label="Impressions" value={dashboard?.summary.impressions ?? stats?.impressions ?? "0"} />
@@ -529,65 +504,65 @@ export default function App() {
                 {(dashboard?.campaigns.filter((c) => c.is_running) ?? []).length === 0 ? (
                   <p style={S.sub}>Abhi koi campaign live nahi hai. Campaign banao, ad submit karo, admin approve ke baad chalegi.</p>
                 ) : (
-                  <table style={S.table}>
+                  <div className="ads-table-wrap"><table className="ads-table">
                     <thead>
                       <tr>
-                        <th style={S.th}>Campaign</th>
-                        <th style={S.th}>Schedule</th>
-                        <th style={S.th}>Days left</th>
-                        <th style={S.th}>Spend / Budget</th>
-                        <th style={S.th}>Impressions</th>
-                        <th style={S.th}>Clicks</th>
-                        <th style={S.th}>Live ads</th>
+                        <th className="ads-th">Campaign</th>
+                        <th className="ads-th">Schedule</th>
+                        <th className="ads-th">Days left</th>
+                        <th className="ads-th">Spend / Budget</th>
+                        <th className="ads-th">Impressions</th>
+                        <th className="ads-th">Clicks</th>
+                        <th className="ads-th">Live ads</th>
                       </tr>
                     </thead>
                     <tbody>
                       {dashboard!.campaigns.filter((c) => c.is_running).map((c) => (
                         <tr key={c.id}>
-                          <td style={S.td}><strong>{c.name}</strong><div style={S.sub}>{OBJECTIVE_LABELS[c.objective ?? ""] ?? c.objective}</div></td>
-                          <td style={S.td}>{fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : "No end"}</td>
-                          <td style={S.td}>{c.days_left != null ? `${c.days_left} days` : "—"}</td>
-                          <td style={S.td}>₹{Number(c.spent_inr).toLocaleString("en-IN")} / ₹{Number(c.total_budget_inr).toLocaleString("en-IN")}</td>
-                          <td style={S.td}>{Number(c.impressions).toLocaleString("en-IN")}</td>
-                          <td style={S.td}>{Number(c.clicks).toLocaleString("en-IN")}</td>
-                          <td style={S.td}>{c.approved_creatives} live · {c.pending_creatives} pending</td>
+                          <td className="ads-td"><strong>{c.name}</strong><div style={S.sub}>{OBJECTIVE_LABELS[c.objective ?? ""] ?? c.objective}</div></td>
+                          <td className="ads-td">{fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : "No end"}</td>
+                          <td className="ads-td">{c.days_left != null ? `${c.days_left} days` : "—"}</td>
+                          <td className="ads-td">₹{Number(c.spent_inr).toLocaleString("en-IN")} / ₹{Number(c.total_budget_inr).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">{Number(c.impressions).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">{Number(c.clicks).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">{c.approved_creatives} live · {c.pending_creatives} pending</td>
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                 )}
               </Panel>
 
               <Panel title="All campaigns">
                 {(dashboard?.campaigns ?? []).length === 0 ? <p style={S.sub}>No campaigns yet.</p> : (
-                  <table style={S.table}>
+                  <div className="ads-table-wrap"><table className="ads-table">
                     <thead>
                       <tr>
-                        <th style={S.th}>Name</th>
-                        <th style={S.th}>Status</th>
-                        <th style={S.th}>Start → End</th>
-                        <th style={S.th}>Spend</th>
-                        <th style={S.th}>Impressions</th>
-                        <th style={S.th}>Clicks</th>
+                        <th className="ads-th">Name</th>
+                        <th className="ads-th">Status</th>
+                        <th className="ads-th">Start → End</th>
+                        <th className="ads-th">Spend</th>
+                        <th className="ads-th">Impressions</th>
+                        <th className="ads-th">Clicks</th>
                       </tr>
                     </thead>
                     <tbody>
                       {dashboard!.campaigns.map((c) => (
                         <tr key={c.id}>
-                          <td style={S.td}>{c.name}</td>
-                          <td style={S.td}>
+                          <td className="ads-td">{c.name}</td>
+                          <td className="ads-td">
                             <span style={{ color: c.is_running ? "#188038" : "#5f6368", fontWeight: 600 }}>
                               {c.is_running ? "Running" : c.status}
                             </span>
                           </td>
-                          <td style={S.td}>{fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : "—"}</td>
-                          <td style={S.td}>₹{Number(c.spent_inr).toLocaleString("en-IN")}</td>
-                          <td style={S.td}>{Number(c.impressions).toLocaleString("en-IN")}</td>
-                          <td style={S.td}>{Number(c.clicks).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">{fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : "—"}</td>
+                          <td className="ads-td">₹{Number(c.spent_inr).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">{Number(c.impressions).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">{Number(c.clicks).toLocaleString("en-IN")}</td>
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                 )}
               </Panel>
 
@@ -595,28 +570,28 @@ export default function App() {
                 {(dashboard?.byCity ?? []).length === 0 ? (
                   <p style={S.sub}>Jab ads chalengi, yahan city-wise impressions dikhengi.</p>
                 ) : (
-                  <table style={S.table}>
+                  <div className="ads-table-wrap"><table className="ads-table">
                     <thead>
                       <tr>
-                        <th style={S.th}>City</th>
-                        <th style={S.th}>State</th>
-                        <th style={S.th}>Impressions</th>
-                        <th style={S.th}>Clicks</th>
-                        <th style={S.th}>Spend</th>
+                        <th className="ads-th">City</th>
+                        <th className="ads-th">State</th>
+                        <th className="ads-th">Impressions</th>
+                        <th className="ads-th">Clicks</th>
+                        <th className="ads-th">Spend</th>
                       </tr>
                     </thead>
                     <tbody>
                       {dashboard!.byCity.map((row, i) => (
                         <tr key={`${row.city}-${row.state}-${i}`}>
-                          <td style={S.td}>{row.city}</td>
-                          <td style={S.td}>{row.state}</td>
-                          <td style={S.td}>{Number(row.impressions).toLocaleString("en-IN")}</td>
-                          <td style={S.td}>{Number(row.clicks).toLocaleString("en-IN")}</td>
-                          <td style={S.td}>₹{Number(row.spend_inr).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">{row.city}</td>
+                          <td className="ads-td">{row.state}</td>
+                          <td className="ads-td">{Number(row.impressions).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">{Number(row.clicks).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">₹{Number(row.spend_inr).toLocaleString("en-IN")}</td>
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                 )}
               </Panel>
 
@@ -624,26 +599,26 @@ export default function App() {
                 {(dashboard?.byDay ?? []).length === 0 ? (
                   <p style={S.sub}>No daily data yet.</p>
                 ) : (
-                  <table style={S.table}>
+                  <div className="ads-table-wrap"><table className="ads-table">
                     <thead>
                       <tr>
-                        <th style={S.th}>Date</th>
-                        <th style={S.th}>Impressions</th>
-                        <th style={S.th}>Clicks</th>
-                        <th style={S.th}>Spend</th>
+                        <th className="ads-th">Date</th>
+                        <th className="ads-th">Impressions</th>
+                        <th className="ads-th">Clicks</th>
+                        <th className="ads-th">Spend</th>
                       </tr>
                     </thead>
                     <tbody>
                       {dashboard!.byDay.map((row) => (
                         <tr key={row.day}>
-                          <td style={S.td}>{fmtDate(row.day)}</td>
-                          <td style={S.td}>{Number(row.impressions).toLocaleString("en-IN")}</td>
-                          <td style={S.td}>{Number(row.clicks).toLocaleString("en-IN")}</td>
-                          <td style={S.td}>₹{Number(row.spend_inr).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">{fmtDate(row.day)}</td>
+                          <td className="ads-td">{Number(row.impressions).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">{Number(row.clicks).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">₹{Number(row.spend_inr).toLocaleString("en-IN")}</td>
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                 )}
               </Panel>
 
@@ -705,31 +680,31 @@ export default function App() {
 
               <Panel title="Campaigns">
                 {campaigns.length === 0 ? <p style={S.sub}>No campaigns yet.</p> : (
-                  <table style={S.table}>
+                  <div className="ads-table-wrap"><table className="ads-table">
                     <thead>
                       <tr>
-                        <th style={S.th}>Name</th>
-                        <th style={S.th}>Objective</th>
-                        <th style={S.th}>Bid</th>
-                        <th style={S.th}>Schedule</th>
-                        <th style={S.th}>Spent / Budget</th>
-                        <th style={S.th}>Status</th>
+                        <th className="ads-th">Name</th>
+                        <th className="ads-th">Objective</th>
+                        <th className="ads-th">Bid</th>
+                        <th className="ads-th">Schedule</th>
+                        <th className="ads-th">Spent / Budget</th>
+                        <th className="ads-th">Status</th>
                       </tr>
                     </thead>
                     <tbody>
                       {campaigns.map((c) => (
                         <tr key={c.id} style={{ background: selectedCampaign === c.id ? "#e8f5f0" : undefined, cursor: "pointer" }}
                           onClick={() => { setSelectedCampaign(c.id); setNav("ads"); }}>
-                          <td style={S.td}>{c.name}</td>
-                          <td style={S.td}>{OBJECTIVE_LABELS[c.objective ?? ""] ?? c.objective}</td>
-                          <td style={S.td}>₹{c.bid_amount_inr} {c.bid_model?.toUpperCase()}</td>
-                          <td style={S.td}>{fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : "—"}</td>
-                          <td style={S.td}>₹{c.spent_inr} / ₹{c.total_budget_inr}</td>
-                          <td style={S.td}>{c.status}</td>
+                          <td className="ads-td">{c.name}</td>
+                          <td className="ads-td">{OBJECTIVE_LABELS[c.objective ?? ""] ?? c.objective}</td>
+                          <td className="ads-td">₹{c.bid_amount_inr} {c.bid_model?.toUpperCase()}</td>
+                          <td className="ads-td">{fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : "—"}</td>
+                          <td className="ads-td">₹{c.spent_inr} / ₹{c.total_budget_inr}</td>
+                          <td className="ads-td">{c.status}</td>
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                 )}
               </Panel>
             </>
@@ -739,32 +714,32 @@ export default function App() {
             <>
             <Panel title="Your ads">
               {creatives.length === 0 ? <p style={S.sub}>No ads yet.</p> : (
-                <table style={S.table}>
+                <div className="ads-table-wrap"><table className="ads-table">
                   <thead>
                     <tr>
-                      <th style={S.th}>Title</th>
-                      <th style={S.th}>Format</th>
-                      <th style={S.th}>Placement</th>
-                      <th style={S.th}>Campaign</th>
-                      <th style={S.th}>Status</th>
-                      <th style={S.th}>Impressions</th>
+                      <th className="ads-th">Title</th>
+                      <th className="ads-th">Format</th>
+                      <th className="ads-th">Placement</th>
+                      <th className="ads-th">Campaign</th>
+                      <th className="ads-th">Status</th>
+                      <th className="ads-th">Impressions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {creatives.map((cr) => (
                       <tr key={cr.id}>
-                        <td style={S.td}>{cr.title}</td>
-                        <td style={S.td}>{cr.format}</td>
-                        <td style={S.td}>{cr.placement}</td>
-                        <td style={S.td}>{cr.campaign_name}</td>
-                        <td style={S.td}>
+                        <td className="ads-td">{cr.title}</td>
+                        <td className="ads-td">{cr.format}</td>
+                        <td className="ads-td">{cr.placement}</td>
+                        <td className="ads-td">{cr.campaign_name}</td>
+                        <td className="ads-td">
                           <StatusBadge status={cr.moderation_status} reason={cr.moderation_reason} />
                         </td>
-                        <td style={S.td}>{cr.impressions}</td>
+                        <td className="ads-td">{cr.impressions}</td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </Panel>
             <Panel title="Create ad">
@@ -965,7 +940,7 @@ export default function App() {
               {!walletConfig?.razorpayConfigured ? (
                 <p style={S.err}>Payment gateway is not configured on the server. Contact support@videh.co.in.</p>
               ) : null}
-              <div style={S.statGrid}>
+              <div className="ads-stat-grid">
                 <Stat label="Available balance" value={`₹${balance.toLocaleString("en-IN")}`} />
                 <Stat label="Total spend" value={`₹${Number(stats?.spent_inr ?? 0).toFixed(0)}`} />
               </div>
@@ -993,33 +968,31 @@ export default function App() {
               {payments.length > 0 ? (
                 <>
                   <h4 style={{ margin: "16px 0 8px", fontSize: 14 }}>Payment history</h4>
-                  <table style={S.table}>
+                  <div className="ads-table-wrap"><table className="ads-table">
                     <thead>
                       <tr>
-                        <th style={S.th}>Date</th>
-                        <th style={S.th}>Amount</th>
-                        <th style={S.th}>Method</th>
-                        <th style={S.th}>Payment ID</th>
+                        <th className="ads-th">Date</th>
+                        <th className="ads-th">Amount</th>
+                        <th className="ads-th">Method</th>
+                        <th className="ads-th">Payment ID</th>
                       </tr>
                     </thead>
                     <tbody>
                       {payments.map((p) => (
                         <tr key={p.razorpay_payment_id}>
-                          <td style={S.td}>{new Date(p.created_at).toLocaleString("en-IN")}</td>
-                          <td style={S.td}>₹{Number(p.amount_inr).toLocaleString("en-IN")}</td>
-                          <td style={S.td}>{p.payment_method ?? "—"}</td>
-                          <td style={S.td}><code style={{ fontSize: 11 }}>{p.razorpay_payment_id}</code></td>
+                          <td className="ads-td">{new Date(p.created_at).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">₹{Number(p.amount_inr).toLocaleString("en-IN")}</td>
+                          <td className="ads-td">{p.payment_method ?? "—"}</td>
+                          <td className="ads-td"><code style={{ fontSize: 11 }}>{p.razorpay_payment_id}</code></td>
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                 </>
               ) : null}
             </Panel>
           )}
-        </main>
-      </div>
-    </div>
+    </AdsShell>
   );
 }
 
@@ -1085,11 +1058,21 @@ function fmtDate(iso?: string | null): string {
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
-  return <div style={S.stat}><div style={S.statL}>{label}</div><div style={S.statV}>{value}</div></div>;
+  return (
+    <div className="ads-stat">
+      <div className="ads-stat-label">{label}</div>
+      <div className="ads-stat-value">{value}</div>
+    </div>
+  );
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section style={S.panel}><h3 style={S.panelT}>{title}</h3>{children}</section>;
+  return (
+    <section className="ads-panel">
+      <h3 className="ads-panel-title">{title}</h3>
+      {children}
+    </section>
+  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

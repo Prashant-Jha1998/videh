@@ -89,6 +89,15 @@ export function setAdsPortalCookie(res: Response, token: string): void {
   });
 }
 
+export function clearAdsPortalCookie(res: Response): void {
+  res.clearCookie(ADS_PORTAL_COOKIE, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+  });
+}
+
 export function getAdsPortalUser(req: Request): AdsPortalIdentity | null {
   const verified = verifySignedPayload(readToken(req));
   if (!verified.ok) return null;
