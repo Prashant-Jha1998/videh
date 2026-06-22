@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetchReelsFeed, type ReelsFeedAdPlacement, type ReelsFeedCursor, type ReelsVideo } from "@/lib/reelsApi";
 import { safeJsonParse } from "@/lib/safeJson";
 
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 export type CachedReelsFeed = {

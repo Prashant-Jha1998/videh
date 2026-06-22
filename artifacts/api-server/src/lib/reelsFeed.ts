@@ -1,8 +1,12 @@
 import { query } from "./db";
-import { getReelsPlatformConfig, type ReelsPlatformConfig } from "./reelsConfig";
+import { getReelsPlatformConfig, type ReelsFeedRules, type ReelsPlatformConfig } from "./reelsConfig";
 
 export type FeedVideoRow = Record<string, unknown>;
 
+/** Keyset cursor for engagement-ranked home feed. */
+export type EngagementFeedCursor = { score: number; id: number };
+
+/** @deprecated Chronological cursor — kept for backward compatibility. */
 export type FeedCursor = { at: string; id: number };
 
 const FEED_BASE_SELECT = `
@@ -19,6 +23,29 @@ const FEED_BASE_SELECT = `
 `;
 
 /**
+ * Engagement score for feed ranking.
+ * Likes signal content quality (reach boost). Comments signal active engagement (wider distribution).
+ * Watch time (view depth) still counts but with a lower weight than likes/comments.
+ */
+export function engagementRankScoreSql(
+  viewerIdParam: string,
+  rules: ReelsFeedRules,
+  fraudPenalty: number,
+): string {
+  return `(
+    (CASE WHEN EXISTS(
+      SELECT 1 FROM reels_subscriptions s
+      WHERE s.channel_id = v.channel_id AND s.subscriber_user_id = ${viewerIdParam}
+    ) THEN $4::numeric ELSE 0 END)
+    + (CASE WHEN v.created_at > NOW() - ($5::text || ' hours')::interval THEN 20 ELSE 0 END)
+    + (v.like_count * $6::numeric)
+    + (v.comment_count * $7::numeric)
+    + (v.view_count::numeric / GREATEST(v.duration_seconds, 1)) * $8::numeric * 0.01
+    - (v.fraud_score + COALESCE(c.fraud_score, 0)) * $9::numeric
+  )`;
+}
+
+/**
  * Trending: high engagement velocity in the last 30 days.
  */
 export async function fetchTrendingReels(
@@ -30,9 +57,9 @@ export async function fetchTrendingReels(
        AND v.created_at > NOW() - INTERVAL '30 days'
      ORDER BY (
        (v.view_count::numeric * 1.0
-        + v.like_count * 8
-        + v.comment_count * 12
-        + COALESCE(v.share_count, 0) * 15)
+        + v.like_count * 10
+        + v.comment_count * 14
+        + COALESCE(v.share_count, 0) * 12)
        / (EXTRACT(EPOCH FROM (NOW() - v.created_at)) / 3600.0 + 2.0)
      ) DESC,
      v.created_at DESC
@@ -43,8 +70,76 @@ export async function fetchTrendingReels(
 }
 
 /**
+ * Home feed: engagement-ranked (likes, comments, watch depth) with subscription + recency boosts.
+ */
+export async function fetchEngagementHomeFeed(
+  viewerId: number,
+  limit: number,
+  cursor: EngagementFeedCursor | null,
+  config?: ReelsPlatformConfig,
+): Promise<{ videos: FeedVideoRow[]; nextCursor: EngagementFeedCursor | null }> {
+  const cfg = config ?? await getReelsPlatformConfig();
+  const f = cfg.feed;
+  const penalty = f.fraudPenaltyMultiplier;
+  const rankExpr = engagementRankScoreSql("$3", f, penalty);
+
+  const result = await query(
+    `WITH scored AS (
+       SELECT v.*,
+              c.handle AS channel_handle,
+              c.display_name AS channel_display_name,
+              c.avatar_url AS channel_avatar_url,
+              c.updated_at AS channel_updated_at,
+              c.fraud_score AS channel_fraud_score,
+              r.reaction AS my_reaction,
+              EXISTS(
+                SELECT 1 FROM reels_subscriptions s
+                WHERE s.channel_id = v.channel_id AND s.subscriber_user_id = $3
+              ) AS is_subscribed,
+              ${rankExpr} AS rank_score
+       FROM reels_videos v
+       JOIN reels_channels c ON c.id = v.channel_id
+       LEFT JOIN reels_video_reactions r ON r.video_id = v.id AND r.user_id = $3
+       WHERE v.status = 'published' AND v.play_enabled = TRUE
+     )
+     SELECT * FROM scored
+     WHERE (
+       $1::numeric IS NULL
+       OR rank_score < $1::numeric
+       OR (rank_score = $1::numeric AND id < $2::bigint)
+     )
+     ORDER BY is_subscribed DESC, rank_score DESC, id DESC
+     LIMIT $10`,
+    [
+      cursor?.score ?? null,
+      cursor?.id ?? 0,
+      viewerId || 0,
+      f.subscribedChannelBoost,
+      f.recencyBoostHours,
+      f.weightLikes,
+      f.weightComments,
+      f.weightWatchHours,
+      penalty,
+      limit,
+    ],
+  );
+
+  const videos = result.rows as FeedVideoRow[];
+  if (videos.length < limit) {
+    return { videos, nextCursor: null };
+  }
+  const last = videos[videos.length - 1];
+  const id = Number(last?.id);
+  const score = Number(last?.rank_score);
+  if (!Number.isFinite(id) || !Number.isFinite(score)) {
+    return { videos, nextCursor: null };
+  }
+  return { videos, nextCursor: { score, id } };
+}
+
+/**
  * Latest-first home feed with keyset pagination (never-ending scroll).
- * Newest uploads always at the top; scroll loads older videos.
+ * @deprecated Prefer fetchEngagementHomeFeed for the main Videh video tab.
  */
 export async function fetchLatestReelsFeed(
   viewerId: number,
@@ -96,6 +191,7 @@ export async function fetchRankedReelsFeed(
   const cfg = config ?? await getReelsPlatformConfig();
   const f = cfg.feed;
   const penalty = f.fraudPenaltyMultiplier;
+  const rankExpr = engagementRankScoreSql("$3", f, penalty);
 
   const result = await query(
     `WITH scored AS (
@@ -110,16 +206,7 @@ export async function fetchRankedReelsFeed(
                 SELECT 1 FROM reels_subscriptions s
                 WHERE s.channel_id = v.channel_id AND s.subscriber_user_id = $3
               ) AS is_subscribed,
-              (
-                (CASE WHEN EXISTS(
-                  SELECT 1 FROM reels_subscriptions s
-                  WHERE s.channel_id = v.channel_id AND s.subscriber_user_id = $3
-                ) THEN $4::numeric ELSE 0 END)
-                + (CASE WHEN v.created_at > NOW() - ($5::text || ' hours')::interval THEN 20 ELSE 0 END)
-                + (v.like_count * $6 + v.comment_count * $7
-                   + (v.view_count::numeric / GREATEST(v.duration_seconds, 1)) * $8 * 0.01)
-                - (v.fraud_score + COALESCE(c.fraud_score, 0)) * $9
-              ) AS rank_score
+              ${rankExpr} AS rank_score
        FROM reels_videos v
        JOIN reels_channels c ON c.id = v.channel_id
        LEFT JOIN reels_video_reactions r ON r.video_id = v.id AND r.user_id = $3

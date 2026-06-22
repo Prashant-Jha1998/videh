@@ -3,7 +3,8 @@ import { useEvent } from "expo";
 import * as Linking from "expo-linking";
 import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useCallback, useEffect, useRef } from "react";
-import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReelsAdDetailPanel } from "@/components/ReelsAdDetailPanel";
 import { useColors } from "@/hooks/useColors";
 import type { ReelsAdBreakItem } from "@/lib/reelsApi";
@@ -38,6 +39,9 @@ export function ReelsAdPlayer({
   onFinished,
 }: Props) {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
+  const videoHeight = Math.round(Math.min(screenWidth * (9 / 16), screenWidth * 0.56));
   const player = useVideoPlayer(ad.videoUrl, (p) => {
     p.loop = false;
     p.muted = false;
@@ -150,7 +154,7 @@ export function ReelsAdPlayer({
 
   return (
     <View style={styles.root}>
-      <View style={styles.videoSection}>
+      <View style={[styles.videoSection, { height: videoHeight }]}>
         <VideoView
           style={styles.player}
           player={player}
@@ -159,42 +163,49 @@ export function ReelsAdPlayer({
         />
 
         <View style={styles.videoOverlay} pointerEvents="box-none">
-          <View style={styles.topRow} pointerEvents="box-none">
+          <View style={[styles.topRow, { paddingTop: Math.max(6, insets.top > 0 ? 0 : 6) }]} pointerEvents="box-none">
             <View style={{ flex: 1 }} />
             <TouchableOpacity onPress={onVisitAdvertiser} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={styles.visitAdvertiser}>Visit advertiser</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.bottomVideoRow} pointerEvents="box-none">
-            <View style={styles.sponsoredRow} pointerEvents="none">
-              <Text style={styles.sponsoredText}>{ad.sponsoredLabel ?? "Sponsored"}</Text>
-              <Ionicons name="information-circle-outline" size={14} color="#fff" />
-            </View>
-
-            {canSkip ? (
+          <View style={styles.bottomBlock} pointerEvents="box-none">
+            <View style={styles.bottomVideoRow} pointerEvents="box-none">
               <TouchableOpacity
-                style={styles.skipBtn}
-                onPress={() => finish(true, false)}
-                activeOpacity={0.85}
+                style={styles.sponsoredRow}
+                onPress={() => Alert.alert("Videh Ads", "This ad is served through ads.videh.co.in — Videh's advertising platform for creators and businesses.")}
+                activeOpacity={0.8}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Text style={styles.skipBtnText}>Skip</Text>
-                <Ionicons name="play-forward" size={15} color="#111" />
+                <Text style={styles.sponsoredText}>{ad.sponsoredLabel ?? "Sponsored"}</Text>
+                <Ionicons name="information-circle-outline" size={14} color="#fff" />
               </TouchableOpacity>
-            ) : skipCountdown != null && skipCountdown > 0 ? (
-              <View style={styles.skipWait} pointerEvents="none">
-                <Text style={styles.skipWaitText}>Skip in {skipCountdown}s</Text>
-              </View>
-            ) : ad.adType === "non_skippable" ? (
-              <View style={styles.skipWait} pointerEvents="none">
-                <Text style={styles.skipWaitText}>Ad · {Math.max(0, Math.ceil(duration - currentTime))}s</Text>
-              </View>
-            ) : null}
-          </View>
 
-          <View style={styles.progressTrack} pointerEvents="none">
-            <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+              {canSkip ? (
+                <TouchableOpacity
+                  style={styles.skipBtn}
+                  onPress={() => finish(true, false)}
+                  activeOpacity={0.85}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.skipBtnText}>Skip ad</Text>
+                  <Ionicons name="play-forward" size={15} color="#111" />
+                </TouchableOpacity>
+              ) : skipCountdown != null && skipCountdown > 0 ? (
+                <View style={styles.skipWait} pointerEvents="none">
+                  <Text style={styles.skipWaitText}>Skip in {skipCountdown}s</Text>
+                </View>
+              ) : ad.adType === "non_skippable" ? (
+                <View style={styles.skipWait} pointerEvents="none">
+                  <Text style={styles.skipWaitText}>Ad · {Math.max(0, Math.ceil(duration - currentTime))}s</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.progressTrack} pointerEvents="none">
+              <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+            </View>
           </View>
         </View>
       </View>
@@ -212,17 +223,27 @@ export function ReelsAdPlayer({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
-  videoSection: { flex: 0.46, position: "relative", backgroundColor: "#000" },
+  videoSection: { position: "relative", backgroundColor: "#000", width: "100%" },
   player: { width: "100%", height: "100%" },
   videoOverlay: {
     ...StyleSheet.absoluteFillObject,
-    justifyContent: "space-between",
   },
   topRow: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
     flexDirection: "row",
     alignItems: "center",
-    paddingTop: 8,
     paddingHorizontal: 12,
+    zIndex: 2,
+  },
+  bottomBlock: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 2,
   },
   visitAdvertiser: {
     color: "#fff",
@@ -237,7 +258,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 12,
-    paddingBottom: 10,
+    paddingBottom: 8,
   },
   sponsoredRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   sponsoredText: {

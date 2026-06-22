@@ -320,7 +320,7 @@ export async function fetchReelsChannel(handle: string, userId?: number, session
   return res;
 }
 
-export type ReelsFeedCursor = { at: string; id: number };
+export type ReelsFeedCursor = { at?: string; id: number; score?: number };
 
 export type ReelsFeedAd = {
   id: number;
@@ -350,7 +350,11 @@ export async function fetchReelsFeed(
   sessionToken?: string | null,
 ) {
   const c = cursor
-    ? `&cursorAt=${encodeURIComponent(cursor.at)}&cursorId=${cursor.id}`
+    ? cursor.score != null && Number.isFinite(cursor.score)
+      ? `&cursorScore=${encodeURIComponent(String(cursor.score))}&cursorId=${cursor.id}`
+      : cursor.at
+        ? `&cursorAt=${encodeURIComponent(cursor.at)}&cursorId=${cursor.id}`
+        : ""
     : "";
   const res = await reelsJson<{
     success: boolean;

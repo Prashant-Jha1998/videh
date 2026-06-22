@@ -51,7 +51,7 @@ export type ReelsComment = {
   myReaction?: "like" | "dislike" | null;
 };
 
-export type ReelsFeedCursor = { at: string; id: number };
+export type ReelsFeedCursor = { at?: string; id: number; score?: number };
 
 export type ReelsFeedAd = {
   id: number;
@@ -318,7 +318,13 @@ function normalizeFeedAd(ad: ReelsFeedAd): ReelsFeedAd {
 }
 
 export async function fetchFeed(userId: number, cursor?: ReelsFeedCursor | null, token?: string | null) {
-  const c = cursor ? `&cursorAt=${encodeURIComponent(cursor.at)}&cursorId=${cursor.id}` : "";
+  const c = cursor
+    ? cursor.score != null && Number.isFinite(cursor.score)
+      ? `&cursorScore=${encodeURIComponent(String(cursor.score))}&cursorId=${cursor.id}`
+      : cursor.at
+        ? `&cursorAt=${encodeURIComponent(cursor.at)}&cursorId=${cursor.id}`
+        : ""
+    : "";
   const res = await reelsFetch<{
     success: boolean;
     videos: ReelsVideo[];

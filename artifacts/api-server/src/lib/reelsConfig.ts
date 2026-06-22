@@ -104,14 +104,14 @@ export type ReelsPlatformConfig = {
 export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
   monetization: {
     minSubscribers: 500,
-    minWatchHours: 2000,
+    minWatchHours: 4000,
     minPublicVideos: 5,
     maxFraudScore: 25,
     revenueSharePercent: 35,
     requireGoodStanding: true,
     summary: [
       "At least 500 subscribers on your channel",
-      "At least 2,000 valid watch hours in the last 12 months",
+      "At least 4,000 valid watch hours in the last 12 months",
       "At least 5 public videos on your channel",
       "Channel in good standing (low fraud score, no policy strikes)",
       "Videh may review your channel before ads run on your videos",
@@ -142,14 +142,16 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
   feed: {
     subscribedChannelBoost: 100,
     recencyBoostHours: 48,
-    weightLikes: 3,
-    weightComments: 5,
-    weightWatchHours: 10,
+    weightLikes: 8,
+    weightComments: 12,
+    weightWatchHours: 4,
     fraudPenaltyMultiplier: 0.3,
     summary: [
       "New videos from channels you subscribe to appear first",
       "Recent uploads within 48 hours get a freshness boost",
-      "Engagement (likes, comments, watch time) improves ranking",
+      "Likes tell Videh the video is worth showing to more people",
+      "Comments boost engagement and help the video reach more viewers",
+      "Watch time still matters, but likes and comments weigh more in ranking",
       "Suspected fake engagement reduces visibility",
     ],
   },

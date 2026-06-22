@@ -38,12 +38,17 @@
     },
     "production": {
       "autoIncrement": true,
+      "prebuildCommand": "npx expo prebuild --platform android --clean",
       "env": {
         "EXPO_PUBLIC_DOMAIN": "videh.co.in",
-        "VIDEOH_SLIM_ANDROID": "1"
+        "VIDEOH_SLIM_ANDROID": "1",
+        "EXPO_ROUTER_APP_ROOT": "app"
       },
       "android": {
         "buildType": "app-bundle"
+      },
+      "cache": {
+        "key": "production-v98-webrtc-fix"
       }
     }
   }

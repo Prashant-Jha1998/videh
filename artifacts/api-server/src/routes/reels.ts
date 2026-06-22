@@ -25,7 +25,7 @@ import {
 } from "../lib/reelsSchema";
 import { getReelsPlatformConfig, publicReelsRules } from "../lib/reelsConfig";
 import { checkCommentFraud, checkSubscribeFraud, checkViewFraud, recordViewSession } from "../lib/reelsFraud";
-import { fetchLatestReelsFeed, fetchTrendingReels, type FeedCursor } from "../lib/reelsFeed";
+import { fetchEngagementHomeFeed, fetchTrendingReels, type EngagementFeedCursor } from "../lib/reelsFeed";
 import { fetchHashtagStats, fetchHashtagSuggestions } from "../lib/reelsHashtags";
 import { canPlayVideo, evaluateChannelMonetization } from "../lib/reelsMonetization";
 import { scanReelsText } from "../lib/reelsContentModeration";
@@ -1285,16 +1285,16 @@ router.delete("/notifications/:notificationId", async (req: Request, res: Respon
 router.get("/feed", async (req: Request, res: Response) => {
   const viewerId = Number(req.query.userId) || 0;
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 15));
-  const cursorAt = String(req.query.cursorAt ?? "").trim();
+  const cursorScore = Number(req.query.cursorScore);
   const cursorId = Number(req.query.cursorId) || 0;
-  const cursor: FeedCursor | null = cursorAt && cursorId > 0
-    ? { at: cursorAt, id: cursorId }
+  const cursor: EngagementFeedCursor | null = Number.isFinite(cursorScore) && cursorId > 0
+    ? { score: cursorScore, id: cursorId }
     : null;
   try {
     await ensureReelsTables();
     const [trendingRows, feedResult, cfg] = await Promise.all([
       cursor ? Promise.resolve([]) : fetchTrendingReels(viewerId, 10),
-      fetchLatestReelsFeed(viewerId, limit, cursor),
+      fetchEngagementHomeFeed(viewerId, limit, cursor),
       getReelsPlatformConfig(),
     ]);
     const { videos: rows, nextCursor } = feedResult;
@@ -1353,7 +1353,10 @@ router.get("/hashtags/:tag", async (req: Request, res: Response) => {
          AND EXISTS (
            SELECT 1 FROM unnest(v.hashtags) h WHERE LOWER(BTRIM(h)) = $1
          )
-       ORDER BY v.view_count DESC, v.created_at DESC
+       ORDER BY (
+         v.like_count * 8 + v.comment_count * 12
+         + v.view_count::numeric / GREATEST(v.duration_seconds, 1) * 0.04
+       ) DESC, v.created_at DESC
        LIMIT $2`,
       [normalized, limit],
     );

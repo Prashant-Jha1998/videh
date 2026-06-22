@@ -1,7 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import * as Linking from "expo-linking";
 import React from "react";
 import {
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -36,12 +38,18 @@ function displaySubtitle(ad: ReelsAdBreakItem): string {
   return ad.advertiserName;
 }
 
+function adTypeLabel(ad: ReelsAdBreakItem): string {
+  if (ad.adType === "skippable") return "Skippable ad";
+  return "Non-skippable ad";
+}
+
 export function ReelsAdDetailPanel({ ad, colors, onLearnMore, onInstall, onHide }: Props) {
   const isAppInstall = ad.format === "app_install" || Boolean(ad.playStoreUrl || ad.appStoreUrl);
   const promoImages = [ad.promoImageUrl, ad.promoImageUrl2].filter(Boolean) as string[];
   const showStats = isAppInstall && (
     ad.appRating != null || ad.appReviewCount || ad.appDownloadCount || ad.appCategory
   );
+  const durationLabel = ad.durationSeconds > 0 ? `${Math.round(ad.durationSeconds)}s` : null;
 
   return (
     <View style={[styles.panel, { backgroundColor: colors.background }]}>
@@ -58,7 +66,25 @@ export function ReelsAdDetailPanel({ ad, colors, onLearnMore, onInstall, onHide 
         </View>
       </View>
 
-      <ScrollView style={styles.scroll} bounces={false} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        bounces
+        nestedScrollEnabled={Platform.OS === "android"}
+        showsVerticalScrollIndicator
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.metaRow}>
+          <View style={[styles.metaChip, { backgroundColor: colors.muted }]}>
+            <Text style={[styles.metaChipText, { color: colors.foreground }]}>{adTypeLabel(ad)}</Text>
+          </View>
+          {durationLabel ? (
+            <View style={[styles.metaChip, { backgroundColor: colors.muted }]}>
+              <Text style={[styles.metaChipText, { color: colors.foreground }]}>{durationLabel}</Text>
+            </View>
+          ) : null}
+        </View>
+
         <View style={styles.identityRow}>
           {ad.imageUrl ? (
             <Image source={{ uri: ad.imageUrl }} style={styles.appIcon} contentFit="cover" />
@@ -74,6 +100,14 @@ export function ReelsAdDetailPanel({ ad, colors, onLearnMore, onInstall, onHide 
             <Text style={[styles.appSubtitle, { color: colors.mutedForeground }]} numberOfLines={1}>
               {displaySubtitle(ad)}
             </Text>
+            <TouchableOpacity
+              onPress={() => void Linking.openURL("https://ads.videh.co.in/").catch(() => {})}
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            >
+              <Text style={[styles.adsPortalLink, { color: colors.mutedForeground }]}>
+                Served via Videh Ads · ads.videh.co.in
+              </Text>
+            </TouchableOpacity>
             {isAppInstall ? (
               <View style={styles.storeRow}>
                 <Ionicons name="logo-google-playstore" size={14} color={colors.mutedForeground} />
@@ -117,10 +151,14 @@ export function ReelsAdDetailPanel({ ad, colors, onLearnMore, onInstall, onHide 
         ) : null}
 
         {ad.description ? (
-          <Text style={[styles.description, { color: colors.foreground }]} numberOfLines={4}>
+          <Text style={[styles.description, { color: colors.foreground }]}>
             {ad.description}
           </Text>
-        ) : null}
+        ) : (
+          <Text style={[styles.description, { color: colors.mutedForeground }]}>
+            Tap Learn more to visit the advertiser, or skip when available to continue watching.
+          </Text>
+        )}
 
         {promoImages.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promoRow}>
@@ -146,7 +184,7 @@ export function ReelsAdDetailPanel({ ad, colors, onLearnMore, onInstall, onHide 
 }
 
 const styles = StyleSheet.create({
-  panel: { flex: 1, borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: "hidden" },
+  panel: { flex: 1, borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: "hidden", minHeight: 0 },
   panelHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -158,12 +196,17 @@ const styles = StyleSheet.create({
   },
   sponsoredTitle: { fontFamily: "Inter_700Bold", fontSize: 16 },
   panelHeaderActions: { flexDirection: "row", alignItems: "center" },
-  scroll: { flex: 1, paddingHorizontal: 16 },
-  identityRow: { flexDirection: "row", gap: 12, paddingTop: 14, paddingBottom: 10 },
+  scroll: { flex: 1, minHeight: 0 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 28, flexGrow: 1 },
+  metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingTop: 12, paddingBottom: 4 },
+  metaChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 16 },
+  metaChipText: { fontFamily: "Inter_600SemiBold", fontSize: 12 },
+  identityRow: { flexDirection: "row", gap: 12, paddingTop: 10, paddingBottom: 10 },
   appIcon: { width: 52, height: 52, borderRadius: 12 },
   identityText: { flex: 1, minWidth: 0 },
   appTitle: { fontFamily: "Inter_700Bold", fontSize: 16, lineHeight: 20 },
   appSubtitle: { fontFamily: "Inter_400Regular", fontSize: 13, marginTop: 2 },
+  adsPortalLink: { fontFamily: "Inter_500Medium", fontSize: 11, marginTop: 6, textDecorationLine: "underline" },
   storeRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 },
   storeText: { fontSize: 12, fontFamily: "Inter_500Medium" },
   statsRow: {
