@@ -62,7 +62,7 @@ import { VidehVoiceMic } from "@/components/VidehVoiceMic";
 import { CHAT_EMOJI_PANEL_HEIGHT, ChatEmojiPanel } from "@/components/ChatEmojiPanel";
 import type { GifMediaItem } from "@/lib/chatGifApi";
 import { uploadRemoteGifOrSticker } from "@/lib/sendChatGifSticker";
-import { ChatMessageText } from "@/components/ChatMessageText";
+import { ChatMessageText, renderChatMentionParts } from "@/components/ChatMessageText";
 import { DocumentMessageBubble } from "@/components/DocumentMessageBubble";
 import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/chatMessageText";
 import { ContactMessageBubble } from "@/components/ContactMessageBubble";
@@ -2973,25 +2973,26 @@ export default function ChatScreen() {
               onCall={(phone) => { Linking.openURL(`tel:${phone}`).catch(() => {}); }}
             />
           ) : compactTextBubble ? (
-            <View style={styles.textMetaInlineRow}>
-              <ChatMessageText
-                text={item.text}
-                linkColor={readMoreLinkColor}
+            <View style={styles.compactTextRow}>
+              <Text
                 style={[
                   styles.msgText,
-                  styles.msgTextInline,
+                  styles.compactFlowText,
                   { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 20 * chatFontScale },
                 ]}
-              />
-              <View style={styles.msgMetaInline}>
-                {item.isEdited ? (
-                  <Text style={[styles.editedLabel, { color: metaTextColor }]}>edited </Text>
-                ) : null}
+              >
+                {renderChatMentionParts(item.text)}
                 <Text style={[styles.msgTime, styles.msgTimeInline, { color: metaTextColor }]}>
+                  {item.isEdited ? " edited" : ""}
+                  {"  "}
                   {formatChatBubbleTime(item.timestamp)}
                 </Text>
-                {isMe ? <TickIcon status={item.status} color={metaTextColor} /> : null}
-              </View>
+              </Text>
+              {isMe ? (
+                <View style={styles.compactTickWrap}>
+                  <TickIcon status={item.status} color={metaTextColor} />
+                </View>
+              ) : null}
             </View>
           ) : (
             <>
@@ -4650,28 +4651,27 @@ const styles = StyleSheet.create({
   bubbleCompact: {
     paddingHorizontal: 7,
     paddingTop: 5,
-    paddingBottom: 4,
+    paddingBottom: 6,
+    overflow: "visible",
   },
-  textMetaInlineRow: {
+  compactTextRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     alignItems: "flex-end",
     maxWidth: "100%",
+    flexShrink: 1,
   },
-  msgTextInline: {
-    marginRight: 4,
-    paddingRight: 2,
+  compactFlowText: {
+    flexShrink: 1,
+    minWidth: 0,
   },
-  msgMetaInline: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 3,
-    marginBottom: 1,
+  compactTickWrap: {
     flexShrink: 0,
+    marginLeft: 2,
+    marginBottom: 1,
   },
   msgTimeInline: {
     includeFontPadding: false,
+    lineHeight: 14,
   },
   /** Bottom corners even; SVG tail sits at corner */
   bubbleWithTailShape: { borderBottomLeftRadius: 10, borderBottomRightRadius: 10 },

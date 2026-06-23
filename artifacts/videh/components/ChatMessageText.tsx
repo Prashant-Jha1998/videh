@@ -11,12 +11,12 @@ type Props = {
   linkColor?: string;
 };
 
-function renderMentionParts(text: string) {
+export function renderChatMentionParts(text: string, mentionColor = "#00A884") {
   const parts = text.split(/(@\w[\w\s]*)/g);
   if (parts.length === 1) return text;
   return parts.map((part, i) =>
     /^@\w/.test(part) ? (
-      <Text key={i} style={{ color: "#00A884", fontFamily: "Inter_600SemiBold" }}>
+      <Text key={i} style={{ color: mentionColor, fontFamily: "Inter_600SemiBold" }}>
         {part}
       </Text>
     ) : (
@@ -39,7 +39,7 @@ export function ChatMessageText({ text, style, linkColor = "#027EB5" }: Props) {
   if (!collapsible || expanded) {
     return (
       <Text style={style}>
-        {renderMentionParts(text)}
+        {renderChatMentionParts(text)}
         {collapsible && expanded ? (
           <Text style={linkStyle} onPress={() => setExpanded(false)}>
             {" "}
@@ -52,7 +52,7 @@ export function ChatMessageText({ text, style, linkColor = "#027EB5" }: Props) {
 
   return (
     <Text style={style}>
-      {renderMentionParts(preview)}
+      {renderChatMentionParts(preview)}
       <Text style={linkStyle} onPress={() => setExpanded(true)}>
         {" "}
         Read more
