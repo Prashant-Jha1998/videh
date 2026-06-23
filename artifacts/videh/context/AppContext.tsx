@@ -1138,7 +1138,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       setChats((prev) => {
         const prevChat = prev.find((c) => String(c.id) === String(chatId));
-        const prevById = new Map((prevChat?.messages ?? []).map((pm) => [pm.id, pm]));
+        const prevMsgs = prevChat?.messages ?? [];
+        const prevById = new Map(prevMsgs.map((pm) => [pm.id, pm]));
 
         const msgs: Message[] = rawMessages.map((m: any) => {
           const id = String(m.id);
@@ -1160,7 +1161,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         return prev.map((c) => {
           if (String(c.id) !== String(chatId)) return c;
-          const prevMsgs = c.messages ?? [];
           const prevStable = prevMsgs.filter((m) => !m.id.startsWith("hint_"));
           const hasPendingHints = prevMsgs.some((m) => m.id.startsWith("hint_"));
           if (

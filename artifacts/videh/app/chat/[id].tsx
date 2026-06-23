@@ -1068,6 +1068,8 @@ export default function ChatScreen() {
     loadMessages, loadOlderMessages, forwardMessage, updateLocationOnServer, stopLiveLocationSession, setActiveChatId,
     typingByChatId, reportRemoteTyping, patchChatMessage,
   } = useApp();
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
 
   const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
   const [initializing, setInitializing] = useState(rawId?.startsWith("new_") ?? false);
@@ -1155,10 +1157,11 @@ export default function ChatScreen() {
       setMessagesReady(false);
       return;
     }
-    setMessagesReady(false);
+    const hasCached = (chatsRef.current.find((x) => x.id === chatId)?.messages?.length ?? 0) > 0;
+    setMessagesReady(hasCached);
     markAsRead(chatId);
     void loadMessages(chatId).finally(() => setMessagesReady(true));
-  }, [chatId]);
+  }, [chatId, loadMessages, markAsRead]);
 
   useEffect(() => {
     const c = chats.find((x) => x.id === chatId);
