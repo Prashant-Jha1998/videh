@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Platform, Text, type TextStyle } from "react-native";
+import { Platform, Text, View, type TextStyle } from "react-native";
 import {
   getCollapsedChatMessagePreview,
   shouldCollapseChatMessage,
@@ -62,8 +62,6 @@ export function ChatCompactMessageText({
   linkColor = "#027EB5",
 }: CompactProps) {
   const { ticks, tickColor } = tickSuffix(isMe, status);
-  const editedPart = isEdited ? "edited " : "";
-  const reserve = `${editedPart}${time}${ticks}`;
   const timeStyle: TextStyle = {
     fontSize: 11,
     lineHeight: 15,
@@ -73,23 +71,37 @@ export function ChatCompactMessageText({
   };
 
   return (
-    <Text style={[style, ANDROID_TEXT_METRICS]}>
-      {renderMentionParts(text, linkColor)}
-      <Text style={[timeStyle, { color: "transparent" }]} accessible={false} importantForAccessibility="no">
-        {" "}
-        {reserve}
+    <View style={styles.compactRow}>
+      <Text style={[style, ANDROID_TEXT_METRICS, styles.compactBody]}>
+        {renderMentionParts(text, linkColor)}
       </Text>
-      {isEdited ? (
-        <Text style={[timeStyle, { fontSize: 10, fontStyle: "italic" }]}>edited </Text>
-      ) : null}
-      <Text style={timeStyle}>
-        {" "}
+      <Text style={[timeStyle, styles.compactMeta]}>
+        {isEdited ? (
+          <Text style={[timeStyle, { fontSize: 10, fontStyle: "italic" }]}>edited </Text>
+        ) : null}
         {time}
         {ticks ? <Text style={{ color: tickColor ?? timeColor }}>{ticks}</Text> : null}
       </Text>
-    </Text>
+    </View>
   );
 }
+
+const styles = {
+  compactRow: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    alignItems: "flex-end" as const,
+    maxWidth: "100%" as const,
+  },
+  compactBody: {
+    flexShrink: 1,
+  },
+  compactMeta: {
+    flexShrink: 0,
+    marginLeft: 4,
+    paddingBottom: Platform.OS === "android" ? 1 : 0,
+  },
+};
 
 /** WhatsApp-style long message text with @mentions and Read more / Read less. */
 export function ChatMessageText({ text, style, linkColor = "#027EB5" }: Props) {
