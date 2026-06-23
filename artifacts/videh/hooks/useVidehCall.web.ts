@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { callDebug } from "@/lib/callDebug";
-import { channelsForCall, loadIceServers } from "@/lib/webrtcIce";
+import { channelsForCall, loadIceServers, peerIdFromCallChannel } from "@/lib/webrtcIce";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import { startScreenShare, stopScreenShare as stopScreenShareTracks } from "@/lib/screenShare";
 import type { VidehCallState } from "./videhCallTypes";
@@ -27,6 +27,10 @@ export function useVidehCall(
   const localStreamRef = useRef<MediaStream | null>(null);
   const cameraVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenSharingRef = useRef(false);
+  const [screenSharing, setScreenSharing] = useState(false);
+  const isVideoRef = useRef(isVideo);
+  const appliedCallVideoRef = useRef(isVideo);
+  isVideoRef.current = isVideo;
   const rolesRef = useRef<Map<string, Role>>(new Map());
   const candidateCursorsRef = useRef<Map<string, number>>(new Map());
   const pollTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
@@ -52,6 +56,115 @@ export function useVidehCall(
     setJoined(connected > 0);
     setRemoteCount(connected);
   }, []);
+
+  const shouldInitiateRenegotiation = useCallback((channel: string) => {
+    const peerId = peerIdFromCallChannel(channel, uid) || remotePeerIds[0];
+    if (!peerId || peerId === uid) return true;
+    return uid < peerId;
+  }, [uid, remotePeerIds]);
+
+  const attachLocalVideo = useCallback(() => {
+    const el = document.getElementById(localVideoId) as HTMLVideoElement | null;
+    if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
+      el.srcObject = localStreamRef.current;
+      el.muted = true;
+      void el.play().catch(() => {});
+    }
+  }, [localVideoId]);
+
+  const switchCallVideoMode = useCallback(async (video: boolean) => {
+    const stream = localStreamRef.current;
+    if (!stream || pcsRef.current.size === 0) return;
+
+    if (screenSharingRef.current) {
+      const { stopScreenShare: stopScreenShareTracks } = await import("@/lib/screenShare");
+      await stopScreenShareTracks();
+      screenSharingRef.current = false;
+      setScreenSharing(false);
+    }
+
+    if (video) {
+      let videoTrack = stream.getVideoTracks()[0];
+      if (!videoTrack) {
+        const { buildCallMediaConstraints, getCallMediaSettings } = await import("@/lib/callMediaSettings");
+        const { lowDataMode } = await getCallMediaSettings();
+        const fresh = await navigator.mediaDevices.getUserMedia(
+          buildCallMediaConstraints(true, lowDataMode) as MediaStreamConstraints,
+        );
+        videoTrack = fresh.getVideoTracks()[0];
+        if (!videoTrack) throw new Error("Camera unavailable");
+        stream.addTrack(videoTrack);
+      } else {
+        videoTrack.enabled = true;
+      }
+      cameraVideoTrackRef.current = videoTrack;
+      setCameraOff(false);
+      for (const pc of pcsRef.current.values()) {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+        if (sender) await sender.replaceTrack(videoTrack);
+        else stream.getTracks().forEach((t) => {
+          if (t.kind === "video") pc.addTrack(t, stream);
+        });
+      }
+      attachLocalVideo();
+    } else {
+      for (const track of [...stream.getVideoTracks()]) {
+        stream.removeTrack(track);
+        track.stop();
+      }
+      cameraVideoTrackRef.current = null;
+      for (const pc of pcsRef.current.values()) {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+        if (sender) await sender.replaceTrack(null);
+      }
+      const el = document.getElementById(localVideoId) as HTMLVideoElement | null;
+      if (el) el.srcObject = null;
+    }
+
+    for (const [channel, pc] of pcsRef.current.entries()) {
+      if (!shouldInitiateRenegotiation(channel)) continue;
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        const res = await webrtcFetch(`/sessions/${encodeURIComponent(channel)}/offer`, sessionToken, {
+          method: "POST",
+          body: JSON.stringify({ offer }),
+        });
+        const payload = (await res.json()) as { offerRevision?: number };
+        if (typeof payload.offerRevision === "number") {
+          lastOfferRevisionRef.current.set(channel, payload.offerRevision);
+        }
+        lastAnswerRevisionRef.current.delete(channel);
+        candidateCursorsRef.current.set(channel, 0);
+      } catch {
+        /* peer poll will retry */
+      }
+    }
+  }, [attachLocalVideo, localVideoId, sessionToken, shouldInitiateRenegotiation]);
+
+  useEffect(() => {
+    appliedCallVideoRef.current = isVideo;
+  }, [primaryChannel, callId, negotiateBump]);
+
+  useEffect(() => {
+    if (appliedCallVideoRef.current === isVideo) return;
+    if (!localStreamRef.current || pcsRef.current.size === 0) {
+      appliedCallVideoRef.current = isVideo;
+      return;
+    }
+    const prev = appliedCallVideoRef.current;
+    let cancelled = false;
+    void switchCallVideoMode(isVideo)
+      .then(() => {
+        if (!cancelled) appliedCallVideoRef.current = isVideo;
+      })
+      .catch(() => {
+        if (!cancelled) appliedCallVideoRef.current = prev;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isVideo, switchCallVideoMode]);
 
   useEffect(() => {
     if (!primaryChannel || !uid || videhCallerId <= 0) return;
@@ -192,7 +305,7 @@ export function useVidehCall(
         body: JSON.stringify({
           channel,
           userId: uid,
-          type: isVideo ? "video" : "audio",
+          type: isVideoRef.current ? "video" : "audio",
           videhCallerId,
         }),
       });
@@ -269,7 +382,10 @@ export function useVidehCall(
           return;
         }
         const iceServers = await loadIceServers(sessionToken);
-        const localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
+        const localStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: isVideoRef.current,
+        });
         if (connectGen !== connectGenRef.current || stopped) {
           localStream.getTracks().forEach((track) => track.stop());
           return;
@@ -303,7 +419,7 @@ export function useVidehCall(
         webrtcFetch(`/sessions/${encodeURIComponent(channel)}`, sessionToken, { method: "DELETE" }).catch(() => {});
       }
     };
-  }, [primaryChannel, uid, isVideo, channels.join("|"), localVideoId, remoteVideoId, refreshAggregate, sessionToken, videhCallerId, callId, negotiateBump]);
+  }, [primaryChannel, uid, channels.join("|"), localVideoId, remoteVideoId, refreshAggregate, sessionToken, videhCallerId, callId, negotiateBump]);
 
   return {
     joined,
@@ -319,6 +435,7 @@ export function useVidehCall(
     hasRemoteVideo,
     remoteUid: null,
     remotePeers: [],
+    screenSharing,
     toggleMute: () => {
       localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = muted; });
       setMuted((m) => !m);
@@ -326,6 +443,40 @@ export function useVidehCall(
     toggleCamera: () => {
       localStreamRef.current?.getVideoTracks().forEach((track) => { track.enabled = cameraOff; });
       setCameraOff((c) => !c);
+    },
+    flipCamera: () => {
+      void (async () => {
+        const stream = localStreamRef.current;
+        if (!stream || !isVideoRef.current) return;
+        const current = stream.getVideoTracks()[0];
+        const settings = current?.getSettings?.() as MediaTrackSettings | undefined;
+        const nextFacing = settings?.facingMode === "environment" ? "user" : "environment";
+        const { buildCallMediaConstraints, getCallMediaSettings } = await import("@/lib/callMediaSettings");
+        const { lowDataMode } = await getCallMediaSettings();
+        const constraints = buildCallMediaConstraints(true, lowDataMode, nextFacing);
+        try {
+          const fresh = await navigator.mediaDevices.getUserMedia(constraints as MediaStreamConstraints);
+          const newVideo = fresh.getVideoTracks()[0];
+          if (!newVideo) return;
+          if (current) {
+            stream.removeTrack(current);
+            current.stop();
+          }
+          stream.addTrack(newVideo);
+          cameraVideoTrackRef.current = newVideo;
+          for (const pc of pcsRef.current.values()) {
+            const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+            if (sender) await sender.replaceTrack(newVideo);
+          }
+          const el = document.getElementById(localVideoId) as HTMLVideoElement | null;
+          if (el) {
+            el.srcObject = stream;
+            void el.play().catch(() => {});
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
     },
     toggleSpeaker: () => {
       setSpeakerOn((s) => {
@@ -356,6 +507,7 @@ export function useVidehCall(
       const screenTrack = screenStream?.getVideoTracks()[0];
       if (!screenTrack) return false;
       screenSharingRef.current = true;
+      setScreenSharing(true);
       for (const pc of pcsRef.current.values()) {
         const sender = pc.getSenders().find((s) => s.track?.kind === "video");
         if (sender) await sender.replaceTrack(screenTrack);
@@ -368,6 +520,7 @@ export function useVidehCall(
       screenTrack.onended = () => {
         void stopScreenShareTracks();
         screenSharingRef.current = false;
+        setScreenSharing(false);
         const cam = cameraVideoTrackRef.current;
         if (cam) {
           for (const pc of pcsRef.current.values()) {
@@ -383,6 +536,7 @@ export function useVidehCall(
       if (!screenSharingRef.current) return;
       await stopScreenShareTracks();
       screenSharingRef.current = false;
+      setScreenSharing(false);
       const cam = cameraVideoTrackRef.current;
       if (!cam) return;
       for (const pc of pcsRef.current.values()) {

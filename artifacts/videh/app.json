@@ -2,7 +2,7 @@
   "expo": {
     "name": "Videh",
     "slug": "videh",
-    "version": "1.0.24",
+    "version": "1.0.25",
     "orientation": "portrait",
     "icon": "./assets/images/videh_icon_foreground.png",
     "scheme": "videh",
@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 101,
+      "versionCode": 102,
       "androidStatusBar": {
         "backgroundColor": "#00A884",
         "barStyle": "light-content",
@@ -112,6 +112,7 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MICROPHONE",
         "android.permission.FOREGROUND_SERVICE_PHONE_CALL",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION",
         "android.permission.MANAGE_OWN_CALLS",
         "android.permission.READ_PHONE_NUMBERS",
         "android.permission.BIND_TELECOM_CONNECTION_SERVICE",
@@ -221,6 +222,7 @@
       "./plugins/withIncomingCallAndroid.js",
       "@config-plugins/react-native-callkeep",
       "./plugins/withVidehCallPip.js",
+      "./plugins/withVidehScreenShare.js",
       "./plugins/withVidehPipModule.js",
       [
         "expo-location",

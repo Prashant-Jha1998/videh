@@ -62,7 +62,7 @@ import { VidehVoiceMic } from "@/components/VidehVoiceMic";
 import { CHAT_EMOJI_PANEL_HEIGHT, ChatEmojiPanel } from "@/components/ChatEmojiPanel";
 import type { GifMediaItem } from "@/lib/chatGifApi";
 import { uploadRemoteGifOrSticker } from "@/lib/sendChatGifSticker";
-import { ChatMessageText } from "@/components/ChatMessageText";
+import { ChatCompactMessageText, ChatMessageText } from "@/components/ChatMessageText";
 import { DocumentMessageBubble } from "@/components/DocumentMessageBubble";
 import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/chatMessageText";
 import { ContactMessageBubble } from "@/components/ContactMessageBubble";
@@ -1221,7 +1221,7 @@ export default function ChatScreen() {
         messagePollInFlightRef.current = true;
         loadMessages(chatId).finally(() => { messagePollInFlightRef.current = false; });
       };
-      const msgTimer = setInterval(() => pollMessages(false), 10000);
+      const msgTimer = setInterval(() => pollMessages(false), 5000);
       void pollMessages(true);
       void pollTyping();
       const typingTimer = setInterval(pollTyping, 4000);
@@ -1840,7 +1840,8 @@ export default function ChatScreen() {
   }, []);
 
   const { keyboardVisible, keyboardHeight } = useChatKeyboard();
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: screenWidth, height: windowHeight } = useWindowDimensions();
+  const bubbleMaxWidth = screenWidth * 0.82;
   const prevKeyboardVisibleRef = useRef(false);
   const prevWindowHeightRef = useRef(windowHeight);
   const emojiPanelOpenRef = useRef(false);
@@ -2751,7 +2752,7 @@ export default function ChatScreen() {
           </View>
         )}
 
-        <View style={styles.bubbleTailWrap}>
+        <View style={[styles.bubbleTailWrap, { maxWidth: bubbleMaxWidth }]}>
           <View
             style={[
               styles.bubble,
@@ -2973,26 +2974,20 @@ export default function ChatScreen() {
               onCall={(phone) => { Linking.openURL(`tel:${phone}`).catch(() => {}); }}
             />
           ) : compactTextBubble ? (
-            <View style={styles.textMetaInlineRow}>
-              <ChatMessageText
-                text={item.text}
-                linkColor={readMoreLinkColor}
-                style={[
-                  styles.msgText,
-                  styles.msgTextInline,
-                  { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 20 * chatFontScale },
-                ]}
-              />
-              <View style={styles.msgMetaInline}>
-                {item.isEdited ? (
-                  <Text style={[styles.editedLabel, { color: metaTextColor }]}>edited </Text>
-                ) : null}
-                <Text style={[styles.msgTime, styles.msgTimeInline, { color: metaTextColor }]}>
-                  {formatChatBubbleTime(item.timestamp)}
-                </Text>
-                {isMe ? <TickIcon status={item.status} color={metaTextColor} /> : null}
-              </View>
-            </View>
+            <ChatCompactMessageText
+              text={item.text}
+              time={formatChatBubbleTime(item.timestamp)}
+              isMe={isMe}
+              status={item.status}
+              isEdited={item.isEdited}
+              timeColor={metaTextColor}
+              linkColor={readMoreLinkColor}
+              style={[
+                styles.msgText,
+                styles.msgTextCompact,
+                { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 20 * chatFontScale },
+              ]}
+            />
           ) : (
             <>
               <ChatMessageText
@@ -4005,7 +4000,7 @@ export default function ChatScreen() {
           keyExtractor={(row) => {
             if (row.rowType === "date") return row.id;
             const m = row.message;
-            return m.id.startsWith("tmp_") ? `${m.id}-${m.timestamp}` : m.id;
+            return m.stableListKey ?? m.id;
           }}
           renderItem={renderChatListRow}
           contentContainerStyle={[
@@ -4648,30 +4643,12 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   bubbleCompact: {
-    paddingHorizontal: 7,
-    paddingTop: 5,
-    paddingBottom: 4,
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    paddingBottom: 6,
   },
-  textMetaInlineRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "flex-end",
-    maxWidth: "100%",
-  },
-  msgTextInline: {
-    marginRight: 4,
-    paddingRight: 2,
-  },
-  msgMetaInline: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 3,
-    marginBottom: 1,
-    flexShrink: 0,
-  },
-  msgTimeInline: {
-    includeFontPadding: false,
+  msgTextCompact: {
+    flexShrink: 1,
   },
   /** Bottom corners even; SVG tail sits at corner */
   bubbleWithTailShape: { borderBottomLeftRadius: 10, borderBottomRightRadius: 10 },
@@ -4701,7 +4678,12 @@ const styles = StyleSheet.create({
   replyStripTextCol: { minWidth: 0, flexShrink: 1 },
   replyWho: { fontSize: 12.5, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
   replyText: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 17 },
-  msgText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
+  msgText: {
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 21,
+    ...(Platform.OS === "android" ? { includeFontPadding: false } : {}),
+  },
   msgImage: { width: W * 0.62, height: W * 0.62, borderRadius: 12 },
   imageFallbackBg: { backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 8 },
   imageFallbackText: { color: "#fff", fontSize: 13, fontFamily: "Inter_600SemiBold" },
@@ -4880,20 +4862,36 @@ const styles = StyleSheet.create({
   contactCallBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#00A88420", alignItems: "center", justifyContent: "center" },
   linkPreview: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, paddingTop: 4, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },
   linkText: { flex: 1, fontSize: 12, fontFamily: "Inter_400Regular" },
-  msgMeta: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 2 },
+  msgMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 3,
+    marginTop: 2,
+    alignSelf: "stretch",
+    flexShrink: 0,
+    minHeight: 16,
+  },
   msgMetaCall: { marginTop: 2, paddingRight: 2 },
   msgMetaOnMedia: {
     position: "absolute",
     right: 6,
     bottom: 6,
     marginTop: 0,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
     borderRadius: 10,
     backgroundColor: "rgba(0,0,0,0.45)",
+    flexShrink: 0,
+    maxWidth: "92%",
   },
   editedLabel: { fontSize: 10, fontFamily: "Inter_400Regular", fontStyle: "italic" },
-  msgTime: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  msgTime: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 15,
+    ...(Platform.OS === "android" ? { includeFontPadding: false } : {}),
+  },
   deletedRowWa: {
     flexDirection: "row",
     alignItems: "center",

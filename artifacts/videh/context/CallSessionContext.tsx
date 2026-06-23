@@ -98,10 +98,13 @@ type CallSessionContextValue = {
   acceptIncoming: (callInfo?: IncomingCallInfo) => Promise<void>;
   declineIncoming: (declineMessage?: string) => Promise<void>;
   minimizeCall: () => void;
+  /** Keep call alive when user leaves the call screen (back, chat, other app). */
+  autoMinimizeIfActive: () => void;
   returnToCallScreen: () => void;
   endCall: () => Promise<void>;
   toggleMute: () => void;
   toggleCamera: () => void;
+  flipCamera: () => void;
   toggleSpeaker: () => void;
   addParticipants: (userIds: number[]) => Promise<{ added: number; busy: number }>;
   inviteeUserIds: number[];
@@ -114,6 +117,7 @@ type CallSessionContextValue = {
   endHeldCall: () => Promise<void>;
   shareScreen: () => Promise<boolean>;
   stopScreenShare: () => Promise<void>;
+  screenSharing: boolean;
   callOutcome: CallOutcome | null;
   outcomeSnapshot: { contactName: string; chatId: string; isVideo: boolean } | null;
   dismissCallOutcome: () => void;
@@ -803,6 +807,15 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (router.canGoBack()) router.back();
   }, [router]);
 
+  const autoMinimizeIfActive = useCallback(() => {
+    if (endingCallRef.current) return;
+    setSession((prev) => {
+      if (!prev?.callId || prev.ringing || prev.onHold) return prev;
+      if (prev.minimized) return prev;
+      return { ...prev, minimized: true };
+    });
+  }, []);
+
   const addParticipants = useCallback(async (userIds: number[]) => {
     if (!session?.callId || !session.engineActive) {
       throw new Error("Start or join the call before adding people.");
@@ -1066,10 +1079,12 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         });
         return;
       }
-      if (action !== "media_type") return;
-      const raw = payload as { type?: string; payload?: { type?: string } };
-      const nextVideo = (raw.type ?? raw.payload?.type) === "video";
-      setSession((prev) => (prev ? { ...prev, isVideo: nextVideo } : prev));
+      if (action === "media_type") {
+        if (!callId || sessionCallIdRef.current !== callId) return;
+        const nextVideo = signal.type === "video";
+        setSession((prev) => (prev ? { ...prev, isVideo: nextVideo } : prev));
+        return;
+      }
     });
     return unsub;
   }, [handleServerCallEnded, userId, bumpNegotiation]);
@@ -1080,13 +1095,20 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const switchCallMediaType = useCallback(
     async (video: boolean) => {
       if (!session?.callId || !user?.dbId) return;
-      await webrtcFetch(`/calls/${session.callId}/media-type`, user.sessionToken, {
-        method: "POST",
-        body: JSON.stringify({ type: video ? "video" : "audio" }),
-      }).catch(() => {});
-      setSession((prev) => (prev ? { ...prev, isVideo: video } : prev));
+      if (session.isVideo === video) return;
+      try {
+        const res = await webrtcFetch(`/calls/${session.callId}/media-type`, user.sessionToken, {
+          method: "POST",
+          body: JSON.stringify({ type: video ? "video" : "audio" }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { success?: boolean };
+        if (!res.ok || !data.success) return;
+        setSession((prev) => (prev ? { ...prev, isVideo: video } : prev));
+      } catch {
+        /* ignore */
+      }
     },
-    [session?.callId, user?.sessionToken],
+    [session?.callId, session?.isVideo, user?.dbId, user?.sessionToken],
   );
 
   const setInCallAudioRoute = useCallback(
@@ -1149,10 +1171,12 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       acceptIncoming,
       declineIncoming,
       minimizeCall,
+      autoMinimizeIfActive,
       returnToCallScreen,
       endCall,
       toggleMute: () => call.toggleMute(),
       toggleCamera: () => call.toggleCamera(),
+      flipCamera: () => call.flipCamera(),
       toggleSpeaker: () => call.toggleSpeaker(),
       addParticipants,
       inviteeUserIds: onCallUserIds,
@@ -1165,6 +1189,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       endHeldCall,
       shareScreen: () => call.shareScreen(),
       stopScreenShare: () => call.stopScreenShare(),
+      screenSharing: call.screenSharing,
       callOutcome,
       outcomeSnapshot,
       dismissCallOutcome,
@@ -1187,6 +1212,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       acceptIncoming,
       declineIncoming,
       minimizeCall,
+      autoMinimizeIfActive,
       returnToCallScreen,
       endCall,
       addParticipants,

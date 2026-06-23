@@ -2,7 +2,7 @@ import * as Font from "expo-font";
 import * as Notifications from "expo-notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Linking from "expo-linking";
-import { type Href, Stack, useRouter } from "expo-router";
+import { type Href, Stack, usePathname, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform } from "react-native";
@@ -130,6 +130,7 @@ const queryClient = new QueryClient({
 function RootLayoutNav() {
   const { isAuthenticated, isInitialized, user, chats, markAsRead, muteChat, sendMessage, loadMessages } = useApp();
   const router = useRouter();
+  const pathname = usePathname();
   const {
     session: activeCallSession,
     duration: callDuration,
@@ -153,6 +154,14 @@ function RootLayoutNav() {
   const incomingRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [incomingCall, setIncomingCall] = useState<IncomingCallInfo | null>(null);
   const [callWaiting, setCallWaiting] = useState<IncomingCallInfo | null>(null);
+
+  const isOnCallScreen = Boolean(pathname?.includes("/call/"));
+  const showOngoingCallBanner = Boolean(
+    activeCallSession?.callId
+    && !activeCallSession.ringing
+    && !activeCallSession.onHold
+    && !isOnCallScreen,
+  );
 
   const clearIncomingAutoEnd = useCallback(() => {
     if (incomingRingTimerRef.current) {
@@ -1004,7 +1013,7 @@ function RootLayoutNav() {
           }}
         />
       ) : null}
-      {activeCallSession?.minimized && activeCallSession.engineActive && !activeCallSession.ringing ? (
+      {showOngoingCallBanner && activeCallSession ? (
         <OngoingCallBanner
           contactName={activeCallSession.contactName}
           isVideo={activeCallSession.isVideo}
