@@ -51,11 +51,6 @@ import {
   type ChatMessageCacheStore,
 } from "@/lib/chatMessageCache";
 import {
-  cachedRowToChat,
-  loadChatListCache,
-  schedulePersistChatListCache,
-} from "@/lib/chatListCache";
-import {
   chatClearCutoff,
   loadChatDeletedAtMap,
   loadHiddenChatIds,
@@ -417,7 +412,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const userRef = useRef<UserProfile | null>(null);
   userRef.current = user;
   const refreshInFlightRef = useRef({ chats: false, statuses: false, calls: false });
-  const chatRefreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const liveLocationTickingRef = useRef(false);
   const activeChatIdRef = useRef<string | null>(null);
   const clearedHistoryAtRef = useRef<number>(0);
@@ -650,25 +644,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const loadChats = useCallback(async (dbUserId: number) => {
     try {
-      const data = await api(`/chats/user/${dbUserId}`) as { success: boolean; chats?: any[] };
-      if (!data.success || !Array.isArray(data.chats)) return;
+      const data = await api(`/chats/user/${dbUserId}`) as { success: boolean; chats: any[] };
+      if (!data.success || !data.chats) return;
       const mapped = mapDbChats(data.chats).filter(
         (c) => Boolean(c.lastMessageTime) || Boolean(c.lastMessage),
       );
-      if (mapped.length === 0) {
-        setChats((prev) => (prev.length > 0 ? prev : []));
-        return;
-      }
       await restoreHiddenChatsWithNewActivity(
         mapped
           .filter((c) => typeof c.lastMessageTime === "number" && c.lastMessageTime > 0)
           .map((c) => ({ id: c.id, lastMessageTime: c.lastMessageTime })),
       );
-      let nextChats: Chat[] = [];
-      setChats((prev) => {
-        const prevById = new Map(prev.map((c) => [c.id, c]));
-        const merged = mapped.map((newChat) => {
-          const old = prevById.get(newChat.id);
+      setChats((prev) =>
+        mapped.map((newChat) => {
+          const old = prev.find((c) => c.id === newChat.id);
           const cached = messageCacheStoreRef.current[String(newChat.id)] as Message[] | undefined;
           const rawMessages =
             old?.messages?.length
@@ -687,21 +675,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             isMuted: newChat.isMuted ?? old?.isMuted,
             isArchived: newChat.isArchived ?? old?.isArchived,
           });
-        });
-        const mergedIds = new Set(merged.map((c) => c.id));
-        const staleGraceMs = 5 * 60_000;
-        const now = Date.now();
-        const keepMissing = prev.filter((c) => {
-          if (mergedIds.has(c.id)) return false;
-          const lastAt = c.lastMessageTime ?? 0;
-          return lastAt > now - staleGraceMs || (c.messages?.length ?? 0) > 0;
-        });
-        nextChats = [...merged, ...keepMissing.map((c) => maskListFieldsIfCleared(c))];
-        return nextChats;
-      });
-      if (nextChats.length > 0) {
-        schedulePersistChatListCache(dbUserId, nextChats);
-      }
+        }),
+      );
       const prefetchIds = mapped
         .slice()
         .sort((a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0))
@@ -782,10 +757,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setIsAuthenticated(true);
           if (parsed.dbId) {
             messageCacheStoreRef.current = await loadChatMessageCache(parsed.dbId);
-            const listCache = await loadChatListCache(parsed.dbId);
-            if (listCache.length > 0) {
-              setChats(listCache.map(cachedRowToChat));
-            }
             await reloadChatListDeleteState(parsed.dbId);
             loadChats(parsed.dbId);
             loadCallLogs(parsed.dbId);
@@ -1138,8 +1109,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       setChats((prev) => {
         const prevChat = prev.find((c) => String(c.id) === String(chatId));
-        const prevMsgs = prevChat?.messages ?? [];
-        const prevById = new Map(prevMsgs.map((pm) => [pm.id, pm]));
+        const prevById = new Map((prevChat?.messages ?? []).map((pm) => [pm.id, pm]));
 
         const msgs: Message[] = rawMessages.map((m: any) => {
           const id = String(m.id);
@@ -1161,6 +1131,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         return prev.map((c) => {
           if (String(c.id) !== String(chatId)) return c;
+          const prevMsgs = c.messages ?? [];
           const prevStable = prevMsgs.filter((m) => !m.id.startsWith("hint_"));
           const hasPendingHints = prevMsgs.some((m) => m.id.startsWith("hint_"));
           if (
@@ -1320,13 +1291,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       refreshInFlightRef.current.chats = true;
       loadChats(uid).finally(() => { refreshInFlightRef.current.chats = false; });
     };
-    const scheduleChatsRefresh = () => {
-      if (chatRefreshDebounceRef.current) clearTimeout(chatRefreshDebounceRef.current);
-      chatRefreshDebounceRef.current = setTimeout(() => {
-        chatRefreshDebounceRef.current = null;
-        runChats();
-      }, 1500);
-    };
     const runStatuses = () => {
       const uid = userRef.current?.dbId;
       if (!uid || refreshInFlightRef.current.statuses) return;
@@ -1380,7 +1344,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         return;
       }
-      scheduleChatsRefresh();
+      runChats();
       try {
         if (!raw) return;
         const parsed = JSON.parse(raw) as {
@@ -1501,7 +1465,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const callTimer = setInterval(runCalls, 45000);
     return () => {
       detachStream();
-      if (chatRefreshDebounceRef.current) clearTimeout(chatRefreshDebounceRef.current);
       clearInterval(chatTimer);
       clearInterval(activeChatMsgTimer);
       clearInterval(statusTimer);

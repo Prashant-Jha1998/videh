@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v27-tick-fix-screen-share"
+        "key": "apk-release-v28-tick-overlay-fix"
       }
     },
     "production": {

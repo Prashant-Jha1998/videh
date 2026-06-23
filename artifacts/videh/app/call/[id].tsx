@@ -377,12 +377,7 @@ export default function CallScreen() {
     );
   }
 
-  const toggleCallMediaType = useCallback(() => {
-    void switchCallMediaType(!isVideo);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [isVideo, switchCallMediaType]);
-
-  const renderLocalVideo = (style: object) =>
+  const renderLocalVideo = (style: object, mirror = true) =>
     !cameraOff && (localStreamUrl || joined) ? (
       <VidehLocalView nativeId={localVideoId} streamUrl={localStreamUrl} style={style} />
     ) : null;
@@ -395,59 +390,6 @@ export default function CallScreen() {
         <Text style={styles.callStatus}>{hasRemoteVideo && joined ? "Connecting video…" : displayStatus}</Text>
       </View>
     );
-
-  // ── WhatsApp-style 1:1 connected AUDIO call ───────────────────────────────
-  if (isOneToOne && !isVideo && !outgoingRinging && (joined || callAnswered)) {
-    return (
-      <View style={[styles.waRoot, { paddingTop: topPad, paddingBottom: insets.bottom + 28 }]}>
-        <TouchableOpacity style={[styles.waCornerBtn, { alignSelf: "flex-start", marginLeft: 12, marginBottom: 8 }]} onPress={minimizeCall}>
-          <Ionicons name="chevron-down" size={28} color="rgba(255,255,255,0.85)" />
-        </TouchableOpacity>
-        <View style={styles.waTop}>
-          <Text style={styles.waName}>{name}</Text>
-          <Text style={styles.waStatus}>{displayStatus}</Text>
-        </View>
-        <View style={styles.waCenter}>
-          {contactAvatar ? (
-            <Image source={{ uri: contactAvatar }} style={styles.waAvatarImg} contentFit="cover" />
-          ) : (
-            <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: pulse }] }]}>
-              <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
-                <Text style={styles.avatarText}>{initials}</Text>
-              </View>
-            </Animated.View>
-          )}
-        </View>
-        <View style={[styles.waBottomBar, { marginBottom: 8 }]}>
-          <TouchableOpacity
-            style={[styles.waBarBtn, muted && styles.waBarBtnActive]}
-            onPress={() => { toggleMute(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-          >
-            <Ionicons name={muted ? "mic-off" : "mic"} size={24} color={muted ? "#111" : "#fff"} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.waBarBtn, speakerOn && styles.waBarBtnActive]}
-            onPress={() => {
-              if (Platform.OS === "web") toggleSpeaker();
-              else pickAudioRoute();
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            }}
-          >
-            <Ionicons name={speakerOn ? "volume-high" : "volume-medium"} size={24} color={speakerOn ? "#111" : "#fff"} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.waBarBtn}
-            onPress={toggleCallMediaType}
-          >
-            <Ionicons name="videocam" size={24} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.waEndBtn} onPress={() => void endCall()} activeOpacity={0.85}>
-            <Ionicons name="call" size={26} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
 
   // ── WhatsApp-style 1:1 connected video call ───────────────────────────────
   if (isVideo && isOneToOne && !outgoingRinging) {
@@ -514,12 +456,6 @@ export default function CallScreen() {
           <View style={[styles.waBottomBar, { marginBottom: insets.bottom + 8 }]}>
             <TouchableOpacity style={styles.waBarBtn} onPress={minimizeCall}>
               <Ionicons name="ellipsis-horizontal" size={22} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.waBarBtn}
-              onPress={toggleCallMediaType}
-            >
-              <Ionicons name="call" size={22} color="#fff" />
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.waBarBtn, cameraOff && styles.waBarBtnActive]}
@@ -673,7 +609,10 @@ export default function CallScreen() {
             <ControlBtn
               icon={isVideo ? "call" : "videocam"}
               label={isVideo ? "Voice only" : "Video"}
-              onPress={toggleCallMediaType}
+              onPress={() => {
+                void switchCallMediaType(!isVideo);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
               active={false}
             />
           ) : null}

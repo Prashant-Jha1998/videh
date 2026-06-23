@@ -62,6 +62,8 @@ export function ChatCompactMessageText({
   linkColor = "#027EB5",
 }: CompactProps) {
   const { ticks, tickColor } = tickSuffix(isMe, status);
+  const editedPart = isEdited ? "edited " : "";
+  const reserve = `${editedPart}${time}${ticks}`;
   const timeStyle: TextStyle = {
     fontSize: 11,
     lineHeight: 15,
@@ -71,37 +73,37 @@ export function ChatCompactMessageText({
   };
 
   return (
-    <View style={styles.compactRow}>
-      <Text style={[style, ANDROID_TEXT_METRICS, styles.compactBody]}>
+    <View style={{ alignSelf: "flex-start", maxWidth: "100%" }}>
+      <Text style={[style, ANDROID_TEXT_METRICS]}>
         {renderMentionParts(text, linkColor)}
+        {/* Invisible suffix reserves width on the last line so meta does not clip. */}
+        <Text style={[timeStyle, { opacity: 0 }]} accessible={false} importantForAccessibility="no">
+          {" "}
+          {reserve}
+        </Text>
       </Text>
-      <Text style={[timeStyle, styles.compactMeta]}>
+      <View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          right: 0,
+          bottom: 0,
+          flexDirection: "row",
+          alignItems: "center",
+        }}
+      >
         {isEdited ? (
           <Text style={[timeStyle, { fontSize: 10, fontStyle: "italic" }]}>edited </Text>
         ) : null}
-        {time}
-        {ticks ? <Text style={{ color: tickColor ?? timeColor }}>{ticks}</Text> : null}
-      </Text>
+        <Text style={timeStyle}>
+          {" "}
+          {time}
+          {ticks ? <Text style={{ color: tickColor ?? timeColor }}>{ticks}</Text> : null}
+        </Text>
+      </View>
     </View>
   );
 }
-
-const styles = {
-  compactRow: {
-    flexDirection: "row" as const,
-    flexWrap: "wrap" as const,
-    alignItems: "flex-end" as const,
-    maxWidth: "100%" as const,
-  },
-  compactBody: {
-    flexShrink: 1,
-  },
-  compactMeta: {
-    flexShrink: 0,
-    marginLeft: 4,
-    paddingBottom: Platform.OS === "android" ? 1 : 0,
-  },
-};
 
 /** WhatsApp-style long message text with @mentions and Read more / Read less. */
 export function ChatMessageText({ text, style, linkColor = "#027EB5" }: Props) {

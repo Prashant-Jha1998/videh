@@ -1079,12 +1079,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         });
         return;
       }
-      if (action === "media_type") {
-        if (!callId || sessionCallIdRef.current !== callId) return;
-        const nextVideo = signal.type === "video";
-        setSession((prev) => (prev ? { ...prev, isVideo: nextVideo } : prev));
-        return;
-      }
+      if (action !== "media_type") return;
+      const raw = payload as { type?: string; payload?: { type?: string } };
+      const nextVideo = (raw.type ?? raw.payload?.type) === "video";
+      setSession((prev) => (prev ? { ...prev, isVideo: nextVideo } : prev));
     });
     return unsub;
   }, [handleServerCallEnded, userId, bumpNegotiation]);
@@ -1095,20 +1093,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const switchCallMediaType = useCallback(
     async (video: boolean) => {
       if (!session?.callId || !user?.dbId) return;
-      if (session.isVideo === video) return;
-      try {
-        const res = await webrtcFetch(`/calls/${session.callId}/media-type`, user.sessionToken, {
-          method: "POST",
-          body: JSON.stringify({ type: video ? "video" : "audio" }),
-        });
-        const data = (await res.json().catch(() => ({}))) as { success?: boolean };
-        if (!res.ok || !data.success) return;
-        setSession((prev) => (prev ? { ...prev, isVideo: video } : prev));
-      } catch {
-        /* ignore */
-      }
+      await webrtcFetch(`/calls/${session.callId}/media-type`, user.sessionToken, {
+        method: "POST",
+        body: JSON.stringify({ type: video ? "video" : "audio" }),
+      }).catch(() => {});
+      setSession((prev) => (prev ? { ...prev, isVideo: video } : prev));
     },
-    [session?.callId, session?.isVideo, user?.dbId, user?.sessionToken],
+    [session?.callId, user?.sessionToken],
   );
 
   const setInCallAudioRoute = useCallback(
