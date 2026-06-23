@@ -937,6 +937,7 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
         messageId: result.rows[0].id,
         content: content ?? "",
         type: type ?? "text",
+        mediaUrl: mediaUrl ?? result.rows[0].media_url ?? undefined,
         senderId,
         senderName,
       },

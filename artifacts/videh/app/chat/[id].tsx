@@ -16,11 +16,13 @@ import {
 } from "react-native-keyboard-controller";
 import { useChatKeyboard } from "@/hooks/useChatKeyboard";
 import { onChatMessageSignal } from "@/lib/chatMessageEvents";
+import { OPEN_CHAT_MESSAGE_POLL_MS } from "@/lib/chatRealtimePoll";
 import { runOnJS } from "react-native-reanimated";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Animated,
   Clipboard,
   BackHandler,
@@ -1221,13 +1223,16 @@ export default function ChatScreen() {
         messagePollInFlightRef.current = true;
         loadMessages(chatId).finally(() => { messagePollInFlightRef.current = false; });
       };
-      const msgTimer = setInterval(() => pollMessages(false), 10000);
+      const msgTimer = setInterval(() => pollMessages(false), OPEN_CHAT_MESSAGE_POLL_MS);
       void pollMessages(true);
       void pollTyping();
       const typingTimer = setInterval(pollTyping, 4000);
       const unsubMsgSignal = onChatMessageSignal((signal) => {
         if (String(signal.chatId) !== String(chatId)) return;
-        // Incoming messages update `messages.length`; scroll only when following (see messages effect).
+        pollMessages(true);
+      });
+      const appStateSub = AppState.addEventListener("change", (state) => {
+        if (state === "active") pollMessages(true);
       });
       const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
       const loadPresence = async () => {
@@ -1252,6 +1257,7 @@ export default function ChatScreen() {
 
       return () => {
         unsubMsgSignal();
+        appStateSub.remove();
         setActiveChatId(null);
         clearTyping(chatId);
         reportRemoteTyping(chatId, []);

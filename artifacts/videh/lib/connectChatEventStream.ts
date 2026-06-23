@@ -54,7 +54,7 @@ export function connectChatEventStream(
   const scheduleReconnect = () => {
     if (cancelled) return;
     if (retryTimer) clearTimeout(retryTimer);
-    retryTimer = setTimeout(connect, 1500);
+    retryTimer = setTimeout(connect, 800);
   };
 
   const connect = () => {

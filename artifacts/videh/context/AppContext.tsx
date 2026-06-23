@@ -5,6 +5,11 @@ import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
 import { agentDebugLog } from "@/lib/agentDebugLog";
 import { albumSendLog } from "@/lib/albumSendLog";
 import { connectChatEventStream } from "@/lib/connectChatEventStream";
+import {
+  ACTIVE_CHAT_MESSAGE_BACKUP_POLL_MS,
+  MESSAGE_HINT_API_DELAY_MS,
+  MESSAGE_HINT_API_RETRY_MS,
+} from "@/lib/chatRealtimePoll";
 import { emitChatMessageSignal, onChatMessageSignal, type ChatMessageSignal } from "@/lib/chatMessageEvents";
 import {
   deliverPremiumChatMessageNotification,
@@ -1010,7 +1015,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const mediaUrl = signal.mediaUrl?.trim();
     const hintType = normalizeMessageType(signal.messageType, text ?? "", mediaUrl);
     if (!serverMessageId && !text && !mediaUrl) return;
-    if (serverMessageId && !text && !mediaUrl) return;
+
+    const hintPreviewText =
+      text
+      || inferChatListPreview(hintType, "", mediaUrl)
+      || (hintType === "image"
+        ? "📷 Photo"
+        : hintType === "video"
+          ? "Video"
+          : hintType === "audio"
+            ? "Voice message"
+            : hintType === "document"
+              ? "Document"
+              : "Message");
 
     setChats((prev) =>
       prev.map((c) => {
@@ -1040,7 +1057,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         const hintMsg: Message = {
           id: serverMessageId ? `hint_${serverMessageId}` : `hint_t${Date.now()}`,
-          text: text ?? (hintType === "image" ? "📷 Photo" : hintType === "video" ? "Video" : ""),
+          text: hintPreviewText,
           timestamp: Date.now(),
           senderId,
           senderName: signal.senderName,
@@ -1186,15 +1203,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /** Defer API refresh so the server row exists before we merge (avoids hint flicker). */
   const scheduleLoadMessagesAfterHint = useCallback(
-    (chatId: string, delayMs = 450) => {
+    (chatId: string) => {
       const key = String(chatId);
       const pending = loadMessagesAfterHintTimersRef.current.get(key);
       if (pending) clearTimeout(pending);
       const timer = setTimeout(() => {
         loadMessagesAfterHintTimersRef.current.delete(key);
         void loadMessages(chatId);
-      }, delayMs);
+      }, MESSAGE_HINT_API_DELAY_MS);
       loadMessagesAfterHintTimersRef.current.set(key, timer);
+
+      const retryKey = `${key}:retry`;
+      const pendingRetry = loadMessagesAfterHintTimersRef.current.get(retryKey);
+      if (pendingRetry) clearTimeout(pendingRetry);
+      const retryTimer = setTimeout(() => {
+        loadMessagesAfterHintTimersRef.current.delete(retryKey);
+        void loadMessages(chatId);
+      }, MESSAGE_HINT_API_RETRY_MS);
+      loadMessagesAfterHintTimersRef.current.set(retryKey, retryTimer);
     },
     [loadMessages],
   );
@@ -1414,18 +1440,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         /* ignore malformed SSE payload */
       }
     };
-    const detachStream = connectChatEventStream(u.dbId, authSessionToken, onChatEvent);
+    let detachStream: (() => void) | null = null;
+    const connectStream = () => {
+      const uid = userRef.current?.dbId;
+      if (!uid) return;
+      detachStream?.();
+      detachStream = connectChatEventStream(uid, authSessionToken, onChatEvent);
+    };
+    connectStream();
+
+    const refreshOpenChat = () => {
+      const cid = activeChatIdRef.current;
+      if (cid) void loadMessages(cid);
+    };
+
     /** SSE delivers instantly; polling is backup only (reduces API load at scale). */
     const chatTimer = setInterval(runChats, 15000);
     const activeChatMsgTimer = setInterval(() => {
       const cid = activeChatIdRef.current;
       if (!cid) return;
       void loadMessages(cid);
-    }, 30000);
+    }, ACTIVE_CHAT_MESSAGE_BACKUP_POLL_MS);
     const statusTimer = setInterval(runStatuses, 30000);
     const callTimer = setInterval(runCalls, 45000);
+    const appStateSub = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      connectStream();
+      runChats();
+      refreshOpenChat();
+    });
     return () => {
-      detachStream();
+      detachStream?.();
+      appStateSub.remove();
       clearInterval(chatTimer);
       clearInterval(activeChatMsgTimer);
       clearInterval(statusTimer);
