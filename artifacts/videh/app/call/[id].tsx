@@ -1,19 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
-  BackHandler,
   PanResponder,
   Platform,
-  Pressable,
   Share,
   StyleSheet,
   Text,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from "react-native";
 import { Image } from "expo-image";
@@ -28,7 +25,6 @@ import type { InCallAudioRoute } from "@/lib/inCallAudio";
 import { phaseLabel } from "@/lib/callState";
 import { createCallLink } from "@/lib/callLinks";
 import { isScreenShareSupported } from "@/lib/screenShare";
-import { useCallCameraPreview } from "@/hooks/useCallCameraPreview";
 
 export default function CallScreen() {
   const insets = useSafeAreaInsets();
@@ -65,11 +61,9 @@ export default function CallScreen() {
     acceptedCount,
     ringingCount,
     minimizeCall,
-    autoMinimizeIfActive,
     endCall,
     toggleMute,
     toggleCamera,
-    flipCamera,
     toggleSpeaker,
     addParticipants,
     inviteeUserIds,
@@ -78,7 +72,6 @@ export default function CallScreen() {
     setInCallAudioRoute,
     shareScreen,
     stopScreenShare,
-    screenSharing,
     callOutcome,
     outcomeSnapshot,
     dismissCallOutcome,
@@ -88,26 +81,7 @@ export default function CallScreen() {
 
   const [addPeopleOpen, setAddPeopleOpen] = useState(false);
   const [addingPeople, setAddingPeople] = useState(false);
-
-  const toggleScreenShare = useCallback(async () => {
-    if (screenSharing) {
-      await stopScreenShare();
-      return;
-    }
-    if (!isScreenShareSupported()) {
-      Alert.alert(
-        "Screen share",
-        Platform.OS === "web"
-          ? "Your browser blocked screen sharing."
-          : "Screen sharing is not supported on this device.",
-      );
-      return;
-    }
-    const ok = await shareScreen();
-    if (!ok) {
-      Alert.alert("Screen share", "Could not start screen sharing. Try again.");
-    }
-  }, [screenSharing, shareScreen, stopScreenShare]);
+  const [screenSharing, setScreenSharing] = useState(false);
 
   // FIX: Stable callback reference for initFromRoute so the effect below does
   // not re-run on every render — only when actual route params change.
@@ -119,81 +93,13 @@ export default function CallScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id, params.callId, params.channel, params.incoming, params.ringing, params.callerId]);
 
-  useFocusEffect(
-    useCallback(() => {
-      return () => {
-        autoMinimizeIfActive();
-      };
-    }, [autoMinimizeIfActive]),
-  );
-
-  useEffect(() => {
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      minimizeCall();
-      return true;
-    });
-    return () => sub.remove();
-  }, [minimizeCall]);
-
   const isVideo = session?.isVideo ?? params.type === "video";
   const name = session?.contactName ?? params.name ?? "Contact";
   const ringing = Boolean(session?.ringing);
   const incoming = session?.isIncoming ?? params.incoming === "1";
-  const isOneToOne = participantCount <= 2;
-  const outgoingRinging = !incoming && !joined && !callAnswered && !error;
-
-  const [mainVideoIsLocal, setMainVideoIsLocal] = useState(false);
-  const [controlsVisible, setControlsVisible] = useState(true);
-  const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const revealControlsRef = useRef<() => void>(() => {});
-  const { width: screenW } = useWindowDimensions();
-  const pipW = Math.round(Math.min(132, screenW * 0.34));
-  const pipH = Math.round(pipW * 1.33);
-
-  const { previewStreamUrl, flipPreviewCamera } = useCallCameraPreview(
-    outgoingRinging && isOneToOne && isVideo && !localStreamUrl,
-  );
-
-  const revealControls = useCallback(() => {
-    setControlsVisible(true);
-    if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
-    if (isVideo && isOneToOne && (joined || callAnswered)) {
-      hideControlsTimerRef.current = setTimeout(() => setControlsVisible(false), 5000);
-    }
-  }, [isVideo, isOneToOne, joined, callAnswered]);
-
-  revealControlsRef.current = revealControls;
-
-  useEffect(() => {
-    if (isVideo && isOneToOne && joined) revealControls();
-    return () => {
-      if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
-    };
-  }, [isVideo, isOneToOne, joined, revealControls]);
 
   const pulse = useRef(new Animated.Value(1)).current;
   const pipOffset = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
-
-  const pipResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => isVideo && (joined || callAnswered),
-        onMoveShouldSetPanResponder: () => isVideo && (joined || callAnswered),
-        onPanResponderGrant: () => {
-          pipOffset.setOffset({ x: (pipOffset.x as any)._value, y: (pipOffset.y as any)._value });
-          pipOffset.setValue({ x: 0, y: 0 });
-        },
-        onPanResponderMove: Animated.event([null, { dx: pipOffset.x, dy: pipOffset.y }], { useNativeDriver: false }),
-        onPanResponderRelease: (_, gesture) => {
-          pipOffset.flattenOffset();
-          if (Math.abs(gesture.dx) < 8 && Math.abs(gesture.dy) < 8) {
-            setMainVideoIsLocal((v) => !v);
-            revealControlsRef.current();
-          }
-        },
-      }),
-    [isVideo, joined, callAnswered, pipOffset],
-  );
 
   useEffect(() => {
     if (joined) return;
@@ -206,6 +112,18 @@ export default function CallScreen() {
     anim.start();
     return () => anim.stop();
   }, [joined, pulse]);
+
+  const pipResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: () => isVideo && joined,
+      onPanResponderGrant: () => {
+        pipOffset.setOffset({ x: (pipOffset.x as any)._value, y: (pipOffset.y as any)._value });
+        pipOffset.setValue({ x: 0, y: 0 });
+      },
+      onPanResponderMove: Animated.event([null, { dx: pipOffset.x, dy: pipOffset.y }], { useNativeDriver: false }),
+      onPanResponderRelease: () => pipOffset.flattenOffset(),
+    }),
+  ).current;
 
   const initials = (name ?? "?").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = (name ?? "?").charCodeAt(0) * 37 % 360;
@@ -255,6 +173,7 @@ export default function CallScreen() {
       ? `Ringing ${ringingCount} people...`
       : phaseLabel("outgoing_ringing", isVideo));
 
+  const isOneToOne = participantCount <= 2;
   const contactAvatar = useMemo(() => {
     const chatId = session?.chatId ?? params.id;
     const chat = chats.find((c) => String(c.id) === String(chatId));
@@ -281,6 +200,8 @@ export default function CallScreen() {
   if (ringing && incoming) {
     return null;
   }
+
+  const outgoingRinging = !incoming && !joined && !callAnswered && !error;
 
   // ── WhatsApp-style outgoing audio call screen ──────────────────────────────
   if (outgoingRinging && isOneToOne && !isVideo) {
@@ -310,202 +231,62 @@ export default function CallScreen() {
     );
   }
 
-  // ── WhatsApp-style outgoing VIDEO call (full-screen camera while ringing) ─
+  // ── WhatsApp-style outgoing VIDEO call waiting screen ─────────────────────
+  // Show avatar + "Calling…" instead of a blank black video surface.
   if (outgoingRinging && isOneToOne && isVideo) {
-    const activePreviewUrl = localStreamUrl ?? previewStreamUrl;
     return (
-      <View style={styles.waVideoRingRoot}>
-        {Platform.OS === "web" && previewStreamUrl && !localStreamUrl
-          ? React.createElement("video", {
-              id: "videh-call-preview",
-              autoPlay: true,
-              playsInline: true,
-              muted: true,
-              style: {
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                transform: "scaleX(-1)",
-              },
-            })
-          : activePreviewUrl ? (
-          <VidehLocalView streamUrl={activePreviewUrl} style={styles.waFullVideo} />
-        ) : (
-          <View style={[styles.waFullVideo, { backgroundColor: "#111" }]} />
-        )}
-        <View style={[styles.waVideoOverlay, { paddingTop: topPad, paddingBottom: insets.bottom + 12 }]}>
-          <View style={styles.waVideoTopCenter}>
-            <Text style={styles.waName}>{name}</Text>
-            <Text style={styles.waStatus}>{displayStatus}</Text>
-          </View>
-          <TouchableOpacity
-            style={[styles.waCornerBtn, styles.waFlipTopRight]}
-            onPress={() => {
-              if (localStreamUrl) flipCamera();
-              else flipPreviewCamera();
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            }}
-          >
-            <Ionicons name="camera-reverse-outline" size={24} color="#fff" />
-          </TouchableOpacity>
-          <View style={styles.waBottomBar}>
-            <TouchableOpacity
-              style={[styles.waBarBtn, muted && styles.waBarBtnActive]}
-              onPress={() => { toggleMute(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-            >
-              <Ionicons name={muted ? "mic-off" : "mic"} size={24} color={muted ? "#111" : "#fff"} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.waBarBtn, speakerOn && styles.waBarBtnActive]}
-              onPress={() => {
-                if (Platform.OS === "web") toggleSpeaker();
-                else pickAudioRoute();
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              }}
-            >
-              <Ionicons name={speakerOn ? "volume-high" : "volume-medium"} size={24} color={speakerOn ? "#111" : "#fff"} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.waEndBtn} onPress={() => void endCall()} activeOpacity={0.85}>
-              <Ionicons name="call" size={26} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
-            </TouchableOpacity>
-          </View>
+      <View style={[styles.waRoot, { paddingTop: topPad, paddingBottom: insets.bottom + 28 }]}>
+        <View style={styles.waTop}>
+          <Text style={styles.waName}>{name}</Text>
+          <Text style={styles.waStatus}>{displayStatus}</Text>
         </View>
-      </View>
-    );
-  }
-
-  const renderLocalVideo = (style: object, mirror = true) =>
-    !cameraOff && (localStreamUrl || joined) ? (
-      <VidehLocalView nativeId={localVideoId} streamUrl={localStreamUrl} style={style} />
-    ) : null;
-
-  const renderRemoteVideo = (style: object) =>
-    remoteStreamUrl ? (
-      <VidehRemoteView nativeId={remoteVideoId} streamUrl={remoteStreamUrl} style={style} />
-    ) : (
-      <View style={[style, styles.videoPlaceholder]}>
-        <Text style={styles.callStatus}>{hasRemoteVideo && joined ? "Connecting video…" : displayStatus}</Text>
-      </View>
-    );
-
-  // ── WhatsApp-style 1:1 connected video call ───────────────────────────────
-  if (isVideo && isOneToOne && !outgoingRinging) {
-    const pipShowsLocal = !mainVideoIsLocal;
-    const mainShowsLocal = mainVideoIsLocal;
-    return (
-      <Pressable style={styles.waVideoInCallRoot} onPress={revealControls}>
-        <View style={styles.waFullVideo}>
-          {mainShowsLocal ? renderLocalVideo(styles.waFullVideo) : renderRemoteVideo(styles.waFullVideo)}
-        </View>
-
-        {controlsVisible ? (
-          <View style={[styles.waVideoOverlay, { paddingTop: topPad, paddingBottom: insets.bottom + 8 }]} pointerEvents="box-none">
-            <View style={styles.waVideoTopRow}>
-              <TouchableOpacity style={styles.waCornerBtn} onPress={minimizeCall}>
-                <Ionicons name="chevron-down" size={26} color="#fff" />
-              </TouchableOpacity>
-              <View style={styles.waVideoTopCenter}>
-                <Text style={styles.waNameSm}>{name}</Text>
-                <Text style={styles.waStatusSm}>{displayStatus}</Text>
+        <View style={styles.waCenter}>
+          {contactAvatar ? (
+            <Animated.View style={{ transform: [{ scale: pulse }] }}>
+              <Image source={{ uri: contactAvatar }} style={styles.waAvatarImg} contentFit="cover" />
+            </Animated.View>
+          ) : (
+            <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: pulse }] }]}>
+              <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
+                <Text style={styles.avatarText}>{initials}</Text>
               </View>
-              {mainShowsLocal && !screenSharing ? (
-                <TouchableOpacity
-                  style={styles.waCornerBtn}
-                  onPress={() => {
-                    flipCamera();
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  }}
-                >
-                  <Ionicons name="camera-reverse-outline" size={22} color="#fff" />
-                </TouchableOpacity>
-              ) : (
-                <View style={{ width: 44 }} />
-              )}
-            </View>
+            </Animated.View>
+          )}
+          <View style={styles.encryptBadge}>
+            <Ionicons name="lock-closed" size={12} color="rgba(255,255,255,0.5)" />
+            <Text style={styles.encryptText}>End-to-end encrypted</Text>
           </View>
-        ) : null}
-
-        {!cameraOff && (localStreamUrl || joined || remoteStreamUrl) ? (
-          <Animated.View
-            style={[
-              styles.waPip,
-              { width: pipW, height: pipH, bottom: controlsVisible ? insets.bottom + 100 : insets.bottom + 24 },
-              { transform: pipOffset.getTranslateTransform() },
-            ]}
-            {...pipResponder.panHandlers}
-          >
-            {pipShowsLocal ? renderLocalVideo(styles.waPipFill) : renderRemoteVideo(styles.waPipFill)}
-            {pipShowsLocal && !screenSharing ? (
-              <TouchableOpacity
-                style={styles.waPipFlip}
-                onPress={() => {
-                  flipCamera();
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }}
-              >
-                <Ionicons name="camera-reverse-outline" size={18} color="#fff" />
-              </TouchableOpacity>
-            ) : null}
-          </Animated.View>
-        ) : null}
-
-        {controlsVisible ? (
-          <View style={[styles.waBottomBar, { marginBottom: insets.bottom + 8 }]}>
-            <TouchableOpacity style={styles.waBarBtn} onPress={minimizeCall}>
-              <Ionicons name="ellipsis-horizontal" size={22} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.waBarBtn, cameraOff && styles.waBarBtnActive]}
-              onPress={() => { toggleCamera(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-            >
-              <Ionicons name={cameraOff ? "videocam-off" : "videocam"} size={24} color={cameraOff ? "#111" : "#fff"} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.waBarBtn, screenSharing && styles.waBarBtnActive]}
-              onPress={() => {
-                void toggleScreenShare();
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              }}
-            >
-              <Ionicons
-                name={screenSharing ? "stop-circle-outline" : "desktop-outline"}
-                size={24}
-                color={screenSharing ? "#111" : "#fff"}
-              />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.waBarBtn, speakerOn && styles.waBarBtnActive]}
-              onPress={() => {
-                if (Platform.OS === "web") toggleSpeaker();
-                else pickAudioRoute();
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              }}
-            >
-              <Ionicons name={speakerOn ? "volume-high" : "volume-medium"} size={24} color={speakerOn ? "#111" : "#fff"} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.waBarBtn, muted && styles.waBarBtnActive]}
-              onPress={() => { toggleMute(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-            >
-              <Ionicons name={muted ? "mic-off" : "mic"} size={24} color={muted ? "#111" : "#fff"} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.waEndBtn} onPress={() => void endCall()} activeOpacity={0.85}>
-              <Ionicons name="call" size={26} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
-            </TouchableOpacity>
-          </View>
-        ) : null}
-      </Pressable>
+        </View>
+        {/* Show mute control while waiting so user can mute before answer */}
+        <View style={styles.outgoingVideoControls}>
+          <ControlBtn
+            icon={muted ? "mic-off" : "mic"}
+            label={muted ? "Unmute" : "Mute"}
+            onPress={() => { toggleMute(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+            active={muted}
+          />
+          <TouchableOpacity style={styles.endBtn} onPress={() => void endCall()} activeOpacity={0.85}>
+            <Ionicons name="call" size={28} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
+          </TouchableOpacity>
+          <ControlBtn
+            icon={speakerOn ? "volume-high" : "volume-medium"}
+            label="Audio"
+            onPress={() => {
+              if (Platform.OS === "web") toggleSpeaker();
+              else pickAudioRoute();
+            }}
+            active={speakerOn}
+          />
+        </View>
+      </View>
     );
   }
 
-  // ── In-call / connected screen (voice + conference) ─────────────────────────
+  // ── In-call / connected screen ─────────────────────────────────────────────
   return (
     <View style={[styles.container, { backgroundColor: isVideo ? "#0B141A" : "#1A1A2E", paddingTop: topPad, paddingBottom: insets.bottom + 30 }]}>
       <View style={styles.topBar}>
-        <TouchableOpacity style={styles.backBtn} onPress={minimizeCall} accessibilityLabel="Minimize call">
+        <TouchableOpacity style={styles.backBtn} onPress={minimizeCall}>
           <Ionicons name="chevron-down" size={28} color="rgba(255,255,255,0.8)" />
         </TouchableOpacity>
         {joined && !isOneToOne ? (
@@ -654,11 +435,27 @@ export default function CallScreen() {
           ) : null}
           {joined && isVideo ? (
             <ControlBtn
-              icon={screenSharing ? "stop-circle-outline" : "desktop-outline"}
+              icon="desktop-outline"
               label={screenSharing ? "Stop share" : "Share"}
               onPress={() => {
-                void toggleScreenShare();
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                void (async () => {
+                  if (screenSharing) {
+                    await stopScreenShare();
+                    setScreenSharing(false);
+                    return;
+                  }
+                  if (!isScreenShareSupported()) {
+                    Alert.alert(
+                      "Screen share",
+                      Platform.OS === "web"
+                        ? "Your browser blocked screen sharing."
+                        : "Screen sharing is available on Videh Web for now.",
+                    );
+                    return;
+                  }
+                  const ok = await shareScreen();
+                  if (ok) setScreenSharing(true);
+                })();
               }}
               active={screenSharing}
             />
@@ -741,80 +538,6 @@ const styles = StyleSheet.create({
     width: 168,
     height: 168,
     borderRadius: 84,
-  },
-  waVideoRingRoot: { flex: 1, backgroundColor: "#000" },
-  waVideoInCallRoot: { flex: 1, backgroundColor: "#000" },
-  waFullVideo: { ...StyleSheet.absoluteFillObject, backgroundColor: "#111" },
-  waVideoOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "space-between",
-  },
-  waVideoTopCenter: { alignItems: "center", paddingHorizontal: 56, marginTop: 8 },
-  waVideoTopRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    paddingHorizontal: 8,
-  },
-  waNameSm: { color: "#F0F2F5", fontSize: 18, fontFamily: "Inter_600SemiBold", textAlign: "center" },
-  waStatusSm: { color: "rgba(255,255,255,0.75)", fontSize: 14, fontFamily: "Inter_400Regular", marginTop: 2, textAlign: "center" },
-  waCornerBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  waFlipTopRight: { position: "absolute", top: 8, right: 12 },
-  waBottomBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-evenly",
-    alignSelf: "center",
-    width: "92%",
-    maxWidth: 420,
-    backgroundColor: "rgba(23,25,28,0.88)",
-    borderRadius: 40,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-  },
-  waBarBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  waBarBtnActive: { backgroundColor: "rgba(255,255,255,0.92)" },
-  waEndBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "#ef4444",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  waPip: {
-    position: "absolute",
-    right: 12,
-    borderRadius: 12,
-    overflow: "hidden",
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.35)",
-    backgroundColor: "#222",
-  },
-  waPipFill: { width: "100%", height: "100%" },
-  waPipFlip: {
-    position: "absolute",
-    top: 6,
-    right: 6,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    alignItems: "center",
-    justifyContent: "center",
   },
   // Outgoing video ringing — mute/speaker row above end button
   outgoingVideoControls: {

@@ -7,7 +7,7 @@ import multer from "multer";
 import { query } from "../lib/db";
 import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
 import { chatMessagePushPreview } from "../lib/chatMessagePreview";
-import { chatMessageEventPayload, resolveChatMessageRowForClient } from "../lib/chatMessageMedia";
+import { resolveChatMessageRowForClient } from "../lib/chatMessageMedia";
 import { isValidPushToken, sendChatPush, sendChatPushToMembers } from "../lib/pushNotify";
 import { pushNotificationImageUrl } from "../lib/pushMediaUrl";
 import { enforceModerationForActivity } from "../lib/moderation";
@@ -933,7 +933,13 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
       type: "message",
       chatId: Array.isArray(chatId) ? chatId[0] ?? "" : chatId,
       userIds: [senderId, ...recipientIds],
-      payload: chatMessageEventPayload(req, result.rows[0] as Record<string, unknown>, { senderName }),
+      payload: {
+        messageId: result.rows[0].id,
+        content: content ?? "",
+        type: type ?? "text",
+        senderId,
+        senderName,
+      },
     });
 
     res.json({
@@ -1097,7 +1103,7 @@ router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Re
       type: "message",
       chatId: targetId,
       userIds: [senderId, ...recipientIds],
-      payload: chatMessageEventPayload(req, result.rows[0] as Record<string, unknown>, { senderName }),
+      payload: { messageId: result.rows[0].id },
     });
 
     res.json({ success: true, message: result.rows[0], targetChatId: targetId });

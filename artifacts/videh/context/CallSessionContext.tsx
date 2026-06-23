@@ -98,13 +98,10 @@ type CallSessionContextValue = {
   acceptIncoming: (callInfo?: IncomingCallInfo) => Promise<void>;
   declineIncoming: (declineMessage?: string) => Promise<void>;
   minimizeCall: () => void;
-  /** Keep call alive when user leaves the call screen (back, chat, other app). */
-  autoMinimizeIfActive: () => void;
   returnToCallScreen: () => void;
   endCall: () => Promise<void>;
   toggleMute: () => void;
   toggleCamera: () => void;
-  flipCamera: () => void;
   toggleSpeaker: () => void;
   addParticipants: (userIds: number[]) => Promise<{ added: number; busy: number }>;
   inviteeUserIds: number[];
@@ -117,7 +114,6 @@ type CallSessionContextValue = {
   endHeldCall: () => Promise<void>;
   shareScreen: () => Promise<boolean>;
   stopScreenShare: () => Promise<void>;
-  screenSharing: boolean;
   callOutcome: CallOutcome | null;
   outcomeSnapshot: { contactName: string; chatId: string; isVideo: boolean } | null;
   dismissCallOutcome: () => void;
@@ -807,15 +803,6 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (router.canGoBack()) router.back();
   }, [router]);
 
-  const autoMinimizeIfActive = useCallback(() => {
-    if (endingCallRef.current) return;
-    setSession((prev) => {
-      if (!prev?.callId || prev.ringing || prev.onHold) return prev;
-      if (prev.minimized) return prev;
-      return { ...prev, minimized: true };
-    });
-  }, []);
-
   const addParticipants = useCallback(async (userIds: number[]) => {
     if (!session?.callId || !session.engineActive) {
       throw new Error("Start or join the call before adding people.");
@@ -1162,12 +1149,10 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       acceptIncoming,
       declineIncoming,
       minimizeCall,
-      autoMinimizeIfActive,
       returnToCallScreen,
       endCall,
       toggleMute: () => call.toggleMute(),
       toggleCamera: () => call.toggleCamera(),
-      flipCamera: () => call.flipCamera(),
       toggleSpeaker: () => call.toggleSpeaker(),
       addParticipants,
       inviteeUserIds: onCallUserIds,
@@ -1180,7 +1165,6 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       endHeldCall,
       shareScreen: () => call.shareScreen(),
       stopScreenShare: () => call.stopScreenShare(),
-      screenSharing: call.screenSharing,
       callOutcome,
       outcomeSnapshot,
       dismissCallOutcome,
@@ -1203,7 +1187,6 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       acceptIncoming,
       declineIncoming,
       minimizeCall,
-      autoMinimizeIfActive,
       returnToCallScreen,
       endCall,
       addParticipants,

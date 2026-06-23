@@ -24,31 +24,6 @@ export function resolveAlbumMessageContent(req: Request, content: string | null 
   }
 }
 
-/** SSE / push payload so receivers can render media instantly (no text-only placeholder). */
-export function chatMessageEventPayload(
-  req: Request,
-  row: Record<string, unknown>,
-  extras?: { senderName?: string },
-): {
-  messageId: unknown;
-  content: string;
-  type: string;
-  senderId: unknown;
-  senderName?: string;
-  mediaUrl?: string;
-} {
-  const client = resolveChatMessageRowForClient(req, row);
-  const mediaUrl = client.media_url;
-  return {
-    messageId: client.id,
-    content: typeof client.content === "string" ? client.content : "",
-    type: typeof client.type === "string" ? client.type : "text",
-    senderId: client.sender_id,
-    senderName: extras?.senderName,
-    mediaUrl: mediaUrl != null && mediaUrl !== "" ? String(mediaUrl) : undefined,
-  };
-}
-
 /** Normalize media_url + album content URLs before sending messages to clients. */
 export function resolveChatMessageRowForClient(req: Request, row: Record<string, unknown>): Record<string, unknown> {
   const type = String(row.type ?? "").toLowerCase();

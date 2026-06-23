@@ -23,10 +23,8 @@ export interface VidehCallState {
   hasRemoteVideo: boolean;
   remoteUid: number | null;
   remotePeers: RemoteCallPeerStream[];
-  screenSharing: boolean;
   toggleMute: () => void;
   toggleCamera: () => void;
-  flipCamera: () => void;
   toggleSpeaker: () => void;
   setSpeaker: (enabled: boolean) => void;
   setHeld: (held: boolean) => void;

@@ -42,7 +42,7 @@ import {
   resolveAlbumUrls,
 } from "@/lib/chatAlbumMessage";
 import { inferChatListPreview, normalizeMessageType } from "@/lib/normalizeMessage";
-import { collectPendingLocalMessages, findTmpPeerForServer, mergeServerWithPending } from "@/lib/mergePendingChatMessages";
+import { collectPendingLocalMessages, mergeServerWithPending } from "@/lib/mergePendingChatMessages";
 import {
   loadChatMessageCache,
   rememberChatMessagesInStore,
@@ -140,8 +140,6 @@ export interface Message {
   expiresAt?: number;
   /** User chose to keep this message past the disappear timer. */
   isKept?: boolean;
-  /** Stable FlatList key across tmp_/hint_ → server id transitions (prevents photo flicker). */
-  stableListKey?: string;
 }
 
 const OLDER_MESSAGES_PAGE = 40;
@@ -155,22 +153,17 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
   }
   const content = m.is_deleted ? "This message was deleted" : (m.content ?? "");
   const mediaUrl = m.media_url ?? undefined;
-  const serverId = String(m.id);
-  const hintPeer = prevLocal?.id === `hint_${serverId}` ? prevLocal : undefined;
-  const mergeFrom = hintPeer ?? prevLocal;
   const albumParsed = parseAlbumMessageContent(content);
   const type = m.is_deleted
     ? "deleted"
     : normalizeMessageType(m.type, content, mediaUrl);
   const albumUrls = resolveAlbumUrls(content, {
-    albumUrls: mergeFrom?.albumUrls ?? prevLocal?.albumUrls,
+    albumUrls: prevLocal?.albumUrls,
     mediaUrl,
   });
-  const albumLocalUrls = mergeFrom?.albumLocalUrls?.length
-    ? mergeFrom.albumLocalUrls
-    : prevLocal?.albumLocalUrls?.length
-      ? prevLocal.albumLocalUrls
-      : undefined;
+  const albumLocalUrls = prevLocal?.albumLocalUrls?.length
+    ? prevLocal.albumLocalUrls
+    : undefined;
   const resolvedType = albumUrls && albumUrls.length >= 2 ? "album" : type;
   const displayText = resolvedType === "album" && albumParsed
     ? (albumParsed.caption ?? albumChatPreview(albumParsed.urls.length))
@@ -208,17 +201,13 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
         })
       : undefined,
     replySenderName: m.reply_sender_name ?? undefined,
-    localMediaUri: mergeFrom?.localMediaUri ?? prevLocal?.localMediaUri,
+    localMediaUri: prevLocal?.localMediaUri,
     downloadProgress: prevLocal?.downloadProgress,
     uploadProgress: prevLocal?.uploadProgress,
     uploadFailed: prevLocal?.uploadFailed,
     fileSizeBytes: prevLocal?.fileSizeBytes,
     expiresAt: m.expires_at ? new Date(m.expires_at).getTime() : prevLocal?.expiresAt,
     isKept: m.is_kept ?? prevLocal?.isKept ?? false,
-    stableListKey:
-      mergeFrom?.stableListKey
-      ?? prevLocal?.stableListKey
-      ?? serverId,
   };
 }
 
@@ -1051,7 +1040,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         const hintMsg: Message = {
           id: serverMessageId ? `hint_${serverMessageId}` : `hint_t${Date.now()}`,
-          stableListKey: serverMessageId ?? `hint_t${Date.now()}`,
           text: text ?? (hintType === "image" ? "📷 Photo" : hintType === "video" ? "Video" : ""),
           timestamp: Date.now(),
           senderId,
@@ -1075,12 +1063,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const activityAt = Date.now();
     if (activityAt > (chatDeletedAtRef.current[chatId] ?? 0)) {
       void restoreHiddenChatsWithNewActivity([{ id: chatId, lastMessageTime: activityAt }]);
-    }
-    if (mediaUrl && (hintType === "image" || hintType === "video")) {
-      void cacheChatImageUrl(mediaUrl, u?.sessionToken).catch(() => {});
-      if (hintType === "video") {
-        void cacheChatVideoUrl(mediaUrl, u?.sessionToken).catch(() => {});
-      }
     }
   }, [restoreHiddenChatsWithNewActivity]);
 
@@ -1112,20 +1094,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const prevById = new Map((prevChat?.messages ?? []).map((pm) => [pm.id, pm]));
 
         const msgs: Message[] = rawMessages.map((m: any) => {
-          const id = String(m.id);
-          const isMe = String(m.sender_id) === String(u?.dbId);
-          const stub = {
-            id,
-            text: String(m.content ?? ""),
-            timestamp: new Date(m.created_at).getTime(),
-            senderId: isMe ? "me" : String(m.sender_id),
-            type: normalizeMessageType(m.type, m.content, m.media_url) as Message["type"],
-            mediaUrl: m.media_url ?? undefined,
-          };
-          const prevLocal =
-            prevById.get(id)
-            ?? prevById.get(`hint_${id}`)
-            ?? findTmpPeerForServer(prevMsgs, stub);
+          const prevLocal = prevById.get(String(m.id));
           return mapServerRowToMessage(m, u?.dbId, prevLocal);
         });
 
@@ -1217,20 +1186,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /** Defer API refresh so the server row exists before we merge (avoids hint flicker). */
   const scheduleLoadMessagesAfterHint = useCallback(
-    (chatId: string, opts?: { urgent?: boolean }) => {
+    (chatId: string, delayMs = 450) => {
       const key = String(chatId);
-      const delayMs = opts?.urgent ? 0 : 120;
       const pending = loadMessagesAfterHintTimersRef.current.get(key);
       if (pending) clearTimeout(pending);
-      const run = () => {
+      const timer = setTimeout(() => {
         loadMessagesAfterHintTimersRef.current.delete(key);
         void loadMessages(chatId);
-      };
-      if (delayMs <= 0) {
-        run();
-        return;
-      }
-      const timer = setTimeout(run, delayMs);
+      }, delayMs);
       loadMessagesAfterHintTimersRef.current.set(key, timer);
     },
     [loadMessages],
@@ -1416,9 +1379,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           applyIncomingMessageHint(signal);
           emitChatMessageSignal(signal);
           if (activeChatIdRef.current === cid) {
-            const urgent =
-              messageType === "image" || messageType === "video" || messageType === "album" || Boolean(mediaUrl);
-            scheduleLoadMessagesAfterHint(cid, { urgent });
+            scheduleLoadMessagesAfterHint(cid);
           }
         }
         if (cid) {
@@ -1478,12 +1439,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       applyIncomingMessageHint(signal);
       const cid = activeChatIdRef.current;
       if (cid && String(signal.chatId) === cid) {
-        const urgent =
-          signal.messageType === "image"
-          || signal.messageType === "video"
-          || signal.messageType === "album"
-          || Boolean(signal.mediaUrl?.trim());
-        scheduleLoadMessagesAfterHint(cid, { urgent });
+        scheduleLoadMessagesAfterHint(cid);
       }
     });
   }, [isAuthenticated, applyIncomingMessageHint, scheduleLoadMessagesAfterHint]);
@@ -1646,16 +1602,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const text = caption?.trim() || (isViewOnce ? "🔁 View once" : isVideo ? "🎥 Video" : "📷 Photo");
     const msgType: Message["type"] = isVideo ? "video" : "image";
     const newMsg: Message = {
-      id: tempId,
-      stableListKey: tempId,
-      text,
-      timestamp: Date.now(),
-      senderId: "me",
-      type: msgType,
-      status: "sent",
-      mediaUrl: shareableMediaUri,
-      localMediaUri: shareableMediaUri,
-      isViewOnce,
+      id: tempId, text, timestamp: Date.now(), senderId: "me",
+      type: msgType, status: "sent", mediaUrl: shareableMediaUri, isViewOnce,
     };
     setChats((prev) =>
       prev.map((c) =>
@@ -1690,7 +1638,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setChats((prev) =>
           prev.map((c) =>
             c.id === chatId
-              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), stableListKey: tempId, status: "delivered", mediaUrl: shareableMediaUri, localMediaUri: shareableMediaUri } : m) }
+              ? { ...c, messages: c.messages.map((m) => m.id === tempId ? { ...m, id: String(mid), status: "delivered", mediaUrl: shareableMediaUri } : m) }
               : c,
           ),
         );
@@ -1731,7 +1679,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const showOptimistic = (displayUri: string) => {
         const newMsg: Message = {
           id: tempId,
-          stableListKey: tempId,
           text,
           timestamp: Date.now(),
           senderId: "me",
@@ -1775,7 +1722,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
           patchMsg({
             id: String(data.message.id),
-            stableListKey: tempId,
             status: "delivered",
             mediaUrl: remoteUrl,
             uploadProgress: undefined,
@@ -1809,6 +1755,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           });
           patchMsg({ mediaUrl: upload.url, uploadProgress: 100 });
           await postMediaMessage(upload.url);
+          patchMsg({ uploadProgress: undefined, localMediaUri: undefined });
         } catch (e) {
           patchMsg({ uploadProgress: undefined, uploadFailed: true });
           Alert.alert("Send failed", e instanceof Error ? e.message : "Could not send media.");
@@ -1904,9 +1851,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               if (c.id !== chatId) return c;
               const local = c.messages.find((m) => m.id === activeMsgId || m.id === tempId || m.id === id);
               const sentAt = local?.timestamp ?? Date.now();
-              const finalized: Partial<Message> = {
+              const finalized: Message = {
                 id,
-                stableListKey: tempId,
                 text: displayText,
                 timestamp: sentAt,
                 senderId: "me",
@@ -1916,6 +1862,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 mediaUrl: remoteUrls[0],
                 uploadProgress: undefined,
                 uploadFailed: false,
+                albumLocalUrls: undefined,
               };
               if (!local) {
                 return {
@@ -1928,9 +1875,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               return {
                 ...c,
                 messages: c.messages.map((m) =>
-                  m.id === activeMsgId || m.id === tempId || m.id === id
-                    ? { ...m, ...finalized, id, albumLocalUrls: m.albumLocalUrls, localMediaUri: m.localMediaUri }
-                    : m,
+                  m.id === activeMsgId || m.id === tempId || m.id === id ? { ...m, ...finalized, id } : m,
                 ),
                 lastMessage: preview,
                 lastMessageTime: sentAt,
@@ -1960,7 +1905,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
         const newMsg: Message = {
           id: tempId,
-          stableListKey: tempId,
           text: caption || preview,
           timestamp: Date.now(),
           senderId: "me",
@@ -2004,6 +1948,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             albumUrls: remoteUrls,
             mediaUrl: remoteUrls[0],
             uploadProgress: undefined,
+            albumLocalUrls: undefined,
             text: caption || preview,
             uploadFailed: false,
           });

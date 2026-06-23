@@ -22,11 +22,7 @@ export async function setCallLowDataMode(enabled: boolean): Promise<void> {
 }
 
 /** WebRTC getUserMedia constraints (WhatsApp-style low data for calls). */
-export function buildCallMediaConstraints(
-  isVideo: boolean,
-  lowData: boolean,
-  facingMode: "user" | "environment" = "user",
-): {
+export function buildCallMediaConstraints(isVideo: boolean, lowData: boolean): {
   audio: boolean | MediaTrackConstraints;
   video: boolean | MediaTrackConstraints;
 } {
@@ -45,7 +41,7 @@ export function buildCallMediaConstraints(
         width: { ideal: 480, max: 640 },
         height: { ideal: 360, max: 480 },
         frameRate: { ideal: 15, max: 20 },
-        facingMode,
+        facingMode: "user",
       },
     };
   }
@@ -56,7 +52,7 @@ export function buildCallMediaConstraints(
       width: { ideal: 1280, max: 1920 },
       height: { ideal: 720, max: 1080 },
       frameRate: { ideal: 24, max: 30 },
-      facingMode,
+      facingMode: "user",
     },
   };
 }

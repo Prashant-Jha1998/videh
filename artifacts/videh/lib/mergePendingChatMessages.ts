@@ -53,15 +53,6 @@ function tempMatchesServer(tmp: Message, server: Message): boolean {
   return Math.abs(server.timestamp - tmp.timestamp) < 15_000;
 }
 
-/** Pair tmp_* row with server row so stableListKey / localMediaUri survive merge. */
-export function findTmpPeerForServer(
-  prevMessages: Message[],
-  server: Pick<Message, "id" | "text" | "timestamp" | "type" | "mediaUrl" | "senderId">,
-): Message | undefined {
-  if (server.senderId !== "me") return undefined;
-  return prevMessages.find((tmp) => tmp.id.startsWith("tmp_") && tempMatchesServer(tmp, server as Message));
-}
-
 /** Pair each tmp_* row with at most one server row (avoids duplicate-text flicker). */
 export function collectSupersededTempIds(tempMessages: Message[], serverMessages: Message[]): Set<string> {
   const superseded = new Set<string>();

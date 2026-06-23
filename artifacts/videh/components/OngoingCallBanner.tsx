@@ -25,7 +25,7 @@ export function OngoingCallBanner({ contactName, isVideo, durationLabel, onRetur
           <Text style={styles.title} numberOfLines={1}>
             {isVideo ? "Video call" : "Voice call"} · {durationLabel}
           </Text>
-          <Text style={styles.sub} numberOfLines={1}>Tap to return · {contactName}</Text>
+          <Text style={styles.sub} numberOfLines={1}>Tap to return to {contactName}</Text>
         </View>
         <Ionicons name="chevron-up" size={22} color="#d9fdd3" />
       </TouchableOpacity>

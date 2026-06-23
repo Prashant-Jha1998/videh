@@ -5,7 +5,6 @@ import { buildCallMediaConstraints, getCallMediaSettings } from "@/lib/callMedia
 import { channelsForCall, loadIceServers, peerIdFromCallChannel } from "@/lib/webrtcIce";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import { normalizeCallNetworkError } from "@/lib/videhCall/signalingClient";
-import { startScreenShare, stopScreenShare as stopScreenShareTracks } from "@/lib/screenShare";
 import { callDebug } from "@/lib/callDebug";
 import type { CallUiPhase } from "@/lib/callState";
 import type { RemoteCallPeerStream, VidehCallState } from "./videhCallTypes";
@@ -75,9 +74,6 @@ export function useVidehCall(
   const hasRemoteMediaRef = useRef(false);
   const remotePeerIdsRef = useRef(remotePeerIds);
   remotePeerIdsRef.current = remotePeerIds;
-  const screenSharingRef = useRef(false);
-  const cameraVideoTrackRef = useRef<any>(null);
-  const [screenSharing, setScreenSharing] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -650,7 +646,6 @@ export function useVidehCall(
       const lowData = (await getCallMediaSettings()).lowDataMode;
       const stream = await mediaDevices.getUserMedia(buildCallMediaConstraints(isVideo, lowData));
       localStreamRef.current = stream;
-      cameraVideoTrackRef.current = stream.getVideoTracks?.()[0] ?? null;
       setLocalStreamUrl(typeof stream.toURL === "function" ? stream.toURL() : undefined);
       return stream;
     };
@@ -715,7 +710,6 @@ export function useVidehCall(
     hasRemoteVideo,
     remoteUid: null,
     remotePeers,
-    screenSharing,
     toggleMute: () => {
       setMuted((m) => {
         const next = !m;
@@ -728,16 +722,6 @@ export function useVidehCall(
     toggleCamera: () => {
       localStreamRef.current?.getVideoTracks?.().forEach((track: any) => { track.enabled = cameraOff; });
       setCameraOff((c) => !c);
-    },
-    flipCamera: () => {
-      const track = localStreamRef.current?.getVideoTracks?.()[0] as { _switchCamera?: () => void } | undefined;
-      if (track?._switchCamera) {
-        try {
-          track._switchCamera();
-        } catch {
-          /* ignore */
-        }
-      }
     },
     toggleSpeaker: () => {
       setSpeakerOn((prev) => {
@@ -765,61 +749,11 @@ export function useVidehCall(
         } catch { /* ignore */ }
       }
     },
-    shareScreen: async () => {
-      if (!isVideo) return false;
-      const screenStream = await startScreenShare();
-      const screenTrack = screenStream?.getVideoTracks?.()[0];
-      if (!screenTrack) return false;
-      if (!cameraVideoTrackRef.current) {
-        cameraVideoTrackRef.current = localStreamRef.current?.getVideoTracks?.()[0] ?? null;
-      }
-      screenSharingRef.current = true;
-      setScreenSharing(true);
-      for (const pc of pcsRef.current.values()) {
-        const sender = pc.getSenders?.().find((s: any) => s.track?.kind === "video");
-        if (sender) await sender.replaceTrack(screenTrack);
-      }
-      const screenUrl = typeof screenStream.toURL === "function" ? screenStream.toURL() : undefined;
-      if (screenUrl) setLocalStreamUrl(screenUrl);
-      screenTrack.onended = () => {
-        void (async () => {
-          await stopScreenShareTracks();
-          screenSharingRef.current = false;
-          setScreenSharing(false);
-          const cam = cameraVideoTrackRef.current;
-          if (!cam) return;
-          for (const pc of pcsRef.current.values()) {
-            const sender = pc.getSenders?.().find((s: any) => s.track?.kind === "video");
-            if (sender) await sender.replaceTrack(cam);
-          }
-          const local = localStreamRef.current;
-          if (local && typeof local.toURL === "function") setLocalStreamUrl(local.toURL());
-        })();
-      };
-      return true;
-    },
-    stopScreenShare: async () => {
-      if (!screenSharingRef.current) return;
-      await stopScreenShareTracks();
-      screenSharingRef.current = false;
-      setScreenSharing(false);
-      const cam = cameraVideoTrackRef.current;
-      if (!cam) return;
-      for (const pc of pcsRef.current.values()) {
-        const sender = pc.getSenders?.().find((s: any) => s.track?.kind === "video");
-        if (sender) await sender.replaceTrack(cam);
-      }
-      const local = localStreamRef.current;
-      if (local && typeof local.toURL === "function") setLocalStreamUrl(local.toURL());
-    },
+    shareScreen: async () => false,
+    stopScreenShare: async () => {},
     leave: async () => {
       connectGenRef.current += 1;
       setProximityScreenOff(false);
-      if (screenSharingRef.current) {
-        await stopScreenShareTracks();
-        screenSharingRef.current = false;
-        setScreenSharing(false);
-      }
       stopAllSignaling();
       closeAllPeerConnections(true);
       await stopInCallSession();
