@@ -1,11 +1,20 @@
 import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
 
-function VideoElement({ nativeId, muted, mirror, streamUrl, style }: { nativeId?: string; muted?: boolean; mirror?: boolean; streamUrl?: string; style?: any }) {
+function VideoElement({ nativeId, muted, mirror, pip, streamUrl, style, renderKey }: { nativeId?: string; muted?: boolean; mirror?: boolean; pip?: boolean; streamUrl?: string; style?: any; renderKey?: string }) {
   if (Platform.OS !== "web") {
     if (!streamUrl) return <View style={[styles.fill, style]} />;
     const { RTCView } = require("react-native-webrtc");
-    return <RTCView streamURL={streamUrl} objectFit="cover" mirror={mirror ?? Boolean(muted)} style={[styles.fill, style]} />;
+    return (
+      <RTCView
+        key={renderKey ?? streamUrl}
+        streamURL={streamUrl}
+        objectFit="cover"
+        mirror={mirror ?? false}
+        zOrder={pip ? 1 : 0}
+        style={[styles.fill, style]}
+      />
+    );
   }
   return React.createElement("video", {
     id: nativeId,
@@ -16,8 +25,21 @@ function VideoElement({ nativeId, muted, mirror, streamUrl, style }: { nativeId?
   });
 }
 
-export function VidehRemoteView({ nativeId, streamUrl, style }: { uid?: number; nativeId?: string; streamUrl?: string; style?: any }) {
-  return <VideoElement nativeId={nativeId} streamUrl={streamUrl} style={style} />;
+export function VidehRemoteView({
+  nativeId,
+  streamUrl,
+  style,
+  pip,
+  renderKey,
+}: {
+  uid?: number;
+  nativeId?: string;
+  streamUrl?: string;
+  style?: any;
+  pip?: boolean;
+  renderKey?: string;
+}) {
+  return <VideoElement nativeId={nativeId} streamUrl={streamUrl} pip={pip} style={style} renderKey={renderKey} />;
 }
 
 export function VidehLocalView({
@@ -25,13 +47,17 @@ export function VidehLocalView({
   streamUrl,
   style,
   mirror = true,
+  pip,
+  renderKey,
 }: {
   nativeId?: string;
   streamUrl?: string;
   style?: any;
   mirror?: boolean;
+  pip?: boolean;
+  renderKey?: string;
 }) {
-  return <VideoElement nativeId={nativeId} streamUrl={streamUrl} muted mirror={mirror} style={style} />;
+  return <VideoElement nativeId={nativeId} streamUrl={streamUrl} muted mirror={mirror} pip={pip} style={style} renderKey={renderKey} />;
 }
 
 const styles = StyleSheet.create({

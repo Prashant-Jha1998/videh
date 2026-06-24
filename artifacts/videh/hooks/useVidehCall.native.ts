@@ -93,6 +93,7 @@ export function useVidehCall(
   const onHoldRef = useRef(false);
   const [speakerOn, setSpeakerOn] = useState(!isVideo ? false : true);
   const [isFrontCamera, setIsFrontCamera] = useState(true);
+  const [localVideoRevision, setLocalVideoRevision] = useState(0);
   const [remoteCount, setRemoteCount] = useState(0);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [localStreamUrl, setLocalStreamUrl] = useState<string | undefined>();
@@ -734,15 +735,34 @@ export function useVidehCall(
     },
     flipCamera: async () => {
       const track = localStreamRef.current?.getVideoTracks?.()[0];
-      if (!track) return;
-      if (typeof track._switchCamera === "function") {
-        track._switchCamera();
-        facingModeRef.current = facingModeRef.current === "user" ? "environment" : "user";
-        setIsFrontCamera(facingModeRef.current === "user");
-        setLocalStreamUrl(typeof localStreamRef.current?.toURL === "function" ? localStreamRef.current.toURL() : undefined);
-        return;
-      }
+      if (!track || track.remote) return;
       const nextFacing: CameraFacing = facingModeRef.current === "user" ? "environment" : "user";
+      const applyFacing = async (facing: CameraFacing) => {
+        const lowData = (await getCallMediaSettings()).lowDataMode;
+        const { video } = buildCallMediaConstraints(isVideo, lowData, facing);
+        if (video && typeof video === "object") {
+          await track.applyConstraints(video);
+        } else {
+          await track.applyConstraints({ facingMode: facing });
+        }
+        const settings = track.getSettings?.() ?? {};
+        const resolved: CameraFacing =
+          settings.facingMode === "environment" ? "environment" : "user";
+        facingModeRef.current = resolved;
+        setIsFrontCamera(resolved === "user");
+        setLocalStreamUrl(
+          typeof localStreamRef.current?.toURL === "function"
+            ? localStreamRef.current.toURL()
+            : undefined,
+        );
+        setLocalVideoRevision((v) => v + 1);
+      };
+      try {
+        await applyFacing(nextFacing);
+        return;
+      } catch {
+        /* applyConstraints failed — replace track */
+      }
       try {
         const { mediaDevices } = require("react-native-webrtc");
         const lowData = (await getCallMediaSettings()).lowDataMode;
@@ -763,7 +783,12 @@ export function useVidehCall(
         cameraVideoTrackRef.current = newTrack;
         facingModeRef.current = nextFacing;
         setIsFrontCamera(nextFacing === "user");
-        setLocalStreamUrl(typeof localStreamRef.current?.toURL === "function" ? localStreamRef.current.toURL() : undefined);
+        setLocalStreamUrl(
+          typeof localStreamRef.current?.toURL === "function"
+            ? localStreamRef.current.toURL()
+            : undefined,
+        );
+        setLocalVideoRevision((v) => v + 1);
         for (const pc of pcsRef.current.values()) {
           const sender = pc.getSenders?.().find((s: any) => s.track?.kind === "video");
           if (sender) await sender.replaceTrack(newTrack);
@@ -773,6 +798,7 @@ export function useVidehCall(
       }
     },
     isFrontCamera,
+    localVideoRevision,
     toggleSpeaker: () => {
       setSpeakerOn((prev) => {
         const next = !prev;

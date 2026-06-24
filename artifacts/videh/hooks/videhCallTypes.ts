@@ -27,6 +27,7 @@ export interface VidehCallState {
   toggleCamera: () => void;
   flipCamera: () => Promise<void>;
   isFrontCamera: boolean;
+  localVideoRevision: number;
   toggleSpeaker: () => void;
   setSpeaker: (enabled: boolean) => void;
   setHeld: (held: boolean) => void;

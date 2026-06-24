@@ -104,6 +104,7 @@ type CallSessionContextValue = {
   toggleCamera: () => void;
   flipCamera: () => Promise<void>;
   isFrontCamera: boolean;
+  localVideoRevision: number;
   toggleSpeaker: () => void;
   addParticipants: (userIds: number[]) => Promise<{ added: number; busy: number }>;
   inviteeUserIds: number[];
@@ -1168,6 +1169,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       toggleCamera: () => call.toggleCamera(),
       flipCamera: () => call.flipCamera(),
       isFrontCamera: call.isFrontCamera,
+      localVideoRevision: call.localVideoRevision,
       toggleSpeaker: () => call.toggleSpeaker(),
       addParticipants,
       inviteeUserIds: onCallUserIds,

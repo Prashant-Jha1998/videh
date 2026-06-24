@@ -5,10 +5,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Alert,
   Animated,
+  AppState,
   PanResponder,
   Platform,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -24,11 +24,9 @@ import { useCallSession } from "@/context/CallSessionContext";
 import { useApp } from "@/context/AppContext";
 import type { InCallAudioRoute } from "@/lib/inCallAudio";
 import { phaseLabel } from "@/lib/callState";
-import { createCallLink } from "@/lib/callLinks";
-import { isScreenShareSupported } from "@/lib/screenShare";
 import { useOutgoingCallCameraPreview } from "@/lib/callLocalPreview";
 
-const CALL_CONTROLS_HIDE_MS = 4000;
+const CALL_CONTROLS_HIDE_MS = 6000;
 
 export default function CallScreen() {
   const insets = useSafeAreaInsets();
@@ -59,8 +57,6 @@ export default function CallScreen() {
     remoteStreamUrl,
     statusText,
     localStreamUrl,
-    localVideoId,
-    remoteVideoId,
     participantCount,
     acceptedCount,
     ringingCount,
@@ -70,26 +66,24 @@ export default function CallScreen() {
     toggleCamera,
     flipCamera,
     isFrontCamera,
+    localVideoRevision,
     toggleSpeaker,
     addParticipants,
     inviteeUserIds,
     remotePeers,
-    switchCallMediaType,
     setInCallAudioRoute,
-    shareScreen,
-    stopScreenShare,
     callOutcome,
     outcomeSnapshot,
     dismissCallOutcome,
     redialFromOutcome,
   } = useCallSession();
-  const { chats, user } = useApp();
+  const { chats } = useApp();
 
   const [addPeopleOpen, setAddPeopleOpen] = useState(false);
   const [addingPeople, setAddingPeople] = useState(false);
-  const [screenSharing, setScreenSharing] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [videoFocus, setVideoFocus] = useState<"remote" | "local">("remote");
+  const [pipMountReady, setPipMountReady] = useState(true);
   const controlsHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearControlsHideTimer = useCallback(() => {
@@ -143,7 +137,8 @@ export default function CallScreen() {
 
   const pipResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: () => isVideo && joined,
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        isVideo && joined && (Math.abs(gesture.dx) > 8 || Math.abs(gesture.dy) > 8),
       onPanResponderGrant: () => {
         pipOffset.setOffset({ x: (pipOffset.x as any)._value, y: (pipOffset.y as any)._value });
         pipOffset.setValue({ x: 0, y: 0 });
@@ -233,19 +228,32 @@ export default function CallScreen() {
   const outgoingVideoRinging = outgoingRinging && isOneToOne && isVideo;
   const ringPreviewUrl = useOutgoingCallCameraPreview(outgoingVideoRinging && !localStreamUrl);
   const effectiveLocalUrl = localStreamUrl || ringPreviewUrl;
-  const canAutoHideControls = isVideo && (joined || callAnswered || mediaReady) && !outgoingVideoRinging;
+  const canAutoHideTopBar = isVideo && (joined || callAnswered || mediaReady) && !outgoingVideoRinging;
+  const showBottomControls = !isVideo || joined || outgoingVideoRinging || callAnswered || mediaReady;
+  const localRenderKey = `local-${localVideoRevision}-${videoFocus}`;
+  const remoteRenderKey = `remote-${videoFocus}-${remoteStreamUrl ?? "none"}`;
 
   useEffect(() => {
-    if (!canAutoHideControls) {
+    if (!canAutoHideTopBar) {
       setControlsVisible(true);
       clearControlsHideTimer();
       return;
     }
     scheduleHideControls();
     return clearControlsHideTimer;
-  }, [canAutoHideControls, clearControlsHideTimer, scheduleHideControls]);
+  }, [canAutoHideTopBar, clearControlsHideTimer, scheduleHideControls]);
 
   useEffect(() => () => clearControlsHideTimer(), [clearControlsHideTimer]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active" && isVideo && joined) {
+        setControlsVisible(true);
+        scheduleHideControls();
+      }
+    });
+    return () => sub.remove();
+  }, [isVideo, joined, scheduleHideControls]);
 
   // ── WhatsApp-style outgoing audio call screen ──────────────────────────────
   if (outgoingRinging && isOneToOne && !isVideo) {
@@ -293,9 +301,13 @@ export default function CallScreen() {
 
   const swapVideoFocus = () => {
     if (!joined || !remoteStreamUrl || !effectiveLocalUrl) return;
+    setPipMountReady(false);
     setVideoFocus((f) => (f === "remote" ? "local" : "remote"));
     showCallControls();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    requestAnimationFrame(() => {
+      setTimeout(() => setPipMountReady(true), 50);
+    });
   };
 
   const renderRemoteMain = () => {
@@ -303,7 +315,13 @@ export default function CallScreen() {
       return <GroupCallGrid peers={gridPeers} placeholderColor={avatarBg} />;
     }
     if (remoteStreamUrl) {
-      return <VidehRemoteView nativeId={remoteVideoId} streamUrl={remoteStreamUrl} style={styles.remoteVideo} />;
+      return (
+        <VidehRemoteView
+          streamUrl={remoteStreamUrl}
+          style={styles.remoteVideo}
+          renderKey={`main-${remoteRenderKey}`}
+        />
+      );
     }
     if (hasRemoteVideo && joined) {
       return (
@@ -336,10 +354,10 @@ export default function CallScreen() {
           <Pressable style={styles.videoContainer} onPress={showCallControls}>
             {outgoingVideoRinging || (videoFocus === "local" && effectiveLocalUrl && joined) ? (
               <VidehLocalView
-                nativeId={localVideoId}
                 streamUrl={effectiveLocalUrl}
                 mirror={isFrontCamera}
                 style={styles.remoteVideo}
+                renderKey={`main-${localRenderKey}`}
               />
             ) : (
               renderRemoteMain()
@@ -373,7 +391,7 @@ export default function CallScreen() {
             </View>
           ) : null}
 
-          {showLocalPip ? (
+          {showLocalPip && pipMountReady ? (
             <Animated.View
               style={[
                 styles.localVideoWrapper,
@@ -383,16 +401,17 @@ export default function CallScreen() {
             >
               <TouchableOpacity activeOpacity={0.92} onPress={swapVideoFocus} style={styles.pipTap}>
                 <VidehLocalView
-                  nativeId={localVideoId}
                   streamUrl={effectiveLocalUrl}
                   mirror={isFrontCamera}
+                  pip
                   style={styles.localVideoFill}
+                  renderKey={`pip-${localRenderKey}`}
                 />
               </TouchableOpacity>
             </Animated.View>
           ) : null}
 
-          {showRemotePip ? (
+          {showRemotePip && pipMountReady ? (
             <Animated.View
               style={[
                 styles.localVideoWrapper,
@@ -401,7 +420,12 @@ export default function CallScreen() {
               {...pipResponder.panHandlers}
             >
               <TouchableOpacity activeOpacity={0.92} onPress={swapVideoFocus} style={styles.pipTap}>
-                <VidehRemoteView nativeId={remoteVideoId} streamUrl={remoteStreamUrl} style={styles.localVideoFill} />
+                <VidehRemoteView
+                  streamUrl={remoteStreamUrl}
+                  pip
+                  style={styles.localVideoFill}
+                  renderKey={`pip-${remoteRenderKey}`}
+                />
               </TouchableOpacity>
             </Animated.View>
           ) : null}
@@ -457,7 +481,7 @@ export default function CallScreen() {
         </>
       )}
 
-      {(!isVideo || controlsVisible) ? (
+      {showBottomControls ? (
       <View style={[styles.controls, isVideo && { position: "absolute", left: 0, right: 0, bottom: insets.bottom + 16 }]}>
         <View style={styles.controlsRow}>
           <ControlBtn
@@ -468,7 +492,7 @@ export default function CallScreen() {
           />
           <ControlBtn
             icon={speakerOn ? "volume-high" : "volume-medium"}
-            label="Audio"
+            label="Speaker"
             onPress={() => {
               if (Platform.OS === "web") {
                 toggleSpeaker();
@@ -479,80 +503,20 @@ export default function CallScreen() {
             }}
             active={speakerOn}
           />
-          {joined ? (
-            <ControlBtn
-              icon={isVideo ? "call" : "videocam"}
-              label={isVideo ? "Voice only" : "Video"}
-              onPress={() => {
-                void switchCallMediaType(!isVideo);
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              }}
-              active={false}
-            />
-          ) : null}
-          {isVideo && (
+          {isVideo ? (
             <ControlBtn
               icon={cameraOff ? "videocam-off" : "videocam"}
               label="Camera"
               onPress={() => { toggleCamera(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
               active={cameraOff}
             />
-          )}
-          <ControlBtn
-            icon="chatbubble-outline"
-            label="Message"
-            onPress={minimizeCall}
-            active={false}
-          />
-          {joined ? (
-            <ControlBtn
-              icon="link-outline"
-              label="Link"
-              onPress={() => {
-                void (async () => {
-                  const chatId = Number(session?.chatId ?? params.id);
-                  const link = await createCallLink(user?.sessionToken, {
-                    chatId: Number.isFinite(chatId) ? chatId : undefined,
-                    type: isVideo ? "video" : "audio",
-                    title: name,
-                  });
-                  if (!link) {
-                    Alert.alert("Call link", "Could not create link. Try again.");
-                    return;
-                  }
-                  await Share.share({ message: link.deepLink });
-                })();
-              }}
-              active={false}
-            />
           ) : null}
-          {joined && isVideo ? (
+          {joined && !isOneToOne ? (
             <ControlBtn
-              icon="desktop-outline"
-              label={screenSharing ? "Stop share" : "Share"}
-              onPress={() => {
-                void (async () => {
-                  if (screenSharing) {
-                    await stopScreenShare();
-                    setScreenSharing(false);
-                    return;
-                  }
-                  if (!isScreenShareSupported()) {
-                    Alert.alert(
-                      "Screen share",
-                      Platform.OS === "ios"
-                        ? "Screen sharing on iPhone requires a system broadcast extension (coming soon). Use Videh Web for now."
-                        : Platform.OS === "web"
-                          ? "Your browser blocked screen sharing."
-                          : "Screen sharing is not available on this device.",
-                    );
-                    return;
-                  }
-                  const ok = await shareScreen();
-                  if (ok) setScreenSharing(true);
-                })();
-              }}
-              active={screenSharing}
+              icon="person-add"
+              label="Add"
+              onPress={() => setAddPeopleOpen(true)}
+              active={false}
             />
           ) : null}
         </View>
@@ -747,9 +711,16 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   encryptText: { color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: "Inter_400Regular" },
-  controls: { width: "100%", alignItems: "center", paddingHorizontal: 24, gap: 32 },
-  controlsRow: { flexDirection: "row", justifyContent: "space-around", width: "100%", flexWrap: "wrap", rowGap: 20 },
-  ctrlBtn: { alignItems: "center", gap: 8 },
+  controls: { width: "100%", alignItems: "center", paddingHorizontal: 20, gap: 24 },
+  controlsRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "flex-start",
+    width: "100%",
+    gap: 28,
+    paddingHorizontal: 8,
+  },
+  ctrlBtn: { alignItems: "center", gap: 8, minWidth: 68 },
   ctrlIcon: {
     width: 60,
     height: 60,

@@ -1019,7 +1019,7 @@ function RootLayoutNav() {
           }}
         />
       ) : null}
-      {activeCallSession?.engineActive && !activeCallSession.ringing && activeCallJoined && !onCallRoute && !onActiveCallChatRoute ? (
+      {activeCallSession?.engineActive && !activeCallSession.ringing && !onCallRoute && !onActiveCallChatRoute ? (
         <OngoingCallBanner
           contactName={activeCallSession.contactName}
           isVideo={activeCallSession.isVideo}

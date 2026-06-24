@@ -1077,7 +1077,6 @@ export default function ChatScreen() {
   const showReturnToCallBar =
     Boolean(activeCallSession?.engineActive)
     && !activeCallSession?.ringing
-    && activeCallJoined
     && chatId != null
     && String(activeCallSession?.chatId) === String(chatId);
   const activeCallDurationLabel = `${Math.floor(activeCallDuration / 60).toString().padStart(2, "0")}:${(activeCallDuration % 60).toString().padStart(2, "0")}`;

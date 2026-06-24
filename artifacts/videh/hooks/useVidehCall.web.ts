@@ -41,6 +41,7 @@ export function useVidehCall(
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [isFrontCamera, setIsFrontCamera] = useState(true);
+  const [localVideoRevision, setLocalVideoRevision] = useState(0);
   const [speakerOn, setSpeakerOn] = useState(true);
   const [remoteCount, setRemoteCount] = useState(0);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
@@ -356,6 +357,7 @@ export function useVidehCall(
       } catch { /* ignore */ }
     },
     isFrontCamera,
+    localVideoRevision,
     toggleSpeaker: () => {
       setSpeakerOn((s) => {
         const next = !s;
