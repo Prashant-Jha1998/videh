@@ -1335,7 +1335,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         return;
       }
-      runChats();
       try {
         if (!raw) return;
         const parsed = JSON.parse(raw) as {
@@ -1461,6 +1460,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const activeChatMsgTimer = setInterval(() => {
       const cid = activeChatIdRef.current;
       if (!cid) return;
+      // Open chat screen already polls; skip duplicate backup fetches.
+      if (getNotificationActiveChatId() === cid) return;
       void loadMessages(cid);
     }, ACTIVE_CHAT_MESSAGE_BACKUP_POLL_MS);
     const statusTimer = setInterval(runStatuses, 30000);

@@ -15,7 +15,6 @@ import {
   useGenericKeyboardHandler,
 } from "react-native-keyboard-controller";
 import { useChatKeyboard } from "@/hooks/useChatKeyboard";
-import { onChatMessageSignal } from "@/lib/chatMessageEvents";
 import { OPEN_CHAT_MESSAGE_POLL_MS } from "@/lib/chatRealtimePoll";
 import { runOnJS } from "react-native-reanimated";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1219,7 +1218,10 @@ export default function ChatScreen() {
         }
       };
       const pollMessages = (force = false) => {
-        if (!force && messagePollInFlightRef.current) return;
+        if (messagePollInFlightRef.current) {
+          if (!force) return;
+          return;
+        }
         messagePollInFlightRef.current = true;
         const safety = setTimeout(() => {
           messagePollInFlightRef.current = false;
@@ -1233,10 +1235,6 @@ export default function ChatScreen() {
       void pollMessages(true);
       void pollTyping();
       const typingTimer = setInterval(pollTyping, 4000);
-      const unsubMsgSignal = onChatMessageSignal((signal) => {
-        if (String(signal.chatId) !== String(chatId)) return;
-        pollMessages(true);
-      });
       const appStateSub = AppState.addEventListener("change", (state) => {
         if (state === "active") pollMessages(true);
       });
@@ -1262,7 +1260,6 @@ export default function ChatScreen() {
       const presenceTimer = !isGroupChat && peerId ? setInterval(loadPresence, 12000) : null;
 
       return () => {
-        unsubMsgSignal();
         appStateSub.remove();
         setActiveChatId(null);
         clearTyping(chatId);

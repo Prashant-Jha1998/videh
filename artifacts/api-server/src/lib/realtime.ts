@@ -36,11 +36,12 @@ export async function initRealtimeBus(): Promise<void> {
 }
 
 export function publishChatEvent(event: ChatEvent): void {
-  // Always notify local SSE clients on this worker (Redis alone can miss if pub/sub hiccups).
-  bus.emit("chat", event);
   if (redisBusActive) {
+    // Redis pub/sub delivers to every worker (including the publisher's subscriber).
     publishRedisBus(JSON.stringify(event));
+    return;
   }
+  bus.emit("chat", event);
 }
 
 export function attachChatEventStream(userId: number, res: Response): () => void {
@@ -54,9 +55,11 @@ export function attachChatEventStream(userId: number, res: Response): () => void
   const onEvent = (event: ChatEvent) => {
     if (!event.userIds.map(Number).includes(userId)) return;
     res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+    (res as { flush?: () => void }).flush?.();
   };
   const heartbeat = setInterval(() => {
     res.write(`event: ping\ndata: {}\n\n`);
+    (res as { flush?: () => void }).flush?.();
   }, 25_000);
   bus.on("chat", onEvent);
   return () => {

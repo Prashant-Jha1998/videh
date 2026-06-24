@@ -3,7 +3,7 @@ import { getApiUrl } from "@/lib/api";
 
 export type ChatStreamHandler = (eventType: string, data: string) => void;
 
-const STALE_SSE_MS = 90_000;
+const STALE_SSE_MS = 120_000;
 const AUTH_FAIL_RETRY_MS = 30_000;
 const NORMAL_RETRY_MS = 800;
 
@@ -20,9 +20,13 @@ function parseSseBlocks(buffer: string): { events: Array<{ type: string; data: s
       else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
     }
     const data = dataLines.join("\n");
-    if (data && type !== "ping" && type !== "ready") events.push({ type, data });
+    if (data) events.push({ type, data });
   }
   return { events, rest };
+}
+
+function isSseKeepalive(type: string): boolean {
+  return type === "ping" || type === "ready";
 }
 
 /** SSE for chat events — EventSource on web, XHR stream on React Native (WhatsApp-style instant). */
@@ -61,6 +65,7 @@ export function connectChatEventStream(
     buf = parsed.rest;
     for (const ev of parsed.events) {
       touchActivity();
+      if (isSseKeepalive(ev.type)) continue;
       onEvent(ev.type, ev.data);
     }
   };
