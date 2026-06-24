@@ -12,3 +12,6 @@ export const MESSAGE_HINT_API_DELAY_MS = 200;
 
 /** Second fetch if the server row is not ready yet. */
 export const MESSAGE_HINT_API_RETRY_MS = 1200;
+
+/** Extra retries for album/media (upload + DB may lag push). */
+export const MESSAGE_HINT_MEDIA_RETRY_MS = 2800;

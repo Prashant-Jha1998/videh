@@ -49,6 +49,14 @@ export function albumChatPreview(count: number, caption?: string): string {
   return count === 1 ? "Photo" : `${count} photos`;
 }
 
+/** Push/FCM body like "4 photos" — not full album JSON. */
+export function parseAlbumPhotoCountLabel(text: string | undefined | null): number | null {
+  const m = String(text ?? "").trim().match(/^(\d+)\s+photos?$/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n >= 2 ? n : null;
+}
+
 /** Best available URL list for rendering an album bubble. */
 export function resolveAlbumUrls(
   content: string | undefined | null,

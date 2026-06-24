@@ -934,6 +934,7 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
           senderName,
           senderAvatarUrl: senderAvatarUrl ?? "",
           messageType: type ?? "text",
+          mediaUrl: String(mediaUrl ?? result.rows[0].media_url ?? ""),
           type: "message",
           notificationKind: "chat_message",
           isGroup: perm.isGroup ? "1" : "0",

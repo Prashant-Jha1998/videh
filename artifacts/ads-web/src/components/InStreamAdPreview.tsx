@@ -177,14 +177,16 @@ export function InStreamAdPreview({
             <div className="yt-ad-video-top">
               <span className="yt-ad-visit">Visit advertiser</span>
             </div>
-            <div className="yt-ad-video-bottom">
-              <span className="yt-ad-sponsored">Sponsored ⓘ</span>
-              <button type="button" className="yt-ad-skip" onClick={() => setAdFinished(true)}>
-                Skip ad ▶
-              </button>
-            </div>
-            <div className="yt-ad-progress">
-              <div className="yt-ad-progress-fill" />
+            <div className="yt-ad-video-bottom-wrap">
+              <div className="yt-ad-video-bottom">
+                <span className="yt-ad-sponsored">Sponsored ⓘ</span>
+                <button type="button" className="yt-ad-skip" onClick={() => setAdFinished(true)}>
+                  Skip ad ▶
+                </button>
+              </div>
+              <div className="yt-ad-progress">
+                <div className="yt-ad-progress-fill" />
+              </div>
             </div>
           </div>
         </div>

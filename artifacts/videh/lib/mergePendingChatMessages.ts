@@ -1,6 +1,6 @@
 import type { Message } from "@/context/AppContext";
 import { albumSendLog } from "@/lib/albumSendLog";
-import { parseAlbumMessageContent } from "@/lib/chatAlbumMessage";
+import { parseAlbumMessageContent, parseAlbumPhotoCountLabel } from "@/lib/chatAlbumMessage";
 
 const TEMP_MATCH_WINDOW_MS = 60_000;
 /** Keep optimistic/patched outgoing rows until the messages API returns them. */
@@ -105,6 +105,13 @@ export function collectPendingLocalMessages(
           if (m.text.trim() && s.text === m.text) return true;
           if (s.type === "album" || parseAlbumMessageContent(s.text)) {
             if (m.type === "album" || parseAlbumMessageContent(m.text)) return true;
+            if (parseAlbumPhotoCountLabel(m.text)) return true;
+          }
+          if (parseAlbumPhotoCountLabel(m.text)) {
+            const serverIsAlbum = s.type === "album" || !!parseAlbumMessageContent(s.text);
+            if (serverIsAlbum && m.senderId !== "me" && Math.abs(s.timestamp - m.timestamp) < 120_000) {
+              return true;
+            }
           }
           return false;
         })

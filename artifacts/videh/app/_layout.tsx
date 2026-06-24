@@ -46,7 +46,7 @@ import {
 } from "@/lib/callKeep";
 import type { CallKeepHandlerPayload } from "@/lib/callKeepBridge";
 import { displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
-import { emitChatMessageSignal } from "@/lib/chatMessageEvents";
+import { emitChatMessageSignal, type ChatMessageSignal } from "@/lib/chatMessageEvents";
 import { getNotificationActiveChatId } from "@/lib/incomingMessageNotify";
 import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
 import { INCOMING_RING_TIMEOUT_MS, INCOMING_CALL_POLL_ACTIVE_MS, INCOMING_CALL_POLL_BACKGROUND_MS } from "@/lib/callConstants";
@@ -646,6 +646,8 @@ function RootLayoutNav() {
             body: notification.request.content.body ?? undefined,
             senderName: String(data.senderName ?? notification.request.content.title ?? ""),
             senderId: data.senderId != null ? String(data.senderId) : undefined,
+            messageType: data.messageType != null ? String(data.messageType) as ChatMessageSignal["messageType"] : undefined,
+            mediaUrl: data.mediaUrl != null ? String(data.mediaUrl) : undefined,
           });
         }
         return {
@@ -696,6 +698,8 @@ function RootLayoutNav() {
           body: notification.request.content.body ?? undefined,
           senderName: String(data.senderName ?? notification.request.content.title ?? ""),
           senderId: data.senderId != null ? String(data.senderId) : undefined,
+          messageType: data.messageType != null ? String(data.messageType) as ChatMessageSignal["messageType"] : undefined,
+          mediaUrl: data.mediaUrl != null ? String(data.mediaUrl) : undefined,
         });
         if (AppState.currentState === "active" && getNotificationActiveChatId() === chatId) {
           void dismissChatMessageNotifications(chatId);

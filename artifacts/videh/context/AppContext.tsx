@@ -10,6 +10,7 @@ import {
   FOREGROUND_CHAT_LIST_POLL_MS,
   MESSAGE_HINT_API_DELAY_MS,
   MESSAGE_HINT_API_RETRY_MS,
+  MESSAGE_HINT_MEDIA_RETRY_MS,
 } from "@/lib/chatRealtimePoll";
 import { emitChatMessageSignal, onChatMessageSignal, type ChatMessageSignal } from "@/lib/chatMessageEvents";
 import {
@@ -49,9 +50,20 @@ import {
   normalizeAlbumMediaUrl,
   encodeAlbumMessageContent,
   parseAlbumMessageContent,
+  parseAlbumPhotoCountLabel,
   resolveAlbumUrls,
 } from "@/lib/chatAlbumMessage";
 import { inferChatListPreview, normalizeMessageType } from "@/lib/normalizeMessage";
+
+function isMediaMessageType(type: Message["type"]): boolean {
+  return (
+    type === "album"
+    || type === "image"
+    || type === "video"
+    || type === "audio"
+    || type === "document"
+  );
+}
 import { collectPendingLocalMessages, mergeServerWithPending } from "@/lib/mergePendingChatMessages";
 import {
   loadChatMessageCache,
@@ -1016,13 +1028,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const serverMessageId = signal.messageId ? String(signal.messageId) : undefined;
     const text = signal.body?.trim();
     const mediaUrl = signal.mediaUrl?.trim();
-    const hintType = normalizeMessageType(signal.messageType, text ?? "", mediaUrl);
-    if (!serverMessageId && !text && !mediaUrl) return;
+    const declaredType = signal.messageType;
+    const hintType = normalizeMessageType(declaredType, text ?? "", mediaUrl);
+    if (!serverMessageId && !text && !mediaUrl && !declaredType) return;
 
     const albumUrls = resolveAlbumUrls(text ?? "", { mediaUrl });
-    const resolvedHintType = albumUrls && albumUrls.length >= 2 ? "album" : hintType;
+    const albumCountFromLabel = parseAlbumPhotoCountLabel(text);
+    const resolvedHintType =
+      albumUrls && albumUrls.length >= 2
+        ? "album"
+        : declaredType === "album" || albumCountFromLabel != null
+          ? "album"
+          : hintType;
+
     const hintPreviewText =
-      inferChatListPreview(signal.messageType ?? resolvedHintType, text ?? "", mediaUrl)
+      inferChatListPreview(declaredType ?? resolvedHintType, text ?? "", mediaUrl)
       || (resolvedHintType === "image"
         ? "📷 Photo"
         : resolvedHintType === "video"
@@ -1031,20 +1051,80 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ? "Voice message"
             : resolvedHintType === "document"
               ? "Document"
-              : resolvedHintType === "album" && albumUrls
-                ? albumChatPreview(albumUrls.length)
+              : resolvedHintType === "album"
+                ? albumChatPreview(albumUrls?.length ?? albumCountFromLabel ?? 2)
                 : "Message");
+
+    const isMediaType =
+      resolvedHintType === "album"
+      || resolvedHintType === "image"
+      || resolvedHintType === "video"
+      || resolvedHintType === "audio"
+      || resolvedHintType === "document";
+    const hasRenderableAlbum = resolvedHintType === "album" && (albumUrls?.length ?? 0) >= 2;
+    const hasRenderableImageVideo =
+      (resolvedHintType === "image" || resolvedHintType === "video") && Boolean(mediaUrl);
+    const shouldSkipBubble =
+      isMediaType
+      && !hasRenderableAlbum
+      && !hasRenderableImageVideo
+      && !(resolvedHintType === "audio" && text);
+
+    const senderId =
+      signal.senderId != null
+        ? String(signal.senderId) === String(u?.dbId)
+          ? "me"
+          : String(signal.senderId)
+        : "other";
+    if (senderId === "me") return;
+
+    const buildHintMsg = (): Message =>
+      coerceAlbumMessageFields({
+        id: serverMessageId ? `hint_${serverMessageId}` : `hint_t${Date.now()}`,
+        text: hintPreviewText,
+        timestamp: Date.now(),
+        senderId,
+        senderName: signal.senderName,
+        type: resolvedHintType,
+        mediaUrl: albumUrls?.[0] ?? mediaUrl ?? undefined,
+        albumUrls,
+        status: "delivered",
+      });
 
     setChats((prev) =>
       prev.map((c) => {
         if (String(c.id) !== chatId) return c;
         const msgs = c.messages ?? [];
-        if (
-          serverMessageId
-          && msgs.some((m) => m.id === serverMessageId || m.id === `hint_${serverMessageId}`)
-        ) {
+
+        if (serverMessageId && msgs.some((m) => m.id === serverMessageId)) {
           return c;
         }
+
+        const hintId = serverMessageId ? `hint_${serverMessageId}` : null;
+        const existingHintIdx = hintId ? msgs.findIndex((m) => m.id === hintId) : -1;
+        if (existingHintIdx >= 0) {
+          const upgraded = buildHintMsg();
+          const prevHint = msgs[existingHintIdx];
+          const prevUrls = prevHint.albumUrls?.length ?? 0;
+          const nextUrls = upgraded.albumUrls?.length ?? 0;
+          if (nextUrls <= prevUrls && prevHint.text === upgraded.text && prevHint.type === upgraded.type) {
+            return c;
+          }
+          if (shouldSkipBubble && nextUrls < 2) {
+            return c;
+          }
+          const nextMsgs = [...msgs];
+          nextMsgs[existingHintIdx] = { ...upgraded, id: hintId! };
+          const preview = inferChatListPreview(resolvedHintType, text ?? "", mediaUrl);
+          return {
+            ...c,
+            messages: nextMsgs.sort((a, b) => a.timestamp - b.timestamp),
+            lastMessage: preview || c.lastMessage,
+            lastMessageTime: Date.now(),
+            unreadCount: Math.max(c.unreadCount ?? 0, 1),
+          };
+        }
+
         if (
           text
           && msgs.some(
@@ -1053,25 +1133,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ) {
           return c;
         }
-        const senderId =
-          signal.senderId != null
-            ? String(signal.senderId) === String(u?.dbId)
-              ? "me"
-              : String(signal.senderId)
-            : "other";
-        if (senderId === "me") return c;
 
-        const hintMsg: Message = coerceAlbumMessageFields({
-          id: serverMessageId ? `hint_${serverMessageId}` : `hint_t${Date.now()}`,
-          text: hintPreviewText,
-          timestamp: Date.now(),
-          senderId,
-          senderName: signal.senderName,
-          type: resolvedHintType,
-          mediaUrl: albumUrls?.[0] ?? mediaUrl ?? undefined,
-          albumUrls,
-          status: "delivered",
-        });
+        if (shouldSkipBubble) {
+          const preview = inferChatListPreview(resolvedHintType, text ?? "", mediaUrl);
+          return {
+            ...c,
+            lastMessage: preview || c.lastMessage,
+            lastMessageTime: Date.now(),
+            unreadCount: Math.max(c.unreadCount ?? 0, 1),
+          };
+        }
+
+        const hintMsg = buildHintMsg();
         const merged = [...msgs, hintMsg].sort((a, b) => a.timestamp - b.timestamp);
         const preview = inferChatListPreview(resolvedHintType, text ?? "", mediaUrl);
         const now = Date.now();
@@ -1084,9 +1157,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         };
       }),
     );
+
     const activityAt = Date.now();
     if (activityAt > (chatDeletedAtRef.current[chatId] ?? 0)) {
       void restoreHiddenChatsWithNewActivity([{ id: chatId, lastMessageTime: activityAt }]);
+    }
+
+    if (isMediaType) {
+      void loadMessagesRef.current?.(chatId);
     }
   }, [restoreHiddenChatsWithNewActivity]);
 
@@ -1210,14 +1288,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /** Defer API refresh so the server row exists before we merge (avoids hint flicker). */
   const scheduleLoadMessagesAfterHint = useCallback(
-    (chatId: string) => {
+    (chatId: string, opts?: { media?: boolean }) => {
       const key = String(chatId);
+      const media = opts?.media === true;
+      const firstDelay = media ? 0 : MESSAGE_HINT_API_DELAY_MS;
+
       const pending = loadMessagesAfterHintTimersRef.current.get(key);
       if (pending) clearTimeout(pending);
       const timer = setTimeout(() => {
         loadMessagesAfterHintTimersRef.current.delete(key);
         void loadMessages(chatId);
-      }, MESSAGE_HINT_API_DELAY_MS);
+      }, firstDelay);
       loadMessagesAfterHintTimersRef.current.set(key, timer);
 
       const retryKey = `${key}:retry`;
@@ -1226,8 +1307,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const retryTimer = setTimeout(() => {
         loadMessagesAfterHintTimersRef.current.delete(retryKey);
         void loadMessages(chatId);
-      }, MESSAGE_HINT_API_RETRY_MS);
+      }, media ? MESSAGE_HINT_API_RETRY_MS : MESSAGE_HINT_API_RETRY_MS);
       loadMessagesAfterHintTimersRef.current.set(retryKey, retryTimer);
+
+      if (media) {
+        const mediaRetryKey = `${key}:media`;
+        const pendingMedia = loadMessagesAfterHintTimersRef.current.get(mediaRetryKey);
+        if (pendingMedia) clearTimeout(pendingMedia);
+        const mediaTimer = setTimeout(() => {
+          loadMessagesAfterHintTimersRef.current.delete(mediaRetryKey);
+          void loadMessages(chatId);
+        }, MESSAGE_HINT_MEDIA_RETRY_MS);
+        loadMessagesAfterHintTimersRef.current.set(mediaRetryKey, mediaTimer);
+      }
     },
     [loadMessages],
   );
@@ -1408,10 +1500,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             messageType,
             mediaUrl,
           };
-          applyIncomingMessageHint(signal);
           emitChatMessageSignal(signal);
           if (activeChatIdRef.current === cid) {
-            scheduleLoadMessagesAfterHint(cid);
+            scheduleLoadMessagesAfterHint(cid, { media: isMediaMessageType(messageType) });
           }
         }
         if (cid) {
@@ -1493,7 +1584,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       applyIncomingMessageHint(signal);
       const cid = activeChatIdRef.current;
       if (cid && String(signal.chatId) === cid) {
-        scheduleLoadMessagesAfterHint(cid);
+        const mt = signal.messageType
+          ?? normalizeMessageType(signal.messageType, signal.body ?? "", signal.mediaUrl);
+        scheduleLoadMessagesAfterHint(cid, { media: isMediaMessageType(mt) });
       }
     });
   }, [isAuthenticated, applyIncomingMessageHint, scheduleLoadMessagesAfterHint]);
