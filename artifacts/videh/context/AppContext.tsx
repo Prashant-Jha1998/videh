@@ -14,6 +14,7 @@ import {
 import { emitChatMessageSignal, onChatMessageSignal, type ChatMessageSignal } from "@/lib/chatMessageEvents";
 import {
   deliverPremiumChatMessageNotification,
+  getNotificationActiveChatId,
   setNotificationActiveChatId,
   setNotificationRuntimeState,
 } from "@/lib/incomingMessageNotify";
