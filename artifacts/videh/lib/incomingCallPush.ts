@@ -6,9 +6,10 @@ import { wakeScreenForIncomingCall } from "@/lib/inCallAudio";
 import {
   presentIncomingCallUi,
   startIncomingCallExperience,
+  isIncomingCallAlreadyHandled,
+  shouldPresentIncomingCallSurfaces,
 } from "@/lib/incomingCallExperience";
 import { showIncomingCallNotification } from "@/lib/incomingCallNotification";
-import { displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
 
 export function isIncomingCallPushData(data: Record<string, unknown> | null | undefined): boolean {
   if (!data?.callId) return false;
@@ -51,26 +52,20 @@ export async function presentIncomingCallFromPush(
   if (Platform.OS === "web" || !isIncomingCallPushData(data)) return;
 
   const call = parseIncomingCallFromPushData(data);
+  if (isIncomingCallAlreadyHandled(call.callId)) return;
 
   const inForeground = AppState.currentState === "active";
+  const presentSurfaces = shouldPresentIncomingCallSurfaces(call.callId);
   wakeScreenForIncomingCall();
   await setupCallKeep();
 
-  if (!inForeground) {
-    displayNativeIncomingCall({
-      callId: call.callId,
-      callerName: call.callerName,
-      isVideo: call.type === "video",
-    });
-  }
-
-  const useNativeSurface = !inForeground && !options?.skipCallKeep;
+  const useNativeSurface = !inForeground && !options?.skipCallKeep && presentSurfaces;
   if (useNativeSurface) {
     showCallKeepIncoming(call.callId, call.callerName, call.chatId, call.type === "video");
   }
 
   const scheduleLocal =
-    options?.scheduleLocalNotification ?? !inForeground;
+    (options?.scheduleLocalNotification ?? !inForeground) && presentSurfaces;
   if (scheduleLocal) {
     await showIncomingCallNotification(call);
   }
@@ -79,7 +74,7 @@ export async function presentIncomingCallFromPush(
 
   if (!inForeground) {
     presentIncomingCallUi(call, { useNativeSurface });
-    if (!isCallKeepAvailable()) {
+    if (!isCallKeepAvailable() && presentSurfaces) {
       void Linking.openURL(incomingCallDeepLink(call)).catch(() => {});
     }
   }

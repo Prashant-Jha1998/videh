@@ -231,20 +231,20 @@ export default function CallScreen() {
   const outgoingVideoRinging = outgoingRinging && isOneToOne && isVideo;
   const ringPreviewUrl = useOutgoingCallCameraPreview(outgoingVideoRinging && !localStreamUrl);
   const effectiveLocalUrl = localStreamUrl || ringPreviewUrl;
-  const canAutoHideTopBar = isVideo && (joined || callAnswered || mediaReady) && !outgoingVideoRinging;
+  const canAutoHideControls = isVideo && (joined || callAnswered || mediaReady) && !outgoingVideoRinging;
   const showBottomControls = !isVideo || joined || outgoingVideoRinging || callAnswered || mediaReady;
   const localRenderKey = `local-${localVideoRevision}-${videoFocus}`;
   const remoteRenderKey = `remote-${videoFocus}-${remoteStreamUrl ?? "none"}`;
 
   useEffect(() => {
-    if (!canAutoHideTopBar) {
+    if (!canAutoHideControls) {
       setControlsVisible(true);
       clearControlsHideTimer();
       return;
     }
     scheduleHideControls();
     return clearControlsHideTimer;
-  }, [canAutoHideTopBar, clearControlsHideTimer, scheduleHideControls]);
+  }, [canAutoHideControls, clearControlsHideTimer, scheduleHideControls]);
 
   useEffect(() => () => clearControlsHideTimer(), [clearControlsHideTimer]);
 
@@ -486,7 +486,7 @@ export default function CallScreen() {
         </>
       )}
 
-      {showBottomControls ? (
+      {showBottomControls && (!isVideo || controlsVisible) ? (
       <View style={[
         styles.controls,
         isVideo && {
@@ -496,7 +496,6 @@ export default function CallScreen() {
           bottom: insets.bottom + VIDEO_CTRL_BOTTOM_PAD,
           zIndex: 40,
           elevation: 40,
-          paddingRight: hasActivePip ? PIP_W + 20 : 0,
         },
       ]}>
         <View style={styles.controlsRow}>
@@ -728,14 +727,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   encryptText: { color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: "Inter_400Regular" },
-  controls: { width: "100%", alignItems: "center", paddingHorizontal: 20, gap: 24 },
+  controls: { width: "100%", alignItems: "center", paddingHorizontal: 24, gap: 20 },
   controlsRow: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "flex-start",
-    width: "100%",
-    gap: 20,
-    paddingHorizontal: 4,
+    alignSelf: "center",
+    gap: 24,
   },
   ctrlBtn: { alignItems: "center", gap: 8, minWidth: 68 },
   ctrlIcon: {

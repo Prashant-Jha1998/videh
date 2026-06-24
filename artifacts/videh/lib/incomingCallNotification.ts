@@ -61,4 +61,20 @@ export async function dismissIncomingCallNotification(callId: string): Promise<v
   }
 }
 
+/** Dismiss local + FCM-presented notifications for one call (stops channel ringtone). */
+export async function dismissAllIncomingCallNotifications(callId: string): Promise<void> {
+  if (Platform.OS === "web") return;
+  await dismissIncomingCallNotification(callId);
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    await Promise.all(
+      presented
+        .filter((n) => String((n.request.content.data as Record<string, unknown> | undefined)?.callId ?? "") === callId)
+        .map((n) => Notifications.dismissNotificationAsync(n.request.identifier).catch(() => {})),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
 export { NOTIFICATION_ACTION_ACCEPT_CALL, NOTIFICATION_ACTION_DECLINE_CALL };

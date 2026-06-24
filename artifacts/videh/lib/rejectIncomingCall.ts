@@ -1,5 +1,5 @@
 import { endCallKeep } from "@/lib/callKeep";
-import { dismissIncomingCallNotification } from "@/lib/incomingCallNotification";
+import { dismissAllIncomingCallNotifications } from "@/lib/incomingCallNotification";
 import { requestDismissIncomingCallUi } from "@/lib/incomingCallUiBridge";
 import { stopCallAlert } from "@/lib/callRingtone";
 import { webrtcFetch } from "@/lib/webrtcApi";
@@ -32,7 +32,7 @@ export async function rejectIncomingCall(args: {
         ...(declineMessage ? { declineMessage } : {}),
       }),
     });
-    await dismissIncomingCallNotification(callId).catch(() => {});
+    await dismissAllIncomingCallNotifications(callId).catch(() => {});
     requestDismissIncomingCallUi(callId, true);
     return res.ok;
   } catch {

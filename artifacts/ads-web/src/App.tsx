@@ -1064,7 +1064,13 @@ export default function App() {
                 <div className="ads-preview-label">Preview — home feed card</div>
                 <div className="ads-feed-preview">
                   <div className="ads-preview-sponsored">Sponsored · {advertiser?.company_name}</div>
-                  {imagePreviewSrc ? <img src={imagePreviewSrc} alt="" className="ads-feed-preview-img" /> : <div className="ads-feed-preview-img-ph" />}
+                  {imagePreviewSrc ? (
+                    <div className="ads-feed-preview-img-wrap">
+                      <img src={imagePreviewSrc} alt="" className="ads-feed-preview-img" />
+                    </div>
+                  ) : (
+                    <div className="ads-feed-preview-img-ph" />
+                  )}
                   <div className="ads-feed-preview-body">
                     <strong>{headline || creativeTitle || "Your headline"}</strong>
                     <p className="ads-preview-muted">{description || "Description"}</p>

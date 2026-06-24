@@ -8,6 +8,23 @@ export function getRingingCallId(): string | null {
   return ringingCallId;
 }
 
+export function isIncomingCallAlreadyHandled(_callId: string): boolean {
+  return false;
+}
+
+export function shouldPresentIncomingCallSurfaces(callId: string): boolean {
+  if (ringingCallId === callId) return false;
+  return true;
+}
+
+export function markIncomingCallHandled(callId: string): void {
+  if (ringingCallId === callId) ringingCallId = null;
+}
+
+export function isAppInForeground(): boolean {
+  return typeof document !== "undefined" ? document.visibilityState === "visible" : true;
+}
+
 export function claimIncomingCallRing(callId: string): boolean {
   if (ringingCallId === callId) return false;
   ringingCallId = callId;

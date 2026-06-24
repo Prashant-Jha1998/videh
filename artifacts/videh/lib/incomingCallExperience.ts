@@ -1,12 +1,15 @@
 import * as Linking from "expo-linking";
 import { AppState, Platform } from "react-native";
 import type { IncomingCallInfo } from "@/components/IncomingCallOverlay";
-import { dismissIncomingCallNotification } from "@/lib/incomingCallNotification";
+import { dismissAllIncomingCallNotifications } from "@/lib/incomingCallNotification";
 import { stopCallAlert, startIncomingCallAlert } from "@/lib/callRingtone";
 import { dismissNativeIncomingCall, displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
 import { endCallKeep, showCallKeepIncoming } from "@/lib/callKeep";
 
 let ringingCallId: string | null = null;
+let surfacesPresentedFor: string | null = null;
+let nativeRingActiveFor: string | null = null;
+const handledCallIds = new Set<string>();
 
 export function isAppInForeground(): boolean {
   return AppState.currentState === "active";
@@ -16,11 +19,31 @@ export function getRingingCallId(): string | null {
   return ringingCallId;
 }
 
+export function isIncomingCallAlreadyHandled(callId: string): boolean {
+  return handledCallIds.has(callId);
+}
+
 /** Returns false if this call is already being offered (avoids duplicate ring/UI from poll). */
 export function claimIncomingCallRing(callId: string): boolean {
   if (ringingCallId === callId) return false;
   ringingCallId = callId;
   return true;
+}
+
+/** One notification + CallKeep + native ring per call (ignores ring-reminder pushes). */
+export function shouldPresentIncomingCallSurfaces(callId: string): boolean {
+  if (handledCallIds.has(callId)) return false;
+  if (surfacesPresentedFor === callId) return false;
+  surfacesPresentedFor = callId;
+  return true;
+}
+
+export function markIncomingCallHandled(callId: string): void {
+  handledCallIds.add(callId);
+  setTimeout(() => handledCallIds.delete(callId), 10 * 60_000);
+  if (ringingCallId === callId) ringingCallId = null;
+  if (surfacesPresentedFor === callId) surfacesPresentedFor = null;
+  if (nativeRingActiveFor === callId) nativeRingActiveFor = null;
 }
 
 /** Foreground: expo-av premium tone. Background: native InCallManager + notification channel sound. */
@@ -33,6 +56,8 @@ export async function startIncomingCallExperience(call: IncomingCallInfo & { cal
     await startIncomingCallAlert();
     return;
   }
+  if (nativeRingActiveFor === call.callId) return;
+  nativeRingActiveFor = call.callId;
   displayNativeIncomingCall({
     callId: call.callId,
     callerName: call.callerName,
@@ -44,11 +69,16 @@ export async function stopIncomingCallExperience(callId?: string, opts?: { force
   if (!opts?.force && callId && ringingCallId && ringingCallId !== callId) {
     return;
   }
-  ringingCallId = null;
+  if (callId) markIncomingCallHandled(callId);
+  else {
+    ringingCallId = null;
+    surfacesPresentedFor = null;
+    nativeRingActiveFor = null;
+  }
   dismissNativeIncomingCall();
   await stopCallAlert();
   if (callId) {
-    await dismissIncomingCallNotification(callId);
+    await dismissAllIncomingCallNotifications(callId);
     endCallKeep(callId, "declined");
   }
 }

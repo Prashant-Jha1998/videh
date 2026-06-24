@@ -45,7 +45,6 @@ import {
   bringCallKeepToForeground,
 } from "@/lib/callKeep";
 import type { CallKeepHandlerPayload } from "@/lib/callKeepBridge";
-import { displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
 import { emitChatMessageSignal, type ChatMessageSignal } from "@/lib/chatMessageEvents";
 import { getNotificationActiveChatId } from "@/lib/incomingMessageNotify";
 import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
@@ -59,6 +58,8 @@ import {
   presentIncomingCallUi,
   startIncomingCallExperience,
   stopIncomingCallExperience,
+  isIncomingCallAlreadyHandled,
+  shouldPresentIncomingCallSurfaces,
 } from "@/lib/incomingCallExperience";
 import { installGlobalErrorHandlers } from "@/lib/globalErrorHandlers";
 import {
@@ -237,19 +238,13 @@ function RootLayoutNav() {
     }
 
     const appActive = isAppInForeground();
+    const presentSurfaces = !appActive && shouldPresentIncomingCallSurfaces(next.callId);
     pendingIncomingRef.current = next;
     setIncomingCall((prev) => (prev?.callId === next.callId ? { ...prev, ...next } : next));
-    presentIncomingCallUi(next, { useNativeSurface: !appActive });
+    presentIncomingCallUi(next, { useNativeSurface: presentSurfaces });
     void startIncomingCallExperience(next);
-    if (!appActive) {
-      displayNativeIncomingCall({
-        callId: next.callId,
-        callerName: next.callerName,
-        isVideo: next.type === "video",
-      });
-      if (Platform.OS !== "web") {
-        void showIncomingCallNotification(next);
-      }
+    if (presentSurfaces && Platform.OS !== "web") {
+      void showIncomingCallNotification(next);
     }
     scheduleIncomingAutoEnd(next.callId);
 
@@ -280,6 +275,7 @@ function RootLayoutNav() {
     if (!user?.dbId) return;
     const partial = toIncomingCallInfo(raw);
     if (dismissedIncomingCallIdsRef.current.has(partial.callId)) return;
+    if (isIncomingCallAlreadyHandled(partial.callId)) return;
     if (activeCallIdRef.current === partial.callId && activeCallIsOutgoingRef.current) return;
     if (activeCallSession?.callId === partial.callId && activeCallSession.isIncoming === false) return;
 
@@ -604,7 +600,9 @@ function RootLayoutNav() {
         const inForeground = isAppInForeground();
 
         if (isCall && data && !inForeground) {
-          void presentIncomingCallFromPush(data, { scheduleLocalNotification: true });
+          if (!isIncomingCallAlreadyHandled(String(data.callId))) {
+            void presentIncomingCallFromPush(data, { scheduleLocalNotification: true });
+          }
           return {
             shouldShowAlert: false,
             shouldPlaySound: false,
@@ -709,6 +707,7 @@ function RootLayoutNav() {
       }
       const isCall = data.kind === "call" || data.notificationKind === "incoming_call";
       if (!isCall || !data.callId) return;
+      if (isIncomingCallAlreadyHandled(String(data.callId))) return;
       if (dismissedIncomingCallIdsRef.current.has(String(data.callId))) return;
       if (activeCallIdRef.current === String(data.callId)) return;
       if (activeCallSession?.callId === String(data.callId)) return;

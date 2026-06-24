@@ -3,7 +3,7 @@ import { useEvent } from "expo";
 import * as Linking from "expo-linking";
 import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useCallback, useEffect, useRef } from "react";
-import { Alert, Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
+import { Alert, AppState, Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReelsAdDetailPanel } from "@/components/ReelsAdDetailPanel";
 import { useColors } from "@/hooks/useColors";
@@ -55,10 +55,42 @@ export function ReelsAdPlayer({
   const finishedRef = useRef(false);
   const currentTimeRef = useRef(0);
   const onFinishedRef = useRef<Props["onFinished"]>(() => {});
+  const resumeOnActiveRef = useRef(false);
 
   useEffect(() => {
     currentTimeRef.current = currentTime;
   }, [currentTime]);
+
+  const pauseForExternal = useCallback(() => {
+    if (finishedRef.current) return;
+    resumeOnActiveRef.current = true;
+    try {
+      player.pause();
+    } catch { /* ignore */ }
+  }, [player]);
+
+  const resumeFromExternal = useCallback(() => {
+    if (finishedRef.current || !resumeOnActiveRef.current) return;
+    resumeOnActiveRef.current = false;
+    try {
+      const t = currentTimeRef.current;
+      if (t > 0) player.currentTime = t;
+      player.play();
+    } catch { /* ignore */ }
+  }, [player]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        resumeFromExternal();
+      } else if (state === "background" || state === "inactive") {
+        if (!finishedRef.current && player.playing) {
+          pauseForExternal();
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [pauseForExternal, resumeFromExternal, player]);
 
   const duration = player.duration > 0 ? player.duration : ad.durationSeconds;
   const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
@@ -129,7 +161,9 @@ export function ReelsAdPlayer({
       return;
     }
     void trackClick(clickTarget);
+    pauseForExternal();
     await Linking.openURL(url).catch(() => {
+      resumeOnActiveRef.current = false;
       Alert.alert("Ad", url);
     });
   };
@@ -150,6 +184,11 @@ export function ReelsAdPlayer({
       return;
     }
     void openUrl(primaryDestination(ad), "cta");
+  };
+
+  const onAdsPortalPress = () => {
+    pauseForExternal();
+    void Linking.openURL("https://ads.videh.co.in/").catch(() => {});
   };
 
   return (
@@ -213,9 +252,10 @@ export function ReelsAdPlayer({
       <ReelsAdDetailPanel
         ad={ad}
         colors={colors}
+        bottomInset={insets.bottom}
         onLearnMore={onLearnMore}
         onInstall={onInstall}
-        onHide={() => finish(true, false)}
+        onAdsPortalPress={onAdsPortalPress}
       />
     </View>
   );
