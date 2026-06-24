@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { InStreamAdPreview } from "./components/InStreamAdPreview";
 import { AdsShell } from "./components/AdsShell";
 import { GoogleSignInButton } from "./components/GoogleSignInButton";
 import { MediaUploadField } from "./components/MediaUploadField";
@@ -954,68 +955,35 @@ export default function App() {
 
                 <aside className="ads-create-previews" aria-label="Ad previews">
               <div className="ads-preview-block">
-                <div className="ads-preview-label">Preview — in-stream ad</div>
-                <div className="ads-instream-preview">
-                  <div className="ads-instream-video">
-                    {videoPreviewSrc ? (
-                      <video src={videoPreviewSrc} className="ads-instream-video-el" muted playsInline loop autoPlay />
-                    ) : (
-                      <div className="ads-instream-video-placeholder" />
-                    )}
-                    <div className="ads-instream-overlay" aria-hidden="true">
-                      <div className="ads-instream-video-top">
-                        <span className="ads-instream-spacer" />
-                        <span className="ads-instream-visit">Visit advertiser</span>
-                      </div>
-                      <div className="ads-instream-bottom-block">
-                        <div className="ads-instream-video-bottom">
-                          <span className="ads-instream-sponsored">Sponsored ⓘ</span>
-                          <span className="ads-instream-skip">Skip ad ▶</span>
-                        </div>
-                        <div className="ads-instream-progress" role="presentation">
-                          <div className="ads-instream-progress-fill" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="ads-instream-panel">
-                    <div className="ads-instream-panel-head"><strong>Sponsored</strong></div>
-                    <div className="ads-instream-identity">
-                      {imagePreviewSrc ? <img src={imagePreviewSrc} alt="" className="ads-instream-icon" /> : <div className="ads-instream-icon-ph" />}
-                      <div>
-                        <strong>{adFormat === "app_install" ? (appName || headline || creativeTitle || "App title") : (headline || creativeTitle || "Your headline")}</strong>
-                        <div className="ads-preview-muted">
-                          {adFormat === "app_install" ? (appDeveloper || advertiser?.company_name || "Developer") : (advertiser?.company_name ?? "Advertiser")}
-                        </div>
-                        {adFormat === "app_install" ? (
-                          <div className="ads-preview-muted" style={{ fontSize: 12, marginTop: 4 }}>Google Play · {appPriceLabel || "FREE"}</div>
-                        ) : null}
-                      </div>
-                    </div>
-                    {adFormat === "app_install" ? (
-                      <div className="ads-instream-stats">
-                        {appRating ? (
-                          <div>
-                            <strong>{appRating} ★</strong>
-                            {appReviewCount ? <div className="ads-stat-sub">{appReviewCount}</div> : null}
-                          </div>
-                        ) : null}
-                        {appDownloadCount ? <div><strong>{appDownloadCount}</strong><div className="ads-stat-sub">Downloads</div></div> : null}
-                        {appCategory ? <div><strong>{appCategory}</strong><div className="ads-stat-sub">Category</div></div> : null}
-                      </div>
-                    ) : null}
-                    <p className="ads-preview-muted" style={{ margin: "10px 0" }}>{description || "Description shown below the video while ad plays."}</p>
-                    <div className="ads-promo-row">
-                      {[promoPreview1, promoPreview2].filter(Boolean).map((url) => (
-                        <img key={url} src={url} alt="" className="ads-promo-thumb" />
-                      ))}
-                    </div>
-                    <div className="ads-instream-actions">
-                      <span className="ads-btn-learn">Learn more</span>
-                      <span className="ads-btn-cta">{adFormat === "app_install" ? "Install" : adFormat === "shopping" ? "Shop now" : "Watch now"}</span>
-                    </div>
-                  </div>
-                </div>
+                <div className="ads-preview-label">Preview — in-stream ad (YouTube-style)</div>
+                <InStreamAdPreview
+                  videoSrc={videoPreviewSrc}
+                  iconSrc={imagePreviewSrc}
+                  headline={
+                    adFormat === "app_install"
+                      ? appName || headline || creativeTitle || "App title"
+                      : headline || creativeTitle || "Your headline"
+                  }
+                  subtitle={
+                    adFormat === "app_install"
+                      ? appDeveloper || advertiser?.company_name || "Developer"
+                      : advertiser?.company_name ?? "Advertiser"
+                  }
+                  description={description || "Description shown below the video while ad plays."}
+                  ctaLabel={adFormat === "app_install" ? "Install" : adFormat === "shopping" ? "Shop now" : "Watch now"}
+                  isAppInstall={adFormat === "app_install"}
+                  appPriceLabel={appPriceLabel}
+                  appRating={appRating}
+                  appReviewCount={appReviewCount}
+                  appDownloadCount={appDownloadCount}
+                  appCategory={appCategory}
+                  promoImages={[promoPreview1, promoPreview2].filter(Boolean) as string[]}
+                  destinationHint={
+                    adFormat === "shopping" && destinationUrl
+                      ? destinationUrl.replace(/^https?:\/\//, "").slice(0, 40)
+                      : undefined
+                  }
+                />
               </div>
 
               <div className="ads-preview-block">

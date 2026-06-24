@@ -27,6 +27,9 @@ import { phaseLabel } from "@/lib/callState";
 import { useOutgoingCallCameraPreview } from "@/lib/callLocalPreview";
 
 const CALL_CONTROLS_HIDE_MS = 6000;
+const PIP_W = 100;
+const PIP_H = 136;
+const VIDEO_CTRL_BOTTOM_PAD = 16;
 
 export default function CallScreen() {
   const insets = useSafeAreaInsets();
@@ -284,7 +287,6 @@ export default function CallScreen() {
   }
 
   // ── In-call / video ringing / connected screen ─────────────────────────────
-  const pipBottom = controlsVisible ? insets.bottom + 118 : insets.bottom + 28;
   const showLocalPip =
     isVideo
     && !cameraOff
@@ -298,6 +300,9 @@ export default function CallScreen() {
     && !!remoteStreamUrl
     && joined
     && isOneToOne;
+  const hasActivePip = (showLocalPip || showRemotePip) && pipMountReady;
+  // Top-right PiP — stays clear of bottom control buttons.
+  const pipTop = topPad + (controlsVisible ? 56 : 10);
 
   const swapVideoFocus = () => {
     if (!joined || !remoteStreamUrl || !effectiveLocalUrl) return;
@@ -395,7 +400,7 @@ export default function CallScreen() {
             <Animated.View
               style={[
                 styles.localVideoWrapper,
-                { bottom: pipBottom, top: undefined, transform: pipOffset.getTranslateTransform() },
+                { top: pipTop, bottom: undefined, transform: pipOffset.getTranslateTransform() },
               ]}
               {...pipResponder.panHandlers}
             >
@@ -415,7 +420,7 @@ export default function CallScreen() {
             <Animated.View
               style={[
                 styles.localVideoWrapper,
-                { bottom: pipBottom, top: undefined, transform: pipOffset.getTranslateTransform() },
+                { top: pipTop, bottom: undefined, transform: pipOffset.getTranslateTransform() },
               ]}
               {...pipResponder.panHandlers}
             >
@@ -482,7 +487,18 @@ export default function CallScreen() {
       )}
 
       {showBottomControls ? (
-      <View style={[styles.controls, isVideo && { position: "absolute", left: 0, right: 0, bottom: insets.bottom + 16 }]}>
+      <View style={[
+        styles.controls,
+        isVideo && {
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: insets.bottom + VIDEO_CTRL_BOTTOM_PAD,
+          zIndex: 40,
+          elevation: 40,
+          paddingRight: hasActivePip ? PIP_W + 20 : 0,
+        },
+      ]}>
         <View style={styles.controlsRow}>
           <ControlBtn
             icon={muted ? "mic-off" : "mic"}
@@ -652,7 +668,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     paddingHorizontal: 4,
-    zIndex: 4,
+    zIndex: 12,
   },
   videoOverlayCenter: { flex: 1, alignItems: "center", paddingTop: 4 },
   videoOverlayRight: { flexDirection: "row", gap: 8, paddingTop: 8, paddingRight: 8 },
@@ -672,13 +688,14 @@ const styles = StyleSheet.create({
   localVideoWrapper: {
     position: "absolute",
     right: 12,
-    width: 108,
-    height: 148,
+    width: PIP_W,
+    height: PIP_H,
     borderRadius: 12,
     overflow: "hidden",
     borderWidth: 2,
     borderColor: "rgba(255,255,255,0.35)",
-    zIndex: 5,
+    zIndex: 10,
+    elevation: 10,
   },
   localVideoFill: { flex: 1, backgroundColor: "#222" },
   avatarRing: {
@@ -717,8 +734,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "flex-start",
     width: "100%",
-    gap: 28,
-    paddingHorizontal: 8,
+    gap: 20,
+    paddingHorizontal: 4,
   },
   ctrlBtn: { alignItems: "center", gap: 8, minWidth: 68 },
   ctrlIcon: {

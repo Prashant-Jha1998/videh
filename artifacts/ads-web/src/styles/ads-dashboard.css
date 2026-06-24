@@ -965,6 +965,467 @@
   padding: 12px 14px 16px;
 }
 
+.ads-btn-cta--full {
+  display: block;
+  width: 100%;
+  text-align: center;
+}
+
+/* ——— YouTube-style in-stream ad preview (phone mock) ——— */
+.yt-phone-preview {
+  max-width: 380px;
+  margin: 0 auto;
+}
+
+.yt-phone-screen {
+  background: #fff;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid #e8eaed;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.yt-phone-screen--ad {
+  height: 620px;
+  background: #000;
+}
+
+.yt-phone-screen--panel-open .yt-ad-video-zone {
+  flex: 0 0 32%;
+  min-height: 160px;
+  max-height: 220px;
+}
+
+.yt-phone-screen--ad:not(.yt-phone-screen--panel-open) .yt-ad-video-zone {
+  flex: 1 1 auto;
+  min-height: 280px;
+}
+
+.yt-phone-screen--video-portrait:not(.yt-phone-screen--panel-open) .yt-ad-video-zone {
+  min-height: 340px;
+}
+
+.yt-phone-screen--video-portrait.yt-phone-screen--panel-open .yt-ad-video-zone {
+  flex: 0 0 38%;
+  max-height: 240px;
+}
+
+.yt-ad-video-zone {
+  position: relative;
+  background: #0d0d0d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: flex 0.28s ease, min-height 0.28s ease, max-height 0.28s ease;
+  overflow: hidden;
+}
+
+.yt-ad-video-el {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.yt-ad-video-el--portrait {
+  object-fit: contain;
+  max-height: 100%;
+  background: #000;
+}
+
+.yt-ad-video-el--landscape {
+  object-fit: cover;
+}
+
+.yt-ad-video-ph {
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  background: linear-gradient(160deg, #2a2a2a, #111);
+}
+
+.yt-ad-video-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.yt-ad-video-top {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px 0;
+}
+
+.yt-ad-visit {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+}
+
+.yt-ad-video-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 6px;
+  pointer-events: auto;
+}
+
+.yt-ad-sponsored {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+}
+
+.yt-ad-skip {
+  border: none;
+  background: rgba(255, 255, 255, 0.94);
+  color: #111;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.yt-ad-progress {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  width: 100%;
+}
+
+.yt-ad-progress-fill {
+  height: 100%;
+  width: 42%;
+  background: #f2c94c;
+}
+
+.yt-ad-sheet {
+  background: #fff;
+  border-radius: 16px 16px 0 0;
+  margin-top: -12px;
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  transition: max-height 0.28s ease;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.yt-ad-sheet--collapsed {
+  max-height: 168px;
+}
+
+.yt-ad-sheet--open {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+.yt-ad-sheet-handle {
+  width: 40px;
+  height: 4px;
+  background: #dadce0;
+  border-radius: 4px;
+  margin: 10px auto 6px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.yt-ad-sheet-handle:active {
+  cursor: grabbing;
+}
+
+.yt-ad-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px 8px;
+  font-size: 0.95rem;
+}
+
+.yt-ad-sheet-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #5f6368;
+}
+
+.yt-ad-sheet-close {
+  border: none;
+  background: transparent;
+  font-size: 1.35rem;
+  line-height: 1;
+  color: #5f6368;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.yt-ad-sheet-scroll {
+  overflow-y: auto;
+  padding: 0 14px 14px;
+  flex: 1;
+  min-height: 0;
+}
+
+.yt-ad-compact {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.yt-ad-compact-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.yt-ad-compact-text strong {
+  display: block;
+  font-size: 0.9rem;
+  line-height: 1.3;
+}
+
+.yt-ad-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.yt-ad-icon--sm {
+  width: 44px;
+  height: 44px;
+}
+
+.yt-ad-icon-ph {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #e8eaed;
+  flex-shrink: 0;
+}
+
+.yt-ad-identity {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 12px 0 8px;
+}
+
+.yt-ad-dest {
+  font-size: 0.78rem;
+  margin-top: 2px;
+}
+
+.yt-ad-desc {
+  margin: 8px 0 12px;
+  line-height: 1.45;
+}
+
+.yt-ad-product-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.yt-ad-product-cell {
+  text-align: center;
+  font-size: 0.72rem;
+  color: #3c4043;
+}
+
+.yt-ad-product-img,
+.yt-ad-product-img-ph {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  object-fit: cover;
+  margin-bottom: 6px;
+  background: #f1f3f4;
+}
+
+.yt-ad-product-img-ph {
+  background: linear-gradient(135deg, #e8eaed, #f8f9fa);
+}
+
+.yt-ad-sheet-cta-wrap {
+  margin-top: 8px;
+  padding-top: 4px;
+}
+
+.ads-preview-hint {
+  font-size: 0.72rem;
+  color: #80868b;
+  text-align: center;
+  margin: 10px 0 0;
+  line-height: 1.4;
+}
+
+.yt-preview-replay {
+  margin: 12px 14px 14px;
+  width: calc(100% - 28px);
+  padding: 10px;
+  border: 1px dashed #dadce0;
+  border-radius: 10px;
+  background: #f8f9fa;
+  color: #1a73e8;
+  font-weight: 600;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+/* Post-ad watch screen */
+.yt-phone-screen--watch {
+  background: #fff;
+  max-height: 620px;
+  overflow-y: auto;
+}
+
+.yt-watch-video {
+  background: #000;
+  width: 100%;
+}
+
+.yt-watch-video--landscape {
+  aspect-ratio: 16 / 9;
+}
+
+.yt-watch-video--portrait {
+  aspect-ratio: 9 / 16;
+  max-height: 320px;
+  margin: 0 auto;
+}
+
+.yt-watch-video--square {
+  aspect-ratio: 1;
+}
+
+.yt-watch-video-el {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.yt-watch-video--portrait .yt-watch-video-el {
+  object-fit: contain;
+}
+
+.yt-watch-video-ph {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #222;
+}
+
+.yt-watch-meta {
+  padding: 12px 14px;
+  border-bottom: 8px solid #f1f3f4;
+}
+
+.yt-watch-title {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.yt-watch-channel {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.yt-watch-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #e8eaed;
+  flex-shrink: 0;
+}
+
+.yt-watch-channel-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.yt-watch-stats {
+  font-size: 0.72rem;
+  color: #606060;
+  margin-top: 2px;
+}
+
+.yt-watch-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 0.75rem;
+  color: #0f0f0f;
+  flex-wrap: wrap;
+}
+
+.yt-watch-comments {
+  margin-top: 14px;
+  font-size: 0.82rem;
+}
+
+.yt-watch-comment-ph {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #f1f3f4;
+  border-radius: 20px;
+  color: #909090;
+  font-size: 0.78rem;
+}
+
+.yt-watch-feed-ad {
+  padding: 12px 14px 16px;
+}
+
+.yt-watch-feed-ad-label {
+  font-size: 0.7rem;
+  color: #606060;
+  margin-bottom: 8px;
+}
+
+.yt-watch-feed-ad-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  border: 1px solid #e8eaed;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.yt-watch-feed-ad-card img {
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.yt-watch-feed-ad-img-ph {
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  background: #e8eaed;
+  flex-shrink: 0;
+}
+
+.yt-watch-feed-ad-card p {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  color: #606060;
+}
+
 .ads-feed-preview-body p {
   margin: 6px 0;
 }
