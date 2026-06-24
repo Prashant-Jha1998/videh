@@ -894,15 +894,33 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
       );
     }
 
-    // Send push notifications (fire and forget)
     const senderRow = await query("SELECT name, avatar_url FROM users WHERE id = $1", [senderId]);
     const senderName = senderRow.rows[0]?.name ?? "Videh";
     const senderAvatarUrl = pushNotificationImageUrl(senderRow.rows[0]?.avatar_url);
     const notifyMembers = members.rows.filter((m: any) => !m.is_muted);
-    const recipientUserIds = notifyMembers.map((m: any) => Number(m.user_id)).filter(Boolean);
+
+    publishChatEvent({
+      type: "message",
+      chatId: Array.isArray(chatId) ? chatId[0] ?? "" : chatId,
+      userIds: [senderId, ...recipientIds],
+      payload: {
+        messageId: result.rows[0].id,
+        content: content ?? "",
+        type: type ?? "text",
+        mediaUrl: mediaUrl ?? result.rows[0].media_url ?? undefined,
+        senderId,
+        senderName,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: resolveChatMessageRowForClient(req, result.rows[0] as Record<string, unknown>),
+    });
+
     if (notifyMembers.length > 0) {
       const preview = chatMessagePushPreview(type ?? "text", content ?? "");
-      await sendChatPushToMembers(
+      void sendChatPushToMembers(
         notifyMembers.map((m: any) => ({
           user_id: Number(m.user_id),
           push_token: m.push_token,
@@ -927,26 +945,10 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
           imageUrl: senderAvatarUrl,
           chatId: String(chatId),
         },
-      );
+      ).catch((err: unknown) => {
+        req.log.warn({ err, chatId, messageId: result.rows[0].id }, "chat push dispatch failed");
+      });
     }
-    publishChatEvent({
-      type: "message",
-      chatId: Array.isArray(chatId) ? chatId[0] ?? "" : chatId,
-      userIds: [senderId, ...recipientIds],
-      payload: {
-        messageId: result.rows[0].id,
-        content: content ?? "",
-        type: type ?? "text",
-        mediaUrl: mediaUrl ?? result.rows[0].media_url ?? undefined,
-        senderId,
-        senderName,
-      },
-    });
-
-    res.json({
-      success: true,
-      message: resolveChatMessageRowForClient(req, result.rows[0] as Record<string, unknown>),
-    });
   } catch (err) {
     req.log.error({ err }, "send message error");
     res.status(500).json({ success: false });
@@ -1068,11 +1070,21 @@ router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Re
     const senderName = senderRow.rows[0]?.name ?? "Videh";
     const senderAvatarUrl = pushNotificationImageUrl(senderRow.rows[0]?.avatar_url);
     const notifyMembers = members.rows.filter((m: { is_muted: boolean }) => !m.is_muted);
+
+    publishChatEvent({
+      type: "message",
+      chatId: targetId,
+      userIds: [senderId, ...recipientIds],
+      payload: { messageId: result.rows[0].id },
+    });
+
+    res.json({ success: true, message: result.rows[0], targetChatId: targetId });
+
     if (notifyMembers.length > 0) {
       const targetIsGroup = await query("SELECT is_group FROM chats WHERE id = $1", [targetId]);
       const isGroup = Boolean(targetIsGroup.rows[0]?.is_group);
       const preview = chatMessagePushPreview(messageType, content) || "Forwarded message";
-      await sendChatPushToMembers(
+      void sendChatPushToMembers(
         notifyMembers.map((m: { user_id: number; push_token: string | null }) => ({
           user_id: Number(m.user_id),
           push_token: m.push_token,
@@ -1097,17 +1109,10 @@ router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Re
           imageUrl: senderAvatarUrl,
           chatId: targetId,
         },
-      );
+      ).catch((err: unknown) => {
+        req.log.warn({ err, chatId: targetId, messageId: result.rows[0].id }, "forward push dispatch failed");
+      });
     }
-
-    publishChatEvent({
-      type: "message",
-      chatId: targetId,
-      userIds: [senderId, ...recipientIds],
-      payload: { messageId: result.rows[0].id },
-    });
-
-    res.json({ success: true, message: result.rows[0], targetChatId: targetId });
   } catch (err) {
     req.log.error({ err }, "forward message error");
     res.status(500).json({ success: false });
