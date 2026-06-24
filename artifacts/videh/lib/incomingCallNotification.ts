@@ -17,8 +17,8 @@ export type IncomingCallNotificationPayload = IncomingCallInfo & {
 export async function showIncomingCallNotification(call: IncomingCallNotificationPayload): Promise<void> {
   if (Platform.OS === "web") return;
 
-  const title = call.type === "video" ? "Incoming video call" : "Incoming voice call";
-  const body = `${call.callerName} is calling`;
+  const title = call.callerName;
+  const body = call.type === "video" ? "Incoming video call" : "Incoming voice call";
   const { sound, channelId } = await resolveCallNotificationSound();
   await Notifications.scheduleNotificationAsync({
     identifier: `incoming_call_${call.callId}`,

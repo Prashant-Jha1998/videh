@@ -129,6 +129,6 @@ export function inferChatListPreview(
       if (isDocumentMessagePayload(raw)) return documentChatPreview(raw);
       if (looksLikeLocationJson(raw)) return locationChatPreview(raw);
       if (parseCallMessageMeta(raw)) return callMessagePreviewText(raw);
-      return raw.length > 120 ? `${raw.slice(0, 119)}…` : raw || "New message";
+      return raw.length > 120 ? `${raw.slice(0, 119)}…` : raw;
   }
 }

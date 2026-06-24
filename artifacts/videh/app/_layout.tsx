@@ -35,7 +35,6 @@ import {
   NOTIFICATION_ACTION_REPLY,
   VIDEH_CALLS_CHANNEL_ID,
 } from "@/lib/pushNotifications";
-import { dismissIncomingCallNotification, showIncomingCallNotification } from "@/lib/incomingCallNotification";
 import { CallWaitingOverlay } from "@/components/CallWaitingOverlay";
 import { HeldCallBanner } from "@/components/HeldCallBanner";
 import {
@@ -46,6 +45,7 @@ import {
 } from "@/lib/callKeep";
 import type { CallKeepHandlerPayload } from "@/lib/callKeepBridge";
 import { emitChatMessageSignal, type ChatMessageSignal } from "@/lib/chatMessageEvents";
+import { extractChatPushBody } from "@/lib/chatPushPayload";
 import { getNotificationActiveChatId } from "@/lib/incomingMessageNotify";
 import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
 import { INCOMING_RING_TIMEOUT_MS, INCOMING_CALL_POLL_ACTIVE_MS, INCOMING_CALL_POLL_BACKGROUND_MS } from "@/lib/callConstants";
@@ -243,9 +243,6 @@ function RootLayoutNav() {
     setIncomingCall((prev) => (prev?.callId === next.callId ? { ...prev, ...next } : next));
     presentIncomingCallUi(next, { useNativeSurface: presentSurfaces });
     void startIncomingCallExperience(next);
-    if (presentSurfaces && Platform.OS !== "web") {
-      void showIncomingCallNotification(next);
-    }
     scheduleIncomingAutoEnd(next.callId);
 
     void loadCachedSilenceUnknownCallers().then((silenceUnknown) => {
@@ -370,6 +367,7 @@ function RootLayoutNav() {
         const action = actionId === NOTIFICATION_ACTION_ACCEPT_CALL ? "accept" : "decline";
         if (action === "decline") {
           const callId = String(data.callId);
+          dismissIncomingCallUi(callId, true);
           void rejectIncomingCall({ callId, userId: user.dbId, sessionToken: user.sessionToken });
           return;
         }
@@ -641,7 +639,7 @@ function RootLayoutNav() {
           emitChatMessageSignal({
             chatId: String(data.chatId),
             messageId: data.messageId != null ? String(data.messageId) : undefined,
-            body: notification.request.content.body ?? undefined,
+            body: extractChatPushBody(data, notification.request.content.body),
             senderName: String(data.senderName ?? notification.request.content.title ?? ""),
             senderId: data.senderId != null ? String(data.senderId) : undefined,
             messageType: data.messageType != null ? String(data.messageType) as ChatMessageSignal["messageType"] : undefined,
@@ -693,7 +691,7 @@ function RootLayoutNav() {
         emitChatMessageSignal({
           chatId,
           messageId: data.messageId != null ? String(data.messageId) : undefined,
-          body: notification.request.content.body ?? undefined,
+          body: extractChatPushBody(data, notification.request.content.body),
           senderName: String(data.senderName ?? notification.request.content.title ?? ""),
           senderId: data.senderId != null ? String(data.senderId) : undefined,
           messageType: data.messageType != null ? String(data.messageType) as ChatMessageSignal["messageType"] : undefined,

@@ -115,8 +115,6 @@ export async function sendFcmChatPush(
     options?.isCall
       ? {
           ...data,
-          title,
-          message: body,
           channelId,
           categoryId: categoryId ?? EXPO_INCOMING_CALL_CATEGORY_ID,
           sticky: "true",

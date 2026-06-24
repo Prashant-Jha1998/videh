@@ -82,7 +82,7 @@ export async function deliverPremiumChatMessageNotification(
     if (!shouldDeliverNotification(opts.chatId, opts.messageId)) return false;
     const { showWebBrowserNotification } = await import("./web/webBrowserNotify");
     const title = opts.senderName?.trim() || chat?.name || "Videh";
-    const body = opts.body?.trim() || chat?.lastMessage?.trim() || "New message";
+    const body = opts.body?.trim() || chat?.lastMessage?.trim() || "Message";
     showWebBrowserNotification(title, body, {
       tag: `chat-${opts.chatId}`,
       data: { chatId: opts.chatId },
@@ -147,7 +147,7 @@ export async function deliverPremiumChatMessageNotification(
   }
 
   const senderName = opts.senderName?.trim() || chat?.name || "Videh";
-  const body = opts.body?.trim() || chat?.lastMessage?.trim() || "New message";
+  const body = opts.body?.trim() || chat?.lastMessage?.trim() || "Message";
   const isGroup = opts.isGroup ?? chat?.isGroup ?? false;
 
   if (appActive) {

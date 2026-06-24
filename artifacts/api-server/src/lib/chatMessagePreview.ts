@@ -116,7 +116,7 @@ export function chatMessagePushPreview(type: string | undefined, content: string
     default: {
       const inferred = previewFromRawContent(raw);
       if (inferred) return inferred;
-      return truncate(raw, 120) || "New message";
+      return truncate(raw, 120);
     }
   }
 }

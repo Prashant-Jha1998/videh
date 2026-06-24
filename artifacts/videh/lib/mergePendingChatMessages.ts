@@ -83,6 +83,11 @@ export function collectSupersededTempIds(tempMessages: Message[], serverMessages
   return superseded;
 }
 
+function isPlaceholderHintText(text: string): boolean {
+  const t = text.trim();
+  return t === "New message" || t === "Message";
+}
+
 export function collectPendingLocalMessages(
   prevMessages: Message[],
   serverMessages: Message[],
@@ -98,6 +103,18 @@ export function collectPendingLocalMessages(
     if (m.id.startsWith("hint_")) {
       const hintedServerId = m.id.startsWith("hint_t") ? null : m.id.slice(5);
       if (hintedServerId && serverMessages.some((s) => s.id === hintedServerId)) return false;
+      if (isPlaceholderHintText(m.text)) {
+        if (
+          serverMessages.some(
+            (s) =>
+              s.senderId !== "me"
+              && s.timestamp >= m.timestamp - 5000
+              && !isPlaceholderHintText(s.text),
+          )
+        ) {
+          return false;
+        }
+      }
       if (
         serverMessages.some((s) => {
           if (s.senderId === "me") return false;

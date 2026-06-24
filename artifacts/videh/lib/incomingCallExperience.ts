@@ -3,7 +3,7 @@ import { AppState, Platform } from "react-native";
 import type { IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { dismissAllIncomingCallNotifications } from "@/lib/incomingCallNotification";
 import { stopCallAlert, startIncomingCallAlert } from "@/lib/callRingtone";
-import { dismissNativeIncomingCall, displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
+import { dismissNativeIncomingCall } from "@/lib/videhNativeCallUi";
 import { endCallKeep, showCallKeepIncoming } from "@/lib/callKeep";
 
 let ringingCallId: string | null = null;
@@ -21,6 +21,10 @@ export function getRingingCallId(): string | null {
 
 export function isIncomingCallAlreadyHandled(callId: string): boolean {
   return handledCallIds.has(callId);
+}
+
+export function hasIncomingCallSurfaces(callId: string): boolean {
+  return surfacesPresentedFor === callId;
 }
 
 /** Returns false if this call is already being offered (avoids duplicate ring/UI from poll). */
@@ -46,7 +50,7 @@ export function markIncomingCallHandled(callId: string): void {
   if (nativeRingActiveFor === callId) nativeRingActiveFor = null;
 }
 
-/** Foreground: expo-av premium tone. Background: native InCallManager + notification channel sound. */
+/** Foreground: expo-av ringtone. Background: sticky notification channel sound only (no InCallManager). */
 export async function startIncomingCallExperience(call: IncomingCallInfo & { callerName: string }): Promise<void> {
   if (Platform.OS === "web") return;
   if (ringingCallId !== call.callId) {
@@ -56,13 +60,7 @@ export async function startIncomingCallExperience(call: IncomingCallInfo & { cal
     await startIncomingCallAlert();
     return;
   }
-  if (nativeRingActiveFor === call.callId) return;
-  nativeRingActiveFor = call.callId;
-  displayNativeIncomingCall({
-    callId: call.callId,
-    callerName: call.callerName,
-    isVideo: call.type === "video",
-  });
+  // Background ringtone comes from the single sticky call notification — avoid double audio.
 }
 
 export async function stopIncomingCallExperience(callId?: string, opts?: { force?: boolean }): Promise<void> {
@@ -84,9 +82,8 @@ export async function stopIncomingCallExperience(callId?: string, opts?: { force
 }
 
 /**
- * WhatsApp-style surfaces:
- * - Foreground: in-app overlay only (CallKeep hidden).
- * - Background/killed path: CallKeep system UI + optional deep link when no CallKeep.
+ * Background: local sticky notification only (WhatsApp-style).
+ * Foreground: in-app overlay — no CallKeep banner.
  */
 export function presentIncomingCallUi(
   call: IncomingCallInfo & { callerName: string },
@@ -98,11 +95,11 @@ export function presentIncomingCallUi(
   const inBackground = !isAppInForeground();
   const useNative = opts?.useNativeSurface ?? inBackground;
 
-  if (useNative) {
+  if (useNative && Platform.OS === "ios") {
     showCallKeepIncoming(call.callId, call.callerName, call.chatId, call.type === "video");
   }
 
-  if (inBackground && Platform.OS !== "web" && !useNative) {
+  if (inBackground && Platform.OS !== "web" && Platform.OS === "ios" && !useNative) {
     const deepLink =
       `videh://call/${call.chatId}?callId=${encodeURIComponent(call.callId)}` +
       `&incoming=1&ringing=1&type=${call.type}&name=${encodeURIComponent(call.callerName)}` +

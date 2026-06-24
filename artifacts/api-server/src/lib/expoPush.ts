@@ -56,8 +56,9 @@ export function sendExpoChatPush(
   const sound = isCall ? "default" : soundId === "msg_default" ? "default" : soundId;
   void sendExpoPush(tokens.map((token) => ({
     to: token,
-    title,
-    body,
+    ...(isCall
+      ? { _contentAvailable: true }
+      : { title, body }),
     data: isCall
       ? {
           ...data,
@@ -71,6 +72,5 @@ export function sendExpoChatPush(
     channelId,
     categoryId: options?.categoryId,
     threadId: options?.threadId,
-    ...(isCall ? { _contentAvailable: true } : {}),
   })));
 }

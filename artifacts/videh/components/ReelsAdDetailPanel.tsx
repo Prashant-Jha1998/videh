@@ -1,10 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Linking from "expo-linking";
-import React, { useRef, useState } from "react";
+import React from "react";
 import {
   Alert,
-  PanResponder,
   Platform,
   ScrollView,
   StyleSheet,
@@ -61,8 +60,6 @@ export function ReelsAdDetailPanel({
   onInstall,
   onAdsPortalPress,
 }: Props) {
-  const [expanded, setExpanded] = useState(false);
-
   const isAppInstall = ad.format === "app_install" || Boolean(ad.playStoreUrl || ad.appStoreUrl);
   const promoImages = [ad.promoImageUrl, ad.promoImageUrl2].filter(Boolean) as string[];
   const showStats = isAppInstall && (
@@ -71,221 +68,155 @@ export function ReelsAdDetailPanel({
   const durationLabel = ad.durationSeconds > 0 ? `${Math.round(ad.durationSeconds)}s` : null;
   const primaryCta = ctaLabel(ad);
 
-  const openMenu = () => {
-    Alert.alert("Coming soon", "More ad options will be available in a future update.");
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx),
-      onPanResponderRelease: (_, g) => {
-        if (g.dy < -28) setExpanded(true);
-        else if (g.dy > 28) setExpanded(false);
-      },
-    }),
-  ).current;
-
   const onAdsPortalLink = () => {
     if (onAdsPortalPress) onAdsPortalPress();
     else void Linking.openURL("https://ads.videh.co.in/").catch(() => {});
   };
 
   return (
-    <View style={[styles.panel, { backgroundColor: colors.background }, expanded && styles.panelExpanded]}>
-      <View {...panResponder.panHandlers}>
-        <TouchableOpacity
-          style={styles.handleWrap}
-          onPress={() => setExpanded((v) => !v)}
-          activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityLabel={expanded ? "Collapse ad details" : "Expand ad details"}
-        >
-          <View style={[styles.handle, { backgroundColor: colors.border }]} />
-        </TouchableOpacity>
-      </View>
-
+    <View style={[styles.panel, { backgroundColor: colors.background }]}>
       <View style={[styles.panelHeader, { borderBottomColor: colors.border }]}>
         <Text style={[styles.sponsoredTitle, { color: colors.foreground }]}>
           {ad.sponsoredLabel ?? "Sponsored"}
         </Text>
-        <TouchableOpacity onPress={openMenu} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <TouchableOpacity
+          onPress={() => Alert.alert("Coming soon", "More ad options will be available in a future update.")}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Ionicons name="ellipsis-vertical" size={18} color={colors.mutedForeground} />
         </TouchableOpacity>
       </View>
 
-      {!expanded ? (
-        <View style={styles.compactBody}>
-          <View style={styles.identityRow}>
-            {ad.imageUrl ? (
-              <Image source={{ uri: ad.imageUrl }} style={styles.appIcon} contentFit="cover" />
-            ) : (
-              <View style={[styles.appIcon, { backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }]}>
-                <Ionicons name="apps-outline" size={22} color={colors.mutedForeground} />
-              </View>
-            )}
-            <View style={styles.identityText}>
-              <Text style={[styles.appTitle, { color: colors.foreground }]} numberOfLines={2}>
-                {displayTitle(ad)}
-              </Text>
-              <Text style={[styles.appSubtitle, { color: colors.mutedForeground }]} numberOfLines={1}>
-                {displaySubtitle(ad)}
-              </Text>
-            </View>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        bounces
+        nestedScrollEnabled={Platform.OS === "android"}
+        showsVerticalScrollIndicator
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.metaRow}>
+          <View style={[styles.metaChip, { backgroundColor: colors.muted }]}>
+            <Text style={[styles.metaChipText, { color: colors.foreground }]}>{adTypeLabel(ad)}</Text>
           </View>
-        </View>
-      ) : (
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          bounces
-          nestedScrollEnabled={Platform.OS === "android"}
-          showsVerticalScrollIndicator
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={styles.metaRow}>
+          {durationLabel ? (
             <View style={[styles.metaChip, { backgroundColor: colors.muted }]}>
-              <Text style={[styles.metaChipText, { color: colors.foreground }]}>{adTypeLabel(ad)}</Text>
+              <Text style={[styles.metaChipText, { color: colors.foreground }]}>{durationLabel}</Text>
             </View>
-            {durationLabel ? (
-              <View style={[styles.metaChip, { backgroundColor: colors.muted }]}>
-                <Text style={[styles.metaChipText, { color: colors.foreground }]}>{durationLabel}</Text>
+          ) : null}
+        </View>
+
+        <View style={styles.identityRow}>
+          {ad.imageUrl ? (
+            <Image source={{ uri: ad.imageUrl }} style={styles.appIcon} contentFit="cover" />
+          ) : (
+            <View style={[styles.appIcon, { backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }]}>
+              <Ionicons name="apps-outline" size={24} color={colors.mutedForeground} />
+            </View>
+          )}
+          <View style={styles.identityText}>
+            <Text style={[styles.appTitle, { color: colors.foreground }]} numberOfLines={2}>
+              {displayTitle(ad)}
+            </Text>
+            <Text style={[styles.appSubtitle, { color: colors.mutedForeground }]} numberOfLines={1}>
+              {displaySubtitle(ad)}
+            </Text>
+            <TouchableOpacity onPress={onAdsPortalLink} hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
+              <Text style={[styles.adsPortalLink, { color: colors.mutedForeground }]}>
+                Served via Videh Ads · ads.videh.co.in
+              </Text>
+            </TouchableOpacity>
+            {isAppInstall ? (
+              <View style={styles.storeRow}>
+                <Ionicons name="logo-google-playstore" size={14} color={colors.mutedForeground} />
+                <Text style={[styles.storeText, { color: colors.mutedForeground }]}>
+                  Google Play · {ad.appPriceLabel ?? "FREE"}
+                </Text>
               </View>
             ) : null}
           </View>
+        </View>
 
-          <View style={styles.identityRow}>
-            {ad.imageUrl ? (
-              <Image source={{ uri: ad.imageUrl }} style={styles.appIcon} contentFit="cover" />
-            ) : (
-              <View style={[styles.appIcon, { backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }]}>
-                <Ionicons name="apps-outline" size={24} color={colors.mutedForeground} />
-              </View>
-            )}
-            <View style={styles.identityText}>
-              <Text style={[styles.appTitle, { color: colors.foreground }]} numberOfLines={2}>
-                {displayTitle(ad)}
-              </Text>
-              <Text style={[styles.appSubtitle, { color: colors.mutedForeground }]} numberOfLines={1}>
-                {displaySubtitle(ad)}
-              </Text>
-              <TouchableOpacity onPress={onAdsPortalLink} hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
-                <Text style={[styles.adsPortalLink, { color: colors.mutedForeground }]}>
-                  Served via Videh Ads · ads.videh.co.in
+        {showStats ? (
+          <View style={[styles.statsRow, { borderColor: colors.border }]}>
+            {ad.appRating != null ? (
+              <View style={styles.statCol}>
+                <Text style={[styles.statValue, { color: colors.foreground }]}>
+                  {ad.appRating.toFixed(1)} ★
                 </Text>
-              </TouchableOpacity>
-              {isAppInstall ? (
-                <View style={styles.storeRow}>
-                  <Ionicons name="logo-google-playstore" size={14} color={colors.mutedForeground} />
-                  <Text style={[styles.storeText, { color: colors.mutedForeground }]}>
-                    Google Play · {ad.appPriceLabel ?? "FREE"}
+                {ad.appReviewCount ? (
+                  <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>
+                    {ad.appReviewCount}
                   </Text>
-                </View>
-              ) : null}
-            </View>
+                ) : null}
+              </View>
+            ) : null}
+            {ad.appDownloadCount ? (
+              <View style={styles.statCol}>
+                <Text style={[styles.statValue, { color: colors.foreground }]}>{ad.appDownloadCount}</Text>
+                <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Downloads</Text>
+              </View>
+            ) : null}
+            {ad.appCategory ? (
+              <View style={styles.statCol}>
+                <Text style={[styles.statValue, { color: colors.foreground }]} numberOfLines={1}>
+                  {ad.appCategory}
+                </Text>
+                <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Category</Text>
+              </View>
+            ) : null}
           </View>
+        ) : null}
 
-          {showStats ? (
-            <View style={[styles.statsRow, { borderColor: colors.border }]}>
-              {ad.appRating != null ? (
-                <View style={styles.statCol}>
-                  <Text style={[styles.statValue, { color: colors.foreground }]}>
-                    {ad.appRating.toFixed(1)} ★
-                  </Text>
-                  {ad.appReviewCount ? (
-                    <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>
-                      {ad.appReviewCount}
-                    </Text>
-                  ) : null}
-                </View>
-              ) : null}
-              {ad.appDownloadCount ? (
-                <View style={styles.statCol}>
-                  <Text style={[styles.statValue, { color: colors.foreground }]}>{ad.appDownloadCount}</Text>
-                  <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Downloads</Text>
-                </View>
-              ) : null}
-              {ad.appCategory ? (
-                <View style={styles.statCol}>
-                  <Text style={[styles.statValue, { color: colors.foreground }]} numberOfLines={1}>
-                    {ad.appCategory}
-                  </Text>
-                  <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Category</Text>
-                </View>
-              ) : null}
-            </View>
-          ) : null}
+        {ad.description ? (
+          <Text style={[styles.description, { color: colors.foreground }]}>
+            {ad.description}
+          </Text>
+        ) : (
+          <Text style={[styles.description, { color: colors.mutedForeground }]}>
+            Tap Learn more to visit the advertiser, or skip when available to continue watching.
+          </Text>
+        )}
 
-          {ad.description ? (
-            <Text style={[styles.description, { color: colors.foreground }]}>
-              {ad.description}
-            </Text>
-          ) : (
-            <Text style={[styles.description, { color: colors.mutedForeground }]}>
-              Tap Learn more to visit the advertiser, or skip when available to continue watching.
-            </Text>
-          )}
-
-          {promoImages.length > 0 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promoRow}>
-              {promoImages.map((uri) => (
-                <Image key={uri} source={{ uri }} style={styles.promoCard} contentFit="cover" />
-              ))}
-            </ScrollView>
-          ) : null}
-        </ScrollView>
-      )}
+        {promoImages.length > 0 ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promoRow}>
+            {promoImages.map((uri) => (
+              <Image key={uri} source={{ uri }} style={styles.promoCard} contentFit="cover" />
+            ))}
+          </ScrollView>
+        ) : null}
+      </ScrollView>
 
       <View style={[styles.actionsRow, { borderTopColor: colors.border, paddingBottom: Math.max(12, bottomInset) }]}>
-        {expanded ? (
-          <>
-            <TouchableOpacity style={[styles.learnBtn, { backgroundColor: colors.muted }]} onPress={onLearnMore}>
-              <Text style={[styles.learnBtnText, { color: colors.foreground }]}>Learn more</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.installBtn} onPress={onInstall}>
-              <Text style={styles.installBtnText}>{primaryCta}</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <TouchableOpacity style={[styles.installBtn, styles.installBtnFull]} onPress={onInstall}>
-            <Text style={styles.installBtnText}>{primaryCta}</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity style={[styles.learnBtn, { backgroundColor: colors.muted }]} onPress={onLearnMore}>
+          <Text style={[styles.learnBtnText, { color: colors.foreground }]}>Learn more</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.installBtn} onPress={onInstall}>
+          <Text style={styles.installBtnText}>{primaryCta}</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  panel: {
-    flex: 1,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    overflow: "hidden",
-    minHeight: 0,
-    maxHeight: 188,
-  },
-  panelExpanded: {
-    maxHeight: undefined,
-    flex: 1,
-  },
-  handleWrap: { paddingTop: 8, paddingBottom: 4, alignItems: "center" },
-  handle: { width: 40, height: 4, borderRadius: 4 },
+  panel: { flex: 1, borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: "hidden", minHeight: 0 },
   panelHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingBottom: 8,
+    paddingTop: 12,
+    paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   sponsoredTitle: { fontFamily: "Inter_700Bold", fontSize: 16 },
-  compactBody: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
   scroll: { flex: 1, minHeight: 0 },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 12, flexGrow: 1 },
   metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingTop: 12, paddingBottom: 4 },
   metaChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 16 },
   metaChipText: { fontFamily: "Inter_600SemiBold", fontSize: 12 },
-  identityRow: { flexDirection: "row", gap: 12, paddingTop: 4, paddingBottom: 8 },
+  identityRow: { flexDirection: "row", gap: 12, paddingTop: 10, paddingBottom: 10 },
   appIcon: { width: 52, height: 52, borderRadius: 12 },
   identityText: { flex: 1, minWidth: 0 },
   appTitle: { fontFamily: "Inter_700Bold", fontSize: 16, lineHeight: 20 },
@@ -330,6 +261,5 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: "#111",
   },
-  installBtnFull: { flex: 1 },
   installBtnText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 14 },
 });

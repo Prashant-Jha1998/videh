@@ -1041,6 +1041,56 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ? "album"
           : hintType;
 
+    const isMediaType =
+      resolvedHintType === "album"
+      || resolvedHintType === "image"
+      || resolvedHintType === "video"
+      || resolvedHintType === "audio"
+      || resolvedHintType === "document";
+    const hasRenderableAlbum = resolvedHintType === "album" && (albumUrls?.length ?? 0) >= 2;
+    const hasRenderableImageVideo =
+      (resolvedHintType === "image" || resolvedHintType === "video") && Boolean(mediaUrl);
+    const hasKnownContent =
+      Boolean(text)
+      || Boolean(mediaUrl)
+      || hasRenderableAlbum
+      || hasRenderableImageVideo
+      || (resolvedHintType === "audio" && Boolean(text))
+      || resolvedHintType === "location"
+      || resolvedHintType === "contact"
+      || resolvedHintType === "call";
+
+    const senderId =
+      signal.senderId != null
+        ? String(signal.senderId) === String(u?.dbId)
+          ? "me"
+          : String(signal.senderId)
+        : "other";
+    if (senderId === "me") return;
+
+    const bumpUnreadAndRefresh = () => {
+      setChats((prev) =>
+        prev.map((c) => {
+          if (String(c.id) !== chatId) return c;
+          const preview = inferChatListPreview(resolvedHintType, text ?? "", mediaUrl);
+          return {
+            ...c,
+            lastMessage: preview || c.lastMessage,
+            lastMessageTime: Date.now(),
+            unreadCount: Math.max(c.unreadCount ?? 0, 1),
+          };
+        }),
+      );
+      void loadMessagesRef.current?.(chatId);
+      setTimeout(() => void loadMessagesRef.current?.(chatId), MESSAGE_HINT_API_RETRY_MS);
+    };
+
+    if (!hasKnownContent) {
+      if (!serverMessageId) return;
+      bumpUnreadAndRefresh();
+      return;
+    }
+
     const hintPreviewText =
       inferChatListPreview(declaredType ?? resolvedHintType, text ?? "", mediaUrl)
       || (resolvedHintType === "image"
@@ -1053,30 +1103,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               ? "Document"
               : resolvedHintType === "album"
                 ? albumChatPreview(albumUrls?.length ?? albumCountFromLabel ?? 2)
-                : "Message");
+                : "");
 
-    const isMediaType =
-      resolvedHintType === "album"
-      || resolvedHintType === "image"
-      || resolvedHintType === "video"
-      || resolvedHintType === "audio"
-      || resolvedHintType === "document";
-    const hasRenderableAlbum = resolvedHintType === "album" && (albumUrls?.length ?? 0) >= 2;
-    const hasRenderableImageVideo =
-      (resolvedHintType === "image" || resolvedHintType === "video") && Boolean(mediaUrl);
+    if (!hintPreviewText.trim()) {
+      if (serverMessageId) bumpUnreadAndRefresh();
+      return;
+    }
+
     const shouldSkipBubble =
       isMediaType
       && !hasRenderableAlbum
       && !hasRenderableImageVideo
       && !(resolvedHintType === "audio" && text);
-
-    const senderId =
-      signal.senderId != null
-        ? String(signal.senderId) === String(u?.dbId)
-          ? "me"
-          : String(signal.senderId)
-        : "other";
-    if (senderId === "me") return;
 
     const buildHintMsg = (): Message =>
       coerceAlbumMessageFields({
