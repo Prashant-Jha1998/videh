@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useRouter, usePathname } from "expo-router";
 import React, {
   createContext,
   useCallback,
@@ -102,6 +102,8 @@ type CallSessionContextValue = {
   endCall: () => Promise<void>;
   toggleMute: () => void;
   toggleCamera: () => void;
+  flipCamera: () => Promise<void>;
+  isFrontCamera: boolean;
   toggleSpeaker: () => void;
   addParticipants: (userIds: number[]) => Promise<{ added: number; busy: number }>;
   inviteeUserIds: number[];
@@ -803,6 +805,17 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (router.canGoBack()) router.back();
   }, [router]);
 
+  const pathname = usePathname();
+  useEffect(() => {
+    if (!session?.engineActive || session.ringing) return;
+    const onCallRoute = /\/call\//.test(pathname ?? "");
+    if (!onCallRoute && call.joined) {
+      setSession((prev) => (prev && !prev.minimized ? { ...prev, minimized: true } : prev));
+    } else if (onCallRoute && session.minimized) {
+      setSession((prev) => (prev ? { ...prev, minimized: false } : prev));
+    }
+  }, [pathname, session?.engineActive, session?.ringing, session?.minimized, call.joined]);
+
   const addParticipants = useCallback(async (userIds: number[]) => {
     if (!session?.callId || !session.engineActive) {
       throw new Error("Start or join the call before adding people.");
@@ -1153,6 +1166,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       endCall,
       toggleMute: () => call.toggleMute(),
       toggleCamera: () => call.toggleCamera(),
+      flipCamera: () => call.flipCamera(),
+      isFrontCamera: call.isFrontCamera,
       toggleSpeaker: () => call.toggleSpeaker(),
       addParticipants,
       inviteeUserIds: onCallUserIds,

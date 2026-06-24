@@ -26,6 +26,7 @@ export function useVidehCall(
   const pcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
   const cameraVideoTrackRef = useRef<MediaStreamTrack | null>(null);
+  const facingModeRef = useRef<"user" | "environment">("user");
   const screenSharingRef = useRef(false);
   const rolesRef = useRef<Map<string, Role>>(new Map());
   const candidateCursorsRef = useRef<Map<string, number>>(new Map());
@@ -39,6 +40,7 @@ export function useVidehCall(
   const [joined, setJoined] = useState(false);
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
+  const [isFrontCamera, setIsFrontCamera] = useState(true);
   const [speakerOn, setSpeakerOn] = useState(true);
   const [remoteCount, setRemoteCount] = useState(0);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
@@ -327,6 +329,33 @@ export function useVidehCall(
       localStreamRef.current?.getVideoTracks().forEach((track) => { track.enabled = cameraOff; });
       setCameraOff((c) => !c);
     },
+    flipCamera: async () => {
+      const track = localStreamRef.current?.getVideoTracks()[0];
+      if (!track) return;
+      const next = facingModeRef.current === "user" ? "environment" : "user";
+      facingModeRef.current = next;
+      setIsFrontCamera(next === "user");
+      try {
+        const fresh = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: next },
+        });
+        const newTrack = fresh.getVideoTracks()[0];
+        if (!newTrack) return;
+        track.stop();
+        const stream = localStreamRef.current;
+        if (stream) {
+          stream.removeTrack(track);
+          stream.addTrack(newTrack);
+        }
+        cameraVideoTrackRef.current = newTrack;
+        for (const pc of pcsRef.current.values()) {
+          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+          if (sender) await sender.replaceTrack(newTrack);
+        }
+      } catch { /* ignore */ }
+    },
+    isFrontCamera,
     toggleSpeaker: () => {
       setSpeakerOn((s) => {
         const next = !s;

@@ -3,6 +3,16 @@ import { fetchIncomingCallDetails } from "@/lib/fetchIncomingCallDetails";
 import { isCallCaller } from "@/lib/callRole";
 
 /** Ensure callerId + channel exist before showing incoming UI or accepting. */
+export function hasCompleteIncomingCallFields(info: IncomingCallInfo): boolean {
+  return Boolean(
+    info.callId
+    && info.channel.trim()
+    && info.callerId
+    && info.callerId > 0,
+  );
+}
+
+/** Load channel/callerId from API when push/SSE omitted a field. */
 export async function hydrateIncomingCallInfo(
   partial: IncomingCallInfo,
   userId: number,

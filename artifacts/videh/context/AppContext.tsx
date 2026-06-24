@@ -43,6 +43,8 @@ import { encodeVoiceMessageText, stripWaveformMeta } from "@/lib/voiceWaveform";
 import { messageReplyPreviewText } from "@/lib/messageReplyPreview";
 import {
   albumChatPreview,
+  albumMessageDisplayText,
+  coerceAlbumMessageFields,
   ensureAlbumDisplayUris,
   normalizeAlbumMediaUrl,
   encodeAlbumMessageContent,
@@ -173,12 +175,10 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     ? prevLocal.albumLocalUrls
     : undefined;
   const resolvedType = albumUrls && albumUrls.length >= 2 ? "album" : type;
-  const displayText = resolvedType === "album" && albumParsed
-    ? (albumParsed.caption ?? albumChatPreview(albumParsed.urls.length))
-    : resolvedType === "album" && albumUrls
-      ? albumChatPreview(albumUrls.length, albumParsed?.caption)
-      : content;
-  return {
+  const displayText = resolvedType === "album"
+    ? albumMessageDisplayText(content, albumUrls?.length ?? albumParsed?.urls.length)
+    : content;
+  return coerceAlbumMessageFields({
     id: String(m.id),
     text: displayText,
     timestamp: new Date(m.created_at).getTime(),
@@ -216,7 +216,7 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     fileSizeBytes: prevLocal?.fileSizeBytes,
     expiresAt: m.expires_at ? new Date(m.expires_at).getTime() : prevLocal?.expiresAt,
     isKept: m.is_kept ?? prevLocal?.isKept ?? false,
-  };
+  });
 }
 
 export interface Chat {
@@ -659,7 +659,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             old?.messages?.length
               ? old.messages
               : cached?.length
-                ? (cached as Message[])
+                ? (cached as Message[]).map((m) => coerceAlbumMessageFields(m))
                 : [];
           const cutoff = getClearCutoff(newChat.id);
           const messages = cutoff > 0
@@ -1019,18 +1019,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const hintType = normalizeMessageType(signal.messageType, text ?? "", mediaUrl);
     if (!serverMessageId && !text && !mediaUrl) return;
 
+    const albumUrls = resolveAlbumUrls(text ?? "", { mediaUrl });
+    const resolvedHintType = albumUrls && albumUrls.length >= 2 ? "album" : hintType;
     const hintPreviewText =
-      text
-      || inferChatListPreview(hintType, "", mediaUrl)
-      || (hintType === "image"
+      inferChatListPreview(signal.messageType ?? resolvedHintType, text ?? "", mediaUrl)
+      || (resolvedHintType === "image"
         ? "📷 Photo"
-        : hintType === "video"
+        : resolvedHintType === "video"
           ? "Video"
-          : hintType === "audio"
+          : resolvedHintType === "audio"
             ? "Voice message"
-            : hintType === "document"
+            : resolvedHintType === "document"
               ? "Document"
-              : "Message");
+              : resolvedHintType === "album" && albumUrls
+                ? albumChatPreview(albumUrls.length)
+                : "Message");
 
     setChats((prev) =>
       prev.map((c) => {
@@ -1058,18 +1061,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             : "other";
         if (senderId === "me") return c;
 
-        const hintMsg: Message = {
+        const hintMsg: Message = coerceAlbumMessageFields({
           id: serverMessageId ? `hint_${serverMessageId}` : `hint_t${Date.now()}`,
           text: hintPreviewText,
           timestamp: Date.now(),
           senderId,
           senderName: signal.senderName,
-          type: hintType,
-          mediaUrl: mediaUrl || undefined,
+          type: resolvedHintType,
+          mediaUrl: albumUrls?.[0] ?? mediaUrl ?? undefined,
+          albumUrls,
           status: "delivered",
-        };
+        });
         const merged = [...msgs, hintMsg].sort((a, b) => a.timestamp - b.timestamp);
-        const preview = inferChatListPreview(hintType, text ?? "", mediaUrl);
+        const preview = inferChatListPreview(resolvedHintType, text ?? "", mediaUrl);
         const now = Date.now();
         return {
           ...c,
@@ -1325,7 +1329,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             /* ignore */
           }
         } else if (eventType === "call") {
-          runCalls();
           try {
             const parsed = JSON.parse(raw ?? "") as { payload?: unknown };
             const { emitCallSignal } = require("@/lib/callEvents") as typeof import("@/lib/callEvents");
@@ -1333,6 +1336,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           } catch {
             /* ignore */
           }
+          setTimeout(() => runCalls(), 2500);
         }
         return;
       }

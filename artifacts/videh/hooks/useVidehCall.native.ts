@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PermissionsAndroid, Platform } from "react-native";
 import { applySpeakerRoute, setProximityScreenOff, startInCallSession, stopInCallSession } from "@/lib/inCallAudio";
-import { buildCallMediaConstraints, getCallMediaSettings } from "@/lib/callMediaSettings";
+import { buildCallMediaConstraints, getCallMediaSettings, type CameraFacing } from "@/lib/callMediaSettings";
+import { startScreenShare, stopScreenShare as stopScreenShareTracks } from "@/lib/screenShare";
 import { channelsForCall, loadIceServers, peerIdFromCallChannel } from "@/lib/webrtcIce";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import { normalizeCallNetworkError } from "@/lib/videhCall/signalingClient";
@@ -69,6 +70,9 @@ export function useVidehCall(
   const mountedRef = useRef(true);
   const speakerOnRef = useRef(!isVideo ? false : true);
   const mediaReadyLatchRef = useRef(false);
+  const facingModeRef = useRef<CameraFacing>("user");
+  const screenSharingRef = useRef(false);
+  const cameraVideoTrackRef = useRef<any>(null);
   const connectedSinceRef = useRef<number | null>(null);
   const disconnectGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasRemoteMediaRef = useRef(false);
@@ -88,6 +92,7 @@ export function useVidehCall(
   const [cameraOff, setCameraOff] = useState(false);
   const onHoldRef = useRef(false);
   const [speakerOn, setSpeakerOn] = useState(!isVideo ? false : true);
+  const [isFrontCamera, setIsFrontCamera] = useState(true);
   const [remoteCount, setRemoteCount] = useState(0);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [localStreamUrl, setLocalStreamUrl] = useState<string | undefined>();
@@ -644,8 +649,12 @@ export function useVidehCall(
       applySpeakerRoute(speakerOnRef.current, isVideo);
       const { mediaDevices } = require("react-native-webrtc");
       const lowData = (await getCallMediaSettings()).lowDataMode;
-      const stream = await mediaDevices.getUserMedia(buildCallMediaConstraints(isVideo, lowData));
+      const stream = await mediaDevices.getUserMedia(
+        buildCallMediaConstraints(isVideo, lowData, facingModeRef.current),
+      );
       localStreamRef.current = stream;
+      const videoTrack = stream.getVideoTracks?.()[0];
+      if (videoTrack) cameraVideoTrackRef.current = videoTrack;
       setLocalStreamUrl(typeof stream.toURL === "function" ? stream.toURL() : undefined);
       return stream;
     };
@@ -723,6 +732,47 @@ export function useVidehCall(
       localStreamRef.current?.getVideoTracks?.().forEach((track: any) => { track.enabled = cameraOff; });
       setCameraOff((c) => !c);
     },
+    flipCamera: async () => {
+      const track = localStreamRef.current?.getVideoTracks?.()[0];
+      if (!track) return;
+      if (typeof track._switchCamera === "function") {
+        track._switchCamera();
+        facingModeRef.current = facingModeRef.current === "user" ? "environment" : "user";
+        setIsFrontCamera(facingModeRef.current === "user");
+        setLocalStreamUrl(typeof localStreamRef.current?.toURL === "function" ? localStreamRef.current.toURL() : undefined);
+        return;
+      }
+      const nextFacing: CameraFacing = facingModeRef.current === "user" ? "environment" : "user";
+      try {
+        const { mediaDevices } = require("react-native-webrtc");
+        const lowData = (await getCallMediaSettings()).lowDataMode;
+        const fresh = await mediaDevices.getUserMedia(buildCallMediaConstraints(isVideo, lowData, nextFacing));
+        const newTrack = fresh.getVideoTracks?.()[0];
+        if (!newTrack) {
+          fresh.getTracks?.().forEach((t: any) => t.stop());
+          return;
+        }
+        track.stop?.();
+        const stream = localStreamRef.current;
+        if (stream?.removeTrack && stream?.addTrack) {
+          stream.removeTrack(track);
+          stream.addTrack(newTrack);
+        } else {
+          localStreamRef.current = fresh;
+        }
+        cameraVideoTrackRef.current = newTrack;
+        facingModeRef.current = nextFacing;
+        setIsFrontCamera(nextFacing === "user");
+        setLocalStreamUrl(typeof localStreamRef.current?.toURL === "function" ? localStreamRef.current.toURL() : undefined);
+        for (const pc of pcsRef.current.values()) {
+          const sender = pc.getSenders?.().find((s: any) => s.track?.kind === "video");
+          if (sender) await sender.replaceTrack(newTrack);
+        }
+      } catch {
+        /* ignore flip failure */
+      }
+    },
+    isFrontCamera,
     toggleSpeaker: () => {
       setSpeakerOn((prev) => {
         const next = !prev;
@@ -749,8 +799,52 @@ export function useVidehCall(
         } catch { /* ignore */ }
       }
     },
-    shareScreen: async () => false,
-    stopScreenShare: async () => {},
+    shareScreen: async () => {
+      const screenStream = await startScreenShare();
+      const screenTrack = screenStream?.getVideoTracks?.()[0];
+      if (!screenTrack) return false;
+      screenSharingRef.current = true;
+      const cam = cameraVideoTrackRef.current
+        ?? localStreamRef.current?.getVideoTracks?.()[0];
+      if (cam && !cameraVideoTrackRef.current) cameraVideoTrackRef.current = cam;
+      for (const pc of pcsRef.current.values()) {
+        const sender = pc.getSenders?.().find((s: any) => s.track?.kind === "video");
+        if (sender) await sender.replaceTrack(screenTrack);
+      }
+      if (typeof screenStream?.toURL === "function") {
+        setLocalStreamUrl(screenStream.toURL());
+      }
+      screenTrack.onended = () => {
+        void (async () => {
+          await stopScreenShareTracks();
+          screenSharingRef.current = false;
+          const restore = cameraVideoTrackRef.current;
+          if (!restore) return;
+          for (const pc of pcsRef.current.values()) {
+            const sender = pc.getSenders?.().find((s: any) => s.track?.kind === "video");
+            if (sender) await sender.replaceTrack(restore);
+          }
+          if (localStreamRef.current && typeof localStreamRef.current.toURL === "function") {
+            setLocalStreamUrl(localStreamRef.current.toURL());
+          }
+        })();
+      };
+      return true;
+    },
+    stopScreenShare: async () => {
+      if (!screenSharingRef.current) return;
+      await stopScreenShareTracks();
+      screenSharingRef.current = false;
+      const cam = cameraVideoTrackRef.current;
+      if (!cam) return;
+      for (const pc of pcsRef.current.values()) {
+        const sender = pc.getSenders?.().find((s: any) => s.track?.kind === "video");
+        if (sender) await sender.replaceTrack(cam);
+      }
+      if (localStreamRef.current && typeof localStreamRef.current.toURL === "function") {
+        setLocalStreamUrl(localStreamRef.current.toURL());
+      }
+    },
     leave: async () => {
       connectGenRef.current += 1;
       setProximityScreenOff(false);

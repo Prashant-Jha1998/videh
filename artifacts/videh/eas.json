@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v30-sse-polling-fix"
+        "key": "apk-release-v31-calls-album-fix"
       }
     },
     "production": {

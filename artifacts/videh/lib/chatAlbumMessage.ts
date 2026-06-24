@@ -122,3 +122,47 @@ export function isAlbumMessage(
   if (parseAlbumMessageContent(content)) return true;
   return !!opts?.albumUrls && opts.albumUrls.length >= 2;
 }
+
+/** Human-readable bubble text — never raw `{"urls":[...]}` JSON. */
+export function albumMessageDisplayText(
+  content: string | undefined | null,
+  urlCount?: number,
+): string {
+  const parsed = parseAlbumMessageContent(content);
+  if (parsed) return parsed.caption ?? albumChatPreview(parsed.urls.length);
+  if (urlCount != null && urlCount >= 2) return albumChatPreview(urlCount);
+  return "";
+}
+
+/** Caption shown under an album grid (null = hide). */
+export function albumBubbleCaptionText(
+  text: string | undefined | null,
+  urlCount: number,
+): string | null {
+  const parsed = parseAlbumMessageContent(text);
+  const cap = parsed?.caption?.trim()
+    ?? (parsed ? "" : (text?.trim() && !text.trim().startsWith("{") ? text.trim() : ""));
+  if (!cap) return null;
+  const defaultLabel = albumChatPreview(urlCount);
+  if (cap === defaultLabel || cap === "Photo") return null;
+  return cap;
+}
+
+/** Fix album rows loaded from SSE hints or stale cache. */
+export function coerceAlbumMessageFields<T extends {
+  text: string;
+  type: string;
+  mediaUrl?: string;
+  albumUrls?: string[];
+}>(msg: T): T {
+  const urls = resolveAlbumUrls(msg.text, { albumUrls: msg.albumUrls, mediaUrl: msg.mediaUrl });
+  if (!urls || urls.length < 2) return msg;
+  const display = albumMessageDisplayText(msg.text, urls.length);
+  return {
+    ...msg,
+    type: "album",
+    text: display || albumChatPreview(urls.length),
+    albumUrls: urls,
+    mediaUrl: urls[0] ?? msg.mediaUrl,
+  };
+}

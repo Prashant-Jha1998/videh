@@ -1,7 +1,17 @@
 import React from "react";
 import { StyleSheet, View } from "react-native";
 
-function VideoElement({ streamUrl, muted, style }: { streamUrl?: string; muted?: boolean; style?: any }) {
+function VideoElement({
+  streamUrl,
+  muted,
+  mirror,
+  style,
+}: {
+  streamUrl?: string;
+  muted?: boolean;
+  mirror?: boolean;
+  style?: any;
+}) {
   const url = typeof streamUrl === "string" ? streamUrl.trim() : "";
   if (!url) return <View style={[styles.fill, style]} />;
   const { RTCView } = require("react-native-webrtc");
@@ -10,7 +20,7 @@ function VideoElement({ streamUrl, muted, style }: { streamUrl?: string; muted?:
       key={url}
       streamURL={url}
       objectFit="cover"
-      mirror={Boolean(muted)}
+      mirror={mirror ?? Boolean(muted)}
       zOrder={muted ? 1 : 0}
       style={[styles.fill, style]}
     />
@@ -21,8 +31,17 @@ export function VidehRemoteView({ streamUrl, style }: { uid?: number; nativeId?:
   return <VideoElement streamUrl={streamUrl} style={style} />;
 }
 
-export function VidehLocalView({ streamUrl, style }: { nativeId?: string; streamUrl?: string; style?: any }) {
-  return <VideoElement streamUrl={streamUrl} muted style={style} />;
+export function VidehLocalView({
+  streamUrl,
+  style,
+  mirror = true,
+}: {
+  nativeId?: string;
+  streamUrl?: string;
+  style?: any;
+  mirror?: boolean;
+}) {
+  return <VideoElement streamUrl={streamUrl} muted mirror={mirror} style={style} />;
 }
 
 const styles = StyleSheet.create({

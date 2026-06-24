@@ -7,6 +7,7 @@ import {
   Animated,
   PanResponder,
   Platform,
+  Pressable,
   Share,
   StyleSheet,
   Text,
@@ -25,6 +26,9 @@ import type { InCallAudioRoute } from "@/lib/inCallAudio";
 import { phaseLabel } from "@/lib/callState";
 import { createCallLink } from "@/lib/callLinks";
 import { isScreenShareSupported } from "@/lib/screenShare";
+import { useOutgoingCallCameraPreview } from "@/lib/callLocalPreview";
+
+const CALL_CONTROLS_HIDE_MS = 4000;
 
 export default function CallScreen() {
   const insets = useSafeAreaInsets();
@@ -64,6 +68,8 @@ export default function CallScreen() {
     endCall,
     toggleMute,
     toggleCamera,
+    flipCamera,
+    isFrontCamera,
     toggleSpeaker,
     addParticipants,
     inviteeUserIds,
@@ -82,6 +88,28 @@ export default function CallScreen() {
   const [addPeopleOpen, setAddPeopleOpen] = useState(false);
   const [addingPeople, setAddingPeople] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [videoFocus, setVideoFocus] = useState<"remote" | "local">("remote");
+  const controlsHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearControlsHideTimer = useCallback(() => {
+    if (controlsHideTimerRef.current) {
+      clearTimeout(controlsHideTimerRef.current);
+      controlsHideTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleHideControls = useCallback(() => {
+    clearControlsHideTimer();
+    controlsHideTimerRef.current = setTimeout(() => {
+      setControlsVisible(false);
+    }, CALL_CONTROLS_HIDE_MS);
+  }, [clearControlsHideTimer]);
+
+  const showCallControls = useCallback(() => {
+    setControlsVisible(true);
+    scheduleHideControls();
+  }, [scheduleHideControls]);
 
   // FIX: Stable callback reference for initFromRoute so the effect below does
   // not re-run on every render — only when actual route params change.
@@ -202,6 +230,22 @@ export default function CallScreen() {
   }
 
   const outgoingRinging = !incoming && !joined && !callAnswered && !error;
+  const outgoingVideoRinging = outgoingRinging && isOneToOne && isVideo;
+  const ringPreviewUrl = useOutgoingCallCameraPreview(outgoingVideoRinging && !localStreamUrl);
+  const effectiveLocalUrl = localStreamUrl || ringPreviewUrl;
+  const canAutoHideControls = isVideo && (joined || callAnswered || mediaReady) && !outgoingVideoRinging;
+
+  useEffect(() => {
+    if (!canAutoHideControls) {
+      setControlsVisible(true);
+      clearControlsHideTimer();
+      return;
+    }
+    scheduleHideControls();
+    return clearControlsHideTimer;
+  }, [canAutoHideControls, clearControlsHideTimer, scheduleHideControls]);
+
+  useEffect(() => () => clearControlsHideTimer(), [clearControlsHideTimer]);
 
   // ── WhatsApp-style outgoing audio call screen ──────────────────────────────
   if (outgoingRinging && isOneToOne && !isVideo) {
@@ -231,60 +275,139 @@ export default function CallScreen() {
     );
   }
 
-  // ── WhatsApp-style outgoing VIDEO call waiting screen ─────────────────────
-  // Show avatar + "Calling…" instead of a blank black video surface.
-  if (outgoingRinging && isOneToOne && isVideo) {
-    return (
-      <View style={[styles.waRoot, { paddingTop: topPad, paddingBottom: insets.bottom + 28 }]}>
-        <View style={styles.waTop}>
-          <Text style={styles.waName}>{name}</Text>
-          <Text style={styles.waStatus}>{displayStatus}</Text>
+  // ── In-call / video ringing / connected screen ─────────────────────────────
+  const pipBottom = controlsVisible ? insets.bottom + 118 : insets.bottom + 28;
+  const showLocalPip =
+    isVideo
+    && !cameraOff
+    && !!effectiveLocalUrl
+    && joined
+    && isOneToOne
+    && videoFocus === "remote";
+  const showRemotePip =
+    isVideo
+    && videoFocus === "local"
+    && !!remoteStreamUrl
+    && joined
+    && isOneToOne;
+
+  const swapVideoFocus = () => {
+    if (!joined || !remoteStreamUrl || !effectiveLocalUrl) return;
+    setVideoFocus((f) => (f === "remote" ? "local" : "remote"));
+    showCallControls();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const renderRemoteMain = () => {
+    if (!isOneToOne && participantCount > 2 && gridPeers.length > 1) {
+      return <GroupCallGrid peers={gridPeers} placeholderColor={avatarBg} />;
+    }
+    if (remoteStreamUrl) {
+      return <VidehRemoteView nativeId={remoteVideoId} streamUrl={remoteStreamUrl} style={styles.remoteVideo} />;
+    }
+    if (hasRemoteVideo && joined) {
+      return (
+        <View style={[styles.remoteVideo, styles.videoPlaceholder]}>
+          <Text style={styles.callStatus}>Connecting video…</Text>
         </View>
-        <View style={styles.waCenter}>
-          {contactAvatar ? (
-            <Animated.View style={{ transform: [{ scale: pulse }] }}>
-              <Image source={{ uri: contactAvatar }} style={styles.waAvatarImg} contentFit="cover" />
-            </Animated.View>
-          ) : (
-            <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: pulse }] }]}>
+      );
+    }
+    return (
+      <View style={[styles.remoteVideo, styles.videoPlaceholder]}>
+        {outgoingVideoRinging ? null : (
+          <>
+            <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: !joined ? pulse : 1 }] }]}>
               <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
                 <Text style={styles.avatarText}>{initials}</Text>
               </View>
             </Animated.View>
-          )}
-          <View style={styles.encryptBadge}>
-            <Ionicons name="lock-closed" size={12} color="rgba(255,255,255,0.5)" />
-            <Text style={styles.encryptText}>End-to-end encrypted</Text>
-          </View>
-        </View>
-        {/* Show mute control while waiting so user can mute before answer */}
-        <View style={styles.outgoingVideoControls}>
-          <ControlBtn
-            icon={muted ? "mic-off" : "mic"}
-            label={muted ? "Unmute" : "Mute"}
-            onPress={() => { toggleMute(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-            active={muted}
-          />
-          <TouchableOpacity style={styles.endBtn} onPress={() => void endCall()} activeOpacity={0.85}>
-            <Ionicons name="call" size={28} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
-          </TouchableOpacity>
-          <ControlBtn
-            icon={speakerOn ? "volume-high" : "volume-medium"}
-            label="Audio"
-            onPress={() => {
-              if (Platform.OS === "web") toggleSpeaker();
-              else pickAudioRoute();
-            }}
-            active={speakerOn}
-          />
-        </View>
+            <Text style={styles.callerName}>{name}</Text>
+          </>
+        )}
+        <Text style={styles.callStatus}>{displayStatus}</Text>
       </View>
     );
-  }
+  };
 
-  // ── In-call / connected screen ─────────────────────────────────────────────
   return (
-    <View style={[styles.container, { backgroundColor: isVideo ? "#0B141A" : "#1A1A2E", paddingTop: topPad, paddingBottom: insets.bottom + 30 }]}>
+    <View style={[styles.container, { backgroundColor: isVideo ? "#0B141A" : "#1A1A2E", paddingTop: isVideo ? 0 : topPad, paddingBottom: isVideo ? 0 : insets.bottom + 30 }]}>
+      {isVideo ? (
+        <View style={styles.videoStage}>
+          <Pressable style={styles.videoContainer} onPress={showCallControls}>
+            {outgoingVideoRinging || (videoFocus === "local" && effectiveLocalUrl && joined) ? (
+              <VidehLocalView
+                nativeId={localVideoId}
+                streamUrl={effectiveLocalUrl}
+                mirror={isFrontCamera}
+                style={styles.remoteVideo}
+              />
+            ) : (
+              renderRemoteMain()
+            )}
+          </Pressable>
+
+          {controlsVisible ? (
+            <View style={[styles.videoOverlayTop, { paddingTop: topPad + 8 }]}>
+              <TouchableOpacity style={styles.backBtn} onPress={minimizeCall}>
+                <Ionicons name="chevron-down" size={28} color="rgba(255,255,255,0.9)" />
+              </TouchableOpacity>
+              <View style={styles.videoOverlayCenter}>
+                <Text style={styles.waNameSmall} numberOfLines={1}>{name}</Text>
+                <Text style={styles.waStatusSmall}>{displayStatus}</Text>
+              </View>
+              <View style={styles.videoOverlayRight}>
+                {joined && !isOneToOne ? (
+                  <TouchableOpacity style={styles.roundToolBtn} onPress={() => setAddPeopleOpen(true)}>
+                    <Ionicons name="person-add" size={22} color="#fff" />
+                  </TouchableOpacity>
+                ) : null}
+                {(joined || outgoingVideoRinging) && effectiveLocalUrl ? (
+                  <TouchableOpacity
+                    style={styles.roundToolBtn}
+                    onPress={() => { void flipCamera(); showCallControls(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                  >
+                    <Ionicons name="camera-reverse" size={22} color="#fff" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+
+          {showLocalPip ? (
+            <Animated.View
+              style={[
+                styles.localVideoWrapper,
+                { bottom: pipBottom, top: undefined, transform: pipOffset.getTranslateTransform() },
+              ]}
+              {...pipResponder.panHandlers}
+            >
+              <TouchableOpacity activeOpacity={0.92} onPress={swapVideoFocus} style={styles.pipTap}>
+                <VidehLocalView
+                  nativeId={localVideoId}
+                  streamUrl={effectiveLocalUrl}
+                  mirror={isFrontCamera}
+                  style={styles.localVideoFill}
+                />
+              </TouchableOpacity>
+            </Animated.View>
+          ) : null}
+
+          {showRemotePip ? (
+            <Animated.View
+              style={[
+                styles.localVideoWrapper,
+                { bottom: pipBottom, top: undefined, transform: pipOffset.getTranslateTransform() },
+              ]}
+              {...pipResponder.panHandlers}
+            >
+              <TouchableOpacity activeOpacity={0.92} onPress={swapVideoFocus} style={styles.pipTap}>
+                <VidehRemoteView nativeId={remoteVideoId} streamUrl={remoteStreamUrl} style={styles.localVideoFill} />
+              </TouchableOpacity>
+            </Animated.View>
+          ) : null}
+        </View>
+      ) : (
+        <>
       <View style={styles.topBar}>
         <TouchableOpacity style={styles.backBtn} onPress={minimizeCall}>
           <Ionicons name="chevron-down" size={28} color="rgba(255,255,255,0.8)" />
@@ -310,38 +433,6 @@ export default function CallScreen() {
         </View>
       )}
 
-      {isVideo ? (
-        <View style={styles.videoContainer}>
-          {!isOneToOne && participantCount > 2 && gridPeers.length > 1 ? (
-            <GroupCallGrid peers={gridPeers} placeholderColor={avatarBg} />
-          ) : remoteStreamUrl ? (
-            <VidehRemoteView nativeId={remoteVideoId} streamUrl={remoteStreamUrl} style={styles.remoteVideo} />
-          ) : hasRemoteVideo && joined ? (
-            <View style={[styles.remoteVideo, styles.videoPlaceholder]}>
-              <Text style={styles.callStatus}>Connecting video…</Text>
-            </View>
-          ) : (
-            <View style={[styles.remoteVideo, styles.videoPlaceholder]}>
-              <Animated.View style={[styles.avatarRing, { borderColor: avatarBg, transform: [{ scale: !joined ? pulse : 1 }] }]}>
-                <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
-                  <Text style={styles.avatarText}>{initials}</Text>
-                </View>
-              </Animated.View>
-              <Text style={styles.callerName}>{name}</Text>
-              <Text style={styles.callStatus}>{displayStatus}</Text>
-            </View>
-          )}
-          {/* Local PiP: show even while connecting so user sees their own camera */}
-          {!cameraOff && (localStreamUrl || joined) && (
-            <Animated.View
-              style={[styles.localVideoWrapper, { transform: pipOffset.getTranslateTransform() }]}
-              {...pipResponder.panHandlers}
-            >
-              <VidehLocalView nativeId={localVideoId} streamUrl={localStreamUrl} style={styles.localVideoFill} />
-            </Animated.View>
-          )}
-        </View>
-      ) : (
         <View style={styles.center}>
           {contactAvatar ? (
             <Animated.View style={{ transform: [{ scale: !joined ? pulse : 1 }], marginBottom: 24 }}>
@@ -363,9 +454,11 @@ export default function CallScreen() {
             </View>
           )}
         </View>
+        </>
       )}
 
-      <View style={styles.controls}>
+      {(!isVideo || controlsVisible) ? (
+      <View style={[styles.controls, isVideo && { position: "absolute", left: 0, right: 0, bottom: insets.bottom + 16 }]}>
         <View style={styles.controlsRow}>
           <ControlBtn
             icon={muted ? "mic-off" : "mic"}
@@ -447,9 +540,11 @@ export default function CallScreen() {
                   if (!isScreenShareSupported()) {
                     Alert.alert(
                       "Screen share",
-                      Platform.OS === "web"
-                        ? "Your browser blocked screen sharing."
-                        : "Screen sharing is available on Videh Web for now.",
+                      Platform.OS === "ios"
+                        ? "Screen sharing on iPhone requires a system broadcast extension (coming soon). Use Videh Web for now."
+                        : Platform.OS === "web"
+                          ? "Your browser blocked screen sharing."
+                          : "Screen sharing is not available on this device.",
                     );
                     return;
                   }
@@ -466,6 +561,7 @@ export default function CallScreen() {
           <Ionicons name="call" size={28} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
         </TouchableOpacity>
       </View>
+      ) : null}
 
       {!isOneToOne ? (
         <AddCallParticipantModal
@@ -582,19 +678,43 @@ const styles = StyleSheet.create({
   },
   conferenceText: { color: "#d9fdd3", fontSize: 12, fontFamily: "Inter_600SemiBold" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
+  videoStage: { flex: 1, width: "100%", position: "relative" },
   videoContainer: { flex: 1, width: "100%", position: "relative" },
+  videoOverlayTop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingHorizontal: 4,
+    zIndex: 4,
+  },
+  videoOverlayCenter: { flex: 1, alignItems: "center", paddingTop: 4 },
+  videoOverlayRight: { flexDirection: "row", gap: 8, paddingTop: 8, paddingRight: 8 },
+  roundToolBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  waNameSmall: { color: "#F0F2F5", fontSize: 17, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  waStatusSmall: { color: "rgba(255,255,255,0.75)", fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
+  pipTap: { flex: 1 },
   remoteVideo: { flex: 1, width: "100%", backgroundColor: "#111" },
   videoPlaceholder: { alignItems: "center", justifyContent: "center" },
   localVideoWrapper: {
     position: "absolute",
-    top: 12,
     right: 12,
-    width: 90,
-    height: 120,
-    borderRadius: 10,
+    width: 108,
+    height: 148,
+    borderRadius: 12,
     overflow: "hidden",
     borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.3)",
+    borderColor: "rgba(255,255,255,0.35)",
+    zIndex: 5,
   },
   localVideoFill: { flex: 1, backgroundColor: "#222" },
   avatarRing: {

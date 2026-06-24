@@ -629,7 +629,7 @@ router.post("/calls", async (req: Request, res: Response) => {
       });
     }
     if (ringingIds.length > 0 && pushTokens.length > 0) {
-      await sendChatPush(
+      void sendChatPush(
         pushTokens,
         body.type === "video" ? "Video call" : "Voice call",
         `${caller.name ?? "Videh user"} is calling`,
@@ -644,7 +644,9 @@ router.post("/calls", async (req: Request, res: Response) => {
           notificationKind: "incoming_call",
         },
         { categoryId: EXPO_INCOMING_CALL_CATEGORY_ID, threadId: `call-${callId}`, isCall: true },
-      );
+      ).catch((err) => {
+        console.error("call invite push", err);
+      });
     }
     const allInviteesBusy = callableParticipantIds.length > 0 && ringingIds.length === 0;
     if (allInviteesBusy) {
@@ -665,7 +667,7 @@ router.post("/calls", async (req: Request, res: Response) => {
 
 router.get("/calls/incoming/:userId", async (req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
-  await cleanupSessions();
+  void cleanupSessions();
   const userId = Number(req.params.userId);
   if (!assertSameUser(req, res, userId)) return;
   const calls = (await Promise.all((await stateKeys("webrtc:call:")).map((key) => stateGetJson<CallInvite>(key))))

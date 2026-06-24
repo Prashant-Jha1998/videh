@@ -99,12 +99,15 @@ export function collectPendingLocalMessages(
       const hintedServerId = m.id.startsWith("hint_t") ? null : m.id.slice(5);
       if (hintedServerId && serverMessages.some((s) => s.id === hintedServerId)) return false;
       if (
-        m.text.trim()
-        && serverMessages.some(
-          (s) =>
-            s.senderId !== "me"
-            && (s.text === m.text || (hintedServerId != null && s.id === hintedServerId)),
-        )
+        serverMessages.some((s) => {
+          if (s.senderId === "me") return false;
+          if (hintedServerId != null && s.id === hintedServerId) return true;
+          if (m.text.trim() && s.text === m.text) return true;
+          if (s.type === "album" || parseAlbumMessageContent(s.text)) {
+            if (m.type === "album" || parseAlbumMessageContent(m.text)) return true;
+          }
+          return false;
+        })
       ) {
         return false;
       }

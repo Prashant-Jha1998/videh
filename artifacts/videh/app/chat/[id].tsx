@@ -84,7 +84,7 @@ import { stashBatchMedia } from "@/lib/chatMediaBatch";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
 import { launchChatPhotoCamera, launchChatVideoCamera } from "@/lib/openChatCamera";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
-import { displayAlbumUrls, isAlbumMessage, resolveAlbumUrls } from "@/lib/chatAlbumMessage";
+import { albumBubbleCaptionText, displayAlbumUrls, isAlbumMessage, resolveAlbumUrls } from "@/lib/chatAlbumMessage";
 import { ChatAlbumGalleryModal } from "@/components/ChatAlbumGalleryModal";
 import { isGifUri } from "@/lib/imageEdit";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
@@ -140,6 +140,8 @@ import { loadEnterIsSend, loadMediaVisibilityEnabled } from "@/lib/chatSettings"
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { safeJsonParse } from "@/lib/safeJson";
 import { formatCallMessageLabel, parseCallMessageMeta } from "@/lib/callMessage";
+import { useCallSession } from "@/context/CallSessionContext";
+import { ReturnToCallChatBar } from "@/components/ReturnToCallChatBar";
 import { normalizeMessageType } from "@/lib/normalizeMessage";
 import { messageReplyPreviewText, replyQuoteSenderLabel } from "@/lib/messageReplyPreview";
 import { downloadUrlToDevice } from "@/lib/web/webDownload";
@@ -1071,6 +1073,15 @@ export default function ChatScreen() {
   } = useApp();
 
   const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
+  const { session: activeCallSession, joined: activeCallJoined, duration: activeCallDuration, returnToCallScreen } = useCallSession();
+  const showReturnToCallBar =
+    Boolean(activeCallSession?.engineActive)
+    && !activeCallSession?.ringing
+    && activeCallJoined
+    && chatId != null
+    && String(activeCallSession?.chatId) === String(chatId);
+  const activeCallDurationLabel = `${Math.floor(activeCallDuration / 60).toString().padStart(2, "0")}:${(activeCallDuration % 60).toString().padStart(2, "0")}`;
+
   const [initializing, setInitializing] = useState(rawId?.startsWith("new_") ?? false);
   const [messagesReady, setMessagesReady] = useState(false);
   const [disappearAfterSeconds, setDisappearAfterSeconds] = useState<number | null>(null);
@@ -2844,9 +2855,8 @@ export default function ChatScreen() {
                 />
               </View>
               {(() => {
-                const cap = item.text?.trim();
-                const defaultLabel = `${albumUrls.length} photos`;
-                if (!cap || cap === defaultLabel || cap === "Photo") return null;
+                const cap = albumBubbleCaptionText(item.text, albumUrls.length);
+                if (!cap) return null;
                 return (
                   <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{cap}</Text>
                 );
@@ -3922,6 +3932,14 @@ export default function ChatScreen() {
         items={chatMenuItems}
         topOffset={topPad + 46}
       />
+
+      {showReturnToCallBar ? (
+        <ReturnToCallChatBar
+          isVideo={Boolean(activeCallSession?.isVideo)}
+          durationLabel={activeCallDurationLabel}
+          onReturn={returnToCallScreen}
+        />
+      ) : null}
 
       {/* Search bar */}
       {searching && (

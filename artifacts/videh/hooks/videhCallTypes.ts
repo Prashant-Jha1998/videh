@@ -25,6 +25,8 @@ export interface VidehCallState {
   remotePeers: RemoteCallPeerStream[];
   toggleMute: () => void;
   toggleCamera: () => void;
+  flipCamera: () => Promise<void>;
+  isFrontCamera: boolean;
   toggleSpeaker: () => void;
   setSpeaker: (enabled: boolean) => void;
   setHeld: (held: boolean) => void;

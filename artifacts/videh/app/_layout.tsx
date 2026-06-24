@@ -2,7 +2,7 @@ import * as Font from "expo-font";
 import * as Notifications from "expo-notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Linking from "expo-linking";
-import { type Href, Stack, useRouter } from "expo-router";
+import { type Href, Stack, usePathname, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform } from "react-native";
@@ -22,7 +22,7 @@ import { getApiUrl } from "@/lib/api";
 import { parseReelsChannelHandleFromUrl, parseReelsWatchIdFromUrl } from "@/lib/reelsShare";
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
 import { shouldPresentIncomingCall, isCallCaller } from "@/lib/callRole";
-import { hydrateAndValidateIncomingCall } from "@/lib/hydrateIncomingCall";
+import { hydrateAndValidateIncomingCall, hasCompleteIncomingCallFields } from "@/lib/hydrateIncomingCall";
 import { IncomingCallOverlay, type IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import { webrtcAuthHeaders, webrtcFetch } from "@/lib/webrtcApi";
 import { normalizeCallNetworkError } from "@/lib/videhCall/signalingClient";
@@ -49,7 +49,7 @@ import { displayNativeIncomingCall } from "@/lib/videhNativeCallUi";
 import { emitChatMessageSignal } from "@/lib/chatMessageEvents";
 import { getNotificationActiveChatId } from "@/lib/incomingMessageNotify";
 import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
-import { INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
+import { INCOMING_RING_TIMEOUT_MS, INCOMING_CALL_POLL_ACTIVE_MS, INCOMING_CALL_POLL_BACKGROUND_MS } from "@/lib/callConstants";
 import { maybePromptDisableBatteryOptimization } from "@/lib/incomingCallBattery";
 import { isIncomingCallPushData, presentIncomingCallFromPush } from "@/lib/incomingCallPush";
 import {
@@ -132,6 +132,7 @@ function RootLayoutNav() {
   const router = useRouter();
   const {
     session: activeCallSession,
+    joined: activeCallJoined,
     duration: callDuration,
     presentIncomingCall,
     acceptIncoming,
@@ -151,6 +152,13 @@ function RootLayoutNav() {
   const respondToIncomingCallRef = useRef<(action: "accept" | "decline", msg?: string) => void>(() => {});
   const handledLaunchCallNotificationRef = useRef(false);
   const incomingRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pathname = usePathname();
+  const onCallRoute = /\/call\//.test(pathname ?? "");
+  const activeCallChatRouteMatch = pathname?.match(/\/chat\/([^/?#]+)/);
+  const onActiveCallChatRoute =
+    Boolean(activeCallChatRouteMatch)
+    && Boolean(activeCallSession)
+    && String(activeCallChatRouteMatch![1]) === String(activeCallSession!.chatId);
   const [incomingCall, setIncomingCall] = useState<IncomingCallInfo | null>(null);
   const [callWaiting, setCallWaiting] = useState<IncomingCallInfo | null>(null);
 
@@ -197,28 +205,7 @@ function RootLayoutNav() {
     }, INCOMING_RING_TIMEOUT_MS);
   }, [clearIncomingAutoEnd, user?.dbId, user?.sessionToken]);
 
-  const offerIncomingCall = useCallback(async (raw: {
-    callId: string;
-    channel?: string;
-    chatId: number;
-    type?: string;
-    callerName?: string;
-    callerId?: number;
-    participantCount?: number;
-  }) => {
-    if (!user?.dbId) return;
-    const partial = toIncomingCallInfo(raw);
-    const callPayload = await hydrateAndValidateIncomingCall(partial, user.dbId, user.sessionToken);
-    if (!callPayload) return;
-    if (!shouldPresentIncomingCall({
-      userId: user.dbId,
-      callerId: callPayload.callerId,
-      callId: callPayload.callId,
-      activeCall: activeCallSession,
-    })) {
-      return;
-    }
-    const next = callPayload;
+  const presentIncomingCallRing = useCallback((next: IncomingCallInfo) => {
     if (dismissedIncomingCallIdsRef.current.has(next.callId)) return;
     if (activeCallIdRef.current === next.callId && activeCallIsOutgoingRef.current) return;
     if (activeCallSession?.callId === next.callId && activeCallSession.isIncoming === false) return;
@@ -229,7 +216,7 @@ function RootLayoutNav() {
       if (activeCallIdRef.current === next.callId && activeCallIsOutgoingRef.current) return;
       if (activeCallSession?.callId === next.callId && activeCallSession.isIncoming === false) return;
       offeredCallIdRef.current = next.callId;
-      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
+      setIncomingCall((prev) => (prev?.callId === next.callId ? { ...prev, ...next } : next));
       pendingIncomingRef.current = next;
       presentIncomingCallUi(next, { useNativeSurface: !isAppInForeground() });
       scheduleIncomingAutoEnd(next.callId);
@@ -249,43 +236,29 @@ function RootLayoutNav() {
       return;
     }
 
-    const silenceUnknown = await loadCachedSilenceUnknownCallers();
-    const knownCaller = isKnownCaller(Number(next.chatId), next.callerId, chats);
-    if (silenceUnknown && user?.dbId && !knownCaller) {
-      // Still show the call UI — only skip the loud ringtone for unknown callers.
-      pendingIncomingRef.current = next;
-      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
-      presentIncomingCallUi(next, { useNativeSurface: !isAppInForeground() });
-      scheduleIncomingAutoEnd(next.callId);
-      return;
-    }
-
     const appActive = isAppInForeground();
-
-    if (appActive) {
-      pendingIncomingRef.current = next;
-      setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
-      presentIncomingCallUi(next, { useNativeSurface: false });
-      void startIncomingCallExperience(next);
-      scheduleIncomingAutoEnd(next.callId);
-      return;
-    }
-
-    displayNativeIncomingCall({
-      callId: next.callId,
-      callerName: next.callerName,
-      isVideo: next.type === "video",
-    });
-    presentIncomingCallUi(next, { useNativeSurface: true });
     pendingIncomingRef.current = next;
-    setIncomingCall((prev) => (prev?.callId === next.callId ? prev : next));
-
+    setIncomingCall((prev) => (prev?.callId === next.callId ? { ...prev, ...next } : next));
+    presentIncomingCallUi(next, { useNativeSurface: !appActive });
     void startIncomingCallExperience(next);
-    if (Platform.OS !== "web") {
-      void showIncomingCallNotification(next);
+    if (!appActive) {
+      displayNativeIncomingCall({
+        callId: next.callId,
+        callerName: next.callerName,
+        isVideo: next.type === "video",
+      });
+      if (Platform.OS !== "web") {
+        void showIncomingCallNotification(next);
+      }
     }
-
     scheduleIncomingAutoEnd(next.callId);
+
+    void loadCachedSilenceUnknownCallers().then((silenceUnknown) => {
+      const knownCaller = isKnownCaller(Number(next.chatId), next.callerId, chats);
+      if (silenceUnknown && !knownCaller) {
+        void stopIncomingCallExperience(next.callId, { force: false });
+      }
+    });
   }, [
     activeCallSession?.callId,
     activeCallSession?.engineActive,
@@ -293,7 +266,55 @@ function RootLayoutNav() {
     activeCallSession?.isIncoming,
     chats,
     scheduleIncomingAutoEnd,
-    presentIncomingCall,
+  ]);
+
+  const offerIncomingCall = useCallback(async (raw: {
+    callId: string;
+    channel?: string;
+    chatId: number;
+    type?: string;
+    callerName?: string;
+    callerId?: number;
+    participantCount?: number;
+  }) => {
+    if (!user?.dbId) return;
+    const partial = toIncomingCallInfo(raw);
+    if (dismissedIncomingCallIdsRef.current.has(partial.callId)) return;
+    if (activeCallIdRef.current === partial.callId && activeCallIsOutgoingRef.current) return;
+    if (activeCallSession?.callId === partial.callId && activeCallSession.isIncoming === false) return;
+
+    if (hasCompleteIncomingCallFields(partial)) {
+      if (isCallCaller(user.dbId, partial.callerId)) return;
+      if (!shouldPresentIncomingCall({
+        userId: user.dbId,
+        callerId: partial.callerId,
+        callId: partial.callId,
+        activeCall: activeCallSession,
+      })) {
+        return;
+      }
+      presentIncomingCallRing(partial);
+      return;
+    }
+
+    if (partial.callId && partial.callerName && !isCallCaller(user.dbId, partial.callerId)) {
+      presentIncomingCallRing(partial);
+    }
+
+    const callPayload = await hydrateAndValidateIncomingCall(partial, user.dbId, user.sessionToken);
+    if (!callPayload) return;
+    if (!shouldPresentIncomingCall({
+      userId: user.dbId,
+      callerId: callPayload.callerId,
+      callId: callPayload.callId,
+      activeCall: activeCallSession,
+    })) {
+      return;
+    }
+    presentIncomingCallRing(callPayload);
+  }, [
+    activeCallSession,
+    presentIncomingCallRing,
     user?.dbId,
     user?.sessionToken,
   ]);
@@ -443,7 +464,7 @@ function RootLayoutNav() {
     let cancelled = false;
     const pollMs = () => {
       const state = AppState.currentState;
-      return state === "active" ? 800 : 500;
+      return state === "active" ? INCOMING_CALL_POLL_ACTIVE_MS : INCOMING_CALL_POLL_BACKGROUND_MS;
     };
     const poll = async () => {
       try {
@@ -511,15 +532,6 @@ function RootLayoutNav() {
       const action = signal.action ?? "";
       const callId = signal.callId ?? "";
       if (action === "ringing" && callId && user.dbId) {
-        const signalCallerId = signal.callerId;
-        if (!shouldPresentIncomingCall({
-          userId: user.dbId,
-          callerId: signalCallerId,
-          callId,
-          activeCall: activeCallSession,
-        })) {
-          return;
-        }
         if (dismissedIncomingCallIdsRef.current.has(callId)) return;
         if (activeCallIdRef.current === callId) return;
         const callInfo: IncomingCallInfo = {
@@ -601,7 +613,16 @@ function RootLayoutNav() {
             shouldSetBadge: false,
           };
         }
-        if (isCall && inForeground) {
+        if (isCall && data && inForeground) {
+          void offerIncomingCall({
+            callId: String(data.callId),
+            channel: String(data.channel ?? ""),
+            chatId: Number(data.chatId),
+            type: String(data.type ?? "audio"),
+            callerName: String(data.callerName ?? "Videh user"),
+            participantCount: Number(data.participantCount ?? 2),
+            callerId: Number(data.callerId) > 0 ? Number(data.callerId) : undefined,
+          });
           return {
             shouldShowAlert: false,
             shouldPlaySound: false,
@@ -636,7 +657,7 @@ function RootLayoutNav() {
         };
       },
     });
-  }, []);
+  }, [offerIncomingCall]);
 
   useEffect(() => {
     if (Platform.OS === "web" || !isAuthenticated || handledLaunchCallNotificationRef.current) return;
@@ -684,25 +705,18 @@ function RootLayoutNav() {
       }
       const isCall = data.kind === "call" || data.notificationKind === "incoming_call";
       if (!isCall || !data.callId) return;
-      const info = toIncomingCallInfo({
+      if (dismissedIncomingCallIdsRef.current.has(String(data.callId))) return;
+      if (activeCallIdRef.current === String(data.callId)) return;
+      if (activeCallSession?.callId === String(data.callId)) return;
+      void offerIncomingCall({
         callId: String(data.callId),
         channel: String(data.channel ?? ""),
         chatId: Number(data.chatId),
         type: String(data.type ?? "audio"),
         callerName: String(data.callerName ?? "Videh user"),
-        participantCount: 2,
+        participantCount: Number(data.participantCount ?? 2),
         callerId: Number(data.callerId) > 0 ? Number(data.callerId) : undefined,
       });
-      if (!user?.dbId || !shouldPresentIncomingCall({
-        userId: user.dbId,
-        callerId: info.callerId,
-        callId: info.callId,
-        activeCall: activeCallSession,
-      })) return;
-      if (activeCallIdRef.current === info.callId) return;
-      if (dismissedIncomingCallIdsRef.current.has(info.callId)) return;
-      if (activeCallSession?.callId === info.callId) return;
-      void offerIncomingCall(info);
     });
     return () => sub.remove();
   }, [isAuthenticated, activeCallSession?.callId, offerIncomingCall, loadMessages]);
@@ -1005,7 +1019,7 @@ function RootLayoutNav() {
           }}
         />
       ) : null}
-      {activeCallSession?.minimized && activeCallSession.engineActive && !activeCallSession.ringing ? (
+      {activeCallSession?.engineActive && !activeCallSession.ringing && activeCallJoined && !onCallRoute && !onActiveCallChatRoute ? (
         <OngoingCallBanner
           contactName={activeCallSession.contactName}
           isVideo={activeCallSession.isVideo}
