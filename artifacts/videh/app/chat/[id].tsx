@@ -1221,7 +1221,13 @@ export default function ChatScreen() {
       const pollMessages = (force = false) => {
         if (!force && messagePollInFlightRef.current) return;
         messagePollInFlightRef.current = true;
-        loadMessages(chatId).finally(() => { messagePollInFlightRef.current = false; });
+        const safety = setTimeout(() => {
+          messagePollInFlightRef.current = false;
+        }, 30_000);
+        loadMessages(chatId).finally(() => {
+          clearTimeout(safety);
+          messagePollInFlightRef.current = false;
+        });
       };
       const msgTimer = setInterval(() => pollMessages(false), OPEN_CHAT_MESSAGE_POLL_MS);
       void pollMessages(true);

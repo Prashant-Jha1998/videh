@@ -3,6 +3,10 @@ import { getApiUrl } from "@/lib/api";
 
 export type ChatStreamHandler = (eventType: string, data: string) => void;
 
+const STALE_SSE_MS = 90_000;
+const AUTH_FAIL_RETRY_MS = 30_000;
+const NORMAL_RETRY_MS = 800;
+
 function parseSseBlocks(buffer: string): { events: Array<{ type: string; data: string }>; rest: string } {
   const parts = buffer.split("\n\n");
   const rest = parts.pop() ?? "";
@@ -44,17 +48,27 @@ export function connectChatEventStream(
   let buf = "";
   let cancelled = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let staleTimer: ReturnType<typeof setInterval> | null = null;
+  let lastEventAt = Date.now();
+  let authFailed = false;
+
+  const touchActivity = () => {
+    lastEventAt = Date.now();
+  };
 
   const flush = () => {
     const parsed = parseSseBlocks(buf);
     buf = parsed.rest;
-    for (const ev of parsed.events) onEvent(ev.type, ev.data);
+    for (const ev of parsed.events) {
+      touchActivity();
+      onEvent(ev.type, ev.data);
+    }
   };
 
-  const scheduleReconnect = () => {
+  const scheduleReconnect = (delayMs = NORMAL_RETRY_MS) => {
     if (cancelled) return;
     if (retryTimer) clearTimeout(retryTimer);
-    retryTimer = setTimeout(connect, 800);
+    retryTimer = setTimeout(connect, delayMs);
   };
 
   const connect = () => {
@@ -66,25 +80,49 @@ export function connectChatEventStream(
     xhr.open("GET", url);
     xhr.setRequestHeader("Accept", "text/event-stream");
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.onreadystatechange = () => {
+      if (!xhr || xhr.readyState !== XMLHttpRequest.HEADERS_RECEIVED) return;
+      if (xhr.status === 401 || xhr.status === 403) {
+        authFailed = true;
+        xhr.abort();
+        scheduleReconnect(AUTH_FAIL_RETRY_MS);
+      }
+    };
     xhr.onprogress = () => {
       if (!xhr) return;
       const text = xhr.responseText;
       const chunk = text.slice(lastLen);
       lastLen = text.length;
       if (!chunk) return;
+      touchActivity();
       buf += chunk;
       flush();
     };
-    xhr.onload = scheduleReconnect;
-    xhr.onerror = scheduleReconnect;
+    xhr.onload = () => {
+      if (authFailed) return;
+      scheduleReconnect();
+    };
+    xhr.onerror = () => {
+      if (authFailed) return;
+      scheduleReconnect();
+    };
     xhr.send();
   };
 
   connect();
 
+  staleTimer = setInterval(() => {
+    if (cancelled) return;
+    if (Date.now() - lastEventAt < STALE_SSE_MS) return;
+    lastEventAt = Date.now();
+    xhr?.abort();
+    scheduleReconnect();
+  }, 30_000);
+
   return () => {
     cancelled = true;
     if (retryTimer) clearTimeout(retryTimer);
+    if (staleTimer) clearInterval(staleTimer);
     xhr?.abort();
     xhr = null;
   };

@@ -36,11 +36,11 @@ export async function initRealtimeBus(): Promise<void> {
 }
 
 export function publishChatEvent(event: ChatEvent): void {
+  // Always notify local SSE clients on this worker (Redis alone can miss if pub/sub hiccups).
+  bus.emit("chat", event);
   if (redisBusActive) {
     publishRedisBus(JSON.stringify(event));
-    return;
   }
-  bus.emit("chat", event);
 }
 
 export function attachChatEventStream(userId: number, res: Response): () => void {

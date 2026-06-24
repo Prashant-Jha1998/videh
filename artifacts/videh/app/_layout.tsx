@@ -678,6 +678,7 @@ function RootLayoutNav() {
         });
         if (AppState.currentState === "active" && getNotificationActiveChatId() === chatId) {
           void dismissChatMessageNotifications(chatId);
+          void loadMessages(chatId);
         }
         return;
       }

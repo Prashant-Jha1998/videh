@@ -7,6 +7,7 @@ import { albumSendLog } from "@/lib/albumSendLog";
 import { connectChatEventStream } from "@/lib/connectChatEventStream";
 import {
   ACTIVE_CHAT_MESSAGE_BACKUP_POLL_MS,
+  FOREGROUND_CHAT_LIST_POLL_MS,
   MESSAGE_HINT_API_DELAY_MS,
   MESSAGE_HINT_API_RETRY_MS,
 } from "@/lib/chatRealtimePoll";
@@ -18,6 +19,7 @@ import {
 } from "@/lib/incomingMessageNotify";
 import * as Location from "expo-location";
 import { getApiUrl } from "@/lib/api";
+import { fetchWithTimeout } from "@/lib/fetchWithTimeout";
 import { registerPushTokenWithServer } from "@/lib/pushNotifications";
 import { encodeLocationPayload, mapsUrl as buildMapsUrl } from "@/lib/locationMessage";
 import { safeJsonParse } from "@/lib/safeJson";
@@ -73,7 +75,7 @@ const getStatusExpiryTime = (status: Status) => status.expiresAt ?? status.times
 const isStatusActive = (status: Status) => getStatusExpiryTime(status) > Date.now();
 
 const api = async (path: string, options?: RequestInit) => {
-  const res = await fetch(`${BASE_URL}/api${path}`, {
+  const res = await fetchWithTimeout(`${BASE_URL}/api${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -1455,7 +1457,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     /** SSE delivers instantly; polling is backup only (reduces API load at scale). */
-    const chatTimer = setInterval(runChats, 15000);
+    const chatTimer = setInterval(runChats, FOREGROUND_CHAT_LIST_POLL_MS);
     const activeChatMsgTimer = setInterval(() => {
       const cid = activeChatIdRef.current;
       if (!cid) return;
@@ -1555,21 +1557,46 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (u?.dbId) {
       void (async () => {
-        const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
-          method: "POST",
-          headers: authHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            senderId: u.dbId,
-            content: text,
-            type: "text",
-            replyToId: replyToId && !replyToId.startsWith("tmp_") ? Number(replyToId) : undefined,
-          }),
-        });
-        const data = (await res.json()) as {
-          success?: boolean;
-          message?: { id: number } | string;
-          code?: string;
+        const payload = {
+          senderId: u.dbId,
+          content: text,
+          type: "text",
+          replyToId: replyToId && !replyToId.startsWith("tmp_") ? Number(replyToId) : undefined,
         };
+        const postOnce = async () => {
+          const res = await fetchWithTimeout(`${BASE_URL}/api/chats/${chatId}/messages`, {
+            method: "POST",
+            headers: authHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify(payload),
+          }, 20_000);
+          return { res, data: (await res.json()) as {
+            success?: boolean;
+            message?: { id: number } | string;
+            code?: string;
+          } };
+        };
+
+        let res: Response;
+        let data: Awaited<ReturnType<typeof postOnce>>["data"];
+        try {
+          ({ res, data } = await postOnce());
+        } catch {
+          try {
+            ({ res, data } = await postOnce());
+          } catch {
+            Alert.alert(
+              "Message not sent",
+              "Could not reach the server. Check your internet and try again.",
+            );
+            setChats((prev) =>
+              prev.map((c) =>
+                c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c,
+              ),
+            );
+            return;
+          }
+        }
+
         if (res.status === 403) {
           const msg = typeof data.message === "string" ? data.message : "You are not allowed to send messages in this chat.";
           Alert.alert("Cannot send message", msg);
@@ -1580,7 +1607,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           );
           return;
         }
-        if (data?.success && data.message && typeof data.message === "object" && "id" in data.message) {
+        if (!data?.success) {
+          Alert.alert("Message not sent", "Please try sending again.");
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === chatId
+                ? {
+                    ...c,
+                    messages: c.messages.map((m) =>
+                      m.id === tempId ? { ...m, uploadFailed: true } : m,
+                    ),
+                  }
+                : c,
+            ),
+          );
+          return;
+        }
+        if (data.message && typeof data.message === "object" && "id" in data.message) {
           const mid = data.message.id;
           const row = data.message as { expires_at?: string; is_kept?: boolean };
           setChats((prev) =>
@@ -1604,7 +1647,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ),
           );
         }
-      })().catch(() => {});
+      })();
     }
   }, []);
 

@@ -106,7 +106,6 @@ export async function sendFcmChatPush(
     ? { channelId: EXPO_ANDROID_CALLS_CHANNEL_ID, sound: "default" as const }
     : fcmMessageSoundAndroid(msgSound);
   const channelId = androidTone.channelId;
-  const androidSound = androidTone.sound;
   const iosSound = options?.isCall ? "default" : fcmMessageSoundIos(msgSound);
   const categoryId =
     options?.categoryId
@@ -127,10 +126,12 @@ export async function sendFcmChatPush(
         }
       : {
           ...data,
+          title,
+          message: body,
+          channelId,
           ...(categoryId ? { categoryId } : {}),
         },
   );
-  const chatTag = options?.threadId?.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
 
   try {
     if (options?.isCall) {
@@ -166,25 +167,25 @@ export async function sendFcmChatPush(
       return;
     }
 
-    await sendFcmMulticast(messaging, tokens, {
-      notification: { title, body },
+    const { android, ios } = splitFcmTokensByPlatform(tokens);
+
+    // Android: data-only so foreground JS receives the event instantly (notification shown locally).
+    await sendFcmMulticast(messaging, android, {
       data: dataPayload,
       android: {
         priority: "high",
-        notification: {
-          channelId,
-          sound: androidSound,
-          priority: "high" as const,
-          visibility: "public" as const,
-          ...(options?.imageUrl ? { imageUrl: options.imageUrl } : {}),
-          ...(chatTag ? { tag: chatTag } : {}),
-        },
       },
+    });
+
+    await sendFcmMulticast(messaging, ios, {
+      notification: { title, body },
+      data: dataPayload,
       apns: {
         payload: {
           aps: {
             sound: iosSound,
             alert: { title, body },
+            category: categoryId,
           },
         },
       },
