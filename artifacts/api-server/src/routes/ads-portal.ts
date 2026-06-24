@@ -698,11 +698,26 @@ router.post("/campaigns/:campaignId/creatives", (req, res) => {
     ));
     try {
       const own = await query(
-        `SELECT id FROM reels_ad_campaigns WHERE id = $1 AND advertiser_id = $2`,
+        `SELECT id, objective FROM reels_ad_campaigns WHERE id = $1 AND advertiser_id = $2`,
         [campaignId, user.advertiserId],
       );
       if (!own.rows.length) {
         res.status(404).json({ success: false, message: "Campaign not found" });
+        return;
+      }
+      const campaignObjective = String((own.rows[0] as { objective?: string }).objective ?? "");
+      if (campaignObjective === "app_promotion" && format !== "app_install") {
+        res.status(400).json({
+          success: false,
+          message: "App promotion campaigns require the App install card format with a Play Store or App Store URL.",
+        });
+        return;
+      }
+      if (campaignObjective === "shopping" && format !== "shopping" && format !== "carousel") {
+        res.status(400).json({
+          success: false,
+          message: "Shopping campaigns require the Shopping / product card format with a shop URL.",
+        });
         return;
       }
       const auditBase = auditFromRequest(req, {

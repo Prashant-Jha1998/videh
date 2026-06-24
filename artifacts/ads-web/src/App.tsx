@@ -5,6 +5,14 @@ import { GoogleSignInButton } from "./components/GoogleSignInButton";
 import { MediaUploadField } from "./components/MediaUploadField";
 import { VidehLogo } from "./components/VidehLogo";
 import { BID_MODEL_LABELS, CATEGORY_LABELS, type AdFormatSpec } from "./lib/adFormats";
+import {
+  COMPATIBLE_FORMAT_IDS,
+  DEFAULT_FORMAT_BY_OBJECTIVE,
+  OBJECTIVE_HINTS,
+  formatMatchesObjective,
+  isCampaignObjective,
+  recommendedFormatLabel,
+} from "./lib/campaignObjective";
 import { adsRequest, adsSignOut } from "./lib/adsClient";
 import { openAdsRazorpayCheckout } from "./lib/razorpayCheckout";
 
@@ -201,6 +209,24 @@ export default function App() {
     if (spec) applyAdFormat(spec);
   }, [pricing, selectedAdFormatId, applyAdFormat]);
 
+  const selectedCampaignRow = campaigns.find((c) => c.id === selectedCampaign);
+  const selectedCampaignObjective = isCampaignObjective(selectedCampaignRow?.objective)
+    ? selectedCampaignRow.objective
+    : null;
+
+  useEffect(() => {
+    if (!selectedCampaignObjective || !pricing?.adFormats?.length) return;
+    const defaultId = DEFAULT_FORMAT_BY_OBJECTIVE[selectedCampaignObjective];
+    if (defaultId && defaultId !== selectedAdFormatId) {
+      setSelectedAdFormatId(defaultId);
+    }
+  }, [selectedCampaign, selectedCampaignObjective, pricing?.adFormats]);
+
+  const formatMismatch =
+    selectedCampaignObjective && pricing?.adFormats
+      ? !formatMatchesObjective(selectedAdFormatId, selectedCampaignObjective, pricing.adFormats)
+      : false;
+
   const lookupPlayStoreDetails = useCallback(async (url: string) => {
     const trimmed = url.trim();
     if (!trimmed || adFormat !== "app_install") {
@@ -307,7 +333,7 @@ export default function App() {
     if (!newCampaign.trim()) return;
     setError("");
     const obj = pricing?.objectives.find((o) => o.id === objective);
-    const res = await api<{ success: boolean; message?: string; code?: string }>("/campaigns", {
+    const res = await api<{ success: boolean; message?: string; code?: string; campaign?: { id: number; objective?: string } }>("/campaigns", {
       method: "POST",
       body: JSON.stringify({
         name: newCampaign.trim(),
@@ -327,12 +353,35 @@ export default function App() {
     }
     setNewCampaign("");
     await loadDash();
-    setNav("campaigns");
+    if (res.campaign?.id) {
+      setSelectedCampaign(res.campaign.id);
+      if (isCampaignObjective(res.campaign.objective)) {
+        setSelectedAdFormatId(DEFAULT_FORMAT_BY_OBJECTIVE[res.campaign.objective]);
+      }
+      setNav("ads");
+    } else {
+      setNav("campaigns");
+    }
   };
 
   const createCreative = async () => {
     if (!selectedCampaign || !creativeTitle.trim()) return;
     setError("");
+    if (formatMismatch && selectedCampaignObjective) {
+      setError(
+        `This ad format does not match your ${OBJECTIVE_LABELS[selectedCampaignObjective]} campaign. `
+        + `Use "${recommendedFormatLabel(selectedCampaignObjective, pricing?.adFormats ?? [])}" instead.`,
+      );
+      return;
+    }
+    if (adFormat === "app_install" && !playStoreUrl.trim() && !appStoreUrl.trim()) {
+      setError("Play Store or App Store URL required for app install ads.");
+      return;
+    }
+    if (adFormat === "shopping" && !destinationUrl.trim()) {
+      setError("Shop URL required for shopping ads.");
+      return;
+    }
     setSubmittingAd(true);
     try {
       const fd = new FormData();
@@ -700,6 +749,9 @@ export default function App() {
                     <input style={S.input} type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
                   </Field>
                 </div>
+                {isCampaignObjective(objective) ? (
+                  <p className="ads-objective-hint">{OBJECTIVE_HINTS[objective]}</p>
+                ) : null}
                 <button type="button" style={{ ...S.primary, width: "auto", marginTop: 12 }} onClick={() => void createCampaign()}>Create campaign</button>
               </Panel>
               )}
@@ -720,7 +772,13 @@ export default function App() {
                     <tbody>
                       {campaigns.map((c) => (
                         <tr key={c.id} style={{ background: selectedCampaign === c.id ? "#e8f5f0" : undefined, cursor: "pointer" }}
-                          onClick={() => { setSelectedCampaign(c.id); setNav("ads"); }}>
+                          onClick={() => {
+                            setSelectedCampaign(c.id);
+                            if (isCampaignObjective(c.objective)) {
+                              setSelectedAdFormatId(DEFAULT_FORMAT_BY_OBJECTIVE[c.objective]);
+                            }
+                            setNav("ads");
+                          }}>
                           <td className="ads-td">{c.name}</td>
                           <td className="ads-td">{OBJECTIVE_LABELS[c.objective ?? ""] ?? c.objective}</td>
                           <td className="ads-td">₹{c.bid_amount_inr} {c.bid_model?.toUpperCase()}</td>
@@ -778,10 +836,26 @@ export default function App() {
               <div className="ads-create-layout">
                 <div className="ads-create-form">
               <p className="ads-sub" style={{ marginBottom: 12 }}>Choose ad format and upload your creative assets.</p>
+              {selectedCampaignObjective ? (
+                <div className={`ads-campaign-format-banner${formatMismatch ? " ads-campaign-format-banner--warn" : ""}`}>
+                  <strong>{OBJECTIVE_LABELS[selectedCampaignObjective]} campaign</strong>
+                  <p>{OBJECTIVE_HINTS[selectedCampaignObjective]}</p>
+                  {formatMismatch ? (
+                    <button
+                      type="button"
+                      className="ads-format-fix-btn"
+                      onClick={() => setSelectedAdFormatId(DEFAULT_FORMAT_BY_OBJECTIVE[selectedCampaignObjective])}
+                    >
+                      Switch to {recommendedFormatLabel(selectedCampaignObjective, pricing?.adFormats ?? [])}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               <AdFormatsCatalog
                 formats={pricing?.adFormats ?? []}
                 compact
                 selectedId={selectedAdFormatId}
+                recommendedIds={selectedCampaignObjective ? COMPATIBLE_FORMAT_IDS[selectedCampaignObjective] : undefined}
                 onSelect={setSelectedAdFormatId}
               />
               {pricing?.adFormats?.find((f) => f.id === selectedAdFormatId && !f.live) ? (
@@ -1079,11 +1153,13 @@ function AdFormatsCatalog({
   onSelect,
   compact,
   selectedId,
+  recommendedIds,
 }: {
   formats: AdFormatSpec[];
   onSelect: (id: string) => void;
   compact?: boolean;
   selectedId?: string;
+  recommendedIds?: string[];
 }) {
   const categories = ["video_watch", "home_feed", "shorts", "display"] as const;
   return (
@@ -1107,11 +1183,21 @@ function AdFormatsCatalog({
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
                     <strong style={{ fontSize: compact ? 13 : 14 }}>{f.label}</strong>
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
-                      background: f.live ? "#e6f4ea" : "#fef7e0", color: f.live ? "#137333" : "#b06000",
-                    }}>
-                      {f.live ? "LIVE" : "SOON"}
+                    <span style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      {recommendedIds?.includes(f.id) ? (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                          background: "#e8f5f0", color: "#00A884",
+                        }}>
+                          RECOMMENDED
+                        </span>
+                      ) : null}
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                        background: f.live ? "#e6f4ea" : "#fef7e0", color: f.live ? "#137333" : "#b06000",
+                      }}>
+                        {f.live ? "LIVE" : "SOON"}
+                      </span>
                     </span>
                   </div>
                   {!compact ? <p style={{ margin: "6px 0 0", fontSize: 12, color: "#5f6368", textAlign: "left" }}>{f.description}</p> : null}
