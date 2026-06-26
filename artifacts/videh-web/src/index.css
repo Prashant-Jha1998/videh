@@ -36,7 +36,7 @@
   --ring: 152 60% 35%;
   --card: 0 0% 100%;
   --card-foreground: 215 25% 15%;
-  --primary: 152 60% 34%;          /* #00A884 Videh green */
+  --primary: 152 60% 34%;          /* #5B4FE8 Videh green */
   --primary-foreground: 0 0% 100%;
   --secondary: 210 20% 94%;
   --secondary-foreground: 215 25% 15%;
@@ -51,9 +51,9 @@
 
   /* Chat specific */
   --chat-bg: #efeae2;
-  --bubble-sent: #d9fdd3;
+  --bubble-sent: #E0DCFF;
   --bubble-recv: #ffffff;
-  --header-bg: #00a884;
+  --header-bg: #5B4FE8;
   --sidebar-bg: #ffffff;
   --sidebar-header: #f0f2f5;
   --panel-bg: #f0f2f5;

@@ -26,7 +26,7 @@ export function isReelsApiStreamUrl(url: string): boolean {
   return /\/api\/reels\/videos\/\d+\/stream$/i.test(base);
 }
 
-/** Qualities this specific video can offer (YouTube: only what the upload supports). */
+/** Qualities this specific video can offer (Video platform: only what the upload supports). */
 export function qualitiesForVideo(
   sourceHeight?: number | null,
   playbackUrl?: string | null,

@@ -79,7 +79,7 @@ export const te = locale({
   "chats.noMessagesYet": "ఇంకా సందేశాలు లేవు",
   "chats.noArchived": "ఆర్కైవ్ చేసిన చాట్‌లు లేవు",
   "chats.noArchivedHint": "ఆర్కైవ్ చేసిన చాట్‌లు ఇక్కడ కనిపిస్తాయి.",
-  "chats.emptyHint": "మీ పరిచయాలతో సంభాషణ ప్రారంభించండి.\nమీ సందేశాలు ఎండ్-టు-ఎండ్ ఎన్క్రిప్ట్ చేయబడ్డాయి.",
+  "chats.emptyHint": "మీ పరిచయాలతో సంభాషణ ప్రారంభించండి.\nమీ సందేశాలు ట్రాన్జిట్‌లో TLSతో సురక్షితం.",
   "chats.startChat": "చాట్ ప్రారంభించండి",
   "chats.noSearchResults": "\"{query}\" కోసం ఫలితాలు లేవు",
   "chats.unlockAndOpen": "అన్‌లాక్ చేసి తెరవండి",

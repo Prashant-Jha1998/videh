@@ -475,7 +475,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
         description: `Videh — payment method verification (₹5)`,
         order_id: checkout.orderId,
         prefill: { name: company.contactName, email: company.email, contact: company.phone },
-        theme: { color: "#00a884" },
+        theme: { color: "#5B4FE8" },
         method: { card: true, upi: true, netbanking: true },
         handler: async (response: {
           razorpay_payment_id: string;
@@ -681,15 +681,15 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
       ) : null}
       {portal.busy && isWorkspaceStep && step !== "done" && !portal.data ? (
         <p className="mb-4 text-sm text-[#667781] flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin text-[#00a884]" />
+          <Loader2 className="h-4 w-4 animate-spin text-[#5B4FE8]" />
           Loading your account data…
         </p>
       ) : null}
 
           {step === "plan" && (
             <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-6">
-              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 1 of 6</p>
-              <h2 className="text-2xl font-bold text-[#111b21]">Choose your plan</h2>
+              <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">Module 1 of 6</p>
+              <h2 className="text-2xl font-bold text-[#14131F]">Choose your plan</h2>
               <p className="text-sm text-[#667781]">
                 Monthly subscription is billed in your company name. If payment fails later, API access is
                 automatically held until payment is captured again.
@@ -703,7 +703,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                   <label
                     key={p.id}
                     className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-colors ${
-                      planId === p.id ? "border-[#00a884] bg-[#00a884]/5" : "border-gray-200"
+                      planId === p.id ? "border-[#5B4FE8] bg-[#5B4FE8]/5" : "border-gray-200"
                     }`}
                   >
                     <span className="flex items-center gap-3">
@@ -712,9 +712,9 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                         name="plan"
                         checked={planId === p.id}
                         onChange={() => setPlanId(p.id)}
-                        className="accent-[#00a884]"
+                        className="accent-[#5B4FE8]"
                       />
-                      <span className="font-semibold text-[#111b21]">{p.name}</span>
+                      <span className="font-semibold text-[#14131F]">{p.name}</span>
                     </span>
                     <span className="text-sm font-medium text-[#667781]">
                       {p.amountInr > 0 ? `₹${p.amountInr.toLocaleString("en-IN")}/mo` : "Custom"}
@@ -750,7 +750,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                     void startDraft();
                   }
                 }}
-                className="w-full flex items-center justify-center gap-2 bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold py-3 rounded-xl disabled:opacity-60"
+                className="w-full flex items-center justify-center gap-2 bg-[#5B4FE8] hover:bg-[#008f6f] text-white font-semibold py-3 rounded-xl disabled:opacity-60"
               >
                 {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <>Continue <ArrowRight className="h-4 w-4" /></>}
               </button>
@@ -759,9 +759,9 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
 
           {step === "company" && (
             <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-4">
-              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 2 of 6</p>
-              <h2 className="text-2xl font-bold text-[#111b21] flex items-center gap-2">
-                <Building2 className="h-6 w-6 text-[#00a884]" /> Company details
+              <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">Module 2 of 6</p>
+              <h2 className="text-2xl font-bold text-[#14131F] flex items-center gap-2">
+                <Building2 className="h-6 w-6 text-[#5B4FE8]" /> Company details
               </h2>
               <p className="text-sm text-[#667781]">
                 Documents in the next step depend on entity type — Pvt Ltd, LLP, or Proprietorship (GST + Udyam).
@@ -877,7 +877,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                   type="button"
                   disabled={busy || !company.companyName || !company.contactName || !company.email || !company.phone}
                   onClick={() => void saveCompany()}
-                  className="flex-1 bg-[#00a884] text-white font-semibold py-2.5 rounded-xl disabled:opacity-60"
+                  className="flex-1 bg-[#5B4FE8] text-white font-semibold py-2.5 rounded-xl disabled:opacity-60"
                 >
                   {busy ? "Saving…" : "Save & upload documents"}
                 </button>
@@ -887,8 +887,8 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
 
           {step === "documents" && (
             <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-4">
-              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 3 of 6</p>
-              <h2 className="text-2xl font-bold text-[#111b21]">Upload documents</h2>
+              <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">Module 3 of 6</p>
+              <h2 className="text-2xl font-bold text-[#14131F]">Upload documents</h2>
               <p className="text-sm text-[#667781]">
                 Required documents for{" "}
                 <strong>{ENTITY_TYPES.find((e) => e.value === company.entityType)?.label}</strong>. Admin will
@@ -901,16 +901,16 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                     className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-gray-200"
                   >
                     <div>
-                      <p className="font-medium text-sm text-[#111b21]">
+                      <p className="font-medium text-sm text-[#14131F]">
                         {d.label} {d.required ? "*" : "(optional)"}
                       </p>
                       {uploaded.has(d.key) ? (
-                        <p className="text-xs text-[#00a884] flex items-center gap-1 mt-1">
+                        <p className="text-xs text-[#5B4FE8] flex items-center gap-1 mt-1">
                           <CheckCircle2 className="h-3.5 w-3.5" /> Uploaded
                         </p>
                       ) : null}
                     </div>
-                    <label className="inline-flex items-center gap-2 text-sm font-semibold text-[#00a884] cursor-pointer">
+                    <label className="inline-flex items-center gap-2 text-sm font-semibold text-[#5B4FE8] cursor-pointer">
                       <Upload className="h-4 w-4" />
                       {uploaded.has(d.key) ? "Replace" : "Upload"}
                       <input
@@ -938,7 +938,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                     setStep("profile");
                     setMaxReachedIndex((m) => Math.max(m, STEPS.indexOf("profile")));
                   }}
-                  className="flex-1 bg-[#00a884] text-white font-semibold py-2.5 rounded-xl disabled:opacity-60"
+                  className="flex-1 bg-[#5B4FE8] text-white font-semibold py-2.5 rounded-xl disabled:opacity-60"
                 >
                   {requiredMissing.length > 0
                     ? `Upload ${requiredMissing.length} required file(s)`
@@ -950,8 +950,8 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
 
           {step === "profile" && (
             <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-4">
-              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 4 of 6</p>
-              <h2 className="text-2xl font-bold text-[#111b21]">Business profile</h2>
+              <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">Module 4 of 6</p>
+              <h2 className="text-2xl font-bold text-[#14131F]">Business profile</h2>
               <p className="text-sm text-[#667781]">
                 Set how your company appears on Videh — display name and logo (verified business profile).
               </p>
@@ -965,7 +965,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                       <ImagePlus className="h-8 w-8" />
                     </div>
                   )}
-                  <label className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[#00a884] text-[#00a884] text-sm font-semibold cursor-pointer">
+                  <label className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[#5B4FE8] text-[#5B4FE8] text-sm font-semibold cursor-pointer">
                     Upload logo
                     <input
                       type="file"
@@ -1023,7 +1023,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                   type="button"
                   disabled={busy || !profile.displayName.trim() || !logoUrl}
                   onClick={() => void saveProfile()}
-                  className="flex-1 bg-[#00a884] text-white font-semibold py-2.5 rounded-xl disabled:opacity-60"
+                  className="flex-1 bg-[#5B4FE8] text-white font-semibold py-2.5 rounded-xl disabled:opacity-60"
                 >
                   Continue to phone verification
                 </button>
@@ -1033,9 +1033,9 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
 
           {step === "channel" && (
             <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-6">
-              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 5 of 6</p>
-              <h2 className="text-2xl font-bold text-[#111b21] flex items-center gap-2">
-                <Phone className="h-6 w-6 text-[#00a884]" /> Phone number verification
+              <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">Module 5 of 6</p>
+              <h2 className="text-2xl font-bold text-[#14131F] flex items-center gap-2">
+                <Phone className="h-6 w-6 text-[#5B4FE8]" /> Phone number verification
               </h2>
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
                 <p className="font-semibold">Dedicated business number (required)</p>
@@ -1064,7 +1064,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                     type="button"
                     disabled={busy || channelPhone.length !== 10 || channelOtpSent}
                     onClick={() => void sendChannelOtpRequest()}
-                    className="w-full border border-[#00a884] text-[#00a884] font-semibold py-2.5 rounded-xl disabled:opacity-50"
+                    className="w-full border border-[#5B4FE8] text-[#5B4FE8] font-semibold py-2.5 rounded-xl disabled:opacity-50"
                   >
                     {busy ? "Sending…" : channelOtpSent ? "OTP sent — check your phone" : "Send OTP to this number"}
                   </button>
@@ -1085,16 +1085,16 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                 </>
               ) : (
                 <div className="rounded-xl bg-[#f0f2f5] p-4 space-y-3 text-sm">
-                  <p className="font-semibold text-[#111b21] flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-[#00a884]" /> Channel verified
+                  <p className="font-semibold text-[#14131F] flex items-center gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-[#5B4FE8]" /> Channel verified
                   </p>
                   <p>
                     <span className="text-[#667781]">Phone Number ID:</span>{" "}
-                    <code className="text-[#00a884]">{phoneNumberId}</code>
+                    <code className="text-[#5B4FE8]">{phoneNumberId}</code>
                   </p>
                   <p>
                     <span className="text-[#667781]">Business Account ID:</span>{" "}
-                    <code className="text-[#00a884]">{businessAccountId}</code>
+                    <code className="text-[#5B4FE8]">{businessAccountId}</code>
                   </p>
                   <p className="text-xs text-[#667781]">
                     API: POST /v1/{phoneNumberId}/messages
@@ -1110,7 +1110,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                     type="button"
                     disabled={busy || channelOtp.length !== 6}
                     onClick={() => void verifyChannelOtpRequest()}
-                    className="flex-1 bg-[#00a884] text-white font-semibold py-2.5 rounded-xl disabled:opacity-60"
+                    className="flex-1 bg-[#5B4FE8] text-white font-semibold py-2.5 rounded-xl disabled:opacity-60"
                   >
                     {busy ? <Loader2 className="h-5 w-5 animate-spin mx-auto" /> : "Verify OTP & continue"}
                   </button>
@@ -1121,7 +1121,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                       void persistWizardStep("payment");
                       setStep("payment");
                     }}
-                    className="flex-1 bg-[#00a884] text-white font-semibold py-2.5 rounded-xl"
+                    className="flex-1 bg-[#5B4FE8] text-white font-semibold py-2.5 rounded-xl"
                   >
                     Continue to payment
                   </button>
@@ -1132,19 +1132,19 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
 
           {step === "payment" && (
             <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-6">
-              <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Module 6 of 6</p>
-              <h2 className="text-2xl font-bold text-[#111b21] flex items-center gap-2">
-                <CreditCard className="h-6 w-6 text-[#00a884]" /> Payment method verification
+              <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">Module 6 of 6</p>
+              <h2 className="text-2xl font-bold text-[#14131F] flex items-center gap-2">
+                <CreditCard className="h-6 w-6 text-[#5B4FE8]" /> Payment method verification
               </h2>
               <ConversationPricing variant="light" />
-              <div className="rounded-xl border-2 border-[#00a884]/40 bg-[#00a884]/5 p-4">
-                <p className="text-sm text-[#111b21] font-semibold mb-1">Required before API keys</p>
+              <div className="rounded-xl border-2 border-[#5B4FE8]/40 bg-[#5B4FE8]/5 p-4">
+                <p className="text-sm text-[#14131F] font-semibold mb-1">Required before API keys</p>
                 <p className="text-sm text-[#667781]">
                   Verify debit/credit card or UPI. Usage bills per conversation to your company; failed monthly
                   payment → API on hold.
                 </p>
                 {selectedPlan.amountInr > 0 ? (
-                  <p className="text-lg font-bold text-[#111b21] mt-4">
+                  <p className="text-lg font-bold text-[#14131F] mt-4">
                     Verify now: ₹5 <span className="text-sm font-normal text-[#667781]">(method check)</span>
                   </p>
                 ) : (
@@ -1164,7 +1164,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                   type="button"
                   disabled={busy || !channelVerified}
                   onClick={() => void startPayment()}
-                  className="flex-1 flex items-center justify-center gap-2 bg-[#00a884] text-white font-semibold py-3 rounded-xl disabled:opacity-60"
+                  className="flex-1 flex items-center justify-center gap-2 bg-[#5B4FE8] text-white font-semibold py-3 rounded-xl disabled:opacity-60"
                 >
                   {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <>Verify payment method & submit</>}
                 </button>
@@ -1175,16 +1175,16 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
           {step === "done" && (
             <section className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-6">
               <div className="text-center pb-4 border-b border-gray-100">
-                <CheckCircle2 className="h-12 w-12 text-[#00a884] mx-auto mb-3" />
-                <h2 className="text-2xl font-bold text-[#111b21]">Application submitted</h2>
-                {reference ? <p className="font-mono text-[#00a884] mt-2 text-sm">{reference}</p> : null}
+                <CheckCircle2 className="h-12 w-12 text-[#5B4FE8] mx-auto mb-3" />
+                <h2 className="text-2xl font-bold text-[#14131F]">Application submitted</h2>
+                {reference ? <p className="font-mono text-[#5B4FE8] mt-2 text-sm">{reference}</p> : null}
                 <p className="text-[#667781] text-sm max-w-lg mx-auto mt-3">
                   Your setup modules are complete. Videh will now run verification — similar to enterprise messaging
                   API onboarding. Track progress below.
                 </p>
               </div>
               <div>
-                <h3 className="text-sm font-bold text-[#111b21] uppercase tracking-wide mb-4">Review pipeline</h3>
+                <h3 className="text-sm font-bold text-[#14131F] uppercase tracking-wide mb-4">Review pipeline</h3>
                 <ol className="space-y-0">
                   {REVIEW_PIPELINE.map((phase, i) => {
                     const phaseIdx = statusOrder.indexOf(phase.key);
@@ -1198,27 +1198,27 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                           <span
                             className={`flex h-9 w-9 items-center justify-center rounded-full border-2 ${
                               done
-                                ? "bg-[#00a884] border-[#00a884] text-white"
+                                ? "bg-[#5B4FE8] border-[#5B4FE8] text-white"
                                 : active
-                                  ? "border-[#00a884] text-[#00a884] bg-[#00a884]/10"
+                                  ? "border-[#5B4FE8] text-[#5B4FE8] bg-[#5B4FE8]/10"
                                   : "border-gray-200 text-gray-400"
                             }`}
                           >
                             {done ? <CheckCircle2 className="h-5 w-5" /> : <span className="text-xs font-bold">{i + 1}</span>}
                           </span>
                           {i < REVIEW_PIPELINE.length - 1 ? (
-                            <span className={`w-0.5 flex-1 min-h-[32px] my-1 ${done ? "bg-[#00a884]" : "bg-gray-200"}`} />
+                            <span className={`w-0.5 flex-1 min-h-[32px] my-1 ${done ? "bg-[#5B4FE8]" : "bg-gray-200"}`} />
                           ) : null}
                         </div>
                         <div className="pb-8">
-                          <p className={`font-semibold text-sm ${active ? "text-[#00a884]" : "text-[#111b21]"}`}>{phase.label}</p>
+                          <p className={`font-semibold text-sm ${active ? "text-[#5B4FE8]" : "text-[#14131F]"}`}>{phase.label}</p>
                           <p className="text-xs text-[#667781] mt-0.5">{phase.desc}</p>
                           {active ? (
                             <span className="inline-block mt-2 text-[10px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 px-2 py-0.5 rounded">
                               In progress
                             </span>
                           ) : done ? (
-                            <span className="inline-block mt-2 text-[10px] font-bold uppercase tracking-wide text-[#00a884] bg-[#00a884]/10 px-2 py-0.5 rounded">
+                            <span className="inline-block mt-2 text-[10px] font-bold uppercase tracking-wide text-[#5B4FE8] bg-[#5B4FE8]/10 px-2 py-0.5 rounded">
                               Complete
                             </span>
                           ) : (
@@ -1233,7 +1233,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                 </ol>
               </div>
               <div>
-                <h3 className="text-sm font-bold text-[#111b21] uppercase tracking-wide mb-3">Manage your account</h3>
+                <h3 className="text-sm font-bold text-[#14131F] uppercase tracking-wide mb-3">Manage your account</h3>
                 <p className="text-sm text-[#667781] mb-4">
                   Use the sidebar under <strong>Manage your account</strong> — or the shortcuts below — to configure
                   templates, view channel IDs, API keys, and billing without leaving this console.
@@ -1251,23 +1251,23 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                       key={item.id}
                       type="button"
                       onClick={() => goToModule(item.id)}
-                      className="text-left rounded-xl border border-[#00a884]/30 bg-[#00a884]/5 p-4 hover:bg-[#00a884]/10 transition-colors"
+                      className="text-left rounded-xl border border-[#5B4FE8]/30 bg-[#5B4FE8]/5 p-4 hover:bg-[#5B4FE8]/10 transition-colors"
                     >
-                      <p className="font-semibold text-[#111b21] text-sm">{item.label}</p>
+                      <p className="font-semibold text-[#14131F] text-sm">{item.label}</p>
                       <p className="text-xs text-[#667781] mt-1">{item.desc}</p>
                     </button>
                   ))}
                 </div>
               </div>
               <div className="rounded-xl bg-[#f0f2f5] p-4 text-sm text-[#667781]">
-                <p className="font-semibold text-[#111b21] mb-1">What happens next?</p>
+                <p className="font-semibold text-[#14131F] mb-1">What happens next?</p>
                 <ul className="list-disc pl-5 space-y-1 text-xs">
                   <li>Videh reviews documents, assigns your channel, and approves templates you submit.</li>
                   <li>After API approval, use GET /v1/templates to list approved template names for your website.</li>
                   <li>Questions: developer@videh.co.in</li>
                 </ul>
               </div>
-              <button type="button" onClick={onClose} className="w-full text-center text-[#00a884] font-semibold hover:underline py-2">
+              <button type="button" onClick={onClose} className="w-full text-center text-[#5B4FE8] font-semibold hover:underline py-2">
                 Exit to developer home
               </button>
             </section>

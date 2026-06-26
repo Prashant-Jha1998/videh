@@ -12,7 +12,7 @@ type Props = {
   onDecline: () => void;
 };
 
-/** WhatsApp-style call waiting while already on a call. */
+/** Videh call waiting while already on a call. */
 export function CallWaitingOverlay({
   visible,
   currentContactName,
@@ -27,7 +27,7 @@ export function CallWaitingOverlay({
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
       <View style={styles.backdrop}>
         <View style={styles.card}>
-          <Ionicons name="call" size={28} color="#00A884" style={{ marginBottom: 12 }} />
+          <Ionicons name="call" size={28} color="#5B4FE8" style={{ marginBottom: 12 }} />
           <Text style={styles.title}>Call waiting</Text>
           <Text style={styles.body}>
             {incoming.callerName} is calling while you are on a call with {currentContactName}.
@@ -59,17 +59,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
   },
   card: {
-    backgroundColor: "#1F2C34",
+    backgroundColor: "#1E1D2E",
     borderRadius: 16,
     padding: 22,
     alignItems: "center",
   },
   title: { color: "#E9EDEF", fontSize: 20, fontFamily: "Inter_700Bold", marginBottom: 8 },
   body: { color: "#8696A0", fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20 },
-  sub: { color: "#00A884", fontSize: 13, fontFamily: "Inter_500Medium", marginTop: 10, marginBottom: 20 },
+  sub: { color: "#5B4FE8", fontSize: 13, fontFamily: "Inter_500Medium", marginTop: 10, marginBottom: 20 },
   holdBtn: {
     width: "100%",
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
     borderRadius: 28,
     paddingVertical: 14,
     alignItems: "center",
@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 10,
   },
-  secondaryTxt: { color: "#00A884", fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  secondaryTxt: { color: "#5B4FE8", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   declineBtn: {
     width: "100%",
     backgroundColor: "rgba(241,92,109,0.2)",

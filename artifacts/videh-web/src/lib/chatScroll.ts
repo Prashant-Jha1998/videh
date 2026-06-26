@@ -1,4 +1,4 @@
-/** WhatsApp-style chat scroll helpers for web message lists. */
+/** Videh chat scroll helpers for web message lists. */
 
 export const CHAT_NEAR_BOTTOM_PX = 80;
 export const CHAT_SCROLL_AWAY_PX = 110;

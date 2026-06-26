@@ -130,9 +130,9 @@ export interface Message {
   type: "text" | "image" | "video" | "audio" | "document" | "location" | "contact" | "deleted" | "call" | "system" | "album";
   status: "sent" | "delivered" | "read";
   mediaUrl?: string;
-  /** Multiple images in one bubble (WhatsApp-style album). */
+  /** Multiple images in one bubble (Videh album). */
   albumUrls?: string[];
-  /** Local picker URIs kept until CDN/API copies are confirmed (WhatsApp-style). */
+  /** Local picker URIs kept until CDN/API copies are confirmed (Videh). */
   albumLocalUrls?: string[];
   isStarred?: boolean;
   isForwarded?: boolean;
@@ -166,6 +166,24 @@ export interface Message {
 
 const OLDER_MESSAGES_PAGE = 40;
 
+function asDeletedMessage(m: Message): Message {
+  return {
+    ...m,
+    type: "deleted",
+    text: "This message was deleted",
+    mediaUrl: undefined,
+    albumUrls: undefined,
+    albumLocalUrls: undefined,
+    localMediaUri: undefined,
+    uploadProgress: undefined,
+    downloadProgress: undefined,
+    uploadFailed: undefined,
+    fileSizeBytes: undefined,
+    isViewOnce: false,
+    viewOnceOpened: false,
+  };
+}
+
 function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal?: Message): Message {
   const isMe = String(m.sender_id) === String(viewerDbId);
   let status: "sent" | "delivered" | "read" = "sent";
@@ -173,12 +191,41 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     if (m.delivery_status === "read") status = "read";
     else if (m.delivery_status === "delivered") status = "delivered";
   }
-  const content = m.is_deleted ? "This message was deleted" : (m.content ?? "");
+  if (m.is_deleted) {
+    return {
+      id: String(m.id),
+      text: "This message was deleted",
+      timestamp: new Date(m.created_at).getTime(),
+      senderId: isMe ? "me" : String(m.sender_id),
+      senderName: m.sender_name ?? undefined,
+      type: "deleted",
+      status,
+      isStarred: m.is_starred,
+      isForwarded: m.is_forwarded,
+      forwardCount: m.forward_count ?? 0,
+      isEdited: !!m.edited_at,
+      editedAt: m.edited_at ? new Date(m.edited_at).getTime() : undefined,
+      reactions: m.reactions ?? [],
+      replyToId: m.reply_to_id ? String(m.reply_to_id) : undefined,
+      replyType: m.reply_type ?? undefined,
+      replyQuotedSenderId: m.reply_sender_id != null ? String(m.reply_sender_id) : undefined,
+      replyText: m.reply_content
+        ? messageReplyPreviewText({
+            type: m.reply_is_deleted ? "deleted" : (m.reply_type ?? "text"),
+            text: m.reply_content,
+            senderId: String(m.reply_sender_id) === String(viewerDbId) ? "me" : String(m.reply_sender_id),
+            isDeleted: !!m.reply_is_deleted,
+          })
+        : undefined,
+      replySenderName: m.reply_sender_name ?? undefined,
+      expiresAt: m.expires_at ? new Date(m.expires_at).getTime() : undefined,
+      isKept: m.is_kept ?? false,
+    };
+  }
+  const content = m.content ?? "";
   const mediaUrl = m.media_url ?? undefined;
   const albumParsed = parseAlbumMessageContent(content);
-  const type = m.is_deleted
-    ? "deleted"
-    : normalizeMessageType(m.type, content, mediaUrl);
+  const type = normalizeMessageType(m.type, content, mediaUrl);
   const albumUrls = resolveAlbumUrls(content, {
     albumUrls: prevLocal?.albumUrls,
     mediaUrl,
@@ -351,7 +398,7 @@ interface AppContextType {
   ) => Promise<{ loaded: number; hasMore: boolean }>;
   refreshChats: () => Promise<void>;
   clearAllChatHistory: () => Promise<void>;
-  /** WhatsApp-style: hide from list, clear local messages until someone messages again. */
+  /** Videh: hide from list, clear local messages until someone messages again. */
   deleteChatsFromList: (chatIds: string[]) => Promise<void>;
   /** Hide chats from list (persists until a new message is sent or received). */
   hideChatsInList: (chatIds: string[]) => Promise<void>;
@@ -400,6 +447,7 @@ interface AppContextType {
   stopLiveLocationSession: () => void;
   setActiveChatId: (chatId: string | null) => void;
   refreshCallLogs: () => Promise<void>;
+  clearCallLogs: () => Promise<boolean>;
   /** Who is typing per chat (names), updated via API poll + realtime. */
   typingByChatId: Record<string, string[]>;
   reportRemoteTyping: (chatId: string, names: string[]) => void;
@@ -449,7 +497,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setChatDeletedAtMap(deletedMap);
   }, []);
 
-  /** WhatsApp-style: deleted chat reappears when a new message arrives after delete. */
+  /** Videh: deleted chat reappears when a new message arrives after delete. */
   const restoreHiddenChatsWithNewActivity = useCallback(
     async (candidates: { id: string; lastMessageTime?: number }[]) => {
       const hidden = hiddenChatIdsRef.current;
@@ -747,7 +795,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           boostVerificationNote: s.boost_verification_note ?? undefined,
           editorData: s.editor_data ?? undefined,
           viewed: Boolean(s.viewed),
-          backgroundColor: s.background_color ?? "#00A884",
+          backgroundColor: s.background_color ?? "#5B4FE8",
         };
       }).filter(isStatusActive);
       setStatuses(mapped);
@@ -864,7 +912,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (u?.dbId) await loadChats(u.dbId);
   }, [loadChats]);
 
-  /** WhatsApp-style "clear all chats": hides existing message history on this device. */
+  /** Videh "clear all chats": hides existing message history on this device. */
   const clearAllChatHistory = useCallback(async () => {
     const now = Date.now();
     clearedHistoryAtRef.current = now;
@@ -1021,7 +1069,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const loadMessagesAfterHintTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  /** Show incoming text immediately from push/SSE before the messages API catches up (WhatsApp-style). */
+  /** Show incoming text immediately from push/SSE before the messages API catches up (Videh). */
   const applyIncomingMessageHint = useCallback((signal: ChatMessageSignal) => {
     const chatId = String(signal.chatId);
     const u = userRef.current;
@@ -1483,6 +1531,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             mediaUrl?: string;
             senderId?: string | number;
             senderName?: string;
+            deleted?: boolean;
           };
         };
         const cid = parsed.chatId != null ? String(parsed.chatId) : null;
@@ -1516,6 +1565,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 : c,
             ),
           );
+          return;
+        }
+
+        if (payload.deleted && cid && payload.messageId != null) {
+          const deletedId = String(payload.messageId);
+          setChats((prev) =>
+            prev.map((c) => {
+              if (c.id !== cid) return c;
+              const messages = c.messages.map((m) =>
+                m.id === deletedId ? asDeletedMessage(m) : m,
+              );
+              const last = [...messages].reverse().find((m) => m.type !== "deleted");
+              return {
+                ...c,
+                messages,
+                lastMessage: messagePreviewText(last),
+                lastMessageTime: last?.timestamp ?? c.lastMessageTime,
+              };
+            }),
+          );
+          const uid = userRef.current?.dbId;
+          if (uid && activeChatIdRef.current === cid) {
+            void loadMessages(cid);
+          }
           return;
         }
 
@@ -2506,14 +2579,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Delete for everyone
   const deleteForEveryone = useCallback((chatId: string, messageId: string) => {
     const u = userRef.current;
+    let nextMessages: Message[] = [];
     setChats((prev) =>
       prev.map((c) => {
         if (c.id !== chatId) return c;
         const messages = c.messages.map((m) =>
-          m.id === messageId
-            ? { ...m, type: "deleted" as const, text: "This message was deleted", mediaUrl: undefined }
-            : m,
+          m.id === messageId ? asDeletedMessage(m) : m,
         );
+        nextMessages = messages;
         const last = [...messages].reverse().find((m) => m.type !== "deleted");
         return {
           ...c,
@@ -2524,6 +2597,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }),
     );
     const dbId = u?.dbId;
+    if (dbId && nextMessages.length > 0) {
+      messageCacheStoreRef.current = rememberChatMessagesInStore(
+        messageCacheStoreRef.current,
+        chatId,
+        nextMessages as CachedChatMessage[],
+      );
+      schedulePersistChatMessageCache(dbId, messageCacheStoreRef.current);
+    }
     if (dbId) {
       void (async () => {
         try {
@@ -2655,7 +2736,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       userAvatar: u.avatar,
       content, type, mediaUrl, timestamp: Date.now(), expiresAt: Date.now() + STATUS_LIFETIME_MS, viewed: false,
       editorData,
-      backgroundColor: bg ?? "#00A884",
+      backgroundColor: bg ?? "#5B4FE8",
     };
     setStatuses((prev) => [newStatus, ...prev].filter(isStatusActive));
 
@@ -2679,7 +2760,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             userId: u.dbId,
             content,
             type,
-            backgroundColor: bg ?? "#00A884",
+            backgroundColor: bg ?? "#5B4FE8",
             mediaUrl: uploadedMediaUrl,
             videoDurationMs: type === "video" ? videoDurationMs ?? null : undefined,
             editorData: uploadedEditorData,
@@ -3090,6 +3171,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await loadCallLogs(uid);
   }, [loadCallLogs]);
 
+  const clearCallLogs = useCallback(async (): Promise<boolean> => {
+    const uid = userRef.current?.dbId;
+    if (!uid) return false;
+    try {
+      const data = await api(`/calls/user/${uid}`, { method: "DELETE" }) as { success?: boolean };
+      if (data.success) {
+        setCallLogs([]);
+        return true;
+      }
+    } catch {}
+    return false;
+  }, []);
+
   return (
     <AppContext.Provider value={{
       user, isAuthenticated, isInitialized, chats, statuses, contacts, callLogs,
@@ -3103,7 +3197,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, reportUser, setChatDisappear,
       updateLocationOnServer, startLiveLocationSession, stopLiveLocationSession,
-      setActiveChatId, refreshCallLogs, typingByChatId, reportRemoteTyping, patchChatMessage,
+      setActiveChatId, refreshCallLogs, clearCallLogs, typingByChatId, reportRemoteTyping, patchChatMessage,
     }}>
       {children}
     </AppContext.Provider>

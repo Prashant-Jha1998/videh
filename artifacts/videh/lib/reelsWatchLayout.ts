@@ -3,7 +3,7 @@ import type { EdgeInsets } from "react-native-safe-area-context";
 
 const SCREEN_W = Dimensions.get("window").width;
 
-/** YouTube-style watch player — slightly taller than classic 16:9. */
+/** in-stream video watch player — slightly taller than classic 16:9. */
 export const REELS_WATCH_PLAYER_HEIGHT = Math.round((SCREEN_W * 11) / 16);
 
 export function reelsWatchTopInset(insets: EdgeInsets): number {

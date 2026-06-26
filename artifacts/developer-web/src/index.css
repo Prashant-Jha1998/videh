@@ -3,14 +3,14 @@
 @theme inline {
   --font-sans: "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --color-brand: #00a884;
+  --color-brand: #5B4FE8;
   --color-brand-dark: #008f6f;
-  --color-wa: #25d366;
+  --color-wa: #7C6CF0;
   --color-wa-dark: #128c7e;
-  --color-surface: #0b141a;
-  --color-panel: #111b21;
-  --color-chat: #0b141a;
-  --color-bubble: #1f2c34;
+  --color-surface: #12101F;
+  --color-panel: #14131F;
+  --color-chat: #12101F;
+  --color-bubble: #1E1D2E;
 }
 
 * {
@@ -21,14 +21,14 @@ body {
   margin: 0;
   font-family: var(--font-sans);
   background: #f4f7f6;
-  color: #111b21;
+  color: #14131F;
   -webkit-font-smoothing: antialiased;
 }
 
 .gradient-hero {
   background:
     radial-gradient(ellipse 80% 60% at 50% -10%, rgba(0, 168, 132, 0.22), transparent),
-    linear-gradient(180deg, #0b141a 0%, #111b21 55%, #0f1a14 100%);
+    linear-gradient(180deg, #12101F 0%, #14131F 55%, #0f1a14 100%);
 }
 
 .glass {
@@ -38,7 +38,7 @@ body {
 }
 
 .chat-doodle {
-  background-color: #0b141a;
+  background-color: #12101F;
   background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
 }
 

@@ -3,9 +3,9 @@ import React from "react";
 import { StyleSheet, View } from "react-native";
 import Svg, { Circle, Ellipse } from "react-native-svg";
 
-const WA_GREEN = "#00A884";
+const WA_GREEN = "#5B4FE8";
 
-/** WhatsApp-style header illustration for disappearing messages. */
+/** Videh header illustration for disappearing messages. */
 export function DisappearMessagesIllustration() {
   return (
     <View style={styles.wrap}>

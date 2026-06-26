@@ -1,4 +1,4 @@
-/** Human-readable typing line for chat header / list (WhatsApp-style). */
+/** Human-readable typing line for chat header / list (Videh). */
 export function formatTypingLabel(names: string[], isGroup?: boolean): string {
   if (!names.length) return "";
   if (!isGroup) return "typing…";

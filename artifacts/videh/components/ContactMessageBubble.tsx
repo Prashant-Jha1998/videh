@@ -24,13 +24,13 @@ export function ContactMessageBubble({ text, colors, isMe, onPress, onCall }: Pr
     .slice(0, 2)
     .toUpperCase() || "?";
 
-  const titleColor = isMe ? (colors.isDark ? colors.foreground : "#111B21") : colors.foreground;
+  const titleColor = isMe ? (colors.isDark ? colors.foreground : "#14131F") : colors.foreground;
   const subColor = isMe ? (colors.isDark ? "rgba(255,255,255,0.72)" : "rgba(17,27,33,0.55)") : colors.mutedForeground;
 
   return (
     <TouchableOpacity style={styles.wrap} onPress={onPress} activeOpacity={0.85}>
       <View style={styles.topRow}>
-        <View style={[styles.avatar, { backgroundColor: isMe ? "rgba(255,255,255,0.92)" : "#00A88422" }]}>
+        <View style={[styles.avatar, { backgroundColor: isMe ? "rgba(255,255,255,0.92)" : "#5B4FE822" }]}>
           <Text style={[styles.avatarTxt, { color: colors.primary }]}>{initials}</Text>
         </View>
         <View style={styles.info}>

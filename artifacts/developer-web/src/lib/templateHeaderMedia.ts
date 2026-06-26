@@ -1,6 +1,6 @@
 import type { HeaderFormat } from "./videhTemplate";
 
-/** WhatsApp-style template header media (1.91:1). */
+/** Videh template header media (1.91:1). */
 export const TEMPLATE_HEADER_IMAGE_WIDTH = 800;
 export const TEMPLATE_HEADER_IMAGE_HEIGHT = 418;
 export const TEMPLATE_HEADER_VIDEO_WIDTH = 800;

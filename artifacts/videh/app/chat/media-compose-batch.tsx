@@ -58,7 +58,7 @@ export default function ChatMediaComposeBatchScreen() {
   if (!chatId || uris.length === 0) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#00a884" />
+        <ActivityIndicator color="#5B4FE8" />
       </View>
     );
   }
@@ -121,18 +121,18 @@ export default function ChatMediaComposeBatchScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b141a" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#0b141a" },
+  root: { flex: 1, backgroundColor: "#12101F" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#12101F" },
   topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, marginBottom: 8 },
   title: { color: "#fff", fontSize: 17, fontWeight: "600" },
   qualityRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, marginBottom: 10 },
   qualityBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: "#202c33", alignItems: "center" },
-  qualityBtnActive: { backgroundColor: "#00a884" },
+  qualityBtnActive: { backgroundColor: "#5B4FE8" },
   qualityText: { color: "#8696a0", fontWeight: "600" },
   qualityTextActive: { color: "#fff" },
   grid: { paddingHorizontal: 12, paddingBottom: 8 },
   thumbWrap: { width: "33.33%", aspectRatio: 1, padding: 4, position: "relative" },
-  thumb: { flex: 1, borderRadius: 8, backgroundColor: "#111b21" },
+  thumb: { flex: 1, borderRadius: 8, backgroundColor: "#14131F" },
   gifBadge: { position: "absolute", bottom: 10, left: 10, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   gifText: { color: "#fff", fontSize: 10, fontWeight: "700" },
   caption: {
@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
   },
   sendBtn: {
     marginHorizontal: 16,
-    backgroundColor: "#00a884",
+    backgroundColor: "#5B4FE8",
     borderRadius: 14,
     paddingVertical: 14,
     flexDirection: "row",

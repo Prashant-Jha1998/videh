@@ -8,7 +8,7 @@ type Handlers = {
   enabled?: boolean;
 };
 
-/** WhatsApp Web–style shortcuts: Ctrl+Enter send, Ctrl+F search, Esc close panels. */
+/** Videh Web–style shortcuts: Ctrl+Enter send, Ctrl+F search, Esc close panels. */
 export function useWebKeyboardShortcuts(handlers: Handlers): void {
   const { onSend, onSearch, onEscape, enabled = true } = handlers;
 

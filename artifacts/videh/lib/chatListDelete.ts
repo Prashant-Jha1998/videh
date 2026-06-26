@@ -77,7 +77,7 @@ export function chatClearCutoff(
   return Math.max(globalClearedAt, deletedMap[String(chatId)] ?? 0);
 }
 
-/** WhatsApp-style: chat reappears only when a message arrives after delete (not on delete itself). */
+/** Videh: chat reappears only when a message arrives after delete (not on delete itself). */
 export function shouldRestoreDeletedChat(
   chatId: string,
   hiddenIds: string[],

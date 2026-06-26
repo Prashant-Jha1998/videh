@@ -2,7 +2,7 @@
   "expo": {
     "name": "Videh",
     "slug": "videh",
-    "version": "1.0.35",
+    "version": "1.0.36",
     "orientation": "portrait",
     "icon": "./assets/images/videh_icon_foreground.png",
     "scheme": "videh",
@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/images/videh_icon_foreground.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0B141A"
+      "backgroundColor": "#12101F"
     },
     "ios": {
       "supportsTablet": false,
@@ -37,15 +37,15 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 108,
+      "versionCode": 109,
       "androidStatusBar": {
-        "backgroundColor": "#00A884",
+        "backgroundColor": "#5B4FE8",
         "barStyle": "light-content",
         "translucent": true
       },
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/videh_icon_foreground.png",
-        "backgroundColor": "#0B141A"
+        "backgroundColor": "#12101F"
       },
       "intentFilters": [
         {
@@ -136,7 +136,7 @@
     },
     "notification": {
       "icon": "./assets/images/videh_icon_foreground.png",
-      "color": "#00A884"
+      "color": "#5B4FE8"
     },
     "plugins": [
       [
@@ -178,7 +178,7 @@
         "expo-notifications",
         {
           "icon": "./assets/images/videh_icon_foreground.png",
-          "color": "#00A884",
+          "color": "#5B4FE8",
           "defaultChannel": "messages",
           "sounds": [
             "./assets/sounds/msg_default.wav",

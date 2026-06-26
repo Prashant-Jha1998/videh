@@ -46,7 +46,7 @@ export type SettingsRowDef = {
 };
 
 export const SETTINGS_ROWS: SettingsRowDef[] = [
-  { id: "assistant", label: "Hey Videh", sub: "Voice assistant", color: "#00A884", Icon: Mic },
+  { id: "assistant", label: "Hey Videh", sub: "Voice assistant", color: "#5B4FE8", Icon: Mic },
   { id: "account", label: "Account", sub: "Security, linked devices", color: "#2196F3", Icon: KeyRound },
   { id: "privacy", label: "Privacy", sub: "Blocked, disappearing messages", color: "#9C27B0", Icon: Lock },
   { id: "theme", label: "App theme", sub: "Colors and gradients", color: "#7C3AED", Icon: Palette },
@@ -61,7 +61,7 @@ export const SETTINGS_ROWS: SettingsRowDef[] = [
   { id: "language", label: "App language", sub: "Change app language", color: "#009688", Icon: Languages },
   { id: "help", label: "Help", sub: "FAQ and support", color: "#3F51B5", Icon: CircleHelp },
   { id: "invite", label: "Invite a friend", sub: "Share Videh with friends", color: "#8BC34A", Icon: Share2 },
-  { id: "updates", label: "App updates", sub: "Version and what's new", color: "#00A884", Icon: Smartphone },
+  { id: "updates", label: "App updates", sub: "Version and what's new", color: "#5B4FE8", Icon: Smartphone },
 ];
 
 export const VISIBILITY_OPTIONS = ["Everyone", "My contacts", "Nobody"] as const;

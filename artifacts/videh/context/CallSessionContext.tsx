@@ -12,6 +12,7 @@ import { Platform } from "react-native";
 import type { IncomingCallInfo } from "@/components/IncomingCallOverlay";
 import type { CallOutcome } from "@/components/CallOutcomeScreen";
 import { useApp } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { useVidehCall } from "@/hooks/useVidehCall";
 import {
   playCallBusyTone,
@@ -44,6 +45,13 @@ import {
 } from "@/lib/callKeep";
 import { setVideoCallPipEnabled } from "@/lib/callPip";
 import type { RemoteCallPeerStream } from "@/hooks/videhCallTypes";
+import {
+  CALL_STATUS_KEYS,
+  incomingCallLabel,
+  outgoingRingingLabel,
+  resolveCallStatusHint,
+  ringingPeopleLabel,
+} from "@/lib/callStatusLabels";
 
 export type CallSession = {
   chatId: string;
@@ -134,6 +142,7 @@ function formatDuration(s: number): string {
 export function CallSessionProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { user, refreshCallLogs } = useApp();
+  const { t } = useUiPreferences();
   const [session, setSession] = useState<CallSession | null>(null);
   const [heldSession, setHeldSession] = useState<CallSession | null>(null);
   const [participantCount, setParticipantCount] = useState(2);
@@ -184,7 +193,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     return [...ids];
   }, [acceptedUserIds, callerId, userId, session?.channel, session?.engineActive, session?.isIncoming, inviteeUserIds]);
 
-  /** Start WebRTC only after the other person accepts (WhatsApp-style). */
+  /** Start WebRTC only after the other person accepts (Videh). */
   const remotePartyAccepted = useMemo(
     () =>
       isRemotePartyAccepted(userId, acceptedUserIds, {
@@ -927,8 +936,6 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
                   : prev,
               );
             }
-          } else if (!call.joined) {
-            setStatusHint("Connecting…");
           }
 
           if (!call.joined && !endedTonePlayed.current) {
@@ -992,7 +999,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       callDebug("CONNECTING_TIMEOUT", { callId });
       void (async () => {
         await webrtcFetch(`/calls/${callId}/end`, user?.sessionToken, { method: "POST" }).catch(() => {});
-        setStatusHint("Could not connect — check internet and try again.");
+        setStatusHint(CALL_STATUS_KEYS.connectFailed);
         await playCallUnavailableTone();
         void teardownCallLocally(callId, { skipServerEnd: true });
       })();
@@ -1115,26 +1122,30 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const statusText = useMemo(() => {
     if (!session) return "";
     if (session.ringing) {
-      return session.isVideo ? "Incoming video call" : "Incoming voice call";
+      return incomingCallLabel(t, session.isVideo);
     }
     if (callAnswered) {
       return formatDuration(duration);
     }
     if (call.connectionPhase === "reconnecting") {
-      return "Reconnecting…";
+      return t(CALL_STATUS_KEYS.reconnecting);
     }
     if (call.joined || remotePartyAccepted) {
-      if (statusHint) return statusHint;
-      return "Connecting…";
+      const hint = resolveCallStatusHint(statusHint, t);
+      if (hint) return hint;
+      return t(CALL_STATUS_KEYS.connecting);
     }
     if (call.error) {
-      return call.error === "NATIVE_WEBRTC_UNAVAILABLE" ? "Connecting..." : `Error: ${call.error}`;
+      return call.error === "NATIVE_WEBRTC_UNAVAILABLE"
+        ? t(CALL_STATUS_KEYS.connecting)
+        : `Error: ${call.error}`;
     }
-    if (statusHint) return statusHint;
-    if (session.isIncoming) return session.isVideo ? "Incoming video call" : "Incoming voice call";
-    if (ringingCount > 1) return `Ringing ${ringingCount} people...`;
-    return session.isVideo ? "Calling…" : "Ringing…";
-  }, [session, call, duration, statusHint, acceptedCount, ringingCount, callAnswered, remotePartyAccepted]);
+    const hint = resolveCallStatusHint(statusHint, t);
+    if (hint) return hint;
+    if (session.isIncoming) return incomingCallLabel(t, session.isVideo);
+    if (ringingCount > 1) return ringingPeopleLabel(t, ringingCount);
+    return outgoingRingingLabel(t, session.isVideo);
+  }, [session, call, duration, statusHint, ringingCount, callAnswered, remotePartyAccepted, t]);
 
   const value = useMemo<CallSessionContextValue>(
     () => ({

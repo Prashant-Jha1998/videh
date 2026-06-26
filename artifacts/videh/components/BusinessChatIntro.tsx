@@ -15,7 +15,7 @@ export function BusinessSecureBanner({ onLearnMore }: BannerProps) {
     }
     Alert.alert(
       "Videh Business",
-      "This business sends messages through Videh's secure Business API. Your personal messages with people you know stay end-to-end encrypted.",
+      "This business sends messages through Videh's secure Business API. Your personal chats use the same Videh transport security as direct messages.",
     );
   };
 
@@ -105,8 +105,8 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     textAlign: "center",
   },
-  bannerBrand: { fontFamily: "Inter_700Bold", color: "#111B21" },
-  bannerLink: { color: "#00A884", fontFamily: "Inter_500Medium" },
+  bannerBrand: { fontFamily: "Inter_700Bold", color: "#14131F" },
+  bannerLink: { color: "#5B4FE8", fontFamily: "Inter_500Medium" },
   cardWrap: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 12 },
   card: {
     backgroundColor: "#FFFFFF",
@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
   },
-  cardDark: { backgroundColor: "#1F2C34" },
+  cardDark: { backgroundColor: "#1E1D2E" },
   logoWrap: {
     width: 88,
     height: 88,
@@ -137,11 +137,11 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: "#00A88422",
+    backgroundColor: "#5B4FE822",
     alignItems: "center",
     justifyContent: "center",
   },
-  logoFallbackTxt: { fontSize: 28, fontFamily: "Inter_700Bold", color: "#00A884" },
+  logoFallbackTxt: { fontSize: 28, fontFamily: "Inter_700Bold", color: "#5B4FE8" },
   nameRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
   businessName: {
     fontSize: 20,
     fontFamily: "Inter_700Bold",
-    color: "#111B21",
+    color: "#14131F",
     textAlign: "center",
     flexShrink: 1,
   },
@@ -178,6 +178,6 @@ const styles = StyleSheet.create({
   manageBtnTxt: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
-    color: "#00A884",
+    color: "#5B4FE8",
   },
 });

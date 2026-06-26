@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PdfPagePreview } from "@/components/web/PdfPagePreview";
 import { useApp } from "@/context/AppContext";
 import { estimatePdfPageCount } from "@/lib/pdfPageCount";
-import { getDocumentVisual, whatsappDocumentMetaLine } from "@/lib/documentMessage";
+import { getDocumentVisual, richDocumentMetaLine } from "@/lib/documentMessage";
 import { extensionFromFilename } from "@/lib/normalizeMessage";
 
 export default function DocumentComposeScreen() {
@@ -77,7 +77,7 @@ export default function DocumentComposeScreen() {
     );
   }
 
-  const metaLine = whatsappDocumentMetaLine(filename, fileSizeBytes, pageCount);
+  const metaLine = richDocumentMetaLine(filename, fileSizeBytes, pageCount);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 12 }]}>
@@ -106,7 +106,7 @@ export default function DocumentComposeScreen() {
             <Text style={styles.docFallbackMeta}>{metaLine}</Text>
           </View>
         )}
-        {loadingMeta ? <ActivityIndicator color="#00A884" style={{ marginTop: 12 }} /> : null}
+        {loadingMeta ? <ActivityIndicator color="#5B4FE8" style={{ marginTop: 12 }} /> : null}
       </View>
 
       <TextInput
@@ -126,10 +126,10 @@ export default function DocumentComposeScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b141a" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#0b141a" },
+  root: { flex: 1, backgroundColor: "#12101F" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#12101F" },
   err: { color: "#fff", marginBottom: 12 },
-  link: { color: "#00a884", fontWeight: "600" },
+  link: { color: "#5B4FE8", fontWeight: "600" },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     borderRadius: 8,
     overflow: "hidden",
-    backgroundColor: "#111b21",
+    backgroundColor: "#14131F",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -182,7 +182,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
     alignItems: "center",
     justifyContent: "center",
     elevation: 6,

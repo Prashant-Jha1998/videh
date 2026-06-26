@@ -27,6 +27,7 @@ import { ReelsCommentsSheet } from "@/components/ReelsCommentsSheet";
 import { ReelsWatchPlayer } from "@/components/ReelsWatchPlayer";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
 import {
   fetchReelsAdBreaks,
   fetchReelsChannel,
@@ -102,6 +103,7 @@ export default function ReelsWatchScreen() {
   );
   const router = useRouter();
   const { user } = useApp();
+  const { t } = useUiPreferences();
   const [video, setVideo] = useState<ReelsVideo | null>(null);
   const [channel, setChannel] = useState<ReelsChannel | null>(null);
   const [subscribed, setSubscribed] = useState(false);
@@ -226,6 +228,7 @@ export default function ReelsWatchScreen() {
 
   const load = useCallback(async () => {
     if (!user?.dbId || !id) return;
+    setVideo(null);
     viewSentRef.current = false;
     watchedRef.current = 0;
     isOwnerViewRef.current = false;
@@ -322,12 +325,18 @@ export default function ReelsWatchScreen() {
 
   const toggleSubscribe = async () => {
     if (!user?.dbId || !video) return;
-    if (subscribed) {
-      await unsubscribeReelsChannel(video.channelId, user.dbId, user.sessionToken);
-      setSubscribed(false);
-    } else {
-      await subscribeReelsChannel(video.channelId, user.dbId, user.sessionToken);
-      setSubscribed(true);
+    const prev = subscribed;
+    try {
+      if (subscribed) {
+        await unsubscribeReelsChannel(video.channelId, user.dbId, user.sessionToken);
+        setSubscribed(false);
+      } else {
+        await subscribeReelsChannel(video.channelId, user.dbId, user.sessionToken);
+        setSubscribed(true);
+      }
+    } catch {
+      setSubscribed(prev);
+      Alert.alert(t("common.error"), t("reels.subscribeFailed"));
     }
   };
 
@@ -410,8 +419,18 @@ export default function ReelsWatchScreen() {
     return (
       <>
         {watchStatusBar}
-        <View style={[styles.center, { backgroundColor: colors.background }]}>
-          <Text style={{ color: colors.mutedForeground }}>Video not found</Text>
+        <View style={[styles.center, { backgroundColor: colors.background, paddingHorizontal: 32 }]}>
+          <Ionicons name="videocam-off-outline" size={56} color={colors.mutedForeground} />
+          <Text style={[styles.notFoundTitle, { color: colors.foreground }]}>{t("reels.videoNotFound")}</Text>
+          <Text style={{ color: colors.mutedForeground, textAlign: "center", marginTop: 8 }}>
+            {t("reels.videoNotFoundHint")}
+          </Text>
+          <TouchableOpacity style={[styles.notFoundBtn, { backgroundColor: colors.primary }]} onPress={() => router.back()}>
+            <Text style={styles.notFoundBtnText}>{t("reels.goBack")}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => void load()} style={{ marginTop: 14 }}>
+            <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>{t("reels.retry")}</Text>
+          </TouchableOpacity>
         </View>
       </>
     );
@@ -597,7 +616,7 @@ export default function ReelsWatchScreen() {
       />
       ) : null}
 
-      {/* Description bottom sheet (YouTube-style) */}
+      {/* Description bottom sheet (in-stream video) */}
       <Modal visible={descOpen} transparent animationType="slide" onRequestClose={() => setDescOpen(false)}>
         <View style={styles.sheetRoot}>
           <Pressable style={styles.sheetScrim} onPress={() => setDescOpen(false)} />
@@ -729,6 +748,9 @@ export default function ReelsWatchScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  notFoundTitle: { fontSize: 17, fontFamily: "Inter_600SemiBold", marginTop: 12 },
+  notFoundBtn: { marginTop: 20, paddingHorizontal: 22, paddingVertical: 11, borderRadius: 22 },
+  notFoundBtnText: { color: "#fff", fontFamily: "Inter_600SemiBold" },
   playerWrap: { position: "relative", backgroundColor: "#000" },
   playerWrapAd: { flex: 1 },
   player: reelsWatchPlayerSize,
@@ -746,7 +768,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 8,
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
   },
   playerRetryText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 14 },
   headerBlock: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 },

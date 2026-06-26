@@ -11,7 +11,7 @@ type Props = {
   linkColor?: string;
 };
 
-export function renderChatMentionParts(text: string, mentionColor = "#00A884") {
+export function renderChatMentionParts(text: string, mentionColor = "#5B4FE8") {
   const parts = text.split(/(@\w[\w\s]*)/g);
   if (parts.length === 1) return text;
   return parts.map((part, i) =>
@@ -25,7 +25,7 @@ export function renderChatMentionParts(text: string, mentionColor = "#00A884") {
   );
 }
 
-/** WhatsApp-style long message text with @mentions and Read more / Read less. */
+/** Videh long message text with @mentions and Read more / Read less. */
 export function ChatMessageText({ text, style, linkColor = "#027EB5" }: Props) {
   const [expanded, setExpanded] = useState(false);
   const collapsible = useMemo(() => shouldCollapseChatMessage(text), [text]);

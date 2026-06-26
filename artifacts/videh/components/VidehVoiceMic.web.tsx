@@ -27,7 +27,7 @@ type Props = {
   fullWidth?: boolean;
 };
 
-/** WhatsApp Web–style: tap mic to record, tap send or trash to finish. */
+/** Videh Web–style: tap mic to record, tap send or trash to finish. */
 export function VidehVoiceMic({ enabled, colors, onSend, onPhaseChange, fullWidth }: Props) {
   const recorderRef = useRef<WebVoiceRecorder | null>(null);
   const startedAtRef = useRef(0);

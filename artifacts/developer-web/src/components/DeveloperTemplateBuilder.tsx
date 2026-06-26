@@ -156,9 +156,9 @@ export function DeveloperTemplateBuilder({
       <div className="grid lg:grid-cols-[1fr_minmax(280px,360px)] gap-6 lg:gap-8 items-start">
         <div className="space-y-6 min-w-0">
           <div className="rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-sm space-y-5">
-            <div className="flex items-center gap-2 text-[#00a884]">
+            <div className="flex items-center gap-2 text-[#5B4FE8]">
               <MessageSquarePlus className="h-5 w-5" />
-              <h3 className="font-bold text-[#111b21]">Create template</h3>
+              <h3 className="font-bold text-[#14131F]">Create template</h3>
             </div>
             <p className="text-sm text-[#667781]">
               Build like Videh Business templates: header, body with {"{{1}}"} variables, optional footer, and
@@ -221,7 +221,7 @@ export function DeveloperTemplateBuilder({
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-sm space-y-4">
-            <h4 className="font-semibold text-[#111b21]">Header</h4>
+            <h4 className="font-semibold text-[#14131F]">Header</h4>
             <div className="flex flex-wrap gap-2">
               {(["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT"] as const).map((fmt) => (
                 <button
@@ -236,8 +236,8 @@ export function DeveloperTemplateBuilder({
                   }
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                     draft.headerFormat === fmt
-                      ? "bg-[#00a884] text-white border-[#00a884]"
-                      : "border-gray-200 text-[#667781] hover:border-[#00a884]/40"
+                      ? "bg-[#5B4FE8] text-white border-[#5B4FE8]"
+                      : "border-gray-200 text-[#667781] hover:border-[#5B4FE8]/40"
                   }`}
                 >
                   {fmt === "NONE" ? "None" : fmt.charAt(0) + fmt.slice(1).toLowerCase()}
@@ -264,7 +264,7 @@ export function DeveloperTemplateBuilder({
                     headerMediaValidation.state === "invalid" || headerMediaValidation.state === "error"
                       ? "border-red-300 bg-red-50/40"
                       : headerMediaValidation.state === "valid"
-                        ? "border-[#00a884]/50"
+                        ? "border-[#5B4FE8]/50"
                         : "border-gray-200"
                   }`}
                 />
@@ -277,7 +277,7 @@ export function DeveloperTemplateBuilder({
                   <p className="text-[11px] text-[#667781]">Checking media dimensions…</p>
                 ) : null}
                 {headerMediaValidation.state === "valid" ? (
-                  <p className="text-[11px] text-[#00a884] font-medium">
+                  <p className="text-[11px] text-[#5B4FE8] font-medium">
                     Dimensions OK — {headerMediaValidation.width}×{headerMediaValidation.height} px
                   </p>
                 ) : null}
@@ -289,7 +289,7 @@ export function DeveloperTemplateBuilder({
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-sm space-y-4">
-            <h4 className="font-semibold text-[#111b21]">Body *</h4>
+            <h4 className="font-semibold text-[#14131F]">Body *</h4>
             <textarea
               value={draft.bodyText}
               onChange={(e) => setDraft((d) => ({ ...d, bodyText: e.target.value }))}
@@ -303,13 +303,13 @@ export function DeveloperTemplateBuilder({
 
             {variableIndexes.length > 0 ? (
               <div className="rounded-xl bg-[#f0f2f5] p-4 space-y-3">
-                <p className="text-xs font-semibold text-[#111b21] flex items-center gap-1">
-                  <Variable className="h-3.5 w-3.5 text-[#00a884]" />
+                <p className="text-xs font-semibold text-[#14131F] flex items-center gap-1">
+                  <Variable className="h-3.5 w-3.5 text-[#5B4FE8]" />
                   Sample values (for preview &amp; admin review)
                 </p>
                 {variableIndexes.map((idx) => (
                   <label key={idx} className="flex items-center gap-2 text-sm">
-                    <span className="font-mono text-[#00a884] w-10 shrink-0">{`{{${idx}}}`}</span>
+                    <span className="font-mono text-[#5B4FE8] w-10 shrink-0">{`{{${idx}}}`}</span>
                     <input
                       value={draft.variableSamples[idx] ?? ""}
                       onChange={(e) =>
@@ -328,7 +328,7 @@ export function DeveloperTemplateBuilder({
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-sm space-y-3">
-            <h4 className="font-semibold text-[#111b21]">Footer (optional)</h4>
+            <h4 className="font-semibold text-[#14131F]">Footer (optional)</h4>
             <input
               value={draft.footerText}
               onChange={(e) => setDraft((d) => ({ ...d, footerText: e.target.value.slice(0, 60) }))}
@@ -339,13 +339,13 @@ export function DeveloperTemplateBuilder({
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between gap-2">
-              <h4 className="font-semibold text-[#111b21]">Buttons (max 3)</h4>
+              <h4 className="font-semibold text-[#14131F]">Buttons (max 3)</h4>
               <div className="flex flex-wrap gap-1">
                 <button
                   type="button"
                   disabled={draft.buttons.length >= 3}
                   onClick={() => addButton("QUICK_REPLY")}
-                  className="text-xs font-semibold text-[#00a884] px-2 py-1 rounded-lg border border-[#00a884]/30 disabled:opacity-40"
+                  className="text-xs font-semibold text-[#5B4FE8] px-2 py-1 rounded-lg border border-[#5B4FE8]/30 disabled:opacity-40"
                 >
                   <Plus className="h-3 w-3 inline" /> Quick reply
                 </button>
@@ -353,7 +353,7 @@ export function DeveloperTemplateBuilder({
                   type="button"
                   disabled={draft.buttons.length >= 3}
                   onClick={() => addButton("URL")}
-                  className="text-xs font-semibold text-[#00a884] px-2 py-1 rounded-lg border border-[#00a884]/30 disabled:opacity-40"
+                  className="text-xs font-semibold text-[#5B4FE8] px-2 py-1 rounded-lg border border-[#5B4FE8]/30 disabled:opacity-40"
                 >
                   <Plus className="h-3 w-3 inline" /> URL
                 </button>
@@ -361,7 +361,7 @@ export function DeveloperTemplateBuilder({
                   type="button"
                   disabled={draft.buttons.length >= 3}
                   onClick={() => addButton("PHONE_NUMBER")}
-                  className="text-xs font-semibold text-[#00a884] px-2 py-1 rounded-lg border border-[#00a884]/30 disabled:opacity-40"
+                  className="text-xs font-semibold text-[#5B4FE8] px-2 py-1 rounded-lg border border-[#5B4FE8]/30 disabled:opacity-40"
                 >
                   <Plus className="h-3 w-3 inline" /> Call
                 </button>
@@ -416,7 +416,7 @@ export function DeveloperTemplateBuilder({
             type="button"
             disabled={submitting}
             onClick={() => void submitTemplate()}
-            className="w-full flex items-center justify-center gap-2 bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold py-3.5 rounded-xl disabled:opacity-60"
+            className="w-full flex items-center justify-center gap-2 bg-[#5B4FE8] hover:bg-[#008f6f] text-white font-semibold py-3.5 rounded-xl disabled:opacity-60"
           >
             {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             Submit for Videh approval
@@ -425,13 +425,13 @@ export function DeveloperTemplateBuilder({
 
         <div className="lg:sticky lg:top-6 space-y-3">
           <p className="text-xs font-bold uppercase tracking-wide text-[#667781] flex items-center gap-1.5">
-            <Eye className="h-4 w-4 text-[#00a884]" />
+            <Eye className="h-4 w-4 text-[#5B4FE8]" />
             Live preview
           </p>
           {previewDraft.headerFormat === "IMAGE" || previewDraft.headerFormat === "VIDEO" ? (
-            <p className="text-[11px] text-[#667781] leading-relaxed rounded-xl bg-[#e7f9f3] border border-[#00a884]/20 px-3 py-2">
-              <strong className="text-[#111b21]">Header {previewDraft.headerFormat.toLowerCase()}:</strong> must be{" "}
-              <strong className="text-[#00a884]">{TEMPLATE_HEADER_MEDIA_LABEL}</strong> (
+            <p className="text-[11px] text-[#667781] leading-relaxed rounded-xl bg-[#e7f9f3] border border-[#5B4FE8]/20 px-3 py-2">
+              <strong className="text-[#14131F]">Header {previewDraft.headerFormat.toLowerCase()}:</strong> must be{" "}
+              <strong className="text-[#5B4FE8]">{TEMPLATE_HEADER_MEDIA_LABEL}</strong> (
               {headerMediaSpecs(previewDraft.headerFormat).width}×{headerMediaSpecs(previewDraft.headerFormat).height}{" "}
               pixels). Wrong size will show an error and block submit.
             </p>
@@ -448,7 +448,7 @@ export function DeveloperTemplateBuilder({
       </div>
 
       <div className="rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-sm">
-        <h3 className="font-bold text-[#111b21] mb-4">Your templates</h3>
+        <h3 className="font-bold text-[#14131F] mb-4">Your templates</h3>
         {!templates.length ? (
           <p className="text-sm text-[#667781]">No templates yet. Create your first template above.</p>
         ) : (
@@ -457,8 +457,8 @@ export function DeveloperTemplateBuilder({
               <li key={t.id} className="rounded-xl border border-gray-100 overflow-hidden">
                 <div className="p-4 flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="font-mono font-semibold text-[#00a884]">{t.name}</p>
-                    <p className="text-[#111b21] font-medium">{t.display_name}</p>
+                    <p className="font-mono font-semibold text-[#5B4FE8]">{t.name}</p>
+                    <p className="text-[#14131F] font-medium">{t.display_name}</p>
                     <p className="text-xs text-[#667781] mt-1">
                       {t.category} · {t.language}
                       {t.header_format && t.header_format !== "NONE" ? ` · ${t.header_format} header` : ""}
@@ -467,7 +467,7 @@ export function DeveloperTemplateBuilder({
                     <span
                       className={`inline-block mt-2 text-xs px-2 py-0.5 rounded font-medium ${
                         t.status === "approved" || t.approved
-                          ? "bg-[#00a884]/10 text-[#00a884]"
+                          ? "bg-[#5B4FE8]/10 text-[#5B4FE8]"
                           : t.status === "rejected"
                             ? "bg-red-50 text-red-700"
                             : "bg-amber-50 text-amber-800"
@@ -483,7 +483,7 @@ export function DeveloperTemplateBuilder({
                     <button
                       type="button"
                       onClick={() => setViewId(viewId === t.id ? null : t.id)}
-                      className="text-xs font-semibold text-[#00a884] px-3 py-1.5 rounded-lg border border-[#00a884]/30"
+                      className="text-xs font-semibold text-[#5B4FE8] px-3 py-1.5 rounded-lg border border-[#5B4FE8]/30"
                     >
                       {viewId === t.id ? "Hide preview" : "Preview"}
                     </button>
@@ -491,7 +491,7 @@ export function DeveloperTemplateBuilder({
                       <button
                         type="button"
                         onClick={() => loadRejected(t)}
-                        className="text-xs font-semibold text-[#111b21] px-3 py-1.5 rounded-lg border border-gray-200"
+                        className="text-xs font-semibold text-[#14131F] px-3 py-1.5 rounded-lg border border-gray-200"
                       >
                         Edit &amp; resubmit
                       </button>
@@ -506,7 +506,7 @@ export function DeveloperTemplateBuilder({
                       compact
                     />
                     <div className="text-xs text-[#667781] space-y-2 font-mono">
-                      <p className="font-sans font-semibold text-[#111b21] text-sm">API send example</p>
+                      <p className="font-sans font-semibold text-[#14131F] text-sm">API send example</p>
                       <pre className="bg-white p-3 rounded-lg border border-gray-200 overflow-x-auto text-[10px] leading-relaxed">
                         {`"template": {
   "name": "${t.name}",

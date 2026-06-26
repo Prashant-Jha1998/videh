@@ -19,18 +19,18 @@ const HERO_CONFIG: Record<
     title: "Videh Web",
     subtitle:
       "Send and receive messages without keeping your phone online. Stay connected on up to 4 linked devices with real-time sync.",
-    footer: "End-to-end encrypted",
+    footer: "TLS-secured in transit",
     icon: MessageSquare,
     features: [
       { icon: Monitor, label: "Multi-device" },
       { icon: Shield, label: "Private & secure" },
-      { icon: Lock, label: "Encrypted" },
+      { icon: Lock, label: "TLS in transit" },
     ],
   },
   calls: {
     title: "Calls on Videh Web",
     subtitle: "Start voice or video calls from any chat. Your call history stays synced across devices.",
-    footer: "Calls are end-to-end encrypted",
+    footer: "Calls use TLS encryption in transit",
     icon: Phone,
     features: [
       { icon: Phone, label: "Voice & video" },

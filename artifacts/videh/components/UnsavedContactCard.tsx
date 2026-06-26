@@ -29,7 +29,7 @@ export function ChatEncryptionNotice() {
       <View style={styles.encryptPill}>
         <Ionicons name="lock-closed" size={14} color="#C9A227" />
         <Text style={styles.encryptText}>
-          Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them.{" "}
+          Messages and calls are protected with TLS while data travels between your device and Videh servers.{" "}
           <Text style={styles.encryptLink}>Learn more</Text>
         </Text>
       </View>
@@ -84,7 +84,7 @@ export function UnsavedContactCard({
         </Text>
 
         <TouchableOpacity style={styles.safetyRow} onPress={openSafetyTools} activeOpacity={0.7}>
-          <Ionicons name="shield-checkmark" size={16} color="#00A884" />
+          <Ionicons name="shield-checkmark" size={16} color="#5B4FE8" />
           <Text style={styles.safetyText}>Safety tools</Text>
         </TouchableOpacity>
 
@@ -95,7 +95,7 @@ export function UnsavedContactCard({
           </TouchableOpacity>
           <View style={[styles.actionDivider, isDark && styles.actionDividerDark]} />
           <TouchableOpacity style={styles.actionBtn} onPress={onAdd} activeOpacity={0.7}>
-            <Ionicons name="person-add-outline" size={18} color="#00A884" />
+            <Ionicons name="person-add-outline" size={18} color="#5B4FE8" />
             <Text style={styles.addTxt}>Add</Text>
           </TouchableOpacity>
         </View>
@@ -116,7 +116,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   encryptText: { flex: 1, fontSize: 12.5, lineHeight: 17, color: "#54656F", fontFamily: "Inter_400Regular" },
-  encryptLink: { color: "#00A884", fontFamily: "Inter_500Medium" },
+  encryptLink: { color: "#5B4FE8", fontFamily: "Inter_500Medium" },
   wrap: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 10 },
   card: {
     backgroundColor: "#FFFFFF",
@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 1 },
   },
-  cardDark: { backgroundColor: "#1F2C34" },
+  cardDark: { backgroundColor: "#1E1D2E" },
   avatar: {
     width: 84,
     height: 84,
@@ -146,7 +146,7 @@ const styles = StyleSheet.create({
   phone: {
     fontSize: 22,
     fontFamily: "Inter_700Bold",
-    color: "#111B21",
+    color: "#14131F",
     textAlign: "center",
     marginBottom: 4,
   },
@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 18,
   },
-  safetyText: { fontSize: 14, fontFamily: "Inter_500Medium", color: "#00A884" },
+  safetyText: { fontSize: 14, fontFamily: "Inter_500Medium", color: "#5B4FE8" },
   actionsRow: {
     flexDirection: "row",
     alignSelf: "stretch",
@@ -193,5 +193,5 @@ const styles = StyleSheet.create({
   },
   actionDividerDark: { backgroundColor: "rgba(255,255,255,0.08)" },
   blockTxt: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#EA0038" },
-  addTxt: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#00A884" },
+  addTxt: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#5B4FE8" },
 });

@@ -226,13 +226,12 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
   const handleCommand = useCallback(async (text: string) => {
     const cleaned = stripWakeFromCommand(text.trim());
-    const lang = listenLocaleRef.current;
 
     if (isSessionExit(cleaned)) {
-      const bye = lang === "en" ? "Okay. Say Hey Videh anytime." : "Theek hai. Jab chahein Hey Videh boliye.";
+      const bye = "Okay. Say Hey Videh anytime.";
       setLastResponse(bye);
       setPhaseSafe("speaking");
-      await speakAssistant(bye, lang);
+      await speakAssistant(bye, "en");
       dismiss();
       return;
     }
@@ -241,9 +240,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     if (pendingCall) {
       if (isAffirmative(cleaned)) {
         pendingCallRef.current = null;
-        const done = lang === "en"
-          ? `Calling ${pendingCall.contactName} now.`
-          : `${pendingCall.contactName} ko ab call lag rahi hai.`;
+        const done = `Calling ${pendingCall.contactName} now.`;
         runAssistantActions({
           speak: done,
           actions: [{
@@ -253,28 +250,22 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
             contactName: pendingCall.contactName,
           }],
         });
-        const follow = lang === "en" ? "Anything else?" : "Aur kuch?";
-        await continueConversation(`${done} ${follow}`, lang);
+        await continueConversation(`${done} Anything else?`, "en");
         return;
       }
       if (isNegative(cleaned)) {
         pendingCallRef.current = null;
-        const cancelled = lang === "en" ? "Call cancelled." : "Call cancel kar di.";
-        await continueConversation(`${cancelled} Aur kuch?`, lang);
+        await continueConversation("Call cancelled. Anything else?", "en");
         return;
       }
-      const clarify = lang === "en"
-        ? `Say yes to call ${pendingCall.contactName}, or no to cancel.`
-        : `${pendingCall.contactName} ko call karoon? Haan ya nahi bolein.`;
-      await continueConversation(clarify, lang);
+      const clarify = `Say yes to call ${pendingCall.contactName}, or no to cancel.`;
+      await continueConversation(clarify, "en");
       return;
     }
 
     if (!user?.sessionToken || !cleaned) {
-      const hint = lang === "en"
-        ? "I did not catch that. Ask anything about your chats, calls, or Videh app."
-        : "Samajh nahi aaya. Chats, calls, ya Videh app ke baare mein kuch bhi poochhiye.";
-      await continueConversation(hint, lang);
+      const hint = "I did not catch that. Ask anything about your chats, calls, or the Videh app.";
+      await continueConversation(hint, "en");
       return;
     }
 
@@ -297,24 +288,19 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
           callType: (startCall.callType === "video" ? "video" : "audio"),
           contactName: startCall.contactName ?? "contact",
         };
-        const confirm = replyLang === "en"
-          ? `Should I call ${pendingCallRef.current.contactName}? Say yes to confirm or no to cancel.`
-          : `Kya main ${pendingCallRef.current.contactName} ko call karoon? Haan bolein confirm ke liye, nahi to cancel.`;
-        await continueConversation(confirm, replyLang);
+        const confirm = `Should I call ${pendingCallRef.current.contactName}? Say yes to confirm or no to cancel.`;
+        await continueConversation(confirm, "en");
         return;
       }
 
-      const speakLine = `${result.speak} ${replyLang === "en" ? "Anything else?" : "Aur kuch?"}`;
+      const speakLine = `${result.speak} Anything else?`;
       setLastResponse(speakLine);
       setPhaseSafe("speaking");
       runAssistantActions(result);
       await speakAssistant(speakLine, result.speechLocale ?? replyLang);
       await beginCommandListening();
     } catch {
-      const err = listenLocaleRef.current === "en"
-        ? "Sorry, I could not process that. Try again."
-        : "Abhi process nahi ho paya. Dubara boliye.";
-      await continueConversation(err, listenLocaleRef.current);
+      await continueConversation("Sorry, I could not process that. Try again.", "en");
     }
   }, [
     user?.sessionToken,
@@ -335,9 +321,8 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     const cmd = stripWakeFromCommand(commandBufferRef.current.trim());
     if (cmd) void handleCommand(cmd);
     else {
-      const lang = listenLocaleRef.current;
-      const prompt = lang === "en" ? "Yes? What should I do?" : "Haan, bataiye — kya karna hai?";
-      void continueConversation(prompt, lang);
+      const prompt = "Yes? What should I do?";
+      void continueConversation(prompt, "en");
     }
   }, [handleCommand, continueConversation]);
 

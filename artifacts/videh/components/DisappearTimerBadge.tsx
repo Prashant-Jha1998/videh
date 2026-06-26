@@ -8,7 +8,7 @@ type Props = {
   variant?: "list" | "header" | "profile";
 };
 
-/** WhatsApp-style timer overlay on chat avatar when disappearing messages are on. */
+/** Videh timer overlay on chat avatar when disappearing messages are on. */
 export function DisappearTimerBadge({ size = 16, variant = "list" }: Props) {
   const isHeader = variant === "header";
   const iconSize = Math.round(size * (isHeader ? 0.58 : 0.68));

@@ -73,6 +73,14 @@ export function ReelsAdDetailPanel({
     else void Linking.openURL("https://ads.videh.co.in/").catch(() => {});
   };
 
+  const onAdMenu = () => {
+    Alert.alert(displayTitle(ad), displaySubtitle(ad), [
+      { text: "Cancel", style: "cancel" },
+      { text: "Learn more", onPress: onLearnMore },
+      { text: "Videh Ads", onPress: onAdsPortalLink },
+    ]);
+  };
+
   return (
     <View style={[styles.panel, { backgroundColor: colors.background }]}>
       <View style={[styles.panelHeader, { borderBottomColor: colors.border }]}>
@@ -80,8 +88,9 @@ export function ReelsAdDetailPanel({
           {ad.sponsoredLabel ?? "Sponsored"}
         </Text>
         <TouchableOpacity
-          onPress={() => Alert.alert("Coming soon", "More ad options will be available in a future update.")}
+          onPress={onAdMenu}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityLabel="Ad options"
         >
           <Ionicons name="ellipsis-vertical" size={18} color={colors.mutedForeground} />
         </TouchableOpacity>

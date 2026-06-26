@@ -12,8 +12,8 @@ import { firstName } from "./assistantLanguages";
 import { query } from "./db";
 import { publishChatEvent } from "./realtime";
 
-function isEn(lang: AssistantLangCode): boolean {
-  return lang === "en";
+function isEn(_lang: AssistantLangCode): boolean {
+  return true;
 }
 
 function doneSuffix(lang: AssistantLangCode): string {
@@ -30,7 +30,7 @@ function doneSuffix(lang: AssistantLangCode): string {
     pa: "ਕੰਮ ਹੋ ਗਿਆ.",
     ur: "کام ہو گیا۔",
   };
-  return map[lang] ?? map.hi!;
+  return map[lang] ?? map.en!;
 }
 
 export type AssistantUserContext = ContactMatchContext & {
@@ -216,7 +216,7 @@ export async function executeAssistantAction(
           intent: "call_contact",
           success: false,
           speak: chat
-            ? `${name} ji, group call abhi assistant se nahi hoti. App se group call karein.`
+            ? `${name}, group calls are not available via the assistant yet. Start one from the app.`
             : chatNotFoundSpeak(ctx, plan.contactName ?? "", lang, name),
           actions: [],
         };
@@ -474,8 +474,8 @@ export async function executeAssistantAction(
           intent: "send_broadcast",
           success: false,
           speak: names
-            ? `${name} ji, broadcast list nahi mili. Aapki lists: ${names}.`
-            : `${name} ji, pehle broadcast list banayein.`,
+            ? `${name}, broadcast list not found. Your lists: ${names}.`
+            : `${name}, create a broadcast list first.`,
           actions: [{ type: "open_broadcasts" }],
         };
       }
@@ -507,7 +507,7 @@ export async function executeAssistantAction(
       return {
         intent: "send_broadcast",
         success: sent > 0,
-        speak: `${name} ji, broadcast "${list.name}" par ${sent} logon ko message bhej diya. ${suffix}`,
+        speak: `${name}, message sent to ${sent} people on broadcast "${list.name}". ${suffix}`,
         actions: [{ type: "open_broadcasts" }],
         data: { listName: list.name, sentCount: sent },
       };
@@ -528,18 +528,18 @@ export async function executeAssistantAction(
           return {
             intent: "khata_summary",
             success: true,
-            speak: `${name} ji, ${chat.displayName} ke saath koi khata entry nahi. ${suffix}`,
+            speak: `${name}, no khata entries with ${chat.displayName}. ${suffix}`,
             actions: [{ type: "open_khata", chatId: String(chat.chatId) }],
           };
         }
         const pending = r.rows.filter((row: { paid: boolean }) => !row.paid);
         const lines = pending.length
           ? pending.map((row: { debtor_name: string; amount: string }) => `${row.debtor_name}: ${row.amount} pending`)
-          : ["sab clear hai"];
+          : ["all clear"];
         return {
           intent: "khata_summary",
           success: true,
-          speak: `${name} ji, ${chat.displayName} ki khata: ${lines.join(". ")}. ${suffix}`,
+          speak: `${name}, ${chat.displayName}'s khata: ${lines.join(". ")}. ${suffix}`,
           actions: [{ type: "open_khata", chatId: String(chat.chatId) }],
           data: { entries: r.rows },
         };
@@ -547,7 +547,7 @@ export async function executeAssistantAction(
         return {
           intent: "khata_summary",
           success: false,
-          speak: `${name} ji, khata abhi is chat mein available nahi hai.`,
+          speak: `${name}, khata is not available for this chat yet.`,
           actions: [],
         };
       }
@@ -560,7 +560,7 @@ export async function executeAssistantAction(
         return { intent: "khata_add", success: false, speak: chatNotFoundSpeak(ctx, plan.contactName ?? "", lang, name), actions: [] };
       }
       if (!Number.isFinite(amount) || amount <= 0) {
-        return { intent: "khata_add", success: false, speak: `${name} ji, amount sahi nahi hai.`, actions: [] };
+        return { intent: "khata_add", success: false, speak: `${name}, that amount is not valid.`, actions: [] };
       }
       try {
         await query(
@@ -571,11 +571,11 @@ export async function executeAssistantAction(
         return {
           intent: "khata_add",
           success: true,
-          speak: `${name} ji, ${chat.displayName} ki khata mein ${amount} rupee add ho gaye. ${suffix}`,
+          speak: `${name}, added ${amount} rupees to ${chat.displayName}'s khata. ${suffix}`,
           actions: [{ type: "open_khata", chatId: String(chat.chatId) }],
         };
       } catch {
-        return { intent: "khata_add", success: false, speak: `${name} ji, khata entry save nahi ho payi.`, actions: [] };
+        return { intent: "khata_add", success: false, speak: `${name}, could not save the khata entry.`, actions: [] };
       }
     }
 
@@ -683,7 +683,7 @@ export async function executeAssistantAction(
         return {
           intent: plan.intent,
           success: true,
-          speak: `${name} ji, ${chat.displayName} se abhi koi message nahi. ${suffix}`,
+          speak: `${name}, no messages from ${chat.displayName} yet. ${suffix}`,
           actions: [],
         };
       }
@@ -691,7 +691,7 @@ export async function executeAssistantAction(
       return {
         intent: plan.intent,
         success: true,
-        speak: `${name} ji, ${chat.displayName}: ${lines.join(". ")}. ${suffix}`,
+        speak: `${name}, ${chat.displayName}: ${lines.join(". ")}. ${suffix}`,
         actions: [{ type: "open_chat", chatId: String(chat.chatId) }],
       };
     }
@@ -731,7 +731,7 @@ export async function executeAssistantAction(
         return {
           intent: "important_messages",
           success: true,
-          speak: `${name} ji, koi important unread message nahi. ${suffix}`,
+          speak: `${name}, no important unread messages. ${suffix}`,
           actions: [],
         };
       }
@@ -740,7 +740,7 @@ export async function executeAssistantAction(
       return {
         intent: "important_messages",
         success: true,
-        speak: `${name} ji, important: ${lines.join(". ")}. ${suffix}`,
+        speak: `${name}, important: ${lines.join(". ")}. ${suffix}`,
         actions: [],
       };
     }
@@ -762,14 +762,14 @@ export async function executeAssistantAction(
         [userId],
       );
       if (!r.rows.length) {
-        return { intent: "chat_summary", success: true, speak: `${name} ji, aaj koi activity nahi. ${suffix}`, actions: [] };
+        return { intent: "chat_summary", success: true, speak: `${name}, no activity today. ${suffix}`, actions: [] };
       }
       const parts = r.rows.map((row: { name: string; total: number; unread: number }) =>
         `${row.name}: ${row.total} msgs, ${row.unread} unread`);
       return {
         intent: "chat_summary",
         success: true,
-        speak: `${name} ji, summary: ${parts.join(". ")}. ${suffix}`,
+        speak: `${name}, summary: ${parts.join(". ")}. ${suffix}`,
         actions: [],
       };
     }
@@ -790,7 +790,7 @@ export async function executeAssistantAction(
       return {
         intent: "unknown",
         success: false,
-        speak: plan.speak ?? `${name} ji, main messaging, calls, broadcast, khata, aur app help kar sakta hoon. Jo chahiye bolein.`,
+        speak: plan.speak ?? `${name}, I can help with messaging, calls, broadcast, khata, and app settings. Just ask.`,
         actions: [],
       };
   }

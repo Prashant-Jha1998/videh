@@ -96,7 +96,7 @@ export function getDocumentVisual(filename: string): DocumentVisual {
     case "aac":
       return { icon: "musical-notes", badge: ext.toUpperCase(), iconColor: "#7B1FA2", iconBg: "#F3E5F5" };
     default:
-      return { icon: "document", badge: ext ? ext.toUpperCase().slice(0, 4) : "FILE", iconColor: "#00A884", iconBg: "#E7F6F1" };
+      return { icon: "document", badge: ext ? ext.toUpperCase().slice(0, 4) : "FILE", iconColor: "#5B4FE8", iconBg: "#E8E6FF" };
   }
 }
 
@@ -105,8 +105,8 @@ export function documentMetaLine(fileSizeBytes?: number | null): string {
   return size ? `${size} · Document · Tap to open` : "Document · Tap to open";
 }
 
-/** WhatsApp-style: `52 pages • 28 MB • PDF` */
-export function whatsappDocumentMetaLine(
+/** Rich document meta: `52 pages • 28 MB • PDF` */
+export function richDocumentMetaLine(
   filename: string,
   fileSizeBytes?: number | null,
   pageCount?: number | null,

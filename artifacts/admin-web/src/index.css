@@ -1,14 +1,14 @@
 :root {
-  --bg: #0b141a;
-  --card: #1f2c34;
+  --bg: #12101F;
+  --card: #1E1D2E;
   --card-elevated: #253540;
-  --border: #2a3942;
+  --border: #2A2838;
   --text: #e9edef;
   --muted: #8696a0;
-  --accent: #00a884;
+  --accent: #5B4FE8;
   --danger: #f15c6d;
   --warn: #e9a23b;
-  --ok: #00a884;
+  --ok: #5B4FE8;
   --err: #f15c6d;
   --radius: 10px;
   font-family: system-ui, "Segoe UI", Roboto, sans-serif;
@@ -639,7 +639,7 @@ th {
   min-height: 220px;
   border-radius: 14px;
   padding: 24px;
-  background: linear-gradient(135deg, #00a884, #075e54);
+  background: linear-gradient(135deg, #5B4FE8, #075e54);
   color: #fff;
   font-size: 1.25rem;
   line-height: 1.5;

@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useThemeGridCardWidth } from "@/lib/themeGridLayout";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
@@ -30,6 +31,7 @@ export default function AppThemeSettingsScreen() {
   const { appThemeId, appTheme, setAppThemeId, appThemeTrialStartedAt } = useUiPreferences();
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+  const themeCardWidth = useThemeGridCardWidth();
   const trialDaysLeft = daysLeftInThemeTrial(appThemeTrialStartedAt);
   const selectedTheme = useMemo(
     () => APP_THEME_OPTIONS.find((theme) => theme.id === appThemeId) ?? appTheme,
@@ -43,7 +45,11 @@ export default function AppThemeSettingsScreen() {
         key={theme.id}
         style={[
           styles.themeCard,
-          { backgroundColor: colors.card, borderColor: selected ? colors.primary : colors.border },
+          {
+            width: themeCardWidth,
+            backgroundColor: colors.card,
+            borderColor: selected ? colors.primary : colors.border,
+          },
           selected && styles.themeCardSelected,
         ]}
         onPress={() => {
@@ -135,7 +141,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 13, fontFamily: "Inter_700Bold", textTransform: "uppercase", letterSpacing: 0.8 },
   sectionSub: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 3, marginBottom: 12 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  themeCard: { width: "31.6%", borderWidth: 1, borderRadius: 16, padding: 8 },
+  themeCard: { borderWidth: 1, borderRadius: 16, padding: 8 },
   themeCardSelected: { borderWidth: 2 },
   swatch: { height: 54, borderRadius: 12, marginBottom: 8, alignItems: "flex-end", justifyContent: "flex-start", padding: 6 },
   selectedBadge: { width: 24, height: 24, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center" },

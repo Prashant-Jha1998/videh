@@ -160,7 +160,7 @@ export function ChatMediaGalleryModal({
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={[styles.backdrop, { backgroundColor: colors.isDark ? "rgba(0,0,0,0.75)" : "rgba(0,0,0,0.55)" }]}>
-        <View style={[styles.sheet, { backgroundColor: colors.isDark ? "#111B21" : colors.background }]}>
+        <View style={[styles.sheet, { backgroundColor: colors.isDark ? "#14131F" : colors.background }]}>
           <View style={[styles.topBar, { borderBottomColor: colors.border }]}>
             <TouchableOpacity onPress={onClose} hitSlop={10}>
               <Ionicons name="close" size={24} color={colors.mutedForeground} />

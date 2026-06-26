@@ -102,7 +102,7 @@ export function StoryRingAvatar({
   activeColor,
   children,
   badgeCount,
-  badgeColor = "#00A884",
+  badgeColor = "#5B4FE8",
   style,
 }: StoryRingAvatarProps) {
   return (

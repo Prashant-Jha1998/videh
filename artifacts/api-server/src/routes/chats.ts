@@ -1682,7 +1682,7 @@ router.put("/:chatId/description", async (req: Request, res: Response) => {
   }
 });
 
-// Set disappearing messages (+ WhatsApp-style system message for all members)
+// Set disappearing messages (+ Videh system message for all members)
 router.put("/:chatId/disappear", async (req: Request, res: Response) => {
   const { chatId } = req.params;
   const authUserId = getAuthUserId(req);

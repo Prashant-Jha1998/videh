@@ -1,4 +1,4 @@
--- Videh Reels / Video platform (YouTube-style channels)
+-- Videh Reels / Video platform (in-stream video channels)
 
 CREATE TABLE IF NOT EXISTS reels_channels (
   id SERIAL PRIMARY KEY,

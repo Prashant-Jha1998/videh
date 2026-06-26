@@ -1003,7 +1003,7 @@ router.post("/calls/:callId/participants", async (req: Request, res: Response) =
   }
 });
 
-/** Put call on hold / resume (WhatsApp-style call waiting). */
+/** Put call on hold / resume (Videh call waiting). */
 router.post("/calls/:callId/hold", async (req: Request, res: Response) => {
   const call = await getCall(String(req.params.callId));
   const userId = Number((req as any).authUserId);
@@ -1026,7 +1026,7 @@ router.post("/calls/:callId/hold", async (req: Request, res: Response) => {
   res.json({ success: true, hold: onHold });
 });
 
-/** Switch ongoing call between voice and video (WhatsApp-style upgrade). */
+/** Switch ongoing call between voice and video (Videh upgrade). */
 router.post("/calls/:callId/media-type", async (req: Request, res: Response) => {
   const call = await getCall(String(req.params.callId));
   const userId = Number((req as any).authUserId);

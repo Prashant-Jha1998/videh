@@ -78,7 +78,7 @@ export const kn = locale({
   "chats.noMessagesYet": "ಇನ್ನೂ ಸಂದೇಶಗಳಿಲ್ಲ",
   "chats.noArchived": "ಆರ್ಕೈವ್ ಚಾಟ್‌ಗಳಿಲ್ಲ",
   "chats.noArchivedHint": "ಆರ್ಕೈವ್ ಚಾಟ್‌ಗಳು ಇಲ್ಲಿ ಕಾಣಿಸುತ್ತವೆ.",
-  "chats.emptyHint": "ನಿಮ್ಮ ಸಂಪರ್ಕಗಳೊಂದಿಗೆ ಸಂಭಾಷಣೆ ಪ್ರಾರಂಭಿಸಿ.\nನಿಮ್ಮ ಸಂದೇಶಗಳು ಎಂಡ್-ಟು-ಎಂಡ್ ಎನ್‌ಕ್ರಿಪ್ಟ್ ಆಗಿವೆ.",
+  "chats.emptyHint": "ನಿಮ್ಮ ಸಂಪರ್ಕಗಳೊಂದಿಗೆ ಸಂಭಾಷಣೆ ಪ್ರಾರಂಭಿಸಿ.\nನಿಮ್ಮ ಸಂದೇಶಗಳು ಸಾಗಣೆಯಲ್ಲಿ TLS ಮೂಲಕ ಸುರಕ್ಷಿತವಾಗಿವೆ.",
   "chats.startChat": "ಚಾಟ್ ಪ್ರಾರಂಭಿಸಿ",
   "chats.noSearchResults": "\"{query}\" ಗೆ ಫಲಿತಾಂಶಗಳಿಲ್ಲ",
   "chats.unlockAndOpen": "ಅನ್‌ಲಾಕ್ ಮಾಡಿ ತೆರೆಯಿರಿ",

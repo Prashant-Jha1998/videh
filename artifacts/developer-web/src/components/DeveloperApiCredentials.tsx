@@ -135,11 +135,11 @@ export function DeveloperApiCredentials({
   const bearerToken = secret ? `${apiKeyId}:${secret}` : null;
 
   return (
-    <div className="rounded-xl border border-[#00a884]/30 bg-[#00a884]/5 p-4 space-y-4 text-sm">
+    <div className="rounded-xl border border-[#5B4FE8]/30 bg-[#5B4FE8]/5 p-4 space-y-4 text-sm">
       <div>
-        <p className="font-semibold text-[#111b21]">Production API credentials</p>
+        <p className="font-semibold text-[#14131F]">Production API credentials</p>
         <p className="text-xs text-[#667781] mt-1 leading-relaxed">
-          <strong className="text-[#111b21] font-mono text-xs">{apiKeyId}</strong> is only your{" "}
+          <strong className="text-[#14131F] font-mono text-xs">{apiKeyId}</strong> is only your{" "}
           <strong>Key ID</strong> (public). The real <strong>API Secret</strong> starts with{" "}
           <code className="text-[10px]">vsec_</code> — use that in API requests, never share it publicly.
         </p>
@@ -154,7 +154,7 @@ export function DeveloperApiCredentials({
           <code className="bg-white px-2 py-1 rounded text-xs font-mono break-all">{apiKeyId}</code>
           <button
             type="button"
-            className="inline-flex items-center gap-1 text-xs font-semibold text-[#00a884] hover:underline"
+            className="inline-flex items-center gap-1 text-xs font-semibold text-[#5B4FE8] hover:underline"
             onClick={() => void copyText(apiKeyId, "key")}
           >
             <Copy className="h-3.5 w-3.5" />
@@ -174,7 +174,7 @@ export function DeveloperApiCredentials({
             type="button"
             disabled={busy}
             onClick={() => void toggleSecret()}
-            className="inline-flex items-center gap-1 text-xs font-semibold text-[#00a884] hover:underline disabled:opacity-60"
+            className="inline-flex items-center gap-1 text-xs font-semibold text-[#5B4FE8] hover:underline disabled:opacity-60"
           >
             {busy ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -188,7 +188,7 @@ export function DeveloperApiCredentials({
           {showSecret && secret ? (
             <button
               type="button"
-              className="inline-flex items-center gap-1 text-xs font-semibold text-[#00a884] hover:underline"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-[#5B4FE8] hover:underline"
               onClick={() => void copyText(secret, "secret")}
             >
               <Copy className="h-3.5 w-3.5" />
@@ -215,20 +215,20 @@ export function DeveloperApiCredentials({
         )}
       </div>
 
-      <div className="space-y-2 rounded-lg border border-[#111b21]/10 bg-[#111b21] text-[#e9edef] p-3">
+      <div className="space-y-2 rounded-lg border border-[#14131F]/10 bg-[#14131F] text-[#e9edef] p-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <p className="text-xs font-semibold text-white">Use on your other website / app</p>
             <p className="text-[11px] text-white/60 mt-0.5 leading-relaxed">
               Copy into <strong className="text-white/90">.env</strong> on your server (Node, PHP, Laravel, Python).
               Automatic Videh template messages use{" "}
-              <code className="text-[10px] text-[#00a884]">POST /v1/&#123;phone-number-id&#125;/messages</code> with an{" "}
+              <code className="text-[10px] text-[#5B4FE8]">POST /v1/&#123;phone-number-id&#125;/messages</code> with an{" "}
               <strong className="text-white/90">approved template</strong>.
             </p>
           </div>
           <button
             type="button"
-            className="inline-flex items-center gap-1 text-xs font-semibold text-[#00a884] bg-white/10 hover:bg-white/15 px-2.5 py-1 rounded-lg shrink-0"
+            className="inline-flex items-center gap-1 text-xs font-semibold text-[#5B4FE8] bg-white/10 hover:bg-white/15 px-2.5 py-1 rounded-lg shrink-0"
             onClick={() => void copyText(envSnippet, "env")}
           >
             <Copy className="h-3.5 w-3.5" />
@@ -241,7 +241,7 @@ export function DeveloperApiCredentials({
         {!showSecret || !secret ? (
           <p className="text-[10px] text-amber-200/90 mt-2">
             Tip: click <strong>Show</strong> on API Secret above, then copy .env again so{" "}
-            <code className="text-[#00a884]">VIDEH_API_SECRET</code> is filled correctly.
+            <code className="text-[#5B4FE8]">VIDEH_API_SECRET</code> is filled correctly.
           </p>
         ) : null}
         <p className="text-[10px] text-white/45 mt-2">
@@ -250,14 +250,14 @@ export function DeveloperApiCredentials({
       </div>
 
       {showSecret && secret && bearerToken ? (
-        <div className="space-y-2 pt-1 border-t border-[#00a884]/20">
+        <div className="space-y-2 pt-1 border-t border-[#5B4FE8]/20">
           <p className="text-xs text-[#667781] uppercase font-semibold">Use in HTTP requests</p>
           <code className="block bg-white px-2 py-2 rounded text-[11px] font-mono break-all border border-gray-100">
             Authorization: Bearer {bearerToken}
           </code>
           <button
             type="button"
-            className="inline-flex items-center gap-1 text-xs font-semibold text-[#00a884] hover:underline"
+            className="inline-flex items-center gap-1 text-xs font-semibold text-[#5B4FE8] hover:underline"
             onClick={() => void copyText(`Bearer ${bearerToken}`, "secret")}
           >
             <Copy className="h-3.5 w-3.5" />

@@ -48,7 +48,10 @@ export function webCallNumber(router: Router): void {
 export function webScheduleCall(router: Router): void {
   Alert.alert(
     "Schedule call",
-    "Pick a chat and use Schedule Message from the menu (⋮) to send a reminder before your call. Full calendar scheduling is coming soon.",
-    [{ text: "OK" }],
+    "Open a chat, tap the menu (⋮), and choose Schedule message to set a reminder before your call.",
+    [
+      { text: "Cancel", style: "cancel" },
+      { text: "Open chats", onPress: () => router.push("/(tabs)/chats") },
+    ],
   );
 }

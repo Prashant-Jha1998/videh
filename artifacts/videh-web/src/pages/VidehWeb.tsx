@@ -816,7 +816,7 @@ export default function VidehWeb() {
     return (
       <div style={{ minHeight: "100vh", backgroundColor: "#f0f2f5", display: "flex", flexDirection: "column" }}>
         {/* Top bar */}
-        <div style={{ backgroundColor: "#00a884", padding: "12px 24px", display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ backgroundColor: "#5B4FE8", padding: "12px 24px", display: "flex", alignItems: "center", gap: 10 }}>
           <img src={`${import.meta.env.BASE_URL}videh-logo.png`} alt="Videh" style={{ width: 48, height: 48, objectFit: "contain", filter: "brightness(0) invert(1)" }} />
           <span style={{ color: "white", fontWeight: 700, fontSize: 18 }}>Videh Web</span>
         </div>
@@ -829,7 +829,7 @@ export default function VidehWeb() {
               <h1 style={{ fontSize: 28, fontWeight: 300, color: "#41525d", marginBottom: 8, lineHeight: 1.3 }}>
                 Use Videh on your computer
               </h1>
-              <div style={{ width: 64, height: 3, backgroundColor: "#00a884", marginBottom: 32, borderRadius: 2 }} />
+              <div style={{ width: 64, height: 3, backgroundColor: "#5B4FE8", marginBottom: 32, borderRadius: 2 }} />
 
               {[
                 { n: 1, text: "Open Videh on your phone" },
@@ -837,7 +837,7 @@ export default function VidehWeb() {
                 { n: 3, text: "Point your phone camera at this screen to scan the QR code" },
               ].map((step) => (
                 <div key={step.n} style={{ display: "flex", gap: 16, marginBottom: 24, alignItems: "flex-start" }}>
-                  <div style={{ width: 32, height: 32, borderRadius: "50%", backgroundColor: "#00a884", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: "50%", backgroundColor: "#5B4FE8", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                     <span style={{ color: "white", fontWeight: 700, fontSize: 14 }}>{step.n}</span>
                   </div>
                   <p style={{ margin: 0, color: "#667781", fontSize: 15, lineHeight: 1.5, paddingTop: 4 }}>{step.text}</p>
@@ -865,7 +865,7 @@ export default function VidehWeb() {
               }}>
                 {status === "loading" && (
                   <div style={{ width: 220, height: 220, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
-                    <div style={{ width: 40, height: 40, border: "3px solid #00a884", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+                    <div style={{ width: 40, height: 40, border: "3px solid #5B4FE8", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
                     <p style={{ margin: 0, color: "#667781", fontSize: 13 }}>Generating QR code...</p>
                   </div>
                 )}
@@ -875,7 +875,7 @@ export default function VidehWeb() {
                     <p style={{ margin: 0, color: "#667781", fontSize: 14, textAlign: "center" }}>QR code expired</p>
                     <button
                       onClick={() => { setStatus("loading"); createSession().then((tok) => { if (tok) { pollRef.current = setInterval(() => pollStatus(tok), 2000); } }); }}
-                      style={{ padding: "10px 20px", backgroundColor: "#00a884", color: "white", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}
+                      style={{ padding: "10px 20px", backgroundColor: "#5B4FE8", color: "white", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}
                     >
                       Get new code
                     </button>
@@ -926,7 +926,7 @@ export default function VidehWeb() {
               {(status === "pending" || status === "scanning") && (
                 <button
                   onClick={() => { stopPoll(); setStatus("loading"); createSession().then((tok) => { if (tok) { pollRef.current = setInterval(() => pollStatus(tok), 2000); } }); }}
-                  style={{ background: "none", border: "none", color: "#00a884", cursor: "pointer", fontSize: 14, textDecoration: "underline" }}
+                  style={{ background: "none", border: "none", color: "#5B4FE8", cursor: "pointer", fontSize: 14, textDecoration: "underline" }}
                 >
                   Refresh QR code
                 </button>
@@ -1497,7 +1497,7 @@ export default function VidehWeb() {
       )}
       </div>
       {statusViewerUserId != null && viewingStatuses.length > 0 && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 3000, backgroundColor: "#0b141a", display: "flex", flexDirection: "column" }} onClick={() => setStatusViewerUserId(null)}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 3000, backgroundColor: "#12101F", display: "flex", flexDirection: "column" }} onClick={() => setStatusViewerUserId(null)}>
           <div style={{ padding: 16, color: "white", display: "flex", justifyContent: "space-between" }}>
             <span>{viewingStatuses[0].user_name}</span>
             <button type="button" onClick={() => setStatusViewerUserId(null)} style={{ background: "none", border: "none", color: "white", fontSize: 22, cursor: "pointer" }}>×</button>
@@ -1510,7 +1510,7 @@ export default function VidehWeb() {
             ) : (
               <div
                 style={{
-                  backgroundColor: viewingStatuses[0].background_color ?? "#00A884",
+                  backgroundColor: viewingStatuses[0].background_color ?? "#5B4FE8",
                   padding: 48,
                   borderRadius: 12,
                   maxWidth: 480,

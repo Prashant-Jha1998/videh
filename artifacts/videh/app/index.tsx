@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import SplashAnimScreen from "./splash";
 import { useApp } from "@/context/AppContext";
@@ -8,13 +8,15 @@ export default function Index() {
   const router = useRouter();
   const { isAuthenticated, isInitialized, user } = useApp();
   const [splashDone, setSplashDone] = useState(false);
+  const routedRef = useRef(false);
 
   const handleSplashDone = () => {
     setSplashDone(true);
   };
 
   useEffect(() => {
-    if (!splashDone || !isInitialized) return;
+    if (!splashDone || !isInitialized || routedRef.current) return;
+    routedRef.current = true;
     if (isAuthenticated && user?.name) {
       router.replace("/(tabs)/chats");
     } else if (isAuthenticated && !user?.name) {
@@ -22,7 +24,7 @@ export default function Index() {
     } else {
       router.replace("/auth/phone");
     }
-  }, [splashDone, isAuthenticated, isInitialized, user?.name]);
+  }, [splashDone, isAuthenticated, isInitialized, user?.name, router]);
 
   return (
     <View style={styles.container}>

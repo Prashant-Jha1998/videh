@@ -6,7 +6,7 @@ import { useColors } from "@/hooks/useColors";
 
 /**
  * Keeps system status bar icons readable: light icons on the branded header color
- * (WhatsApp / YouTube style) instead of washed-out icons on a white strip.
+ * (Videh / video platform style) instead of washed-out icons on a white strip.
  */
 export function AppStatusBar() {
   const colors = useColors();

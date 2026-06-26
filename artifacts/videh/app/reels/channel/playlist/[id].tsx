@@ -84,7 +84,7 @@ export default function ReelsPlaylistScreen() {
         keyExtractor={(v) => String(v.id)}
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         ListEmptyComponent={
-          <Text style={{ color: colors.mutedForeground, padding: 20 }}>Is playlist mein abhi koi video nahi</Text>
+          <Text style={{ color: colors.mutedForeground, padding: 20 }}>No videos in this playlist yet</Text>
         }
         renderItem={({ item }) => (
           <TouchableOpacity

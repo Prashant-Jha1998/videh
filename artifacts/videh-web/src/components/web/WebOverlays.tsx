@@ -323,7 +323,7 @@ export function NewChatModal({
               <button
                 type="button"
                 onClick={() => toggleMember(u)}
-                style={{ ...smallBtn, backgroundColor: selected.some((m) => m.id === u.id) ? "#00a884" : "#f0f2f5", color: selected.some((m) => m.id === u.id) ? "white" : "#111b21" }}
+                style={{ ...smallBtn, backgroundColor: selected.some((m) => m.id === u.id) ? "#5B4FE8" : "#f0f2f5", color: selected.some((m) => m.id === u.id) ? "white" : "#14131F" }}
               >
                 {selected.some((m) => m.id === u.id) ? "Added" : "Add"}
               </button>
@@ -363,5 +363,5 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 
 const labelStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: "#54656f", fontWeight: 600 };
 const inputStyle: React.CSSProperties = { padding: "10px 12px", border: "1px solid #e9edef", borderRadius: 8, fontSize: 14, outline: "none" };
-const primaryBtn: React.CSSProperties = { padding: "12px 16px", backgroundColor: "#00a884", color: "white", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer", fontSize: 15 };
-const smallBtn: React.CSSProperties = { padding: "6px 14px", backgroundColor: "#00a884", color: "white", border: "none", borderRadius: 16, cursor: "pointer", fontSize: 13, fontWeight: 600 };
+const primaryBtn: React.CSSProperties = { padding: "12px 16px", backgroundColor: "#5B4FE8", color: "white", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer", fontSize: 15 };
+const smallBtn: React.CSSProperties = { padding: "6px 14px", backgroundColor: "#5B4FE8", color: "white", border: "none", borderRadius: 16, cursor: "pointer", fontSize: 13, fontWeight: 600 };

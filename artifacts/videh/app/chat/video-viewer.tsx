@@ -176,12 +176,12 @@ export default function ChatVideoViewerScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b141a" },
+  root: { flex: 1, backgroundColor: "#12101F" },
   header: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "#1f2c34",
+    backgroundColor: "#1E1D2E",
     paddingBottom: 10,
   },
   headerIcon: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 20,
-    backgroundColor: "#00a884",
+    backgroundColor: "#5B4FE8",
   },
   backPillText: { color: "#fff", fontFamily: "Inter_600SemiBold" },
   replyBar: {
@@ -210,7 +210,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingTop: 10,
-    backgroundColor: "#1f2c34",
+    backgroundColor: "#1E1D2E",
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "rgba(255,255,255,0.08)",
   },
@@ -219,7 +219,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "#2a3942",
+    backgroundColor: "#2A2838",
     borderRadius: 22,
     paddingVertical: 10,
     paddingHorizontal: 14,

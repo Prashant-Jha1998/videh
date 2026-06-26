@@ -5,7 +5,7 @@ import { WebDesktopShell } from "@/components/web/WebDesktopShell";
 import { ClassicTabLayout } from "@/components/TabLayout";
 import { WEB_DESKTOP_MIN_WIDTH } from "@/lib/web/webDesktop";
 
-/** WhatsApp Web–style desktop: nav rail + list pane + main content. */
+/** Videh Web–style desktop: nav rail + list pane + main content. */
 export default function WebTabsLayout() {
   const { width } = useWindowDimensions();
   const pathname = usePathname();

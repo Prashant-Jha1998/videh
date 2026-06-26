@@ -277,11 +277,11 @@ export default function ScheduledScreen() {
       </View>
 
       {loading ? (
-        <ActivityIndicator color="#00A884" style={{ marginTop: 40 }} />
+        <ActivityIndicator color="#5B4FE8" style={{ marginTop: 40 }} />
       ) : messages.length === 0 ? (
         <View style={styles.empty}>
           <View style={styles.emptyIconWrap}>
-            <Ionicons name="time-outline" size={40} color="#00A884" />
+            <Ionicons name="time-outline" size={40} color="#5B4FE8" />
           </View>
           <Text style={styles.emptyText}>No scheduled messages</Text>
           <Text style={styles.emptySub}>Send later — birthday wishes, reminders, or follow-ups.</Text>
@@ -298,7 +298,7 @@ export default function ScheduledScreen() {
           renderItem={({ item }) => (
             <View style={styles.card}>
               <View style={styles.cardIcon}>
-                <Ionicons name="alarm-outline" size={22} color="#00A884" />
+                <Ionicons name="alarm-outline" size={22} color="#5B4FE8" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.cardWhen}>{formatListWhen(item.scheduled_at)}</Text>
@@ -352,7 +352,7 @@ export default function ScheduledScreen() {
                 onChangeText={setNewText}
                 multiline
                 maxLength={1000}
-                selectionColor="#00A884"
+                selectionColor="#5B4FE8"
               />
               <Text style={styles.charCount}>{newText.length}/1000</Text>
 
@@ -383,7 +383,7 @@ export default function ScheduledScreen() {
                     minimumDate={new Date()}
                     maximumDate={maxScheduleDate}
                     themeVariant="dark"
-                    accentColor="#00A884"
+                    accentColor="#5B4FE8"
                     onChange={(_, d) => {
                       if (d) {
                         setScheduledAt((prev) => mergeDatePart(prev, d));
@@ -397,7 +397,7 @@ export default function ScheduledScreen() {
                     display="compact"
                     minuteInterval={5}
                     themeVariant="dark"
-                    accentColor="#00A884"
+                    accentColor="#5B4FE8"
                     onChange={(_, d) => {
                       if (d) {
                         setScheduledAt((prev) => mergeTimePart(prev, d));
@@ -410,7 +410,7 @@ export default function ScheduledScreen() {
                 <>
                   <Pressable style={styles.pickerRow} onPress={() => setShowDatePicker(true)}>
                     <View style={styles.pickerRowIcon}>
-                      <Ionicons name="calendar-outline" size={20} color="#00A884" />
+                      <Ionicons name="calendar-outline" size={20} color="#5B4FE8" />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.pickerRowLabel}>Date</Text>
@@ -420,7 +420,7 @@ export default function ScheduledScreen() {
                   </Pressable>
                   <Pressable style={styles.pickerRow} onPress={() => setShowTimePicker(true)}>
                     <View style={styles.pickerRowIcon}>
-                      <Ionicons name="time-outline" size={20} color="#00A884" />
+                      <Ionicons name="time-outline" size={20} color="#5B4FE8" />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.pickerRowLabel}>Time</Text>
@@ -435,7 +435,7 @@ export default function ScheduledScreen() {
                 <Ionicons
                   name={isValidSchedule ? "paper-plane-outline" : "warning-outline"}
                   size={18}
-                  color={isValidSchedule ? "#00A884" : "#E9A23B"}
+                  color={isValidSchedule ? "#5B4FE8" : "#E9A23B"}
                 />
                 <Text style={[styles.previewText, !isValidSchedule && styles.previewTextWarn]}>
                   {isValidSchedule
@@ -487,11 +487,11 @@ export default function ScheduledScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#111B21" },
+  container: { flex: 1, backgroundColor: "#14131F" },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1F2C34",
+    backgroundColor: "#1E1D2E",
     paddingHorizontal: 12,
     paddingVertical: 14,
   },
@@ -515,7 +515,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 24,
@@ -523,7 +523,7 @@ const styles = StyleSheet.create({
   },
   emptyCtaText: { color: "#fff", fontSize: 15, fontWeight: "700" },
   card: {
-    backgroundColor: "#1F2C34",
+    backgroundColor: "#1E1D2E",
     borderRadius: 14,
     padding: 14,
     marginBottom: 12,
@@ -539,14 +539,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  cardWhen: { color: "#00A884", fontSize: 14, fontWeight: "700" },
+  cardWhen: { color: "#5B4FE8", fontSize: 14, fontWeight: "700" },
   cardMeta: { color: "#8696A0", fontSize: 12, marginTop: 2, marginBottom: 6 },
   cardContent: { color: "#E9EDEF", fontSize: 15, lineHeight: 22 },
   delBtn: { padding: 4 },
   modalRoot: { flex: 1, justifyContent: "flex-end" },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.55)" },
   modal: {
-    backgroundColor: "#1F2C34",
+    backgroundColor: "#1E1D2E",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 20,
@@ -570,7 +570,7 @@ const styles = StyleSheet.create({
   modalTitle: { color: "#fff", fontSize: 18, fontWeight: "700" },
   label: { color: "#E9EDEF", fontSize: 14, fontWeight: "600", marginTop: 14, marginBottom: 8 },
   input: {
-    backgroundColor: "#2A3942",
+    backgroundColor: "#2A2838",
     color: "#E9EDEF",
     borderRadius: 12,
     padding: 14,
@@ -584,19 +584,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 20,
-    backgroundColor: "#2A3942",
+    backgroundColor: "#2A2838",
     marginRight: 8,
     borderWidth: 1,
     borderColor: "transparent",
   },
-  chipActive: { backgroundColor: "rgba(0,168,132,0.2)", borderColor: "#00A884" },
+  chipActive: { backgroundColor: "rgba(0,168,132,0.2)", borderColor: "#5B4FE8" },
   chipText: { color: "#8696A0", fontSize: 13, fontWeight: "600" },
   chipTextActive: { color: "#00E5B0" },
   iosPickerBlock: { gap: 4, marginBottom: 4 },
   pickerRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#2A3942",
+    backgroundColor: "#2A2838",
     borderRadius: 12,
     padding: 14,
     marginBottom: 10,
@@ -625,7 +625,7 @@ const styles = StyleSheet.create({
   previewText: { flex: 1, color: "#00E5B0", fontSize: 14, fontWeight: "500", lineHeight: 20 },
   previewTextWarn: { color: "#E9A23B" },
   schedBtn: {
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
     borderRadius: 14,
     padding: 15,
     alignItems: "center",

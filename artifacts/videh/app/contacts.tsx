@@ -211,7 +211,7 @@ export default function ContactsScreen() {
   const inviteContact = async (contact: DeviceContact) => {
     try {
       await Share.share({
-        message: `Hey ${contact.name}! I'm using Videh — a fast, secure messaging app. Join me here: https://videh.app`,
+        message: `Hey ${contact.name}! Join me on Videh for chat, calls, and video.\nhttps://videh.co.in/download.html`,
         title: "Invite to Videh",
       });
     } catch {}

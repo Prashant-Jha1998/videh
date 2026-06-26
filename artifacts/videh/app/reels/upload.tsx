@@ -224,7 +224,7 @@ export default function ReelsUploadScreen() {
 
       <Text style={[styles.sectionLabel, { color: colors.foreground }]}>Thumbnail</Text>
       <Text style={[styles.thumbHint, { color: colors.mutedForeground }]}>
-        {REELS_THUMB_HINT} — optional; video se auto frame ban jayega agar skip karein.
+        {REELS_THUMB_HINT} — optional; a frame from the video is used automatically if you skip this.
       </Text>
       <TouchableOpacity
         style={[styles.thumbBox, { borderColor: colors.border }]}
@@ -263,7 +263,7 @@ export default function ReelsUploadScreen() {
       />
       <Text style={[styles.sectionLabel, { color: colors.foreground, marginTop: 4 }]}>Hashtags</Text>
       <Text style={[styles.thumbHint, { color: colors.mutedForeground, marginBottom: 8 }]}>
-        Type karein — suggestions mein kitne videos aur views hain woh dikhega (max 20 tags).
+        Type to search — suggestions show video and view counts (max 20 tags).
       </Text>
       <TextInput
         style={[styles.input, { color: colors.foreground, borderColor: colors.border, marginBottom: 0 }]}

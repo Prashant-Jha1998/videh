@@ -77,7 +77,7 @@ export async function answerVidehQuestion(
 
   const openAiKey = process.env["OPENAI_API_KEY"]?.trim();
   const name = firstName(userName);
-  const langLabel = INDIAN_LANGUAGE_LABELS[lang] ?? "Hindi";
+  const langLabel = INDIAN_LANGUAGE_LABELS[lang] ?? "English";
 
   if (!openAiKey) {
     if (lang === "en") {

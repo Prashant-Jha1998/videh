@@ -34,7 +34,7 @@ function phoneDigits(column: string): string {
   return `regexp_replace(${column}, '[^0-9]', '', 'g')`;
 }
 
-/** Phone-synced Videh users + people you already chat with (WhatsApp Web style). */
+/** Phone-synced Videh users + people you already chat with (Videh Web style). */
 export async function listVidehContactsForUser(userId: number): Promise<ContactRow[]> {
   await ensureUserSyncedContactsTable();
 

@@ -1,6 +1,6 @@
 const { withAndroidManifest } = require("expo/config-plugins");
 
-/** adjustResize shrinks the chat window above the keyboard (WhatsApp-style). */
+/** adjustResize shrinks the chat window above the keyboard (Videh). */
 function withAndroidAdjustResize(config) {
   return withAndroidManifest(config, (cfg) => {
     const app = cfg.modResults.manifest?.application?.[0];

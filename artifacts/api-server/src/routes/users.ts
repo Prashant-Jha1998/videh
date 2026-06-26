@@ -354,7 +354,7 @@ router.get("/:id/block-status", async (req: Request, res: Response) => {
   } catch { res.status(500).json({ success: false }); }
 });
 
-// Business API channel profile (for WhatsApp-style business chat intro)
+// Business API channel profile (for Videh business chat intro)
 router.get("/:id/business-channel", async (req: Request, res: Response) => {
   const userId = Number(req.params.id);
   if (!userId) {

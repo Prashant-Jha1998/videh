@@ -5,8 +5,8 @@ import { parseAssistantIntent, intentToPlanned } from "./assistantIntents";
 import { executeAssistantAction } from "./assistantExecutor";
 import { query } from "./db";
 
-function isEn(lang: AssistantLangCode): boolean {
-  return lang === "en";
+function isEn(_lang: AssistantLangCode): boolean {
+  return true;
 }
 
 /** Identity & general Videh questions — no OpenAI required. */

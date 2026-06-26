@@ -1,4 +1,4 @@
-/** WhatsApp Web–style: download media to disk instead of phone gallery. */
+/** Videh Web–style: download media to disk instead of phone gallery. */
 export async function downloadUrlToDevice(
   url: string,
   filename: string,

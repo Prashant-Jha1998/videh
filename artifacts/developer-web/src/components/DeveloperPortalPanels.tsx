@@ -42,8 +42,8 @@ export function DeveloperChannelPanel({ data, busy, error, onRefresh }: PanelPro
 
   return (
     <section className="w-full min-h-[calc(100dvh-10rem)] rounded-2xl bg-white p-6 md:p-8 lg:p-10 shadow-sm border border-gray-200 space-y-5">
-      <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Business channel</p>
-      <h2 className="text-2xl font-bold text-[#111b21]">Phone &amp; channel IDs</h2>
+      <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">Business channel</p>
+      <h2 className="text-2xl font-bold text-[#14131F]">Phone &amp; channel IDs</h2>
       <p className="text-sm text-[#667781]">
         Your verified business number and Videh channel identifiers. Production API keys appear under{" "}
         <strong>API access</strong> after full approval.
@@ -55,7 +55,7 @@ export function DeveloperChannelPanel({ data, busy, error, onRefresh }: PanelPro
         type="button"
         disabled={busy}
         onClick={onRefresh}
-        className="inline-flex items-center gap-2 text-sm font-semibold text-[#00a884] hover:underline disabled:opacity-60"
+        className="inline-flex items-center gap-2 text-sm font-semibold text-[#5B4FE8] hover:underline disabled:opacity-60"
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
         Refresh
@@ -66,26 +66,26 @@ export function DeveloperChannelPanel({ data, busy, error, onRefresh }: PanelPro
           <p className="text-xs text-[#667781] uppercase font-semibold flex items-center gap-1">
             <Phone className="h-3.5 w-3.5" /> Registered number
           </p>
-          <p className="font-semibold text-[#111b21] mt-1 font-mono">{channelPhone ?? "—"}</p>
+          <p className="font-semibold text-[#14131F] mt-1 font-mono">{channelPhone ?? "—"}</p>
         </div>
         <div className="rounded-xl bg-[#f0f2f5] p-4">
           <p className="text-xs text-[#667781] uppercase font-semibold">Channel status</p>
-          <p className="font-semibold text-[#111b21] mt-1 capitalize">{channelStatus.replace(/_/g, " ")}</p>
+          <p className="font-semibold text-[#14131F] mt-1 capitalize">{channelStatus.replace(/_/g, " ")}</p>
         </div>
       </div>
 
       {phone || business ? (
-        <div className="rounded-xl border border-[#00a884]/30 bg-[#00a884]/5 p-4 space-y-2 text-sm">
-          <p className="font-semibold text-[#111b21]">Videh channel identifiers</p>
+        <div className="rounded-xl border border-[#5B4FE8]/30 bg-[#5B4FE8]/5 p-4 space-y-2 text-sm">
+          <p className="font-semibold text-[#14131F]">Videh channel identifiers</p>
           {phone ? (
             <p>
-              Phone Number ID: <code className="text-[#00a884] text-xs bg-white px-1.5 py-0.5 rounded">{phone}</code>
+              Phone Number ID: <code className="text-[#5B4FE8] text-xs bg-white px-1.5 py-0.5 rounded">{phone}</code>
             </p>
           ) : null}
           {business ? (
             <p>
               Business Account ID:{" "}
-              <code className="text-[#00a884] text-xs bg-white px-1.5 py-0.5 rounded">{business}</code>
+              <code className="text-[#5B4FE8] text-xs bg-white px-1.5 py-0.5 rounded">{business}</code>
             </p>
           ) : null}
           <p className="text-xs text-[#667781] pt-1">
@@ -117,8 +117,8 @@ export function DeveloperTemplatesPanel({
   return (
     <section className="space-y-6">
       <div className="rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 space-y-3">
-        <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Message templates</p>
-        <h2 className="text-2xl font-bold text-[#111b21]">Videh template studio</h2>
+        <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">Message templates</p>
+        <h2 className="text-2xl font-bold text-[#14131F]">Videh template studio</h2>
         <p className="text-sm text-[#667781] max-w-2xl">
           Build templates for Videh Business — header, body with {"{{1}}"} variables, footer, and buttons.
           Live preview shows exactly how the message will look to your customers. Videh admin approves before production
@@ -131,7 +131,7 @@ export function DeveloperTemplatesPanel({
           type="button"
           disabled={busy}
           onClick={onRefresh}
-          className="inline-flex items-center gap-2 text-sm font-semibold text-[#00a884] hover:underline disabled:opacity-60"
+          className="inline-flex items-center gap-2 text-sm font-semibold text-[#5B4FE8] hover:underline disabled:opacity-60"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Refresh
@@ -156,9 +156,9 @@ export function DeveloperApiPanel({ data, busy, error, leadId, reference, onRefr
 
   return (
     <section className="w-full min-h-[calc(100dvh-10rem)] rounded-2xl bg-white p-6 md:p-8 lg:p-10 shadow-sm border border-gray-200 space-y-5">
-      <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">API access</p>
-      <h2 className="text-2xl font-bold text-[#111b21] flex items-center gap-2">
-        <Key className="h-7 w-7 text-[#00a884]" />
+      <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">API access</p>
+      <h2 className="text-2xl font-bold text-[#14131F] flex items-center gap-2">
+        <Key className="h-7 w-7 text-[#5B4FE8]" />
         Production credentials
       </h2>
       <p className="text-sm text-[#667781]">
@@ -173,7 +173,7 @@ export function DeveloperApiPanel({ data, busy, error, leadId, reference, onRefr
         type="button"
         disabled={busy}
         onClick={onRefresh}
-        className="inline-flex items-center gap-2 text-sm font-semibold text-[#00a884] hover:underline disabled:opacity-60"
+        className="inline-flex items-center gap-2 text-sm font-semibold text-[#5B4FE8] hover:underline disabled:opacity-60"
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
         Refresh
@@ -182,13 +182,13 @@ export function DeveloperApiPanel({ data, busy, error, leadId, reference, onRefr
       <div className="grid sm:grid-cols-2 gap-3 text-sm">
         <div className="rounded-xl bg-[#f0f2f5] p-4">
           <p className="text-xs text-[#667781] uppercase font-semibold">Application status</p>
-          <p className="font-semibold text-[#111b21] mt-1">
+          <p className="font-semibold text-[#14131F] mt-1">
             {PORTAL_STATUS_LABELS[data?.lead.status ?? ""] ?? data?.lead.status ?? "—"}
           </p>
         </div>
         <div className="rounded-xl bg-[#f0f2f5] p-4">
           <p className="text-xs text-[#667781] uppercase font-semibold">Plan</p>
-          <p className="font-semibold text-[#111b21] mt-1">{data?.lead.plan_id ?? "—"}</p>
+          <p className="font-semibold text-[#14131F] mt-1">{data?.lead.plan_id ?? "—"}</p>
         </div>
       </div>
 
@@ -206,12 +206,12 @@ export function DeveloperApiPanel({ data, busy, error, leadId, reference, onRefr
             <div className="rounded-xl bg-[#f0f2f5] p-4 space-y-2 text-sm">
               {phone ? (
                 <p>
-                  Phone Number ID: <code className="text-[#00a884] text-xs">{phone}</code>
+                  Phone Number ID: <code className="text-[#5B4FE8] text-xs">{phone}</code>
                 </p>
               ) : null}
               {business ? (
                 <p>
-                  Business Account ID: <code className="text-[#00a884] text-xs">{business}</code>
+                  Business Account ID: <code className="text-[#5B4FE8] text-xs">{business}</code>
                 </p>
               ) : null}
               <p className="text-xs text-[#667781] pt-1">
@@ -253,9 +253,9 @@ export function DeveloperBillingPanel({
 
   return (
     <section className="w-full min-h-[calc(100dvh-10rem)] rounded-2xl bg-white p-6 md:p-8 lg:p-10 shadow-sm border border-gray-200 space-y-5 flex flex-col">
-      <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">Billing &amp; usage</p>
-      <h2 className="text-2xl md:text-3xl font-bold text-[#111b21] flex items-center gap-2">
-        <BarChart3 className="h-7 w-7 md:h-8 md:w-8 text-[#00a884]" />
+      <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">Billing &amp; usage</p>
+      <h2 className="text-2xl md:text-3xl font-bold text-[#14131F] flex items-center gap-2">
+        <BarChart3 className="h-7 w-7 md:h-8 md:w-8 text-[#5B4FE8]" />
         Usage &amp; invoices
       </h2>
 
@@ -267,7 +267,7 @@ export function DeveloperBillingPanel({
             type="button"
             disabled={busy}
             onClick={onRefresh}
-            className="inline-flex items-center gap-2 text-sm font-semibold text-[#00a884] hover:underline disabled:opacity-60"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-[#5B4FE8] hover:underline disabled:opacity-60"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Refresh
@@ -280,14 +280,14 @@ export function DeveloperBillingPanel({
                 <button
                   type="button"
                   onClick={() => openInvoices("current")}
-                  className="text-sm font-semibold text-[#00a884] hover:underline"
+                  className="text-sm font-semibold text-[#5B4FE8] hover:underline"
                 >
                   Current bill
                 </button>
                 <button
                   type="button"
                   onClick={() => openInvoices("all")}
-                  className="text-sm font-semibold text-[#00a884] hover:underline"
+                  className="text-sm font-semibold text-[#5B4FE8] hover:underline"
                 >
                   See previous bill
                 </button>

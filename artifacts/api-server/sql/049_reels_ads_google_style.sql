@@ -1,4 +1,4 @@
--- Google Ads / YouTube-style feed ads: app install, shopping, image + billing
+-- Google Ads / in-stream video feed ads: app install, shopping, image + billing
 
 UPDATE reels_advertisers SET balance_inr = 100000 WHERE email = 'ads@videh.co.in' AND balance_inr < 1000;
 

@@ -306,7 +306,7 @@ export default function SendLocationScreen() {
                 setLiveIntroOpen(true);
               }}
             >
-              <View style={[styles.rowIconCircle, { backgroundColor: "#25D366" }]}>
+              <View style={[styles.rowIconCircle, { backgroundColor: "#7C6CF0" }]}>
                 <Ionicons name="navigate" size={20} color="#fff" />
               </View>
               <Text style={[styles.rowTitle, { color: colors.foreground }]}>Share live location</Text>
@@ -356,9 +356,9 @@ export default function SendLocationScreen() {
         <Pressable style={styles.modalDim} onPress={() => setLiveIntroOpen(false)}>
           <Pressable style={[styles.introCard, { backgroundColor: colors.background }]} onPress={(e) => e.stopPropagation()}>
             <View style={styles.introIconWrap}>
-              <Ionicons name="radio" size={18} color="#25D366" style={{ position: "absolute", left: 0 }} />
-              <Ionicons name="location" size={36} color="#25D366" />
-              <Ionicons name="radio" size={18} color="#25D366" style={{ position: "absolute", right: 0 }} />
+              <Ionicons name="radio" size={18} color="#7C6CF0" style={{ position: "absolute", left: 0 }} />
+              <Ionicons name="location" size={36} color="#7C6CF0" />
+              <Ionicons name="radio" size={18} color="#7C6CF0" style={{ position: "absolute", right: 0 }} />
             </View>
             <Text style={[styles.introBody, { color: colors.foreground }]}>
               Members in this chat will see your location in real time. This feature shares your location for the duration you choose even

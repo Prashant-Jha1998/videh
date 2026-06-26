@@ -78,7 +78,7 @@ export const mr = locale({
   "chats.noMessagesYet": "अद्याप संदेश नाहीत",
   "chats.noArchived": "संग्रहित चॅट नाहीत",
   "chats.noArchivedHint": "संग्रहित चॅट येथे दिसतील.",
-  "chats.emptyHint": "तुमच्या संपर्कांशी संभाषण सुरू करा.\nतुमचे संदेश एंड-टू-एंड एनक्रिप्टेड आहेत.",
+  "chats.emptyHint": "तुमच्या संपर्कांशी संभाषण सुरू करा.\nतुमचे संदेश ट्रान्झिटमध्ये TLS ने सुरक्षित आहेत.",
   "chats.startChat": "चॅट सुरू करा",
   "chats.noSearchResults": "\"{query}\" साठी परिणाम नाहीत",
   "chats.unlockAndOpen": "अनलॉक करून उघडा",

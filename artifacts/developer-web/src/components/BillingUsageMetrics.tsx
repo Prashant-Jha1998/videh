@@ -13,19 +13,19 @@ export function BillingUsageMetrics({ account }: Props) {
   return (
     <div className="space-y-4">
       <div className="grid sm:grid-cols-3 gap-3">
-        <div className="rounded-xl border-2 border-[#00a884]/30 bg-[#e7f9f3] p-4">
-          <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">API hits (month)</p>
-          <p className="text-3xl font-bold text-[#111b21] mt-1">{apiHitsMonth}</p>
+        <div className="rounded-xl border-2 border-[#5B4FE8]/30 bg-[#e7f9f3] p-4">
+          <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">API hits (month)</p>
+          <p className="text-3xl font-bold text-[#14131F] mt-1">{apiHitsMonth}</p>
           <p className="text-[11px] text-[#667781] mt-1">POST /v1/business-messages calls this month</p>
         </div>
-        <div className="rounded-xl border-2 border-[#00a884]/30 bg-[#e7f9f3] p-4">
-          <p className="text-xs font-semibold text-[#00a884] uppercase tracking-wide">API usage (month)</p>
-          <p className="text-3xl font-bold text-[#111b21] mt-1">{formatInrRupees(usageInr)}</p>
+        <div className="rounded-xl border-2 border-[#5B4FE8]/30 bg-[#e7f9f3] p-4">
+          <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">API usage (month)</p>
+          <p className="text-3xl font-bold text-[#14131F] mt-1">{formatInrRupees(usageInr)}</p>
           <p className="text-[11px] text-[#667781] mt-1">Conversation charges added to your bill</p>
         </div>
-        <div className="rounded-xl border-2 border-[#111b21]/10 bg-[#f0f2f5] p-4">
+        <div className="rounded-xl border-2 border-[#14131F]/10 bg-[#f0f2f5] p-4">
           <p className="text-xs font-semibold text-[#667781] uppercase tracking-wide">Est. monthly bill</p>
-          <p className="text-3xl font-bold text-[#111b21] mt-1">{formatInrRupees(estimatedBill)}</p>
+          <p className="text-3xl font-bold text-[#14131F] mt-1">{formatInrRupees(estimatedBill)}</p>
           <p className="text-[11px] text-[#667781] mt-1">
             Plan {formatInrRupees(Number(account.amount_inr_monthly ?? 0))} + API usage {formatInrRupees(usageInr)}
           </p>
@@ -35,25 +35,25 @@ export function BillingUsageMetrics({ account }: Props) {
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <div className="rounded-xl bg-[#f0f2f5] p-4">
           <p className="text-xs text-[#667781]">API hits (all time)</p>
-          <p className="text-xl font-bold text-[#111b21]">{apiHitsTotal}</p>
+          <p className="text-xl font-bold text-[#14131F]">{apiHitsTotal}</p>
         </div>
         <div className="rounded-xl bg-[#f0f2f5] p-4">
           <p className="text-xs text-[#667781]">Messages delivered (month)</p>
-          <p className="text-xl font-bold text-[#111b21]">{delivered}</p>
+          <p className="text-xl font-bold text-[#14131F]">{delivered}</p>
         </div>
         <div className="rounded-xl bg-[#f0f2f5] p-4">
           <p className="text-xs text-[#667781]">Billing status</p>
-          <p className="text-lg font-bold text-[#111b21]">{account.billing_status}</p>
+          <p className="text-lg font-bold text-[#14131F]">{account.billing_status}</p>
         </div>
         <div className="rounded-xl bg-[#f0f2f5] p-4">
           <p className="text-xs text-[#667781]">Platform plan / mo</p>
-          <p className="text-xl font-bold text-[#111b21]">
+          <p className="text-xl font-bold text-[#14131F]">
             {account.amount_inr_monthly ? formatInrRupees(Number(account.amount_inr_monthly)) : account.plan_id ?? "—"}
           </p>
         </div>
         <div className="rounded-xl bg-[#f0f2f5] p-4">
           <p className="text-xs text-[#667781]">Total paid (lifetime)</p>
-          <p className="text-xl font-bold text-[#111b21]">{formatInrRupees(Number(account.total_billed_inr ?? 0))}</p>
+          <p className="text-xl font-bold text-[#14131F]">{formatInrRupees(Number(account.total_billed_inr ?? 0))}</p>
         </div>
       </div>
 

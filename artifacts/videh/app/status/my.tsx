@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp, type Status } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { getApiUrl } from "@/lib/api";
+import { saveStatusToGalleryWithAlert } from "@/lib/saveStatusToLibrary";
 import { DropdownMenu } from "@/components/DropdownMenu";
 
 const BOOST_BASE_PRICE_INR = 499;
@@ -218,7 +219,11 @@ export default function MyStatusScreen() {
 
   const menuItems = menuStatus ? [
     { label: "Forward", icon: "arrow-redo-outline", onPress: () => { void shareStatus(menuStatus, "Forwarded status"); } },
-    { label: "Save", icon: "download-outline", onPress: () => { void shareStatus(menuStatus, "Save this status"); } },
+    {
+      label: "Save to gallery",
+      icon: "download-outline",
+      onPress: () => { void saveStatusToGalleryWithAlert(menuStatus, user?.sessionToken); },
+    },
     { label: "Share", icon: "share-social-outline", onPress: () => { void shareStatus(menuStatus); } },
     { label: "Share to Facebook", icon: "logo-facebook", onPress: () => { void shareStatus(menuStatus, "Facebook"); } },
     { label: "Share to Instagram", icon: "logo-instagram", onPress: () => { void shareStatus(menuStatus, "Instagram"); } },
@@ -272,7 +277,7 @@ export default function MyStatusScreen() {
                     <Ionicons
                       name={item.boostStatus === "rejected" ? "close-circle" : item.boostStatus === "pending_verification" ? "time" : "flash"}
                       size={12}
-                      color="#111B21"
+                      color="#14131F"
                     />
                     <Text style={styles.boostBadgeText}>
                       {item.boostStatus === "rejected" ? "Boost rejected" : item.boostStatus === "pending_verification" ? "Pending verification" : "Boosted"}
@@ -353,7 +358,7 @@ export default function MyStatusScreen() {
                 Boosted stories do not expire after 24 hours. After admin approval, this story will stay boosted for {boostPlan.durationDays} day(s).
               </Text>
               <TouchableOpacity style={styles.payBtn} onPress={submitBoost} disabled={Boolean(boostingId)}>
-                {boostingId ? <ActivityIndicator color="#111B21" /> : <Text style={styles.payBtnText}>Pay ₹{boostPlan.amountInr} & send for verification</Text>}
+                {boostingId ? <ActivityIndicator color="#14131F" /> : <Text style={styles.payBtnText}>Pay ₹{boostPlan.amountInr} & send for verification</Text>}
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -370,13 +375,13 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 30, fontFamily: "Inter_600SemiBold" },
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
   thumb: { width: 56, height: 56, borderRadius: 8, backgroundColor: "#0f172a" },
-  textThumb: { alignItems: "center", justifyContent: "center", backgroundColor: "#00A884" },
+  textThumb: { alignItems: "center", justifyContent: "center", backgroundColor: "#5B4FE8" },
   rowTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
   rowSub: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
   boostBadge: { marginTop: 6, alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#FACC15", borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 },
   boostPendingBadge: { backgroundColor: "#38BDF8" },
   boostRejectedBadge: { backgroundColor: "#FB7185" },
-  boostBadgeText: { color: "#111B21", fontSize: 11, fontFamily: "Inter_700Bold" },
+  boostBadgeText: { color: "#14131F", fontSize: 11, fontFamily: "Inter_700Bold" },
   rejectNote: { color: "#FB7185", fontSize: 11, fontFamily: "Inter_500Medium", marginTop: 4 },
   boostTextBtn: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6, marginLeft: 8 },
   boostTextBtnLabel: { fontSize: 12, fontFamily: "Inter_700Bold" },
@@ -384,21 +389,21 @@ const styles = StyleSheet.create({
   empty: { alignItems: "center", paddingTop: 70, gap: 8 },
   emptyText: { fontSize: 14, fontFamily: "Inter_500Medium" },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
-  boostSheet: { backgroundColor: "#111B21", borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: "88%" },
-  boostHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", padding: 18, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#2A3942", gap: 12 },
+  boostSheet: { backgroundColor: "#14131F", borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: "88%" },
+  boostHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", padding: 18, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#2A2838", gap: 12 },
   boostTitle: { color: "#fff", fontSize: 22, fontFamily: "Inter_700Bold" },
   boostSub: { color: "#9db0b8", fontSize: 12, marginTop: 4, maxWidth: 280 },
   closeBtn: { padding: 6 },
   boostForm: { padding: 16, gap: 14 },
-  priceCard: { backgroundColor: "#00A88422", borderWidth: 1, borderColor: "#00A88455", borderRadius: 16, padding: 14 },
+  priceCard: { backgroundColor: "#5B4FE822", borderWidth: 1, borderColor: "#5B4FE855", borderRadius: 16, padding: 14 },
   priceLabel: { color: "#b8d9d0", fontSize: 12, fontFamily: "Inter_600SemiBold" },
   priceValue: { color: "#fff", fontSize: 32, fontFamily: "Inter_700Bold", marginTop: 4 },
-  priceHint: { color: "#d9fdd3", fontSize: 13, marginTop: 4 },
+  priceHint: { color: "#E0DCFF", fontSize: 13, marginTop: 4 },
   formRow: { gap: 6 },
   formGrid: { flexDirection: "row", gap: 12 },
   inputLabel: { color: "#dfe8eb", fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  boostInput: { backgroundColor: "#2A3942", color: "#fff", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, borderWidth: 1, borderColor: "#3f515b", fontSize: 15 },
+  boostInput: { backgroundColor: "#2A2838", color: "#fff", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, borderWidth: 1, borderColor: "#3f515b", fontSize: 15 },
   policyText: { color: "#9db0b8", fontSize: 12, lineHeight: 18 },
   payBtn: { backgroundColor: "#FACC15", borderRadius: 16, paddingVertical: 14, alignItems: "center", justifyContent: "center", marginTop: 2 },
-  payBtnText: { color: "#111B21", fontSize: 15, fontFamily: "Inter_700Bold" },
+  payBtnText: { color: "#14131F", fontSize: 15, fontFamily: "Inter_700Bold" },
 });

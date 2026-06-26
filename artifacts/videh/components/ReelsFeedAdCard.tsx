@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import React, { useEffect, useMemo, useRef } from "react";
-import { Dimensions, Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Dimensions, Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
 import {
   recordReelsAdClick,
   recordReelsAdImpression,
@@ -30,21 +31,15 @@ function primaryTapTarget(ad: ReelsFeedAd): { target: "cta" | "play_store" | "ap
   return { target: "destination", url: ad.destinationUrl ?? ad.playStoreUrl ?? ad.appStoreUrl };
 }
 
-function displayRating(ad: ReelsFeedAd): string | null {
-  if (ad.format !== "app_install") return null;
-  const score = 4 + ((ad.id * 7) % 9) / 10;
-  return `${score.toFixed(1)}★`;
-}
-
 export function ReelsFeedAdCard({ ad }: Props) {
   const colors = useColors();
   const { user } = useApp();
+  const { t } = useUiPreferences();
   const impressedRef = useRef(false);
 
   const heroUri = ad.imageUrl ?? ad.videoUrl;
   const brandName = ad.appName ?? ad.headline ?? ad.title;
   const tagline = ad.description?.trim() || ad.advertiserName;
-  const rating = useMemo(() => displayRating(ad), [ad]);
   const cta = ctaLabel(ad);
 
   useEffect(() => {
@@ -79,6 +74,27 @@ export function ReelsFeedAdCard({ ad }: Props) {
     void onTap(target === "destination" ? "cta" : target, url);
   };
 
+  const onAdMenu = () => {
+    const { url } = primaryTapTarget(ad);
+    Alert.alert(brandName, t("reels.adWhyBody"), [
+      { text: t("common.cancel"), style: "cancel" },
+      { text: t("reels.adLearnMore"), onPress: handlePrimary },
+      {
+        text: t("reels.adVidehAds"),
+        onPress: () => void Linking.openURL("https://ads.videh.co.in/").catch(() => {}),
+      },
+      ...(url
+        ? [{ text: t("reels.adWhySeeing"), onPress: () => Alert.alert(t("reels.adWhySeeing"), t("reels.adWhyBody")) }]
+        : []),
+    ]);
+  };
+
+  const metaParts = useMemo(() => {
+    const parts = [ad.sponsoredLabel];
+    if (ad.format === "app_install") parts.push("FREE");
+    return parts.filter(Boolean).join(" · ");
+  }, [ad.format, ad.sponsoredLabel]);
+
   return (
     <View style={styles.wrap}>
       <TouchableOpacity activeOpacity={0.92} onPress={handlePrimary}>
@@ -110,19 +126,26 @@ export function ReelsFeedAdCard({ ad }: Props) {
             {tagline}
           </Text>
           <Text style={[styles.metaLine, { color: colors.mutedForeground }]} numberOfLines={1}>
-            {ad.sponsoredLabel}
-            {rating ? ` · ${rating}` : ""}
-            {ad.format === "app_install" ? " · FREE" : ""}
+            {metaParts}
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.menuBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <TouchableOpacity
+          style={styles.menuBtn}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          onPress={onAdMenu}
+          accessibilityLabel="Ad options"
+        >
           <Ionicons name="ellipsis-vertical" size={18} color={colors.mutedForeground} />
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity style={styles.installBtn} onPress={handlePrimary} activeOpacity={0.88}>
-        <Text style={styles.installBtnText}>{cta}</Text>
+      <TouchableOpacity
+        style={[styles.installBtn, { backgroundColor: colors.foreground }]}
+        onPress={handlePrimary}
+        activeOpacity={0.88}
+      >
+        <Text style={[styles.installBtnText, { color: colors.background }]}>{cta}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -151,14 +174,12 @@ const styles = StyleSheet.create({
   installBtn: {
     marginHorizontal: 12,
     marginTop: 10,
-    backgroundColor: "#0f0f0f",
     borderRadius: 8,
     paddingVertical: 11,
     alignItems: "center",
     justifyContent: "center",
   },
   installBtnText: {
-    color: "#fff",
     fontFamily: "Inter_600SemiBold",
     fontSize: 14,
     letterSpacing: 0.2,

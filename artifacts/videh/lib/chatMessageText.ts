@@ -1,7 +1,7 @@
-/** WhatsApp allows very long text messages (~64k chars). */
+/** Videh allows very long text messages (~64k chars). */
 export const CHAT_MESSAGE_MAX_CHARS = 65536;
 
-/** Collapse long bubbles with "Read more" (WhatsApp-style). */
+/** Collapse long bubbles with "Read more" (Videh). */
 export const READ_MORE_COLLAPSE_CHARS = 600;
 export const READ_MORE_COLLAPSE_LINES = 18;
 

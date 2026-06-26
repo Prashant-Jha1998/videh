@@ -1,10 +1,10 @@
 :root {
-  --brand: #00a884;
+  --brand: #5B4FE8;
   --brand-dark: #008f6f;
-  --brand-light: #25d366;
+  --brand-light: #7C6CF0;
   --brand-glow: rgba(0, 168, 132, 0.35);
-  --ink: #0b141a;
-  --text: #111b21;
+  --ink: #12101F;
+  --text: #14131F;
   --muted: #667781;
   --bg: #f0f2f5;
   --bg-alt: #e9edef;
@@ -151,7 +151,7 @@ a {
 .hero {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(145deg, #0b141a 0%, #152a24 40%, #0d3d32 100%);
+  background: linear-gradient(145deg, #12101F 0%, #152a24 40%, #0d3d32 100%);
   color: #fff;
   padding: clamp(48px, 8vw, 88px) clamp(16px, 4vw, 40px);
 }

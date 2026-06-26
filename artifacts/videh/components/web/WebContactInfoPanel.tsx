@@ -43,7 +43,7 @@ export function WebContactInfoPanel({ chatId, chatName, onClose }: Props) {
         styles.panel,
         {
           width: WEB_CONTACT_PANEL_WIDTH,
-          backgroundColor: colors.isDark ? "#111B21" : colors.background,
+          backgroundColor: colors.isDark ? "#14131F" : colors.background,
           borderLeftColor: colors.border,
         },
       ]}
@@ -121,7 +121,7 @@ export function WebContactInfoPanel({ chatId, chatName, onClose }: Props) {
         <View style={styles.encrypt}>
           <Ionicons name="lock-closed" size={12} color={colors.mutedForeground} />
           <Text style={[styles.encryptTxt, { color: colors.mutedForeground }]}>
-            Messages and calls are end-to-end encrypted
+            Messages and calls use TLS encryption in transit
           </Text>
         </View>
       </ScrollView>

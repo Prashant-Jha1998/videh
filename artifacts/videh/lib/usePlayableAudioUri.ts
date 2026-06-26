@@ -94,7 +94,7 @@ async function getCachedAudioFile(absoluteUrl: string, sessionToken?: string | n
 /**
  * Resolves voice-note sources for expo-av: local files, data URIs, and remote
  * chat media. Remote media is downloaded to a local cache file first so playback
- * is reliable (WhatsApp-style), instead of streaming with auth headers.
+ * is reliable (Videh), instead of streaming with auth headers.
  */
 export function usePlayableAudioUri(uri: string | undefined, sessionToken?: string | null): {
   playbackSource: AVPlaybackSource | null;

@@ -7,7 +7,7 @@ function docBadge(filename: string): { label: string; bg: string; color: string 
   if (ext === "pdf") return { label: "PDF", bg: "#FFEBEE", color: "#E53935" };
   if (ext === "doc" || ext === "docx") return { label: "DOC", bg: "#E3F2FD", color: "#1565C0" };
   if (ext === "xls" || ext === "xlsx" || ext === "csv") return { label: ext.toUpperCase(), bg: "#E8F5E9", color: "#2E7D32" };
-  return { label: ext.toUpperCase().slice(0, 4) || "FILE", bg: "#E7F6F1", color: "#00A884" };
+  return { label: ext.toUpperCase().slice(0, 4) || "FILE", bg: "#E8E6FF", color: "#5B4FE8" };
 }
 
 export function WebDocumentBubble({
@@ -130,7 +130,7 @@ export function WebDocumentBubble({
             style={{
               fontSize: 14,
               fontWeight: 500,
-              color: "#111b21",
+              color: "#14131F",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",

@@ -177,7 +177,7 @@ function FaqItem({ q, a }: { q: string; a: string }) {
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between py-4 text-left font-semibold text-[#111b21] hover:text-[#00a884] transition-colors"
+        className="w-full flex items-center justify-between py-4 text-left font-semibold text-[#14131F] hover:text-[#5B4FE8] transition-colors"
       >
         {q}
         <ChevronDown className={`h-5 w-5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
@@ -343,7 +343,7 @@ export default function App() {
               />
             </span>
             <span className="hidden sm:inline leading-tight">
-              Videh <span className="text-[#00a884] font-semibold text-base sm:ml-1">Developer</span>
+              Videh <span className="text-[#5B4FE8] font-semibold text-base sm:ml-1">Developer</span>
             </span>
           </a>
           <nav className="hidden lg:flex items-center justify-center gap-2 flex-1 px-2">
@@ -385,7 +385,7 @@ export default function App() {
                 </a>
                 <a
                   href="#signup"
-                  className="text-sm font-semibold text-[#00a884] px-3 py-2 rounded-lg bg-white hover:bg-white/90"
+                  className="text-sm font-semibold text-[#5B4FE8] px-3 py-2 rounded-lg bg-white hover:bg-white/90"
                 >
                   Sign up
                 </a>
@@ -394,7 +394,7 @@ export default function App() {
             <a
               href={consoleReady ? "#apply" : "#get-api"}
               onClick={openConsole}
-              className="text-sm font-semibold bg-[#00a884] hover:bg-[#008f6f] text-white px-4 py-2.5 rounded-lg transition-colors shadow-md shadow-[#00a884]/25 whitespace-nowrap"
+              className="text-sm font-semibold bg-[#5B4FE8] hover:bg-[#008f6f] text-white px-4 py-2.5 rounded-lg transition-colors shadow-md shadow-[#5B4FE8]/25 whitespace-nowrap"
             >
               {consoleReady ? "Open console" : "Get API access"}
             </a>
@@ -409,13 +409,13 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#00a884] bg-[#00a884]/15 rounded-full px-3 py-1 mb-5">
+            <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#5B4FE8] bg-[#5B4FE8]/15 rounded-full px-3 py-1 mb-5">
               <Zap className="h-3.5 w-3.5" />
               Videh Business Messaging API · India
             </p>
             <h1 className="text-4xl md:text-5xl lg:text-[3.25rem] font-extrabold leading-[1.1] tracking-tight mb-5">
               Official business messaging API for{" "}
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00c9a0] to-[#00a884]">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00c9a0] to-[#5B4FE8]">
                 your company logo
               </span>
             </h1>
@@ -427,7 +427,7 @@ export default function App() {
               <a
                 href="#apply"
                 onClick={openApplyWizard}
-                className="inline-flex items-center gap-2 bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold px-6 py-3 rounded-xl transition-colors"
+                className="inline-flex items-center gap-2 bg-[#5B4FE8] hover:bg-[#008f6f] text-white font-semibold px-6 py-3 rounded-xl transition-colors"
               >
                 Start application
                 <ArrowRight className="h-4 w-4" />
@@ -442,13 +442,13 @@ export default function App() {
             </div>
             <div className="mt-10 flex flex-wrap gap-6 text-sm text-white/60">
               <span className="flex items-center gap-1.5">
-                <CheckCircle2 className="h-4 w-4 text-[#00a884]" /> Videh Cloud API
+                <CheckCircle2 className="h-4 w-4 text-[#5B4FE8]" /> Videh Cloud API
               </span>
               <span className="flex items-center gap-1.5">
-                <CheckCircle2 className="h-4 w-4 text-[#00a884]" /> Template + Utility
+                <CheckCircle2 className="h-4 w-4 text-[#5B4FE8]" /> Template + Utility
               </span>
               <span className="flex items-center gap-1.5">
-                <CheckCircle2 className="h-4 w-4 text-[#00a884]" /> Indian support
+                <CheckCircle2 className="h-4 w-4 text-[#5B4FE8]" /> Indian support
               </span>
             </div>
           </motion.div>
@@ -466,7 +466,7 @@ export default function App() {
         </div>
       </section>
 
-      <section className="py-4 bg-[#111b21] border-y border-white/5">
+      <section className="py-4 bg-[#14131F] border-y border-white/5">
         <div className="max-w-6xl mx-auto px-4 flex flex-wrap justify-center gap-x-10 gap-y-2 text-center text-sm text-white/50">
           <span>Trusted by Indian businesses for</span>
           <span className="text-white/80">Order alerts</span>
@@ -480,7 +480,7 @@ export default function App() {
 
       <section id="features" className="py-20 px-4">
         <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl font-bold text-[#111b21] mb-3 text-center">
+          <h2 className="text-3xl font-bold text-[#14131F] mb-3 text-center">
             Enterprise-grade business messaging — managed for you
           </h2>
           <p className="text-[#667781] text-center max-w-2xl mx-auto mb-12">
@@ -491,12 +491,12 @@ export default function App() {
             {FEATURES.map((f) => (
               <div
                 key={f.title}
-                className="rounded-2xl bg-white p-6 border border-gray-100 shadow-sm hover:shadow-md hover:border-[#00a884]/30 transition-all"
+                className="rounded-2xl bg-white p-6 border border-gray-100 shadow-sm hover:shadow-md hover:border-[#5B4FE8]/30 transition-all"
               >
-                <div className="h-11 w-11 rounded-xl bg-[#00a884]/10 flex items-center justify-center text-[#00a884] mb-4">
+                <div className="h-11 w-11 rounded-xl bg-[#5B4FE8]/10 flex items-center justify-center text-[#5B4FE8] mb-4">
                   <f.icon className="h-5 w-5" />
                 </div>
-                <h3 className="font-bold text-[#111b21] mb-2">{f.title}</h3>
+                <h3 className="font-bold text-[#14131F] mb-2">{f.title}</h3>
                 <p className="text-sm text-[#667781] leading-relaxed">{f.desc}</p>
               </div>
             ))}
@@ -506,7 +506,7 @@ export default function App() {
 
       <section className="py-16 px-4 bg-white">
         <div className="max-w-6xl mx-auto">
-          <h2 className="text-2xl font-bold text-center mb-10 text-[#111b21]">
+          <h2 className="text-2xl font-bold text-center mb-10 text-[#14131F]">
             Supported business entities
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -518,10 +518,10 @@ export default function App() {
             ].map((e) => (
               <div
                 key={e.label}
-                className="rounded-xl border border-gray-200 p-5 text-center hover:border-[#00a884]/40 transition-colors"
+                className="rounded-xl border border-gray-200 p-5 text-center hover:border-[#5B4FE8]/40 transition-colors"
               >
-                <e.icon className="h-8 w-8 text-[#00a884] mx-auto mb-3" />
-                <p className="font-semibold text-[#111b21]">{e.label}</p>
+                <e.icon className="h-8 w-8 text-[#5B4FE8] mx-auto mb-3" />
+                <p className="font-semibold text-[#14131F]">{e.label}</p>
                 <p className="text-xs text-[#667781] mt-1">{e.sub}</p>
               </div>
             ))}
@@ -531,7 +531,7 @@ export default function App() {
 
       <section id="how-it-works" className="py-20 px-4 bg-[#f0f2f5]">
         <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl font-bold text-[#111b21] mb-3 text-center">How onboarding works</h2>
+          <h2 className="text-3xl font-bold text-[#14131F] mb-3 text-center">How onboarding works</h2>
           <p className="text-[#667781] text-center mb-12 max-w-xl mx-auto">
             Videh requires real businesses — not fake shells. We verify you first, then guide business
             verification and template approval.
@@ -539,8 +539,8 @@ export default function App() {
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             {STEPS.map((s) => (
               <div key={s.n} className="relative rounded-2xl bg-white p-6 shadow-sm border border-gray-100">
-                <span className="text-4xl font-black text-[#00a884]/20">{s.n}</span>
-                <h3 className="font-bold text-[#111b21] mt-2 mb-2">{s.title}</h3>
+                <span className="text-4xl font-black text-[#5B4FE8]/20">{s.n}</span>
+                <h3 className="font-bold text-[#14131F] mt-2 mb-2">{s.title}</h3>
                 <p className="text-sm text-[#667781] leading-relaxed">{s.desc}</p>
               </div>
             ))}
@@ -551,7 +551,7 @@ export default function App() {
       <section id="api" className="py-20 px-4">
         <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-10 items-start">
           <div>
-            <h2 className="text-3xl font-bold text-[#111b21] mb-4">Developer-first REST API</h2>
+            <h2 className="text-3xl font-bold text-[#14131F] mb-4">Developer-first REST API</h2>
             <p className="text-[#667781] mb-6 leading-relaxed">
               Integrate in minutes. Send utility OTPs, order updates, or marketing templates from your backend,
               ERP, or no-code automation.
@@ -564,8 +564,8 @@ export default function App() {
                 "Media upload API",
                 "Rate limits with burst allowance",
               ].map((item) => (
-                <li key={item} className="flex items-center gap-2 text-[#111b21]">
-                  <CheckCircle2 className="h-4 w-4 text-[#00a884] shrink-0" />
+                <li key={item} className="flex items-center gap-2 text-[#14131F]">
+                  <CheckCircle2 className="h-4 w-4 text-[#5B4FE8] shrink-0" />
                   {item}
                 </li>
               ))}
@@ -573,15 +573,15 @@ export default function App() {
           </div>
           <div className="space-y-4">
             <p className="text-xs font-semibold text-[#667781] uppercase tracking-wide">Account &amp; channel IDs</p>
-            <pre className="code-block rounded-2xl bg-[#0b141a] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
+            <pre className="code-block rounded-2xl bg-[#12101F] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
               <code>{API_ME}</code>
             </pre>
             <p className="text-xs font-semibold text-[#667781] uppercase tracking-wide">List approved templates</p>
-            <pre className="code-block rounded-2xl bg-[#0b141a] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
+            <pre className="code-block rounded-2xl bg-[#12101F] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
               <code>{API_LIST_TEMPLATES}</code>
             </pre>
             <p className="text-xs font-semibold text-[#667781] uppercase tracking-wide">Send message (Videh API path)</p>
-            <pre className="code-block rounded-2xl bg-[#0b141a] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
+            <pre className="code-block rounded-2xl bg-[#12101F] text-[#e9edef] p-5 overflow-x-auto border border-white/10 shadow-xl text-xs">
               <code>{API_SAMPLE}</code>
             </pre>
           </div>
@@ -590,7 +590,7 @@ export default function App() {
 
       {!consoleReady ? <DeveloperDashboard /> : null}
 
-      <section id="pricing" className="py-20 px-4 bg-[#111b21] text-white">
+      <section id="pricing" className="py-20 px-4 bg-[#14131F] text-white">
         <div className="max-w-6xl mx-auto">
           <ConversationPricing variant="dark" />
           <h3 className="text-xl font-bold text-center mt-16 mb-3">Platform plans (partner fee)</h3>
@@ -603,12 +603,12 @@ export default function App() {
                 key={p.name}
                 className={`rounded-2xl p-6 border ${
                   p.popular
-                    ? "border-[#00a884] bg-[#00a884]/10 scale-[1.02] shadow-xl shadow-[#00a884]/10"
+                    ? "border-[#5B4FE8] bg-[#5B4FE8]/10 scale-[1.02] shadow-xl shadow-[#5B4FE8]/10"
                     : "border-white/10 bg-white/5"
                 }`}
               >
                 {p.popular && (
-                  <span className="text-xs font-bold uppercase tracking-wider text-[#00a884] mb-2 block">
+                  <span className="text-xs font-bold uppercase tracking-wider text-[#5B4FE8] mb-2 block">
                     Most popular
                   </span>
                 )}
@@ -620,7 +620,7 @@ export default function App() {
                 <ul className="mt-6 space-y-2.5 text-sm text-white/75">
                   {p.highlights.map((h) => (
                     <li key={h} className="flex gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-[#00a884] shrink-0 mt-0.5" />
+                      <CheckCircle2 className="h-4 w-4 text-[#5B4FE8] shrink-0 mt-0.5" />
                       {h}
                     </li>
                   ))}
@@ -630,7 +630,7 @@ export default function App() {
                   onClick={openApplyWizard}
                   className={`mt-8 block text-center font-semibold py-2.5 rounded-xl transition-colors ${
                     p.popular
-                      ? "bg-[#00a884] hover:bg-[#008f6f] text-white"
+                      ? "bg-[#5B4FE8] hover:bg-[#008f6f] text-white"
                       : "border border-white/20 hover:bg-white/10"
                   }`}
                 >
@@ -659,13 +659,13 @@ export default function App() {
       <section id="apply" className="py-20 px-4 bg-gradient-to-b from-[#f0f2f5] to-white">
         <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 items-start">
           <div>
-            <h2 className="text-3xl font-bold text-[#111b21] mb-4">Get API access</h2>
+            <h2 className="text-3xl font-bold text-[#14131F] mb-4">Get API access</h2>
             <p className="text-[#667781] leading-relaxed mb-6">
               Opens the Videh Business API console — step-by-step modules for plan, company details, compliance
               documents, business profile, and payment verification (same layout as enterprise messaging portals).
             </p>
             <div className="space-y-4 text-sm">
-              <p className="font-semibold text-[#111b21]">Documents typically required:</p>
+              <p className="font-semibold text-[#14131F]">Documents typically required:</p>
               <ul className="space-y-2 text-[#667781]">
                 <li>• Certificate of Incorporation / LLP agreement</li>
                 <li>• GST certificate</li>
@@ -678,7 +678,7 @@ export default function App() {
           <a
             href="#apply"
             onClick={openApplyWizard}
-            className="inline-flex items-center justify-center gap-2 w-full bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold px-6 py-4 rounded-xl"
+            className="inline-flex items-center justify-center gap-2 w-full bg-[#5B4FE8] hover:bg-[#008f6f] text-white font-semibold px-6 py-4 rounded-xl"
           >
             Open step-by-step application
             <ArrowRight className="h-5 w-5" />
@@ -687,7 +687,7 @@ export default function App() {
       </section>
 
       <section className="py-16 px-4 max-w-3xl mx-auto">
-        <h2 className="text-2xl font-bold text-center mb-8 text-[#111b21]">Frequently asked questions</h2>
+        <h2 className="text-2xl font-bold text-center mb-8 text-[#14131F]">Frequently asked questions</h2>
         <div className="bg-white rounded-2xl border border-gray-200 px-6 shadow-sm">
           {FAQ.map((f) => (
             <FaqItem key={f.q} q={f.q} a={f.a} />
@@ -695,7 +695,7 @@ export default function App() {
         </div>
       </section>
 
-      <footer className="bg-[#0b141a] text-white/60 py-12 px-4">
+      <footer className="bg-[#12101F] text-white/60 py-12 px-4">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between gap-8">
           <div>
             <p className="font-bold text-white mb-2">Videh Developer Platform</p>

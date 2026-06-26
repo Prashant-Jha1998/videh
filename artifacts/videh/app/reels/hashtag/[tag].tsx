@@ -79,7 +79,7 @@ export default function ReelsHashtagScreen() {
           contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 12 }}
           ListEmptyComponent={
             <Text style={{ color: colors.mutedForeground, textAlign: "center", marginTop: 40 }}>
-              Is hashtag par abhi koi public video nahi hai.
+              No public videos for this hashtag yet.
             </Text>
           }
           renderItem={({ item }) => (

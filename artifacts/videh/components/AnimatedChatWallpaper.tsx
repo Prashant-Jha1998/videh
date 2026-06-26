@@ -85,8 +85,8 @@ export function AnimatedChatWallpaper({ id, accent, isDark }: Props) {
   const preset = PRESETS[id];
   if (!preset) return null;
 
-  const base = isDark ? "#0B141A" : "#E5DDD5";
-  const tint = accent ?? "#00A884";
+  const base = isDark ? "#12101F" : "#EDEAF5";
+  const tint = accent ?? "#5B4FE8";
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">

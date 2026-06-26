@@ -1,5 +1,5 @@
 -- Honest duration metadata for @videh Pexels seed clips (actual files are ~10–30s, not 1–5 min).
--- Also set official channel display name for YouTube-style feed.
+-- Also set official channel display name for in-stream video feed.
 
 UPDATE reels_videos v
 SET duration_seconds = sub.real_dur

@@ -17,7 +17,7 @@ function sanitizeContactDisplayName(raw: string, phone: string): string {
   return name;
 }
 
-/** Save a phone number to the device address book (WhatsApp-style Add contact). */
+/** Save a phone number to the device address book (Videh Add contact). */
 export async function addDeviceContact(opts: {
   name: string;
   phone: string;

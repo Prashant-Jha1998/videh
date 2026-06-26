@@ -8,6 +8,7 @@ import {
   Platform,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -20,6 +21,7 @@ import { formatTime } from "@/utils/time";
 import { ThemedHeader } from "@/components/ThemedHeader";
 import { StoryRingAvatar } from "@/components/StoryRing";
 import { getStatusRingSegments } from "@/lib/statusRingSegments";
+import { DropdownMenu } from "@/components/DropdownMenu";
 
 interface StatusGroup {
   userId: string;
@@ -39,6 +41,9 @@ export default function StatusScreen() {
   const { t } = useUiPreferences();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
   const [fabOpen, setFabOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const myStatuses = useMemo(
     () => statuses.filter((s) => s.userId === "me").sort((a, b) => a.timestamp - b.timestamp),
@@ -78,8 +83,19 @@ export default function StatusScreen() {
       });
   }, [statuses]);
 
-  const recentGroups = statusGroups.filter((g) => g.hasUnviewed);
-  const viewedGroups = statusGroups.filter((g) => !g.hasUnviewed);
+  const recentGroups = useMemo(
+    () => statusGroups.filter((g) => g.hasUnviewed).filter((g) => matchesStatusSearch(g, searchQuery)),
+    [statusGroups, searchQuery],
+  );
+  const viewedGroups = useMemo(
+    () => statusGroups.filter((g) => !g.hasUnviewed).filter((g) => matchesStatusSearch(g, searchQuery)),
+    [statusGroups, searchQuery],
+  );
+
+  const menuItems = [
+    { label: t("status.menu.privacy"), icon: "eye-outline", onPress: () => router.push("/settings/privacy") },
+    { label: t("status.menu.notifications"), icon: "notifications-outline", onPress: () => router.push("/settings/notifications") },
+  ];
 
   const initials = (user?.name ?? "?").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
 
@@ -101,16 +117,47 @@ export default function StatusScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
-        <Text style={styles.headerTitle}>{t("status.title")}</Text>
-        <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerBtn}>
-            <Ionicons name="search-outline" size={22} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerBtn}>
-            <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
-          </TouchableOpacity>
-        </View>
+        {searching ? (
+          <View style={styles.searchHeader}>
+            <TouchableOpacity
+              style={styles.headerBtn}
+              onPress={() => { setSearching(false); setSearchQuery(""); }}
+            >
+              <Ionicons name="arrow-back" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TextInput
+              style={styles.searchInput}
+              placeholder={t("status.searchPlaceholder")}
+              placeholderTextColor="rgba(255,255,255,0.65)"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+          </View>
+        ) : (
+          <>
+            <Text style={styles.headerTitle}>{t("status.title")}</Text>
+            <View style={styles.headerRight}>
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSearching(true); }}
+              >
+                <Ionicons name="search-outline" size={22} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMenuOpen(true); }}
+              >
+                <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </ThemedHeader>
+
+      <DropdownMenu visible={menuOpen} onClose={() => setMenuOpen(false)} items={menuItems} topOffset={topPad + 46} />
 
       <FlatList
         data={[]}
@@ -201,6 +248,15 @@ export default function StatusScreen() {
                 </Text>
               </View>
             )}
+
+            {statusGroups.length > 0 && recentGroups.length === 0 && viewedGroups.length === 0 && searchQuery.trim() ? (
+              <View style={styles.empty}>
+                <Ionicons name="search-outline" size={48} color={colors.mutedForeground} />
+                <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+                  {interpolate(t("status.noSearchResults"), { query: searchQuery.trim() })}
+                </Text>
+              </View>
+            ) : null}
           </View>
         }
         contentContainerStyle={{ paddingBottom: 120 }}
@@ -241,6 +297,12 @@ export default function StatusScreen() {
   );
 }
 
+function matchesStatusSearch(group: StatusGroup, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return group.userName.toLowerCase().includes(q);
+}
+
 function StatusGroupRow({ group, colors, t, onPress }: { group: StatusGroup; colors: ReturnType<typeof useColors>; t: (key: string) => string; onPress: () => void }) {
   const initials = (group.userName ?? "?").split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = (group.userName ?? "A").charCodeAt(0) * 37 % 360;
@@ -274,7 +336,7 @@ function StatusGroupRow({ group, colors, t, onPress }: { group: StatusGroup; col
         </Text>
         {group.isBoosted && (
           <View style={styles.boostBadge}>
-            <Ionicons name="flash" size={11} color="#111B21" />
+            <Ionicons name="flash" size={11} color="#14131F" />
             <Text style={styles.boostBadgeText}>{t("status.sponsored")}</Text>
           </View>
         )}
@@ -288,6 +350,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 10 },
   headerTitle: { color: "#fff", fontSize: 22, fontFamily: "Inter_700Bold" },
   headerRight: { flexDirection: "row" },
+  searchHeader: { flex: 1, flexDirection: "row", alignItems: "center", gap: 4 },
+  searchInput: { flex: 1, color: "#fff", fontSize: 17, fontFamily: "Inter_400Regular", paddingVertical: 4 },
   headerBtn: { padding: 6 },
   myStatus: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: 2 },
   myStatusLeft: { flexDirection: "row", alignItems: "center", gap: 14 },
@@ -307,7 +371,7 @@ const styles = StyleSheet.create({
   statusName: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
   statusTime: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
   boostBadge: { marginTop: 5, alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#FACC15", borderRadius: 11, paddingHorizontal: 7, paddingVertical: 2 },
-  boostBadgeText: { color: "#111B21", fontSize: 10, fontFamily: "Inter_700Bold" },
+  boostBadgeText: { color: "#14131F", fontSize: 10, fontFamily: "Inter_700Bold" },
   empty: { alignItems: "center", marginTop: 60, paddingHorizontal: 40, gap: 12 },
   emptyText: { fontSize: 16, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   emptyHint: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center" },

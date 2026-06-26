@@ -7,7 +7,7 @@ import {
   documentFilenameFromText,
   documentPagesFromText,
   getDocumentVisual,
-  whatsappDocumentMetaLine,
+  richDocumentMetaLine,
 } from "@/lib/documentMessage";
 import type { Message } from "@/context/AppContext";
 import { PdfPagePreview } from "@/components/web/PdfPagePreview";
@@ -42,13 +42,13 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, o
   const transferPercent = uploading ? (uploadPct ?? 0) : downloading ? (downloadPct ?? 0) : 0;
   const failed = item.uploadFailed === true;
   const ready = !!item.localMediaUri && !transferring && !failed;
-  const titleColor = isMe ? (colors.isDark ? colors.foreground : "#111B21") : colors.foreground;
+  const titleColor = isMe ? (colors.isDark ? colors.foreground : "#14131F") : colors.foreground;
   const metaColor = isMe ? (colors.isDark ? "rgba(255,255,255,0.72)" : "rgba(17,27,33,0.55)") : colors.mutedForeground;
-  const ringColor = "#00A884";
+  const ringColor = "#5B4FE8";
 
-  let metaLine = whatsappDocumentMetaLine(filename, item.fileSizeBytes, pageCount);
+  let metaLine = richDocumentMetaLine(filename, item.fileSizeBytes, pageCount);
   if (failed) metaLine = "Couldn't send · Tap to retry";
-  else if (uploading) metaLine = whatsappDocumentMetaLine(filename, item.fileSizeBytes, pageCount);
+  else if (uploading) metaLine = richDocumentMetaLine(filename, item.fileSizeBytes, pageCount);
   else if (downloading) metaLine = `Downloading… ${transferPercent}%`;
   else if (!isMe && !ready && item.mediaUrl) metaLine = metaLine;
 

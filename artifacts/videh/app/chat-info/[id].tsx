@@ -911,9 +911,9 @@ export default function ChatInfoScreen() {
             icon="lock-closed-outline"
             iconBg="#4CAF50"
             label="Encryption"
-            value="Messages are end-to-end encrypted"
+            value="Messages are protected in transit (TLS)"
             colors={colors}
-            onPress={() => Alert.alert("End-to-End Encryption", "Messages and calls are secured with end-to-end encryption.")}
+            onPress={() => Alert.alert("Transport security", "Messages and calls use TLS encryption between your device and Videh servers. Content is stored on Videh servers to sync chats and linked devices.")}
           />
           <InfoRow
             icon="pin-outline"
@@ -982,7 +982,7 @@ export default function ChatInfoScreen() {
                         <Text style={[styles.adminText, { color: colors.primary }]}>Admin</Text>
                       </View>
                     )}
-                    <View style={[styles.onlineDot, { backgroundColor: m.is_online ? "#25D366" : "transparent", borderColor: m.is_online ? "transparent" : colors.border }]} />
+                    <View style={[styles.onlineDot, { backgroundColor: m.is_online ? "#7C6CF0" : "transparent", borderColor: m.is_online ? "transparent" : colors.border }]} />
                   </View>
                 </TouchableOpacity>
               );
@@ -1298,7 +1298,7 @@ export default function ChatInfoScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingBottom: 12, backgroundColor: "#00A884" },
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingBottom: 12, backgroundColor: "#5B4FE8" },
   backBtn: { padding: 8 },
   headerTitle: { flex: 1, fontSize: 18, fontFamily: "Inter_600SemiBold", color: "#fff", marginLeft: 8 },
   headerBtn: { padding: 8 },

@@ -73,10 +73,10 @@ if (!s.includes("function canGoTo")) {
 }
 
 const headerStart = s.indexOf("  return (\r\n    <motion.div");
-const headerStartLf = s.indexOf("  return (\n    <div className=\"fixed inset-0 z-[100] bg-[#0b141a]/95");
+const headerStartLf = s.indexOf("  return (\n    <div className=\"fixed inset-0 z-[100] bg-[#12101F]/95");
 const start = headerStartLf >= 0 ? headerStartLf : s.indexOf('  return (\r\n    <motion.div className="fixed');
 if (start < 0) {
-  const alt = s.indexOf('  return (\n    <div className="fixed inset-0 z-[100] bg-[#0b141a]/95');
+  const alt = s.indexOf('  return (\n    <div className="fixed inset-0 z-[100] bg-[#12101F]/95');
   if (alt < 0) throw new Error("start not found");
 }
 const errMarker = '{error ? (\r\n            <p className="mb-4 text-sm text-red-300';

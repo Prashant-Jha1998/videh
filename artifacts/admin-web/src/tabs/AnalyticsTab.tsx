@@ -59,7 +59,7 @@ export function AnalyticsTab({ onErr }: Props) {
         <div className="stat">
           <b>{total("signups")}</b>
           <span>Signups ({days}d)</span>
-          {miniChart(series.signups ?? [], "#00a884")}
+          {miniChart(series.signups ?? [], "#5B4FE8")}
         </div>
         <div className="stat">
           <b>{total("messages")}</b>

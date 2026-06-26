@@ -207,7 +207,7 @@ export function ImageDrawModal({ visible, imageUri, onCancel, onDone }: Props) {
           {...drawResponder.panHandlers}
         >
           {loading || !imageSize || !displayBounds ? (
-            <ActivityIndicator color="#00a884" size="large" />
+            <ActivityIndicator color="#5B4FE8" size="large" />
           ) : (
             <View
               ref={captureRefView}
@@ -250,14 +250,14 @@ export function ImageDrawModal({ visible, imageUri, onCancel, onDone }: Props) {
             style={[styles.toolBtn, highlight && styles.toolBtnActive]}
             onPress={() => setHighlight(true)}
           >
-            <Ionicons name="brush" size={22} color={highlight ? "#00a884" : "#fff"} />
+            <Ionicons name="brush" size={22} color={highlight ? "#5B4FE8" : "#fff"} />
             <Text style={[styles.toolLabel, highlight && styles.toolLabelActive]}>Highlight</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.toolBtn, !highlight && styles.toolBtnActive]}
             onPress={() => setHighlight(false)}
           >
-            <Ionicons name="pencil" size={22} color={!highlight ? "#00a884" : "#fff"} />
+            <Ionicons name="pencil" size={22} color={!highlight ? "#5B4FE8" : "#fff"} />
             <Text style={[styles.toolLabel, !highlight && styles.toolLabelActive]}>Pen</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.toolBtn} onPress={undo} disabled={strokes.length === 0}>
@@ -292,7 +292,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   title: { color: "#fff", fontSize: 17, fontWeight: "600" },
-  done: { color: "#00a884", fontSize: 17, fontWeight: "700" },
+  done: { color: "#5B4FE8", fontSize: 17, fontWeight: "700" },
   doneDisabled: { opacity: 0.4 },
   canvas: { flex: 1, backgroundColor: "#000" },
   toolRow: {
@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
   },
   toolBtnActive: { backgroundColor: "#0d2a24" },
   toolLabel: { color: "#8696a0", fontSize: 11, marginTop: 4, fontWeight: "600" },
-  toolLabelActive: { color: "#00a884" },
+  toolLabelActive: { color: "#5B4FE8" },
   colorRow: {
     flexDirection: "row",
     justifyContent: "center",
@@ -326,7 +326,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "transparent",
   },
-  colorDotSelected: { borderColor: "#00a884", transform: [{ scale: 1.12 }] },
+  colorDotSelected: { borderColor: "#5B4FE8", transform: [{ scale: 1.12 }] },
   hint: {
     color: "#8696a0",
     textAlign: "center",

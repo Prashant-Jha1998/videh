@@ -1,4 +1,4 @@
-/** Per-chat timer options — order matches WhatsApp. */
+/** Per-chat timer options — order matches Videh. */
 export const CHAT_DISAPPEAR_TIMER_OPTIONS = [
   { label: "24 hours", seconds: 86400 },
   { label: "7 days", seconds: 604800 },

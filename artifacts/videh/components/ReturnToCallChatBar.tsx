@@ -8,7 +8,7 @@ type Props = {
   onReturn: () => void;
 };
 
-/** WhatsApp-style strip inside an open chat while a call is active. */
+/** Videh strip inside an open chat while a call is active. */
 export function ReturnToCallChatBar({ isVideo, durationLabel, onReturn }: Props) {
   return (
     <TouchableOpacity style={styles.wrap} onPress={onReturn} activeOpacity={0.92}>
@@ -26,7 +26,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
     paddingVertical: 10,
     paddingHorizontal: 14,
     marginHorizontal: 8,

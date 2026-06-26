@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,7 +19,16 @@ import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollV
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { registerPushTokenWithServer } from "@/lib/pushNotifications";
+import {
+  clearProfileSetupDraft,
+  loadProfileSetupDraft,
+  saveProfileSetupDraft,
+} from "@/lib/profileSetupDraft";
 import { checkReelsHandle, createReelsChannel, REELS_HANDLE_RE } from "@/lib/reelsApi";
+
+function normalizeReelsHandleInput(value: string): string {
+  return value.replace(/^@+/, "").replace(/[^a-zA-Z0-9_]/g, "").slice(0, 30);
+}
 
 export default function ProfileSetupScreen() {
   const colors = useColors();
@@ -36,6 +45,39 @@ export default function ProfileSetupScreen() {
   const [loading, setLoading] = useState(false);
   const [nameFocused, setNameFocused] = useState(false);
   const [aboutFocused, setAboutFocused] = useState(false);
+  const [draftReady, setDraftReady] = useState(false);
+
+  const reelsHandleRef = useRef(reelsHandle);
+  reelsHandleRef.current = reelsHandle;
+  const handleCheckSeqRef = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const draft = await loadProfileSetupDraft(user?.dbId);
+      if (cancelled) return;
+      if (draft) {
+        if (draft.name.trim()) setName(draft.name);
+        if (draft.reelsHandle.trim()) setReelsHandle(normalizeReelsHandleInput(draft.reelsHandle));
+        if (draft.about.trim()) setAbout(draft.about);
+      }
+      setDraftReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.dbId]);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    const timer = setTimeout(() => {
+      void saveProfileSetupDraft(
+        { name, reelsHandle, about },
+        user?.dbId,
+      );
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [name, reelsHandle, about, draftReady, user?.dbId]);
 
   const isValid = name.trim().length >= 2 && REELS_HANDLE_RE.test(reelsHandle.trim()) && handleOk;
 
@@ -43,11 +85,14 @@ export default function ProfileSetupScreen() {
     const h = reelsHandle.trim().replace(/^@/, "");
     if (!REELS_HANDLE_RE.test(h)) {
       setHandleOk(false);
-      setHandleError(h.length > 0 ? "Username: 3–30 letters, numbers, underscore." : null);
+      setHandleError(h.length > 0 ? "Username: 3–30 letters, numbers, underscore. Must start with a letter." : null);
       return;
     }
+    const seq = ++handleCheckSeqRef.current;
     const t = setTimeout(() => {
       void checkReelsHandle(h, user?.sessionToken).then((res) => {
+        if (seq !== handleCheckSeqRef.current) return;
+        if (reelsHandleRef.current.trim().replace(/^@/, "") !== h) return;
         if (!res.success) {
           setHandleOk(false);
           setHandleError(res.message ?? "Could not verify username");
@@ -56,7 +101,7 @@ export default function ProfileSetupScreen() {
         setHandleOk(Boolean(res.available));
         setHandleError(res.available ? null : "Username already used");
       });
-    }, 400);
+    }, 450);
     return () => clearTimeout(t);
   }, [reelsHandle, user?.sessionToken]);
 
@@ -147,6 +192,7 @@ export default function ProfileSetupScreen() {
         Alert.alert("Reels username", ch.message ?? "Username already used.");
         return;
       }
+      await clearProfileSetupDraft();
       try {
         await registerPushTokenWithServer(user.dbId);
       } catch {
@@ -218,6 +264,8 @@ export default function ProfileSetupScreen() {
               autoFocus={Platform.OS !== "android"}
               returnKeyType="next"
               blurOnSubmit={false}
+              autoComplete="name"
+              textContentType="name"
             />
             <Text style={[styles.charCount, { color: colors.mutedForeground }]}>{name.length}/25</Text>
           </View>
@@ -232,9 +280,12 @@ export default function ProfileSetupScreen() {
                 placeholder="yourchannel"
                 placeholderTextColor={colors.mutedForeground}
                 value={reelsHandle}
-                onChangeText={(t) => setReelsHandle(t.replace(/[^a-zA-Z0-9_]/g, ""))}
+                onChangeText={(t) => setReelsHandle(normalizeReelsHandleInput(t))}
                 autoCapitalize="none"
                 autoCorrect={false}
+                autoComplete="off"
+                textContentType="none"
+                importantForAutofill="no"
                 maxLength={30}
               />
             </View>

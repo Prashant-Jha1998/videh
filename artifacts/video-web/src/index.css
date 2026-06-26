@@ -5,7 +5,7 @@
   --yt-text: #f1f1f1;
   --yt-muted: #aaa;
   --yt-border: #3f3f3f;
-  --yt-brand: #00a884;
+  --yt-brand: #5B4FE8;
   --yt-brand-hover: #00c49a;
   --yt-danger: #ff6b6b;
   --yt-sidebar-w: 240px;
@@ -308,7 +308,7 @@ img { max-width: 100%; display: block; }
 .page-channel { padding-top: 8px; }
 .page-channel .channel-banner {
   height: 180px; border-radius: 12px;
-  background: linear-gradient(135deg, #0b141a, #00a884);
+  background: linear-gradient(135deg, #12101F, #5B4FE8);
   background-size: cover; background-position: center; margin-bottom: -40px;
 }
 .channel-head { display: flex; gap: 16px; align-items: flex-end; margin-bottom: 24px; padding: 0 8px; }

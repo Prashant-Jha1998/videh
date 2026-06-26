@@ -98,7 +98,7 @@ export function LeadForm() {
           email: form.email,
           contact: form.phone,
         },
-        theme: { color: "#00a884" },
+        theme: { color: "#5B4FE8" },
         method: { card: true, upi: true, netbanking: true },
         handler: async (response: {
           razorpay_payment_id: string;
@@ -172,13 +172,13 @@ export function LeadForm() {
 
   if (status === "ok") {
     return (
-      <div className="rounded-2xl bg-white border border-[#00a884]/20 p-10 text-center shadow-lg">
-        <div className="mx-auto h-14 w-14 rounded-full bg-[#00a884]/15 flex items-center justify-center text-[#00a884] mb-4">
+      <div className="rounded-2xl bg-white border border-[#5B4FE8]/20 p-10 text-center shadow-lg">
+        <div className="mx-auto h-14 w-14 rounded-full bg-[#5B4FE8]/15 flex items-center justify-center text-[#5B4FE8] mb-4">
           <Send className="h-7 w-7" />
         </div>
-        <h3 className="text-xl font-bold text-[#111b21] mb-2">Application submitted</h3>
+        <h3 className="text-xl font-bold text-[#14131F] mb-2">Application submitted</h3>
         {reference ? (
-          <p className="text-sm font-mono text-[#00a884] mb-2">{reference}</p>
+          <p className="text-sm font-mono text-[#5B4FE8] mb-2">{reference}</p>
         ) : null}
         <p className="text-[#667781] max-w-md mx-auto">
           Payment verified. Your application is in the Videh admin queue for document review, channel
@@ -187,7 +187,7 @@ export function LeadForm() {
         <button
           type="button"
           onClick={() => setStatus("idle")}
-          className="mt-6 text-sm font-semibold text-[#00a884] hover:underline"
+          className="mt-6 text-sm font-semibold text-[#5B4FE8] hover:underline"
         >
           Submit another application
         </button>
@@ -201,22 +201,22 @@ export function LeadForm() {
       className="rounded-2xl bg-white border border-gray-200/80 p-6 md:p-8 shadow-xl shadow-black/5 space-y-5"
     >
       <div className="flex items-center gap-3 mb-2">
-        <div className="h-10 w-10 rounded-xl bg-[#00a884]/10 flex items-center justify-center text-[#00a884]">
+        <div className="h-10 w-10 rounded-xl bg-[#5B4FE8]/10 flex items-center justify-center text-[#5B4FE8]">
           <Building2 className="h-5 w-5" />
         </div>
         <div>
-          <h3 className="font-bold text-lg text-[#111b21]">Apply for Videh Business Messaging API</h3>
+          <h3 className="font-bold text-lg text-[#14131F]">Apply for Videh Business Messaging API</h3>
           <p className="text-sm text-[#667781]">Pay with debit/credit card · Admin approves each stage</p>
         </div>
       </div>
 
       <label className="block space-y-1.5">
-        <span className="text-sm font-medium text-[#111b21]">Select plan *</span>
+        <span className="text-sm font-medium text-[#14131F]">Select plan *</span>
         <select
           required
           value={form.planId}
           onChange={(e) => set("planId", e.target.value)}
-          className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#00a884]/40"
+          className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/40"
         >
           {(plans.length ? plans : [
             { id: "starter", name: "Starter", amountInr: 2999 },
@@ -232,8 +232,8 @@ export function LeadForm() {
 
       {selectedPlan.amountInr > 0 ? (
         <div className="flex items-center gap-2 text-sm text-[#667781] bg-[#f0f2f5] rounded-xl px-4 py-3">
-          <CreditCard className="h-4 w-4 text-[#00a884]" />
-          On submit you will pay <strong className="text-[#111b21]">₹{selectedPlan.amountInr.toLocaleString("en-IN")}</strong> via
+          <CreditCard className="h-4 w-4 text-[#5B4FE8]" />
+          On submit you will pay <strong className="text-[#14131F]">₹{selectedPlan.amountInr.toLocaleString("en-IN")}</strong> via
           debit/credit card (Razorpay). Then admin reviews your application.
         </div>
       ) : (
@@ -244,23 +244,23 @@ export function LeadForm() {
 
       <div className="grid md:grid-cols-2 gap-4">
         <label className="block space-y-1.5 md:col-span-2">
-          <span className="text-sm font-medium text-[#111b21]">Company legal name *</span>
+          <span className="text-sm font-medium text-[#14131F]">Company legal name *</span>
           <input
             required
             value={form.companyName}
             onChange={(e) => set("companyName", e.target.value)}
             placeholder="Acme Solutions Pvt Ltd"
-            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00a884]/40 focus:border-[#00a884]"
+            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/40 focus:border-[#5B4FE8]"
           />
         </label>
 
         <label className="block space-y-1.5">
-          <span className="text-sm font-medium text-[#111b21]">Entity type *</span>
+          <span className="text-sm font-medium text-[#14131F]">Entity type *</span>
           <select
             required
             value={form.entityType}
             onChange={(e) => set("entityType", e.target.value)}
-            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#00a884]/40"
+            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/40"
           >
             {ENTITY_TYPES.map((t) => (
               <option key={t.value} value={t.value}>
@@ -271,65 +271,65 @@ export function LeadForm() {
         </label>
 
         <label className="block space-y-1.5">
-          <span className="text-sm font-medium text-[#111b21]">GSTIN (if registered)</span>
+          <span className="text-sm font-medium text-[#14131F]">GSTIN (if registered)</span>
           <input
             value={form.gstin}
             onChange={(e) => set("gstin", e.target.value.toUpperCase())}
             placeholder="22AAAAA0000A1Z5"
-            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00a884]/40"
+            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/40"
           />
         </label>
 
         <label className="block space-y-1.5">
-          <span className="text-sm font-medium text-[#111b21]">Contact person *</span>
+          <span className="text-sm font-medium text-[#14131F]">Contact person *</span>
           <input
             required
             value={form.contactName}
             onChange={(e) => set("contactName", e.target.value)}
             placeholder="Full name"
-            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00a884]/40"
+            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/40"
           />
         </label>
 
         <label className="block space-y-1.5">
-          <span className="text-sm font-medium text-[#111b21]">Work email *</span>
+          <span className="text-sm font-medium text-[#14131F]">Work email *</span>
           <input
             required
             type="email"
             value={form.email}
             onChange={(e) => set("email", e.target.value)}
             placeholder="you@company.com"
-            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00a884]/40"
+            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/40"
           />
         </label>
 
         <label className="block space-y-1.5">
-          <span className="text-sm font-medium text-[#111b21]">Business phone *</span>
+          <span className="text-sm font-medium text-[#14131F]">Business phone *</span>
           <input
             required
             value={form.phone}
             onChange={(e) => set("phone", e.target.value)}
             placeholder="+91 98765 43210"
-            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00a884]/40"
+            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/40"
           />
         </label>
 
         <label className="block space-y-1.5">
-          <span className="text-sm font-medium text-[#111b21]">Website</span>
+          <span className="text-sm font-medium text-[#14131F]">Website</span>
           <input
             value={form.website}
             onChange={(e) => set("website", e.target.value)}
             placeholder="https://yourcompany.com"
-            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#00a884]/40"
+            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/40"
           />
         </label>
 
         <label className="block space-y-1.5">
-          <span className="text-sm font-medium text-[#111b21]">Expected monthly messages</span>
+          <span className="text-sm font-medium text-[#14131F]">Expected monthly messages</span>
           <select
             value={form.monthlyVolume}
             onChange={(e) => set("monthlyVolume", e.target.value)}
-            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#00a884]/40"
+            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/40"
           >
             <option value="under_10k">Under 10,000</option>
             <option value="10k_50k">10,000 – 50,000</option>
@@ -339,11 +339,11 @@ export function LeadForm() {
         </label>
 
         <label className="block space-y-1.5 md:col-span-2">
-          <span className="text-sm font-medium text-[#111b21]">Primary use case</span>
+          <span className="text-sm font-medium text-[#14131F]">Primary use case</span>
           <select
             value={form.useCase}
             onChange={(e) => set("useCase", e.target.value)}
-            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#00a884]/40"
+            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/40"
           >
             {USE_CASES.map((u) => (
               <option key={u} value={u}>
@@ -354,13 +354,13 @@ export function LeadForm() {
         </label>
 
         <label className="block space-y-1.5 md:col-span-2">
-          <span className="text-sm font-medium text-[#111b21]">Tell us about your messaging needs</span>
+          <span className="text-sm font-medium text-[#14131F]">Tell us about your messaging needs</span>
           <textarea
             rows={3}
             value={form.message}
             onChange={(e) => set("message", e.target.value)}
             placeholder="Order updates, OTP, marketing campaigns, support desk integration..."
-            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#00a884]/40"
+            className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/40"
           />
         </label>
       </div>
@@ -372,7 +372,7 @@ export function LeadForm() {
       <button
         type="submit"
         disabled={status === "loading"}
-        className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold py-3.5 transition-colors disabled:opacity-60"
+        className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#5B4FE8] hover:bg-[#008f6f] text-white font-semibold py-3.5 transition-colors disabled:opacity-60"
       >
         {status === "loading" ? (
           <>

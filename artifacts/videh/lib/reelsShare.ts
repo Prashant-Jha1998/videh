@@ -14,7 +14,7 @@ function normalizeChannelHandle(handle: string): string {
   return handle.replace(/^@+/, "").trim();
 }
 
-/** Parse YouTube-style share URL or videh:// deep link → video id. */
+/** Parse in-stream video share URL or videh:// deep link → video id. */
 export function parseReelsWatchIdFromUrl(url: string): string | null {
   if (!url) return null;
   const goMatch = url.match(/\/api\/reels\/go\/(\d+)/i);

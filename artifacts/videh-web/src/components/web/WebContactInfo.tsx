@@ -225,7 +225,7 @@ export function WebContactInfo({
                 wordBreak: "break-word",
               }}
             >
-              🔒 Messages and calls are end-to-end encrypted
+              🔒 Messages and calls use TLS encryption in transit
             </div>
           </>
         )}

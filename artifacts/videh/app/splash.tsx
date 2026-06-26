@@ -39,7 +39,7 @@ export default function SplashAnimScreen({ onDone }: { onDone?: () => void }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0B141A",
+    backgroundColor: "#12101F",
     alignItems: "center",
     justifyContent: "center",
   },

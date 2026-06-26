@@ -102,13 +102,13 @@ export type ReelsVideo = {
 export const REELS_HANDLE_RE = /^[a-zA-Z][a-zA-Z0-9_]{2,29}$/;
 /** No 5-minute cap — server allows up to 4 hours. */
 export const MAX_REELS_VIDEO_SECONDS = 14400;
-/** YouTube-style thumbnail: 16:9 */
+/** in-stream video thumbnail: 16:9 */
 export const REELS_THUMB_WIDTH = 1280;
 export const REELS_THUMB_HEIGHT = 720;
 export const REELS_THUMB_ASPECT = 16 / 9;
 export const REELS_THUMB_HINT = `16:9 · ${REELS_THUMB_WIDTH}×${REELS_THUMB_HEIGHT} recommended (JPG/PNG)`;
 
-/** Channel logo — square, YouTube-style profile picture. */
+/** Channel logo — square, in-stream video profile picture. */
 export const CHANNEL_AVATAR_SIZE = 800;
 export const CHANNEL_AVATAR_ASPECT = 1;
 export const CHANNEL_AVATAR_HINT =

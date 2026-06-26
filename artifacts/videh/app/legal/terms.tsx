@@ -3,7 +3,7 @@ import { useRouter } from "expo-router";
 import React from "react";
 import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useColors } from "@/hooks/useColors";
+import { THIRD_PARTY_BRAND_DISCLAIMER } from "@/lib/legalDisclaimers";
 
 const SECTIONS = [
   {
@@ -51,7 +51,11 @@ const SECTIONS = [
     body: `These Terms shall be governed by and construed in accordance with the laws of India. Any disputes arising under these Terms shall be subject to the exclusive jurisdiction of the courts located in New Delhi, India.\n\nIf any provision of these Terms is found to be unenforceable, the remaining provisions will remain in full force and effect.`,
   },
   {
-    title: "12. Contact Us",
+    title: "12. Third-Party Brands",
+    body: THIRD_PARTY_BRAND_DISCLAIMER,
+  },
+  {
+    title: "13. Contact Us",
     body: `If you have any questions, concerns, or complaints regarding these Terms, please contact us at:\n\nVideh Technologies\nEmail: support@videh.co.in\nAddress: New Delhi, India\n\nLast updated: June 2026`,
   },
 ];

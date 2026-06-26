@@ -20,7 +20,7 @@ import {
   isSameDisappearTimer,
 } from "@/lib/disappearTimerOptions";
 
-const WA_GREEN = "#00A884";
+const WA_GREEN = "#5B4FE8";
 
 function RadioOption({
   label,
@@ -89,7 +89,7 @@ export default function DisappearingMessagesScreen() {
     <View style={[styles.container, { backgroundColor: "#fff" }]}>
       <View style={[styles.header, { paddingTop: topPad, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Ionicons name="arrow-back" size={24} color="#111B21" />
+          <Ionicons name="arrow-back" size={24} color="#14131F" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Disappearing messages</Text>
         <View style={styles.backBtn} />
@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 19,
     fontFamily: "Inter_600SemiBold",
-    color: "#111B21",
+    color: "#14131F",
     textAlign: "center",
     marginRight: 48,
   },
@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
   heading: {
     fontSize: 17,
     fontFamily: "Inter_700Bold",
-    color: "#111B21",
+    color: "#14131F",
     marginBottom: 10,
     lineHeight: 24,
   },
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
   optionLabel: {
     fontSize: 16,
     fontFamily: "Inter_400Regular",
-    color: "#111B21",
+    color: "#14131F",
   },
   footerDivider: {
     height: StyleSheet.hairlineWidth,

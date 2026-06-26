@@ -20,7 +20,7 @@ type Props = {
 
 export function WebEmptyPane({ icon, title, subtitle, footer, actions }: Props) {
   const colors = useColors();
-  const bg = colors.isDark ? "#0B141A" : "#E5DDD5";
+  const bg = colors.isDark ? "#12101F" : "#EDEAF5";
 
   return (
     <View style={[styles.root, { backgroundColor: bg, borderLeftColor: colors.border }]}>

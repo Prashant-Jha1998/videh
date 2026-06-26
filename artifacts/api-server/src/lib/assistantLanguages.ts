@@ -47,11 +47,11 @@ const SPEECH_LOCALE: Record<AssistantLangCode, string> = {
 };
 
 export function toSpeechLocale(code: AssistantLangCode): string {
-  return SPEECH_LOCALE[code] ?? "hi-IN";
+  return SPEECH_LOCALE[code] ?? "en-IN";
 }
 
 export function toRecognitionLocale(code: AssistantLangCode): string {
-  return SPEECH_LOCALE[code] ?? "hi-IN";
+  return SPEECH_LOCALE[code] ?? "en-IN";
 }
 
 export function normalizeLangCode(raw?: string | null): AssistantLangCode {
@@ -110,12 +110,12 @@ export function detectAssistantLanguage(text: string, hint?: string | null): Ass
   }
 
   if (bestScore === 0) {
-    if (HINGLISH_HINTS.test(text)) return "hi";
     if (/^[a-zA-Z0-9\s.,!?'"-]+$/.test(text.trim())) return "en";
-    return "hi";
+    if (HINGLISH_HINTS.test(text)) return "en";
+    return "en";
   }
 
-  if (best === "en" && HINGLISH_HINTS.test(text)) return "hi";
+  if (best === "en" && HINGLISH_HINTS.test(text)) return "en";
 
   if (best === "hi" && MARATHI_HINTS.test(text)) return "mr";
   if (best === "bn" && /\b(apuni|kene|kio|noi)\b/i.test(text)) return "as";

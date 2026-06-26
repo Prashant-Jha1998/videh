@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   StyleSheet,
@@ -24,17 +24,24 @@ export default function ReelsSetupScreen() {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const handleRef = useRef(handle);
+  handleRef.current = handle;
+  const checkSeqRef = useRef(0);
 
   useEffect(() => {
     const h = handle.trim().replace(/^@/, "");
     if (!REELS_HANDLE_RE.test(h)) {
       setAvailable(null);
+      setChecking(false);
       setError(h.length > 0 ? "Use 3–30 letters, numbers, underscore. Must start with a letter." : null);
       return;
     }
     setChecking(true);
+    const seq = ++checkSeqRef.current;
     const t = setTimeout(() => {
       void checkReelsHandle(h, user?.sessionToken).then((res) => {
+        if (seq !== checkSeqRef.current) return;
+        if (handleRef.current.trim().replace(/^@/, "") !== h) return;
         setChecking(false);
         if (!res.success) {
           setAvailable(false);
@@ -44,7 +51,7 @@ export default function ReelsSetupScreen() {
         setAvailable(res.available ?? false);
         setError(res.available ? null : "Username already used");
       });
-    }, 400);
+    }, 450);
     return () => clearTimeout(t);
   }, [handle, user?.sessionToken]);
 
@@ -58,7 +65,7 @@ export default function ReelsSetupScreen() {
       setError(res.message ?? "Could not create channel");
       return;
     }
-    router.replace("/(tabs)/video");
+    router.replace("/reels/upload" as never);
   };
 
   return (
@@ -79,8 +86,11 @@ export default function ReelsSetupScreen() {
           placeholderTextColor={colors.mutedForeground}
           autoCapitalize="none"
           autoCorrect={false}
+          autoComplete="off"
+          textContentType="none"
+          importantForAutofill="no"
           value={handle}
-          onChangeText={(t) => setHandle(t.replace(/[^a-zA-Z0-9_]/g, ""))}
+          onChangeText={(t) => setHandle(t.replace(/[^a-zA-Z0-9_]/g, "").slice(0, 30))}
           maxLength={30}
         />
         {checking ? <ActivityIndicator size="small" color={colors.primary} /> : null}

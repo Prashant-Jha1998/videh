@@ -11,7 +11,7 @@ const LOCK_SCREEN_MARKER = "VidehIncomingCallLockScreen";
 const FULL_SCREEN_MARKER = "VidehIncomingCallFullScreenIntent";
 
 /**
- * Show incoming call UI over the lock screen (WhatsApp-style on Android).
+ * Show incoming call UI over the lock screen (Videh on Android).
  */
 function withIncomingCallAndroid(config) {
   config = withAndroidManifest(config, (cfg) => {

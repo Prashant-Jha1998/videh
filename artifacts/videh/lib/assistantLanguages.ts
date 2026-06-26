@@ -79,7 +79,7 @@ function scriptHint(text: string): AssistantLangCode | null {
 export function detectLocaleFromTranscript(text: string): AssistantLangCode {
   const script = scriptHint(text);
   if (script) return script;
-  if (HINGLISH_HINTS.test(text)) return "hi";
   if (/^[a-zA-Z0-9\s.,!?'"-]+$/.test(text.trim())) return "en";
-  return "hi";
+  if (HINGLISH_HINTS.test(text)) return "en";
+  return "en";
 }

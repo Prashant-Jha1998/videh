@@ -104,7 +104,7 @@ function toCoords(loc: Location.LocationObject, fromCache: boolean): DeviceCoord
 }
 
 /**
- * WhatsApp-style: recent cache first (instant map), then GPS, then stale cache.
+ * Videh: recent cache first (instant map), then GPS, then stale cache.
  */
 export async function resolveDeviceLocation(opts?: {
   timeoutMs?: number;

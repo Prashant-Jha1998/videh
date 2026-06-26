@@ -43,7 +43,7 @@ export function openAdsRazorpayCheckout(opts: {
     description: `Add ₹${opts.amountInr.toLocaleString("en-IN")} to ad wallet`,
     order_id: opts.orderId,
     prefill: { name: opts.companyName, email: opts.email },
-    theme: { color: "#00A884" },
+    theme: { color: "#5B4FE8" },
     method: { card: true, upi: true, netbanking: true, wallet: true },
     handler: (response: RazorpayHandlerResponse) => {
       void opts.onSuccess(response);

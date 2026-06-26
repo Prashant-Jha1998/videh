@@ -60,7 +60,7 @@ export async function saveReelsFeedCache(
   }
 }
 
-/** Warm feed cache in background so Video tab opens instantly (YouTube-style). */
+/** Warm feed cache in background so Video tab opens instantly (in-stream video). */
 export async function prefetchReelsFeed(userId: number, sessionToken?: string | null): Promise<void> {
   if (!userId) return;
   try {

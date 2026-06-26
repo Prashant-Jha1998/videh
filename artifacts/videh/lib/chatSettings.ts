@@ -84,8 +84,8 @@ export function fontSizeLabelToScale(label: string): number {
 /** Maps a global wallpaper label to a solid background color, or null for theme default. */
 export function wallpaperLabelToColor(label: string): string | null {
   switch (label) {
-    case "Dark": return "#0B141A";
-    case "Classic Dark": return "#111B21";
+    case "Dark": return "#12101F";
+    case "Classic Dark": return "#14131F";
     case "Light Blue": return "#CFE9F1";
     case "Solid Black": return "#000000";
     case "Solid White": return "#FFFFFF";

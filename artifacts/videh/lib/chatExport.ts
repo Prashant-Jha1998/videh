@@ -28,7 +28,7 @@ function messageLine(chat: Chat, m: Message, myName: string): string {
   return `[${formatStamp(m.timestamp)}] ${who}: ${body}`;
 }
 
-/** Builds a WhatsApp-style plain-text transcript of all chats. */
+/** Builds a Videh plain-text transcript of all chats. */
 export function buildChatsTextExport(chats: Chat[], myName: string): string {
   const lines: string[] = [];
   lines.push(`Videh chat export`);

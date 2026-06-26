@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useThemeGridCardWidth } from "@/lib/themeGridLayout";
 import { ThemedHeader } from "@/components/ThemedHeader";
 import { useColors } from "@/hooks/useColors";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
@@ -57,6 +58,7 @@ export default function AdvancedThemeScreen() {
 
   const [packFilter, setPackFilter] = useState<ThemePackId | "all">("all");
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+  const themeCardWidth = useThemeGridCardWidth();
   const trialDaysLeft = daysLeftInThemeTrial(appThemeTrialStartedAt);
   const premiumPacks = useMemo(() => listPremiumPacks(), []);
   const usingThemeDefaultBubbles = customBubbleOverride == null;
@@ -77,7 +79,11 @@ export default function AdvancedThemeScreen() {
         key={theme.id}
         style={[
           styles.themeCard,
-          { backgroundColor: colors.card, borderColor: selected ? colors.primary : colors.border },
+          {
+            width: themeCardWidth,
+            backgroundColor: colors.card,
+            borderColor: selected ? colors.primary : colors.border,
+          },
         ]}
         onPress={() => {
           if (trialDaysLeft <= 0 && !selected) {
@@ -118,7 +124,7 @@ export default function AdvancedThemeScreen() {
         >
           <Text style={styles.heroTitle}>Whole app look</Text>
           <Text style={styles.heroSub}>
-            Accent, chat bubbles, badges, and chat backgrounds change together — like Meta advanced themes.
+            Accent, chat bubbles, badges, and chat backgrounds change together across the whole app.
           </Text>
         </LinearGradient>
 
@@ -263,7 +269,10 @@ export default function AdvancedThemeScreen() {
                 key={icon.id}
                 style={[
                   styles.iconChip,
-                  { borderColor: appIconStyle === icon.id ? colors.primary : colors.border },
+                  {
+                    width: themeCardWidth,
+                    borderColor: appIconStyle === icon.id ? colors.primary : colors.border,
+                  },
                 ]}
                 onPress={() => void setAppIconStyle(icon.id)}
               >
@@ -336,7 +345,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 16, fontFamily: "Inter_700Bold", marginBottom: 10 },
   hint: { fontSize: 12, lineHeight: 18, marginBottom: 12 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  themeCard: { width: "30%", minWidth: 96, borderRadius: 12, borderWidth: 1.5, padding: 8, alignItems: "center" },
+  themeCard: { borderRadius: 12, borderWidth: 1.5, padding: 8, alignItems: "center" },
   swatch: { width: "100%", aspectRatio: 1, borderRadius: 10, justifyContent: "center", alignItems: "center" },
   check: { width: 24, height: 24, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center" },
   cardLabel: { fontSize: 11, marginTop: 6, fontFamily: "Inter_500Medium" },
@@ -385,7 +394,7 @@ const styles = StyleSheet.create({
   animChip: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5 },
   animLabel: { fontSize: 13, fontFamily: "Inter_500Medium" },
   iconRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  iconChip: { width: "30%", alignItems: "center", padding: 10, borderRadius: 12, borderWidth: 1.5 },
+  iconChip: { alignItems: "center", padding: 10, borderRadius: 12, borderWidth: 1.5 },
   iconDot: { width: 36, height: 36, borderRadius: 10 },
   iconLabel: { fontSize: 11, marginTop: 6, textAlign: "center" },
 });

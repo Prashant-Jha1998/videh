@@ -295,7 +295,7 @@ export function ManualImageCropModal({
           {...(!loading && crop && displayBounds ? panResponder.panHandlers : {})}
         >
           {loading || !imageSize || !displayBounds ? (
-            <ActivityIndicator color="#00a884" size="large" />
+            <ActivityIndicator color="#5B4FE8" size="large" />
           ) : (
             <>
               <View
@@ -408,7 +408,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   title: { color: "#fff", fontSize: 17, fontFamily: "Inter_600SemiBold" },
-  done: { color: "#00a884", fontSize: 17, fontFamily: "Inter_700Bold" },
+  done: { color: "#5B4FE8", fontSize: 17, fontFamily: "Inter_700Bold" },
   doneDisabled: { opacity: 0.4 },
   canvas: { flex: 1, backgroundColor: "#000" },
   dim: { position: "absolute", backgroundColor: "rgba(0,0,0,0.55)" },

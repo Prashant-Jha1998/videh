@@ -1,6 +1,6 @@
 import type { AssistantLangCode } from "./assistantLanguages";
 
-/** Instant reply right after "Hey" / "Hey Videh" — WhatsApp-style. */
+/** Instant reply right after "Hey" / "Hey Videh" — Videh. */
 export function wakeListenPrompt(lang: AssistantLangCode = "en"): string {
   const map: Partial<Record<AssistantLangCode, string>> = {
     en: "Yes?",

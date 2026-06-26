@@ -238,7 +238,7 @@ export async function pickFeedAds(count: number): Promise<ReelsFeedAdItem[]> {
   return out;
 }
 
-/** YouTube-style: ads appear after a random number of videos within [minGap, maxGap]. */
+/** in-stream video: ads appear after a random number of videos within [minGap, maxGap]. */
 export function planFeedAdPlacements(
   videoCount: number,
   ads: ReelsFeedAdItem[],

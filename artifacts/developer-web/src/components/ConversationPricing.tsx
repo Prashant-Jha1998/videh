@@ -14,9 +14,9 @@ export function ConversationPricing({ variant = "dark" }: { variant?: Variant })
   const card = dark
     ? "rounded-2xl border border-white/10 bg-white/5 p-5"
     : "rounded-2xl border border-gray-200 bg-white p-5 shadow-sm";
-  const title = dark ? "text-white" : "text-[#111b21]";
+  const title = dark ? "text-white" : "text-[#14131F]";
   const muted = dark ? "text-white/60" : "text-[#667781]";
-  const accent = "text-[#00a884]";
+  const accent = "text-[#5B4FE8]";
 
   return (
     <div className="space-y-6">
@@ -70,8 +70,8 @@ export function ConversationPricing({ variant = "dark" }: { variant?: Variant })
       <div
         className={
           dark
-            ? "rounded-xl border border-[#00a884]/30 bg-[#00a884]/10 p-4 text-sm text-white/80"
-            : "rounded-xl border border-[#00a884]/30 bg-[#00a884]/5 p-4 text-sm text-[#667781]"
+            ? "rounded-xl border border-[#5B4FE8]/30 bg-[#5B4FE8]/10 p-4 text-sm text-white/80"
+            : "rounded-xl border border-[#5B4FE8]/30 bg-[#5B4FE8]/5 p-4 text-sm text-[#667781]"
         }
       >
         <p className={`font-semibold ${title} flex items-center gap-2 mb-2`}>

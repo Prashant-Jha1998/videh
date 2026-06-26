@@ -14,7 +14,7 @@ export function WebCallMessageBubble({ content, isMe }: { content: string; isMe:
           width: 22,
           height: 22,
           borderRadius: "50%",
-          backgroundColor: isMissed ? "#ea0038" : "#00a884",
+          backgroundColor: isMissed ? "#ea0038" : "#5B4FE8",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -29,7 +29,7 @@ export function WebCallMessageBubble({ content, isMe }: { content: string; isMe:
           )}
         </svg>
       </div>
-      <span style={{ fontSize: 14.5, color: isMissed && !isMe ? "#ea0038" : "#111b21", fontStyle: "normal" }}>
+      <span style={{ fontSize: 14.5, color: isMissed && !isMe ? "#ea0038" : "#14131F", fontStyle: "normal" }}>
         {label}
       </span>
     </div>

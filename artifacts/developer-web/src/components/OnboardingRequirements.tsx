@@ -132,7 +132,7 @@ const STATS = [
 
 export function OnboardingRequirements() {
   return (
-    <section id="requirements" className="py-24 px-4 bg-[#0b141a] text-white relative overflow-hidden">
+    <section id="requirements" className="py-24 px-4 bg-[#12101F] text-white relative overflow-hidden">
       <div
         className="absolute inset-0 pointer-events-none opacity-40"
         aria-hidden
@@ -143,7 +143,7 @@ export function OnboardingRequirements() {
       />
       <div className="max-w-6xl mx-auto relative">
         <div className="text-center max-w-3xl mx-auto mb-14">
-          <p className="text-[#00a884] text-sm font-semibold uppercase tracking-widest mb-3">
+          <p className="text-[#5B4FE8] text-sm font-semibold uppercase tracking-widest mb-3">
             Before API access
           </p>
           <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-4">
@@ -161,7 +161,7 @@ export function OnboardingRequirements() {
               key={s.label}
               className="rounded-2xl border border-white/10 bg-white/5 px-4 py-5 text-center"
             >
-              <p className="text-2xl md:text-3xl font-extrabold text-[#00a884]">{s.value}</p>
+              <p className="text-2xl md:text-3xl font-extrabold text-[#5B4FE8]">{s.value}</p>
               <p className="text-xs text-white/50 mt-1">{s.label}</p>
             </div>
           ))}
@@ -174,7 +174,7 @@ export function OnboardingRequirements() {
               className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden"
             >
               <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-6 px-6 py-5 border-b border-white/10 bg-white/[0.02]">
-                <span className="text-xs font-bold text-[#00a884] uppercase tracking-wider">
+                <span className="text-xs font-bold text-[#5B4FE8] uppercase tracking-wider">
                   {phase.phase}
                 </span>
                 <div className="flex-1">
@@ -189,9 +189,9 @@ export function OnboardingRequirements() {
                 {phase.items.map((item) => (
                   <div
                     key={item.title}
-                    className="flex gap-4 p-5 bg-[#0b141a] hover:bg-[#111b21] transition-colors"
+                    className="flex gap-4 p-5 bg-[#12101F] hover:bg-[#14131F] transition-colors"
                   >
-                    <div className="h-10 w-10 shrink-0 rounded-xl bg-[#00a884]/15 flex items-center justify-center text-[#00a884]">
+                    <div className="h-10 w-10 shrink-0 rounded-xl bg-[#5B4FE8]/15 flex items-center justify-center text-[#5B4FE8]">
                       <item.icon className="h-5 w-5" />
                     </div>
                     <div>
@@ -205,15 +205,15 @@ export function OnboardingRequirements() {
           ))}
         </div>
 
-        <div className="mt-12 rounded-2xl border border-[#00a884]/30 bg-[#00a884]/10 p-6 md:p-8 text-center">
-          <p className="text-lg font-semibold mb-2">The same process on Videh — end to end</p>
+        <div className="mt-12 rounded-2xl border border-[#5B4FE8]/30 bg-[#5B4FE8]/10 p-6 md:p-8 text-center">
+          <p className="text-lg font-semibold mb-2">The same process on Videh — full workflow</p>
           <p className="text-white/70 text-sm max-w-2xl mx-auto mb-6">
             You submit the application → we verify documents → business channel and templates are approved →
             you receive API keys and webhooks. No step can be skipped.
           </p>
           <a
             href="#get-api"
-            className="inline-flex items-center gap-2 bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold px-8 py-3 rounded-xl transition-colors"
+            className="inline-flex items-center gap-2 bg-[#5B4FE8] hover:bg-[#008f6f] text-white font-semibold px-8 py-3 rounded-xl transition-colors"
           >
             Start verification
           </a>

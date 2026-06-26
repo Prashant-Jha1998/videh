@@ -1,19 +1,27 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
+  Alert,
   FlatList,
   Platform,
+  Share,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useApp, type CallLog } from "@/context/AppContext";
+import { useApp } from "@/context/AppContext";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { ThemedHeader } from "@/components/ThemedHeader";
+import { DropdownMenu } from "@/components/DropdownMenu";
+import { filterCallLogs } from "@/lib/callLogFilter";
+import { createCallLink } from "@/lib/callLinks";
+import { interpolate } from "@/lib/i18n";
 
 function formatCallTime(ts: number, yesterdayLabel: string): string {
   const now = Date.now();
@@ -31,26 +39,115 @@ export default function CallsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { callLogs } = useApp();
+  const { callLogs, clearCallLogs, user } = useApp();
   const { t } = useUiPreferences();
   const [tab, setTab] = useState<"all" | "missed">("all");
+  const [searching, setSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const filtered = tab === "missed" ? callLogs.filter((c) => c.status === "missed") : callLogs;
+  const filtered = useMemo(
+    () => filterCallLogs(callLogs, { tab, query: searchQuery }),
+    [callLogs, tab, searchQuery],
+  );
+
+  const emptyMessage = useMemo(() => {
+    const q = searchQuery.trim();
+    if (q) return interpolate(t("calls.noSearchResults"), { query: q });
+    if (tab === "missed") return t("calls.noMissed");
+    return t("calls.noCalls");
+  }, [searchQuery, tab, t]);
+
+  const shareCallLink = async () => {
+    const link = await createCallLink(user?.sessionToken, { type: "video", hoursValid: 48 });
+    if (!link) {
+      Alert.alert(t("common.error"), t("calls.linkFailed"));
+      return;
+    }
+    const domain = process.env.EXPO_PUBLIC_DOMAIN;
+    const url = link.webPath && domain
+      ? `${domain.startsWith("http") ? domain : `https://${domain}`}${link.webPath}`
+      : link.deepLink;
+    if (Platform.OS === "web" && typeof navigator !== "undefined" && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(url);
+        Alert.alert(t("calls.linkCreated"), t("calls.linkCopied"));
+        return;
+      } catch {
+        /* fall through */
+      }
+    }
+    try {
+      await Share.share({ message: `Join my Videh call:\n${url}`, title: "Videh call link" });
+    } catch {
+      Alert.alert(t("calls.linkCreated"), url);
+    }
+  };
+
+  const confirmClearLog = () => {
+    Alert.alert(t("calls.menu.clearLog"), t("calls.menu.clearLogConfirm"), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("calls.menu.clearLog"),
+        style: "destructive",
+        onPress: () => {
+          void clearCallLogs();
+        },
+      },
+    ]);
+  };
+
+  const menuItems = [
+    { label: t("calls.menu.createLink"), icon: "link-outline", onPress: () => void shareCallLink() },
+    { label: t("calls.menu.notifications"), icon: "notifications-outline", onPress: () => router.push("/settings/notifications") },
+    { label: t("calls.menu.clearLog"), icon: "trash-outline", danger: true, onPress: confirmClearLog },
+  ];
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
-        <Text style={styles.headerTitle}>{t("calls.title")}</Text>
-        <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerBtn}>
-            <Ionicons name="search-outline" size={22} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerBtn}>
-            <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
-          </TouchableOpacity>
-        </View>
+        {searching ? (
+          <View style={styles.searchHeader}>
+            <TouchableOpacity
+              style={styles.headerBtn}
+              onPress={() => { setSearching(false); setSearchQuery(""); }}
+            >
+              <Ionicons name="arrow-back" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TextInput
+              style={styles.searchInput}
+              placeholder={t("calls.searchPlaceholder")}
+              placeholderTextColor="rgba(255,255,255,0.65)"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+          </View>
+        ) : (
+          <>
+            <Text style={styles.headerTitle}>{t("calls.title")}</Text>
+            <View style={styles.headerRight}>
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSearching(true); }}
+              >
+                <Ionicons name="search-outline" size={22} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMenuOpen(true); }}
+              >
+                <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </ThemedHeader>
+
+      <DropdownMenu visible={menuOpen} onClose={() => setMenuOpen(false)} items={menuItems} topOffset={topPad + 46} />
 
       <View style={[styles.tabs, { borderBottomColor: colors.border }]}>
         {(["all", "missed"] as const).map((tabId) => (
@@ -113,7 +210,7 @@ export default function CallsScreen() {
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="call-outline" size={60} color={colors.mutedForeground} />
-            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>{t("calls.noMissed")}</Text>
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>{emptyMessage}</Text>
           </View>
         }
         contentContainerStyle={{ paddingBottom: 100 }}
@@ -135,6 +232,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 10 },
   headerTitle: { color: "#fff", fontSize: 22, fontFamily: "Inter_700Bold" },
   headerRight: { flexDirection: "row" },
+  searchHeader: { flex: 1, flexDirection: "row", alignItems: "center", gap: 4 },
+  searchInput: { flex: 1, color: "#fff", fontSize: 17, fontFamily: "Inter_400Regular", paddingVertical: 4 },
   headerBtn: { padding: 6 },
   tabs: { flexDirection: "row", borderBottomWidth: 0.5, marginHorizontal: 16 },
   tabBtn: { flex: 1, alignItems: "center", paddingVertical: 10, position: "relative" },
@@ -148,7 +247,7 @@ const styles = StyleSheet.create({
   meta: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
   metaText: { fontSize: 13, fontFamily: "Inter_400Regular" },
   callBtn: { padding: 10 },
-  empty: { alignItems: "center", marginTop: 80, gap: 12 },
-  emptyText: { fontSize: 15, fontFamily: "Inter_400Regular" },
+  empty: { alignItems: "center", marginTop: 80, gap: 12, paddingHorizontal: 24 },
+  emptyText: { fontSize: 15, fontFamily: "Inter_400Regular", textAlign: "center" },
   fab: { position: "absolute", bottom: 90, right: 20, width: 60, height: 60, borderRadius: 30, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 5 },
 });

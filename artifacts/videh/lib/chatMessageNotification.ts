@@ -19,7 +19,7 @@ export type ChatMessageNotificationPayload = {
   isGroup?: boolean;
 };
 
-/** WhatsApp-style local notification: avatar + inline Reply / Mark read / Mute. */
+/** Videh local notification: avatar + inline Reply / Mark read / Mute. */
 export async function showChatMessageNotification(payload: ChatMessageNotificationPayload): Promise<void> {
   if (Platform.OS === "web") return;
   agentDebugLog(

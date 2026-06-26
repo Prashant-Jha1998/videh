@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { stateDelete, stateGetJson, stateSetJson } from "./sharedState";
 
-/** Lock after this many wrong OTP / PIN attempts (WhatsApp-style). */
+/** Lock after this many wrong OTP / PIN attempts (Videh). */
 export const LOGIN_MAX_FAILS = 2;
 export const LOGIN_LOCK_MS = 15 * 60 * 1000;
 

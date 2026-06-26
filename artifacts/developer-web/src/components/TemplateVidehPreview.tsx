@@ -26,7 +26,7 @@ function MediaPlaceholder({
   hint?: string;
 }) {
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-3 bg-gradient-to-br from-[#00a884]/25 to-[#128c7e]/35">
+    <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-3 bg-gradient-to-br from-[#5B4FE8]/25 to-[#128c7e]/35">
       {kind === "video" ? (
         <Play className="h-8 w-8 text-white/70 mb-1" />
       ) : (
@@ -66,7 +66,7 @@ export function TemplateVidehPreview({
   }, [mediaUrl, draft.headerFormat]);
 
   const mediaFrameClass =
-    "w-full bg-[#2a3942] border-b border-white/5 relative overflow-hidden aspect-[800/418] max-h-[160px]";
+    "w-full bg-[#2A2838] border-b border-white/5 relative overflow-hidden aspect-[800/418] max-h-[160px]";
 
   const isMediaHeader = draft.headerFormat === "IMAGE" || draft.headerFormat === "VIDEO";
   const mediaSpecs = isMediaHeader ? headerMediaSpecs(draft.headerFormat) : null;
@@ -101,7 +101,7 @@ export function TemplateVidehPreview({
       style={{ maxHeight: compact ? "420px" : "min(640px, calc(100dvh - 6rem))" }}
     >
       <div className="shrink-0 flex items-center gap-3 px-4 py-3 bg-[#202c33] border-b border-white/5">
-        <div className="h-10 w-10 shrink-0 rounded-full bg-gradient-to-br from-[#00a884] to-[#128c7e] flex items-center justify-center text-white font-bold text-sm">
+        <div className="h-10 w-10 shrink-0 rounded-full bg-gradient-to-br from-[#5B4FE8] to-[#128c7e] flex items-center justify-center text-white font-bold text-sm">
           {businessName.charAt(0).toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
@@ -118,7 +118,7 @@ export function TemplateVidehPreview({
           How customers see this template on Videh
         </p>
 
-        <div className="bg-[#1f2c34] rounded-xl overflow-hidden w-full max-w-[340px] mx-auto shadow-md">
+        <div className="bg-[#1E1D2E] rounded-xl overflow-hidden w-full max-w-[340px] mx-auto shadow-md">
           {hasHeader && draft.headerFormat === "TEXT" ? (
             <div className="px-3 pt-3 pb-1">
               <p className="text-[13px] font-semibold text-[#e9edef] leading-snug">
@@ -197,7 +197,7 @@ export function TemplateVidehPreview({
                     ? "text-[#8696a0] bg-[#182229]"
                     : hintTone === "error"
                       ? "text-[#f15c6d] bg-[#f15c6d]/10"
-                      : "text-[#e9edef] bg-[#00a884]/15"
+                      : "text-[#e9edef] bg-[#5B4FE8]/15"
               }`}
             >
               {validationHint}
@@ -226,7 +226,7 @@ export function TemplateVidehPreview({
                   key={`${btn.type}-${i}`}
                   type="button"
                   tabIndex={-1}
-                  className="w-full flex items-center justify-center gap-1.5 py-2.5 text-[#00a884] text-[13px] font-medium border-t border-white/10 bg-[#1a262d] hover:bg-[#1f2c34]"
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 text-[#5B4FE8] text-[13px] font-medium border-t border-white/10 bg-[#1a262d] hover:bg-[#1E1D2E]"
                 >
                   <ButtonIcon type={btn.type} />
                   {btn.text.trim() || "Button"}
@@ -239,7 +239,7 @@ export function TemplateVidehPreview({
       </div>
 
       <div className="shrink-0 px-3 py-2 bg-[#202c33] border-t border-white/5">
-        <div className="h-8 rounded-full bg-[#2a3942] px-4 flex items-center text-[#8696a0] text-xs">Type a message</div>
+        <div className="h-8 rounded-full bg-[#2A2838] px-4 flex items-center text-[#8696a0] text-xs">Type a message</div>
       </div>
     </div>
   );

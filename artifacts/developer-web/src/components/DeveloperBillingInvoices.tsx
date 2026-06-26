@@ -217,7 +217,7 @@ export function DeveloperBillingInvoices({
           email: contactEmail,
           contact: contactPhone,
         },
-        theme: { color: "#00a884" },
+        theme: { color: "#5B4FE8" },
         method: { card: true, upi: true, netbanking: true },
         handler: async (response: {
           razorpay_payment_id: string;
@@ -254,13 +254,13 @@ export function DeveloperBillingInvoices({
       <button
         type="button"
         onClick={onBack}
-        className="inline-flex items-center gap-2 text-sm font-semibold text-[#00a884] hover:underline"
+        className="inline-flex items-center gap-2 text-sm font-semibold text-[#5B4FE8] hover:underline"
       >
         <ArrowLeft className="h-4 w-4" />
         Back to usage
       </button>
 
-      <h3 className="text-lg font-bold text-[#111b21]">
+      <h3 className="text-lg font-bold text-[#14131F]">
         {filter === "current" ? "Current bill" : "Previous bills"}
       </h3>
       <p className="text-xs text-[#667781]">Unpaid bills appear first, then paid bills (by date).</p>
@@ -269,7 +269,7 @@ export function DeveloperBillingInvoices({
         type="button"
         disabled={busy}
         onClick={() => void load()}
-        className="inline-flex items-center gap-2 text-sm font-semibold text-[#00a884] hover:underline disabled:opacity-60"
+        className="inline-flex items-center gap-2 text-sm font-semibold text-[#5B4FE8] hover:underline disabled:opacity-60"
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
         Refresh
@@ -305,7 +305,7 @@ export function DeveloperBillingInvoices({
                 return (
                   <tr key={inv.id} className="border-t border-gray-100 align-middle">
                     <td className="px-3 py-3 text-center text-[#667781] font-medium">{serialNo}</td>
-                    <td className="px-3 py-3 font-mono text-xs text-[#00a884] break-all">{inv.bill_number}</td>
+                    <td className="px-3 py-3 font-mono text-xs text-[#5B4FE8] break-all">{inv.bill_number}</td>
                     <td className="px-3 py-3 whitespace-nowrap tabular-nums">{formatBillDate(inv.bill_date)}</td>
                     <td className="px-3 py-3 whitespace-nowrap tabular-nums">{formatBillDate(inv.due_date)}</td>
                     <td className="px-3 py-3 font-semibold whitespace-nowrap">{formatInrRupees(inv.amount_inr)}</td>
@@ -322,7 +322,7 @@ export function DeveloperBillingInvoices({
                           type="button"
                           disabled={downloadingId === inv.id}
                           onClick={() => void downloadBillPdf(inv)}
-                          className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#00a884]/40 px-2.5 py-1.5 text-xs font-semibold text-[#00a884] hover:bg-[#e7f9f3] disabled:opacity-60"
+                          className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#5B4FE8]/40 px-2.5 py-1.5 text-xs font-semibold text-[#5B4FE8] hover:bg-[#e7f9f3] disabled:opacity-60"
                         >
                           {downloadingId === inv.id ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -336,7 +336,7 @@ export function DeveloperBillingInvoices({
                             type="button"
                             disabled={payingId === inv.id}
                             onClick={() => void payBill(inv)}
-                            className="shrink-0 rounded-lg bg-[#00a884] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#008f72] disabled:opacity-60 whitespace-nowrap"
+                            className="shrink-0 rounded-lg bg-[#5B4FE8] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#008f72] disabled:opacity-60 whitespace-nowrap"
                           >
                             {payingId === inv.id ? "…" : "Pay"}
                           </button>
@@ -362,7 +362,7 @@ export function DeveloperBillingInvoices({
               type="button"
               disabled={busy || pagination.page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#111b21] hover:bg-[#f0f2f5] disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#14131F] hover:bg-[#f0f2f5] disabled:opacity-50"
             >
               <ChevronLeft className="h-4 w-4" />
               Previous
@@ -374,7 +374,7 @@ export function DeveloperBillingInvoices({
               type="button"
               disabled={busy || pagination.page >= pagination.total_pages}
               onClick={() => setPage((p) => p + 1)}
-              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#111b21] hover:bg-[#f0f2f5] disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#14131F] hover:bg-[#f0f2f5] disabled:opacity-50"
             >
               Next
               <ChevronRight className="h-4 w-4" />

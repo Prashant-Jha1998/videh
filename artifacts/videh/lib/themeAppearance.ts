@@ -31,7 +31,7 @@ export type AppIconStyleId =
   | "blue"
   | "purple";
 
-/** Full app look derived from a theme (Meta-style advanced theming). */
+/** Full app look derived from a Videh theme pack. */
 export type ThemeAppearance = {
   id: string;
   name: string;
@@ -59,7 +59,7 @@ export const THEME_PACK_META: Record<
   ThemePackId,
   { title: string; subtitle: string; icon: string }
 > = {
-  classic: { title: "Classic", subtitle: "Videh greens & basics", icon: "leaf-outline" },
+  classic: { title: "Classic", subtitle: "Videh signature look", icon: "leaf-outline" },
   amoled: { title: "AMOLED Black", subtitle: "Pure black, battery friendly", icon: "moon-outline" },
   neon: { title: "Dark Neon", subtitle: "Glow accents on dark", icon: "flash-outline" },
   gold: { title: "Gold", subtitle: "Premium metallic look", icon: "diamond-outline" },
@@ -78,8 +78,8 @@ export const ANIMATED_WALLPAPERS: { id: AnimatedWallpaperId; name: string }[] = 
 ];
 
 export const APP_ICON_STYLES: { id: AppIconStyleId; name: string; color: string }[] = [
-  { id: "default", name: "Videh Green", color: "#00A884" },
-  { id: "green", name: "Green", color: "#25D366" },
+  { id: "default", name: "Videh Indigo", color: "#5B4FE8" },
+  { id: "indigo", name: "Indigo", color: "#6366F1" },
   { id: "black", name: "Black", color: "#111827" },
   { id: "gold", name: "Gold", color: "#CA8A04" },
   { id: "blue", name: "Blue", color: "#2563EB" },
@@ -122,7 +122,7 @@ export function mixHex(a: string, b: string, t: number): string {
   );
 }
 
-/** Derive WhatsApp-style bubbles from accent when not explicitly set. */
+/** Derive chat bubbles from accent when not explicitly set. */
 export function deriveBubblesFromAccent(accent: string): Pick<
   ThemeAppearance,
   "bubbleSentLight" | "bubbleReceivedLight" | "bubbleSentDark" | "bubbleReceivedDark"
@@ -130,8 +130,8 @@ export function deriveBubblesFromAccent(accent: string): Pick<
   return {
     bubbleSentLight: mixHex(accent, "#FFFFFF", 0.78),
     bubbleReceivedLight: "#FFFFFF",
-    bubbleSentDark: mixHex(accent, "#0B141A", 0.55),
-    bubbleReceivedDark: "#1F2C34",
+    bubbleSentDark: mixHex(accent, "#12101F", 0.55),
+    bubbleReceivedDark: "#1E1D2E",
   };
 }
 
@@ -140,12 +140,12 @@ const PREMIUM_OVERRIDES: Partial<
 > = {
   black: {
     pack: "amoled",
-    bubbleSentLight: "#2A3942",
+    bubbleSentLight: "#2A2838",
     bubbleReceivedLight: "#1A2329",
-    bubbleSentDark: "#005C4B",
-    bubbleReceivedDark: "#1F2C34",
-    chatBackgroundLight: "#E5DDD5",
-    chatBackgroundDark: "#000000",
+    bubbleSentDark: "#3D3566",
+    bubbleReceivedDark: "#1E1D2E",
+    chatBackgroundLight: "#EDEAF5",
+    chatBackgroundDark: "#12101F",
     premium: true,
   },
   neon: {
@@ -203,8 +203,8 @@ function fromAppTheme(opt: AppThemeOption): ThemeAppearance {
     pack,
     kind: opt.kind,
     accent: opt.colors,
-    chatBackgroundLight: override?.chatBackgroundLight ?? "#E5DDD5",
-    chatBackgroundDark: override?.chatBackgroundDark ?? "#0B141A",
+    chatBackgroundLight: override?.chatBackgroundLight ?? "#EDEAF5",
+    chatBackgroundDark: override?.chatBackgroundDark ?? "#12101F",
     animatedWallpaper: override?.animatedWallpaper,
     premium: override?.premium,
     ...bubbles,

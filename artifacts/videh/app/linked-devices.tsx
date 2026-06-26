@@ -259,8 +259,8 @@ export default function LinkedDevicesScreen() {
           <Ionicons name="lock-closed-outline" size={14} color={colors.mutedForeground} />
           <Text style={[styles.encryptionText, { color: colors.mutedForeground }]}>
             Your personal messages are{" "}
-            <Text style={{ color: "#00a884", fontWeight: "700" }}>end-to-end encrypted</Text>
-            {" "}on all your devices.
+            <Text style={{ color: "#5B4FE8", fontWeight: "700" }}>protected with TLS encryption</Text>
+            {" "}on all your linked devices.
           </Text>
         </View>
       </ScrollView>
@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
   overlayRow: { flexDirection: "row", height: 260 },
   overlaySide: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
   scanWindow: { width: 260, position: "relative" },
-  corner: { position: "absolute", width: CORNER_SIZE, height: CORNER_SIZE, borderColor: "#00a884" },
+  corner: { position: "absolute", width: CORNER_SIZE, height: CORNER_SIZE, borderColor: "#5B4FE8" },
   cornerTL: { top: 0, left: 0, borderTopWidth: CORNER_WIDTH, borderLeftWidth: CORNER_WIDTH, borderTopLeftRadius: 4 },
   cornerTR: { top: 0, right: 0, borderTopWidth: CORNER_WIDTH, borderRightWidth: CORNER_WIDTH, borderTopRightRadius: 4 },
   cornerBL: { bottom: 0, left: 0, borderBottomWidth: CORNER_WIDTH, borderLeftWidth: CORNER_WIDTH, borderBottomLeftRadius: 4 },

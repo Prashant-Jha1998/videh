@@ -78,7 +78,7 @@ export const pa = locale({
   "chats.noMessagesYet": "ਅਜੇ ਕੋਈ ਸੁਨੇਹਾ ਨਹੀਂ",
   "chats.noArchived": "ਕੋਈ ਆਰਕਾਈਵ ਚੈਟ ਨਹੀਂ",
   "chats.noArchivedHint": "ਆਰਕਾਈਵ ਚੈਟ ਇੱਥੇ ਦਿਖਾਈ ਦੇਣਗੀਆਂ।",
-  "chats.emptyHint": "ਆਪਣੇ ਸੰਪਰਕਾਂ ਨਾਲ ਗੱਲਬਾਤ ਸ਼ੁਰੂ ਕਰੋ।\nਤੁਹਾਡੇ ਸੁਨੇਹੇ ਐਂਡ-ਟੂ-ਐਂਡ ਐਨਕ੍ਰਿਪਟ ਹਨ।",
+  "chats.emptyHint": "ਆਪਣੇ ਸੰਪਰਕਾਂ ਨਾਲ ਗੱਲਬਾਤ ਸ਼ੁਰੂ ਕਰੋ।\nਤੁਹਾਡੇ ਸੁਨੇਹੇ ਟ੍ਰਾਂਜ਼ਿਟ ਵਿੱਚ TLS ਨਾਲ ਸੁਰੱਖਿਅਤ ਹਨ।",
   "chats.startChat": "ਚੈਟ ਸ਼ੁਰੂ ਕਰੋ",
   "chats.noSearchResults": "\"{query}\" ਲਈ ਕੋਈ ਨਤੀਜਾ ਨਹੀਂ",
   "chats.unlockAndOpen": "ਅਨਲਾਕ ਕਰਕੇ ਖੋਲ੍ਹੋ",

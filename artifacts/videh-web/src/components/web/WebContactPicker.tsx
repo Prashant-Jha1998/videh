@@ -205,7 +205,7 @@ export function WebContactPicker({
           style={{
             width: "100%",
             border: "none",
-            borderBottom: "2px solid #00a884",
+            borderBottom: "2px solid #5B4FE8",
             padding: "10px 4px",
             fontSize: 14,
             outline: "none",

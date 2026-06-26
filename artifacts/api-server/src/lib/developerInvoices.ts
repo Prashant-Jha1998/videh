@@ -310,8 +310,8 @@ export function buildInvoiceHtml(inv: DeveloperInvoiceRow, companyName: string):
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/><title>${inv.bill_number}</title>
 <style>
-  body{font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#111b21;max-width:720px;margin:0 auto}
-  h1{color:#00a884;font-size:22px;margin-bottom:8px}
+  body{font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#14131F;max-width:720px;margin:0 auto}
+  h1{color:#5B4FE8;font-size:22px;margin-bottom:8px}
   .meta{line-height:1.7;margin:16px 0}
   table{width:100%;border-collapse:collapse;margin:16px 0}
   td,th{padding:10px 12px;border-bottom:1px solid #e9edef;text-align:left}
@@ -319,7 +319,7 @@ export function buildInvoiceHtml(inv: DeveloperInvoiceRow, companyName: string):
   .tag{display:inline-block;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700}
   .paid{background:#d1fae5;color:#065f46}.unpaid{background:#fee2e2;color:#991b1b}
   .toolbar{margin:20px 0;padding:12px;background:#f0f2f5;border-radius:8px;font-size:13px}
-  .btn{background:#00a884;color:#fff;border:none;padding:10px 18px;border-radius:8px;font-weight:700;cursor:pointer;margin-right:8px}
+  .btn{background:#5B4FE8;color:#fff;border:none;padding:10px 18px;border-radius:8px;font-weight:700;cursor:pointer;margin-right:8px}
   @media print{.toolbar{display:none}}
 </style></head><body>
 <div class="toolbar no-print">

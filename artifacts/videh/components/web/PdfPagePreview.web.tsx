@@ -12,7 +12,7 @@ type Props = {
   localUri?: string | null;
 };
 
-/** WhatsApp-style first-page PDF strip above document bubble (web only). */
+/** Videh first-page PDF strip above document bubble (web only). */
 export function PdfPagePreview({ mediaUrl, filename, sessionToken, height = 200 }: Props) {
   const hostRef = useRef<View>(null);
   const [loading, setLoading] = useState(true);

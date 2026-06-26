@@ -1152,7 +1152,7 @@ router.post("/:token/statuses", async (req: Request, res: Response) => {
       `INSERT INTO statuses (user_id, content, type, background_color, media_url, expires_at)
        VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '24 hours')
        RETURNING id, user_id, content, type, background_color, media_url, expires_at, created_at`,
-      [session.userId, content.trim(), type ?? "text", backgroundColor ?? "#00A884", mediaUrl ?? null],
+      [session.userId, content.trim(), type ?? "text", backgroundColor ?? "#5B4FE8", mediaUrl ?? null],
     );
     res.json({ success: true, status: result.rows[0] });
   } catch (err) {

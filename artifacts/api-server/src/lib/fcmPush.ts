@@ -135,7 +135,7 @@ export async function sendFcmChatPush(
     if (options?.isCall) {
       const { android, ios } = splitFcmTokensByPlatform(tokens);
 
-      // Android: data-only wakes JS → CallKeep + local full-screen notification (WhatsApp-style).
+      // Android: data-only wakes JS → CallKeep + local full-screen notification (Videh).
       await sendFcmMulticast(messaging, android, {
         data: dataPayload,
         android: {

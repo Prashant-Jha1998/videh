@@ -54,7 +54,7 @@ const ATTACH_ITEMS: {
 }[] = [
   { key: "gal", icon: "images", label: "Gallery", color: "#2F80ED", type: "gallery" },
   { key: "cam", icon: "camera", label: "Camera", color: "#E8558D", type: "camera" },
-  { key: "loc", icon: "location", label: "Location", color: "#25D366", type: "location" },
+  { key: "loc", icon: "location", label: "Location", color: "#7C6CF0", type: "location" },
   { key: "con", icon: "person", label: "Contact", color: "#1296D4", type: "contact" },
   { key: "doc", icon: "document-text", label: "Document", color: "#8B5CF6", type: "document" },
   { key: "vidcam", icon: "videocam", label: "Record video", color: "#C2185B", type: "videocamera" },
@@ -75,7 +75,7 @@ type Props = {
   insets: EdgeInsets;
   onClose: () => void;
   onAction: (type: AttachSheetAction) => void;
-  /** WhatsApp-style: send one or many gallery picks (ordered). */
+  /** Videh: send one or many gallery picks (ordered). */
   onPickAssets: (assets: GalleryAsset[]) => void;
 };
 
@@ -317,7 +317,7 @@ export function ChatAttachSheet({ visible, colors, insets, onClose, onAction, on
           </View>
           <Text style={[styles.viewOnceText, { color: colors.primary }]}>View once photo or video</Text>
         </TouchableOpacity>
-        <View style={[styles.galleryDivider, { borderTopColor: colors.isDark ? "#2A3942" : "#D1D7DB" }]} />
+        <View style={[styles.galleryDivider, { borderTopColor: colors.isDark ? "#2A2838" : "#D1D7DB" }]} />
         <TouchableOpacity style={styles.expandHint} onPress={snapExpand} activeOpacity={0.8}>
           <Ionicons name="chevron-up" size={18} color={colors.mutedForeground} />
           <Text style={[styles.expandHintText, { color: colors.mutedForeground }]}>Swipe up for all photos</Text>
@@ -349,17 +349,17 @@ export function ChatAttachSheet({ visible, colors, insets, onClose, onAction, on
           {expanded ? (
             <View style={styles.galleryToolbar}>
               <TouchableOpacity onPress={snapCollapse} hitSlop={12} style={styles.toolbarBtn}>
-                <Ionicons name="chevron-down" size={26} color={colors.isDark ? "#E9EDEF" : "#111B21"} />
+                <Ionicons name="chevron-down" size={26} color={colors.isDark ? "#E9EDEF" : "#14131F"} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.albumBtn}
                 onPress={() => setAlbumMenuOpen((v) => !v)}
                 activeOpacity={0.75}
               >
-                <Text style={[styles.albumTitle, { color: colors.isDark ? "#E9EDEF" : "#111B21" }]} numberOfLines={1}>
+                <Text style={[styles.albumTitle, { color: colors.isDark ? "#E9EDEF" : "#14131F" }]} numberOfLines={1}>
                   {selectedAlbum?.title ?? "Recents"}
                 </Text>
-                <Ionicons name="chevron-down" size={18} color={colors.isDark ? "#E9EDEF" : "#111B21"} />
+                <Ionicons name="chevron-down" size={18} color={colors.isDark ? "#E9EDEF" : "#14131F"} />
               </TouchableOpacity>
               {selectedOrder.length > 0 ? (
                 <TouchableOpacity style={styles.sendBtn} onPress={confirmSelection} hitSlop={8}>
@@ -376,7 +376,7 @@ export function ChatAttachSheet({ visible, colors, insets, onClose, onAction, on
                   onPress={() => onAction("gallery")}
                   hitSlop={8}
                 >
-                  <Ionicons name="folder-open-outline" size={22} color={colors.isDark ? "#E9EDEF" : "#111B21"} />
+                  <Ionicons name="folder-open-outline" size={22} color={colors.isDark ? "#E9EDEF" : "#14131F"} />
                 </TouchableOpacity>
               )}
             </View>
@@ -447,11 +447,11 @@ export function ChatAttachSheet({ visible, colors, insets, onClose, onAction, on
                     style={[styles.albumRow, selected && { backgroundColor: colors.isDark ? "#1a282f" : "#f0f9f6" }]}
                     onPress={() => void loadAlbum(item)}
                   >
-                    <View style={[styles.albumThumb, { backgroundColor: colors.isDark ? "#2A3942" : "#e9edef" }]}>
+                    <View style={[styles.albumThumb, { backgroundColor: colors.isDark ? "#2A2838" : "#e9edef" }]}>
                       <Ionicons name="images-outline" size={18} color={colors.mutedForeground} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.albumRowTitle, { color: colors.isDark ? "#E9EDEF" : "#111B21" }]} numberOfLines={1}>
+                      <Text style={[styles.albumRowTitle, { color: colors.isDark ? "#E9EDEF" : "#14131F" }]} numberOfLines={1}>
                         {item.title}
                       </Text>
                       <Text style={[styles.albumRowCount, { color: colors.mutedForeground }]}>
@@ -514,7 +514,7 @@ const styles = StyleSheet.create({
   albumTitle: { fontSize: 17, fontFamily: "Inter_600SemiBold", maxWidth: SCREEN_W * 0.5 },
   gridPad: { paddingHorizontal: 6, paddingBottom: 12 },
   row: { gap: GALLERY_GAP, marginBottom: GALLERY_GAP },
-  cell: { borderRadius: 2, overflow: "hidden", backgroundColor: "#2A3942" },
+  cell: { borderRadius: 2, overflow: "hidden", backgroundColor: "#2A2838" },
   thumb: { width: "100%", height: "100%" },
   videoBadge: {
     position: "absolute",
@@ -536,7 +536,7 @@ const styles = StyleSheet.create({
     minWidth: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
     borderWidth: 2,
     borderColor: "#fff",
     alignItems: "center",
@@ -559,7 +559,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
@@ -576,7 +576,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 4,
   },
-  sendCountText: { color: "#00A884", fontSize: 10, fontFamily: "Inter_700Bold" },
+  sendCountText: { color: "#5B4FE8", fontSize: 10, fontFamily: "Inter_700Bold" },
   collapsedSendBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -586,7 +586,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
   },
   collapsedSendText: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   empty: { textAlign: "center", fontSize: 13, paddingVertical: 24, paddingHorizontal: 20 },

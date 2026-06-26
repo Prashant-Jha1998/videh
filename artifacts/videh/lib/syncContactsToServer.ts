@@ -3,7 +3,7 @@ import * as Contacts from "expo-contacts";
 import { jsonAuthHeaders } from "@/lib/authHeaders";
 import { deviceContactsToPhoneEntries, loadAllDeviceContacts } from "@/lib/deviceContacts";
 
-/** Upload device address book to server so Videh Web can show contacts (WhatsApp-style). */
+/** Upload device address book to server so Videh Web can show contacts (Videh). */
 export async function syncDeviceContactsToServer(
   apiUrl: string,
   sessionToken?: string | null,

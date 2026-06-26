@@ -1,4 +1,4 @@
--- Per-message expiry for disappearing messages (WhatsApp-style).
+-- Per-message expiry for disappearing messages (Videh).
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_kept BOOLEAN NOT NULL DEFAULT FALSE;
 

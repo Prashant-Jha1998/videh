@@ -1,4 +1,4 @@
--- Channel profile links (YouTube-style) and playlists
+-- Channel profile links (in-stream video) and playlists
 CREATE TABLE IF NOT EXISTS reels_channel_links (
   id SERIAL PRIMARY KEY,
   channel_id INTEGER NOT NULL REFERENCES reels_channels(id) ON DELETE CASCADE,

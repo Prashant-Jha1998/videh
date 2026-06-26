@@ -741,7 +741,7 @@ router.post("/", async (req: Request, res: Response) => {
       INSERT INTO statuses (user_id, content, type, background_color, media_url, editor_data, expires_at)
       VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW() + INTERVAL '24 hours')
       RETURNING *
-    `, [userId, content, type ?? "text", backgroundColor ?? "#00A884", mediaUrl ?? null, editorData ? JSON.stringify(editorData) : null]);
+    `, [userId, content, type ?? "text", backgroundColor ?? "#5B4FE8", mediaUrl ?? null, editorData ? JSON.stringify(editorData) : null]);
     res.json({ success: true, status: result.rows[0] });
   } catch (err) {
     res.status(500).json({ success: false });

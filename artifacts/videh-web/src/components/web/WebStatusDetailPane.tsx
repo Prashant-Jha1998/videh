@@ -24,7 +24,7 @@ function StatusPreview({ status }: { status: WebStatus }) {
   return (
     <div
       className="vw-status-detail__text-card"
-      style={{ backgroundColor: status.background_color ?? "#00A884" }}
+      style={{ backgroundColor: status.background_color ?? "#5B4FE8" }}
     >
       <p>{status.content}</p>
     </div>
@@ -171,7 +171,7 @@ export function WebStatusDetailPane({
                 {s.type === "image" && s.media_url ? (
                   <img src={s.media_url} alt="" />
                 ) : (
-                  <span style={{ backgroundColor: s.background_color ?? "#00A884" }} />
+                  <span style={{ backgroundColor: s.background_color ?? "#5B4FE8" }} />
                 )}
               </button>
             ))}

@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+import { saveStatusToGalleryWithAlert } from "@/lib/saveStatusToLibrary";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
 import Svg, { Path } from "react-native-svg";
 
@@ -134,13 +135,11 @@ const BASE_URL = getApiUrl();
 const REACTIONS = ["❤️", "👍", "😂", "😮", "😢", "🙏"];
 
 const MENU_ITEMS = [
-  { label: "Message", icon: "chatbubble-outline" },
-  { label: "Voice call", icon: "call-outline" },
-  { label: "Video call", icon: "videocam-outline" },
-  { label: "View contact", icon: "person-outline" },
-  { label: "Get notifications", icon: "notifications-outline" },
-  { label: "Hide", icon: "eye-off-outline" },
-  { label: "Report", icon: "flag-outline" },
+  { label: "Message", icon: "chatbubble-outline", action: "message" as const },
+  { label: "Voice call", icon: "call-outline", action: "voice" as const },
+  { label: "Video call", icon: "videocam-outline", action: "video" as const },
+  { label: "View contact", icon: "person-outline", action: "contact" as const },
+  { label: "Report", icon: "flag-outline", action: "report" as const },
 ];
 
 export default function ViewStatusScreen() {
@@ -165,6 +164,7 @@ export default function ViewStatusScreen() {
   const [reply, setReply] = useState("");
   const [useNativeImageFallback, setUseNativeImageFallback] = useState(false);
   const [mediaLoadFailed, setMediaLoadFailed] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const progress = useRef(new Animated.Value(0)).current;
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
@@ -273,6 +273,86 @@ export default function ViewStatusScreen() {
     else pauseStory();
   };
 
+  const downloadStory = useCallback(async () => {
+    if (!currentStatus || downloading) return;
+    pauseStory();
+    setDownloading(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      await saveStatusToGalleryWithAlert(currentStatus, user?.sessionToken);
+    } finally {
+      setDownloading(false);
+      resumeStory();
+    }
+  }, [currentStatus, downloading, pauseStory, resumeStory, user?.sessionToken]);
+
+  const visibleMenuItems = [
+    ...(isMedia && currentStatus?.mediaUrl
+      ? [{ label: "Download", icon: "download-outline" as const, action: "download" as const }]
+      : []),
+    ...(!isMyStatus ? MENU_ITEMS : []),
+  ];
+
+  const openStatusContactChat = useCallback(async () => {
+    if (!currentStatus || !user?.dbId || isMyStatus) return;
+    const otherUserId = parseInt(currentStatus.userId, 10);
+    if (!Number.isFinite(otherUserId)) return;
+    const chatId = await createDirectChat(
+      otherUserId,
+      currentStatus.userName ?? "Contact",
+      currentStatus.userAvatar,
+    );
+    router.push({ pathname: "/chat/[id]", params: { id: chatId, name: currentStatus.userName ?? "Contact" } });
+  }, [createDirectChat, currentStatus, isMyStatus, router, user?.dbId]);
+
+  const startStatusCall = useCallback(async (type: "audio" | "video") => {
+    if (!currentStatus || !user?.dbId || isMyStatus) return;
+    try {
+      const otherUserId = parseInt(currentStatus.userId, 10);
+      if (!Number.isFinite(otherUserId)) return;
+      const chatId = await createDirectChat(
+        otherUserId,
+        currentStatus.userName ?? "Contact",
+        currentStatus.userAvatar,
+      );
+      router.push({
+        pathname: "/call/[id]",
+        params: { id: chatId, name: currentStatus.userName ?? "Contact", type },
+      });
+    } catch {
+      Alert.alert("Error", "Could not start call.");
+    }
+  }, [createDirectChat, currentStatus, isMyStatus, router, user?.dbId]);
+
+  const handleStatusMenuAction = useCallback(async (action: string) => {
+    setShowMenu(false);
+    if (action === "download") {
+      void downloadStory();
+      return;
+    }
+    resumeStory();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      if (action === "message") await openStatusContactChat();
+      else if (action === "voice") await startStatusCall("audio");
+      else if (action === "video") await startStatusCall("video");
+      else if (action === "contact") await openStatusContactChat();
+      else if (action === "report") {
+        Alert.alert(
+          "Report status",
+          "Tell us why you are reporting this status.",
+          [
+            { text: "Spam", onPress: () => Alert.alert("Reported", "Thank you. Our team will review this status.") },
+            { text: "Inappropriate", onPress: () => Alert.alert("Reported", "Thank you. Our team will review this status.") },
+            { text: "Cancel", style: "cancel" },
+          ],
+        );
+      }
+    } catch {
+      Alert.alert("Error", "Could not complete this action.");
+    }
+  }, [downloadStory, openStatusContactChat, resumeStory, startStatusCall]);
+
   const sendReply = async () => {
     if (!currentStatus || !user?.dbId || !reply.trim()) return;
     try {
@@ -318,7 +398,7 @@ export default function ViewStatusScreen() {
 
   const userInitials = (currentStatus.userName ?? "?").split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
   const totalReactions = Object.values(reactionSummary).reduce((a, b) => a + b, 0);
-  const bgColor = isMedia ? "#000" : (currentStatus.backgroundColor ?? "#00A884");
+  const bgColor = isMedia ? "#000" : (currentStatus.backgroundColor ?? "#5B4FE8");
 
   return (
     <View style={[styles.container, { backgroundColor: bgColor, paddingTop: topPad }]}>
@@ -361,7 +441,7 @@ export default function ViewStatusScreen() {
           </Text>
           {isBoostedStory && !isMyStatus && (
             <View style={styles.sponsoredPill}>
-              <Ionicons name="flash" size={10} color="#111B21" />
+              <Ionicons name="flash" size={10} color="#14131F" />
               <Text style={styles.sponsoredText}>Sponsored</Text>
             </View>
           )}
@@ -369,6 +449,19 @@ export default function ViewStatusScreen() {
         <TouchableOpacity style={styles.iconBtn} onPress={togglePause}>
           <Ionicons name={paused ? "play" : "pause"} size={17} color="#fff" />
         </TouchableOpacity>
+        {isMedia && currentStatus.mediaUrl ? (
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => { void downloadStory(); }}
+            disabled={downloading}
+          >
+            {downloading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons name="download-outline" size={20} color="#fff" />
+            )}
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity style={styles.iconBtn} onPress={() => { setShowMenu(true); pauseStory(); }}>
           <Ionicons name="ellipsis-vertical" size={20} color="#fff" />
         </TouchableOpacity>
@@ -462,7 +555,7 @@ export default function ViewStatusScreen() {
               ))}
               {editorData?.musicName ? (
                 <View style={styles.musicPill}>
-                  <Ionicons name="musical-notes" size={12} color="#d9fdd3" />
+                  <Ionicons name="musical-notes" size={12} color="#E0DCFF" />
                   <Text style={styles.musicPillText}>{editorData.musicName}</Text>
                 </View>
               ) : null}
@@ -563,17 +656,13 @@ export default function ViewStatusScreen() {
       >
         <View style={styles.statusMenuLift}>
           <View style={styles.menuCard}>
-            {MENU_ITEMS.map((item, idx) => (
+            {visibleMenuItems.map((item, idx) => (
               <TouchableOpacity
                 key={item.label}
-                style={[styles.menuItem, idx < MENU_ITEMS.length - 1 && styles.menuItemBorder]}
-                onPress={() => {
-                  setShowMenu(false);
-                  resumeStory();
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }}
+                style={[styles.menuItem, idx < visibleMenuItems.length - 1 && styles.menuItemBorder]}
+                onPress={() => { void handleStatusMenuAction(item.action); }}
               >
-                <Ionicons name={item.icon as any} size={20} color={item.label === "Report" ? "#e53e3e" : "#111b21"} />
+                <Ionicons name={item.icon as any} size={20} color={item.label === "Report" ? "#e53e3e" : "#14131F"} />
                 <Text style={[styles.menuItemText, item.label === "Report" && { color: "#e53e3e" }]}>{item.label}</Text>
               </TouchableOpacity>
             ))}
@@ -600,7 +689,7 @@ const styles = StyleSheet.create({
   headerName: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   headerTime: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontFamily: "Inter_400Regular" },
   sponsoredPill: { marginTop: 4, alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#FACC15", borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
-  sponsoredText: { color: "#111B21", fontSize: 10, fontFamily: "Inter_700Bold" },
+  sponsoredText: { color: "#14131F", fontSize: 10, fontFamily: "Inter_700Bold" },
   // Content
   statusText: { color: "#fff", fontSize: 26, fontFamily: "Inter_600SemiBold", textAlign: "center", lineHeight: 36 },
   mediaErrorCard: { alignItems: "center", justifyContent: "center", paddingHorizontal: 28, gap: 8 },
@@ -608,7 +697,7 @@ const styles = StyleSheet.create({
   mediaErrorHint: { color: "rgba(255,255,255,0.68)", fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center" },
   storyOverlay: { position: "absolute", textAlign: "center", fontWeight: "800", textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 5, transform: [{ translateX: -60 }, { translateY: -20 }], maxWidth: W * 0.82 },
   musicPill: { position: "absolute", top: 12, left: 14, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6 },
-  musicPillText: { color: "#d9fdd3", fontSize: 11, fontFamily: "Inter_700Bold", maxWidth: W * 0.7 },
+  musicPillText: { color: "#E0DCFF", fontSize: 11, fontFamily: "Inter_700Bold", maxWidth: W * 0.7 },
   captionBar: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.5)", padding: 12 },
   captionText: { color: "#fff", fontSize: 15, textAlign: "center" },
   // Bottom
@@ -620,7 +709,7 @@ const styles = StyleSheet.create({
   replyRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   replyBar: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.3)", borderRadius: 50, paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
   replyInput: { flex: 1, color: "#fff", fontSize: 14 },
-  sendBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#25D366", alignItems: "center", justifyContent: "center" },
+  sendBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#7C6CF0", alignItems: "center", justifyContent: "center" },
   reactionToggle: { width: 50, height: 50, borderRadius: 25, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.3)", alignItems: "center", justifyContent: "center" },
   reactionToggleActive: { borderColor: "#fff", backgroundColor: "rgba(255,255,255,0.15)" },
   reactionToggleText: { fontSize: 24 },
@@ -636,5 +725,5 @@ const styles = StyleSheet.create({
   menuCard: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 20 },
   menuItem: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingVertical: 16, gap: 16 },
   menuItemBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#f0f2f5" },
-  menuItemText: { fontSize: 16, color: "#111b21", fontFamily: "Inter_400Regular" },
+  menuItemText: { fontSize: 16, color: "#14131F", fontFamily: "Inter_400Regular" },
 });

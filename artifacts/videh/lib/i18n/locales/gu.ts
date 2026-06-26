@@ -78,7 +78,7 @@ export const gu = locale({
   "chats.noMessagesYet": "હજુ સંદેશ નથી",
   "chats.noArchived": "આર્કાઇવ ચેટ નથી",
   "chats.noArchivedHint": "આર્કાઇવ ચેટ અહીં દેખાશે.",
-  "chats.emptyHint": "તમારા સંપર્કો સાથે વાતચીત શરૂ કરો.\nતમારા સંદેશાઓ એન્ડ-ટુ-એન્ડ એન્ક્રિપ્ટેડ છે.",
+  "chats.emptyHint": "તમારા સંપર્કો સાથે વાતચીત શરૂ કરો.\nતમારા સંદેશાઓ ટ્રાન્ઝિટમાં TLS દ્વારા સુરક્ષિત છે.",
   "chats.startChat": "ચેટ શરૂ કરો",
   "chats.noSearchResults": "\"{query}\" માટે પરિણામ નથી",
   "chats.unlockAndOpen": "અનલૉક કરી ખોલો",

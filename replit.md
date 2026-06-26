@@ -64,7 +64,7 @@ Phone number → OTP verification (Fast2SMS) → Profile setup → Main app
 
 ### Legal Pages
 - `/app/legal/terms.tsx` — Full Terms of Service (11 sections, professionally written)
-- `/app/legal/privacy.tsx` — Full Privacy Policy (12 sections, covers E2E encryption, data rights)
+- `/app/legal/privacy.tsx` — Full Privacy Policy (transport security & data rights)
 - Links in phone screen are now clickable and navigate to these pages
 
 ### Settings Sub-screens
@@ -87,7 +87,7 @@ Phone number → OTP verification (Fast2SMS) → Profile setup → Main app
 - **Profile photo fullscreen** — tapping avatar in chat-info opens fullscreen viewer
 - **Message info** — long-press → "Message info" → shows Read/Delivered/Sent receipts per recipient in `/chat/message-info`
 - **Status reply** — reply button in status viewer sends reply as a private chat message
-- **@mentions** — "@" in group chat opens autocomplete dropdown with member names; selected name inserted as "@name "; mentions highlighted in green (#00A884) in bubbles
+- **@mentions** — "@" in group chat opens autocomplete dropdown with member names; selected name inserted as "@name "; mentions highlighted in green (#5B4FE8) in bubbles
 - **Chat wallpaper** — per-user per-chat wallpaper stored in `chat_members.wallpaper`; set via chat menu "Wallpaper" → image picker; rendered as full-bleed background in chat screen
 - **Push notifications** — `expo-notifications@~0.32.16`; `users.push_token` column; token registered on login; `PUT /api/users/:id/push-token`; message send endpoint calls Expo push API with sender name + preview; foreground alerts enabled; tapping notification navigates to correct chat
 - **Notification tap routing** — `addNotificationResponseReceivedListener` in _layout.tsx routes to the relevant chat on notification tap
@@ -140,7 +140,7 @@ A browser-based companion app at `/videh-web/` that mirrors the mobile Videh exp
 - Chat interface: sidebar with chat list + search + avatars + unread badges
 - Message view: Videh bubble design, auto-scrolls, auto-refreshes every 5s
 - Send messages via Enter key or send button
-- Videh green theme (#00a884) throughout
+- Videh green theme (#5B4FE8) throughout
 
 ### Mobile QR Scanner
 - Screen: `artifacts/videh/app/linked-devices.tsx`

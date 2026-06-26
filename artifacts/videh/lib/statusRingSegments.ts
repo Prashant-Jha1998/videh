@@ -1,6 +1,6 @@
 import type { Status } from "@/context/AppContext";
 
-export const STATUS_RING_GREEN = "#25D366";
+export const STATUS_RING_GREEN = "#7C6CF0";
 export const STATUS_RING_GREY = "#8696a0";
 
 /** Oldest → newest; true = viewed (grey segment). */

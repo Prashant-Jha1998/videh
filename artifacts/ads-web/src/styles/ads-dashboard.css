@@ -1,8 +1,8 @@
 :root {
-  --ads-brand: #00a884;
+  --ads-brand: #5B4FE8;
   --ads-brand-dark: #008f6f;
-  --ads-brand-soft: #e8f5f0;
-  --ads-ink: #0b141a;
+  --ads-brand-soft: #E8E6FF;
+  --ads-ink: #12101F;
   --ads-text: #202124;
   --ads-muted: #5f6368;
   --ads-border: #dadce0;
@@ -395,7 +395,7 @@
   align-items: center;
   justify-content: center;
   padding: 24px 16px;
-  background: linear-gradient(160deg, #e8f5f0 0%, var(--ads-bg) 45%, #fff 100%);
+  background: linear-gradient(160deg, #E8E6FF 0%, var(--ads-bg) 45%, #fff 100%);
 }
 
 .ads-auth-card {
@@ -981,7 +981,7 @@
   text-align: center;
 }
 
-/* ——— YouTube-style in-stream ad preview (phone mock) ——— */
+/* ——— in-stream video in-stream ad preview (phone mock) ——— */
 .yt-phone-preview {
   max-width: 380px;
   margin: 0 auto;
@@ -1481,7 +1481,7 @@
 .ads-objective-hint {
   margin: 12px 0 0;
   padding: 12px 14px;
-  background: #e8f5f0;
+  background: #E8E6FF;
   border: 1px solid #b8e6d8;
   border-radius: 8px;
   font-size: 13px;
@@ -1492,7 +1492,7 @@
 .ads-campaign-format-banner {
   margin: 0 0 14px;
   padding: 14px 16px;
-  background: #e8f5f0;
+  background: #E8E6FF;
   border: 1px solid #b8e6d8;
   border-radius: 10px;
   font-size: 13px;
@@ -1502,7 +1502,7 @@
 .ads-campaign-format-banner strong {
   display: block;
   margin-bottom: 4px;
-  color: #00A884;
+  color: #5B4FE8;
 }
 
 .ads-campaign-format-banner p {
@@ -1522,7 +1522,7 @@
 .ads-format-fix-btn {
   margin-top: 10px;
   padding: 8px 14px;
-  background: #00A884;
+  background: #5B4FE8;
   color: #fff;
   border: none;
   border-radius: 8px;

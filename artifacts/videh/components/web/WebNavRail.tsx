@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import React from "react";
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import type { WebDesktopSection } from "@/lib/web/webDesktop";
@@ -25,13 +25,13 @@ const ITEMS: NavItem[] = [
     id: "communities",
     icon: "people-outline",
     iconActive: "people",
-    onPress: () => Alert.alert("Communities", "Communities are coming soon to Videh Web."),
+    route: "/broadcasts",
   },
   {
     id: "channels",
     icon: "megaphone-outline",
     iconActive: "megaphone",
-    onPress: () => Alert.alert("Channels", "Channels are coming soon to Videh Web."),
+    route: "/(tabs)/video",
   },
   { id: "starred", icon: "star-outline", iconActive: "star", route: "/starred" },
   { id: "archived", icon: "archive-outline", iconActive: "archive", route: "/(tabs)/chats?archived=1" },
@@ -47,7 +47,7 @@ export function WebNavRail({ active }: Props) {
   const router = useRouter();
   const { chats, user } = useApp();
   const unread = chats.filter((c) => !c.isArchived).reduce((n, c) => n + c.unreadCount, 0);
-  const railBg = colors.isDark ? "#111B21" : "#F0F2F5";
+  const railBg = colors.isDark ? "#14131F" : "#F0F2F5";
 
   return (
     <View style={[styles.rail, { width: WEB_NAV_RAIL_WIDTH, backgroundColor: railBg, borderRightColor: colors.border }]}>

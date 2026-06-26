@@ -525,11 +525,11 @@ router.get("/go/channel/:handle", async (req: Request, res: Response) => {
   <meta property="og:url" content="${shareUrl}"/>
   <meta property="og:type" content="profile"/>
   <style>
-    body{font-family:system-ui,sans-serif;background:#0b141a;color:#e9edef;margin:0;padding:24px;text-align:center}
-    .card{max-width:420px;margin:40px auto;padding:24px;border-radius:16px;background:#1f2c34}
+    body{font-family:system-ui,sans-serif;background:#12101F;color:#e9edef;margin:0;padding:24px;text-align:center}
+    .card{max-width:420px;margin:40px auto;padding:24px;border-radius:16px;background:#1E1D2E}
     h1{font-size:1.25rem;margin:0 0 8px}
     p{color:#8696a0;margin:0 0 20px}
-    a.btn{display:inline-block;padding:14px 28px;background:#00a884;color:#fff;text-decoration:none;border-radius:999px;font-weight:700}
+    a.btn{display:inline-block;padding:14px 28px;background:#5B4FE8;color:#fff;text-decoration:none;border-radius:999px;font-weight:700}
     .muted{font-size:.85rem;margin-top:16px;color:#8696a0}
   </style>
 </head>
@@ -554,7 +554,7 @@ router.get("/go/channel/:handle", async (req: Request, res: Response) => {
   }
 });
 
-/** YouTube-style share link landing — opens Videh app or shows download prompt. */
+/** in-stream video share link landing — opens Videh app or shows download prompt. */
 router.get("/go/:videoId", async (req: Request, res: Response) => {
   const videoId = Number(req.params.videoId);
   if (!videoId) {
@@ -603,11 +603,11 @@ router.get("/go/:videoId", async (req: Request, res: Response) => {
   <meta property="og:image" content="${thumb}"/>
   <meta property="og:type" content="video.other"/>
   <style>
-    body{font-family:system-ui,sans-serif;background:#0b141a;color:#e9edef;margin:0;padding:24px;text-align:center}
-    .card{max-width:420px;margin:40px auto;padding:24px;border-radius:16px;background:#1f2c34}
+    body{font-family:system-ui,sans-serif;background:#12101F;color:#e9edef;margin:0;padding:24px;text-align:center}
+    .card{max-width:420px;margin:40px auto;padding:24px;border-radius:16px;background:#1E1D2E}
     h1{font-size:1.25rem;margin:0 0 8px}
     p{color:#8696a0;margin:0 0 20px}
-    a.btn{display:inline-block;padding:14px 28px;background:#00a884;color:#fff;text-decoration:none;border-radius:999px;font-weight:700}
+    a.btn{display:inline-block;padding:14px 28px;background:#5B4FE8;color:#fff;text-decoration:none;border-radius:999px;font-weight:700}
     .muted{font-size:.85rem;margin-top:16px;color:#8696a0}
   </style>
 </head>

@@ -3,7 +3,7 @@ import { useRouter } from "expo-router";
 import React from "react";
 import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useColors } from "@/hooks/useColors";
+import { PRIVACY_TRANSPORT_SECTION, THIRD_PARTY_BRAND_DISCLAIMER } from "@/lib/legalDisclaimers";
 
 const SECTIONS = [
   {
@@ -15,8 +15,8 @@ const SECTIONS = [
     body: `We use your information exclusively to:\n• Verify your identity and secure your account\n• Provide and maintain the messaging service\n• Display your profile to contacts who have your phone number\n• Send you important service-related notifications\n• Improve app performance and fix bugs\n• Comply with legal obligations\n\nWe do NOT use your personal data for targeted advertising or sell your information to third parties.`,
   },
   {
-    title: "3. Message Privacy & End-to-End Encryption",
-    body: `Videh uses end-to-end encryption (E2EE) for private messages between users. This means:\n• Only you and the person you communicate with can read your messages\n• Videh cannot read, access, or decrypt your private messages\n• Even if our servers were compromised, your message content would remain private\n\nGroup messages are also encrypted. Status updates are stored on our servers temporarily but are encrypted in transit.\n\nNote: If you back up your chats, the backup may not be end-to-end encrypted depending on your storage provider.`,
+    title: "3. Message Privacy & Transport Security",
+    body: PRIVACY_TRANSPORT_SECTION,
   },
   {
     title: "4. Data Sharing",
@@ -55,7 +55,11 @@ const SECTIONS = [
     body: `When you watch or upload videos on Videh:\n\n**Public by default**\n• Channel pages, uploaded videos, comments, and public engagement (likes, subscriber counts) are visible to other Videh users unless a feature explicitly says otherwise.\n\n**What we store**\n• Video files, thumbnails, metadata, and moderation scan results\n• Comments, replies, and reactions you post\n• Reports you submit about videos or channels\n\n**Recommendations & safety**\n• We use watch history, likes, and subscriptions to rank your feed — not your private chats.\n• Automated and human review may flag content that violates our policies.\n• Phone numbers are not shown on public video surfaces; channel handles are used instead.\n\n**Ads on Video**\n• If ads appear before or during videos, we may log ad impressions and skips to measure delivery. Advertisers do not receive your private messages.\n\nYou can delete videos you uploaded, remove comments you wrote, and request account deletion as described in Section 5.`,
   },
   {
-    title: "13. Contact Us",
+    title: "14. Third-Party Brands",
+    body: THIRD_PARTY_BRAND_DISCLAIMER,
+  },
+  {
+    title: "15. Contact Us",
     body: `If you have questions, concerns, or requests regarding this Privacy Policy or how we handle your data, please contact our Data Protection Officer:\n\nVideh Technologies\nPrivacy Team\nEmail: support@videh.co.in\nAddress: New Delhi, India\nPhone: Available through in-app support\n\nLast updated: June 2026`,
   },
 ];
@@ -79,9 +83,9 @@ export default function PrivacyScreen() {
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 40 }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.badge, { backgroundColor: "#00A884" + "20" }]}>
-          <Ionicons name="shield-checkmark-outline" size={24} color="#00A884" />
-          <Text style={[styles.badgeText, { color: "#00A884" }]}>Your privacy is our priority</Text>
+        <View style={[styles.badge, { backgroundColor: "#5B4FE8" + "20" }]}>
+          <Ionicons name="shield-checkmark-outline" size={24} color="#5B4FE8" />
+          <Text style={[styles.badgeText, { color: "#5B4FE8" }]}>Your privacy is our priority</Text>
         </View>
 
         <Text style={[styles.intro, { color: colors.foreground }]}>
@@ -89,7 +93,7 @@ export default function PrivacyScreen() {
         </Text>
 
         {SECTIONS.map((s) => (
-          <View key={s.title} style={[styles.section, { borderLeftColor: "#00A884" }]}>
+          <View key={s.title} style={[styles.section, { borderLeftColor: "#5B4FE8" }]}>
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>{s.title}</Text>
             <Text style={[styles.sectionBody, { color: colors.mutedForeground }]}>{s.body}</Text>
           </View>

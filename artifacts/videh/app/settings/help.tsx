@@ -3,8 +3,10 @@ import { useRouter } from "expo-router";
 import React, { useCallback } from "react";
 import {
   Alert,
+  Linking,
   Platform,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -15,6 +17,7 @@ import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
 import { jsonAuthHeaders } from "@/lib/authHeaders";
+import { THIRD_PARTY_BRAND_DISCLAIMER } from "@/lib/legalDisclaimers";
 
 const SUPPORT_PHONE = "+919999999999";
 const SUPPORT_DISPLAY = "+91 9999999999";
@@ -71,11 +74,18 @@ export default function HelpScreen() {
     }
   }, [chats, router, user?.dbId, user?.sessionToken]);
 
+  const inviteFriend = useCallback(async () => {
+    const message = "Try Videh — chat, calls, stories, and Videh Video in one app.\n\nhttps://videh.co.in/download.html";
+    try {
+      await Share.share({ message, title: "Invite to Videh" });
+    } catch { /* cancelled */ }
+  }, []);
+
   const rows = [
     {
       icon: "help-circle-outline", iconBg: "#2196F3", label: "Help Centre",
       hint: "Find answers to common questions",
-      onPress: () => Alert.alert("Help Centre", "Visit help.videh.app for full documentation and FAQs."),
+      onPress: () => { void Linking.openURL("https://videh.co.in"); },
     },
     {
       icon: "chatbubble-outline", iconBg: "#4CAF50", label: "Contact us",
@@ -85,12 +95,16 @@ export default function HelpScreen() {
     {
       icon: "star-outline", iconBg: "#FF9800", label: "Rate us",
       hint: "If you enjoy Videh, please leave a rating",
-      onPress: () => Alert.alert("Rate Videh", "Thank you for your support! Rating will open the app store."),
+      onPress: () => {
+        void Linking.openURL("https://play.google.com/store/apps/details?id=com.videh.app").catch(() => {
+          Alert.alert("Rate Videh", "Search Videh on the Play Store to leave a rating.");
+        });
+      },
     },
     {
       icon: "people-outline", iconBg: "#9C27B0", label: "Invite a friend",
       hint: "Share Videh with your contacts",
-      onPress: () => Alert.alert("Invite", "Share Videh with friends!\n\nDownload Videh for instant messaging."),
+      onPress: () => { void inviteFriend(); },
     },
     {
       icon: "document-text-outline", iconBg: "#00BCD4", label: "Terms of Service",
@@ -98,7 +112,7 @@ export default function HelpScreen() {
       onPress: () => router.push("/legal/terms"),
     },
     {
-      icon: "shield-checkmark-outline", iconBg: "#00A884", label: "Privacy Policy",
+      icon: "shield-checkmark-outline", iconBg: "#5B4FE8", label: "Privacy Policy",
       hint: "How we handle your data",
       onPress: () => router.push("/legal/privacy"),
     },
@@ -136,6 +150,7 @@ export default function HelpScreen() {
         </View>
 
         <View style={styles.versionBlock}>
+          <Text style={[styles.disclaimerText, { color: colors.mutedForeground }]}>{THIRD_PARTY_BRAND_DISCLAIMER}</Text>
           <Text style={[styles.versionText, { color: colors.mutedForeground }]}>Videh v1.0.0</Text>
           <Text style={[styles.versionSub, { color: colors.mutedForeground }]}>© 2026 Videh Technologies</Text>
         </View>
@@ -154,7 +169,8 @@ const styles = StyleSheet.create({
   iconWrap: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   rowLabel: { fontSize: 15, fontFamily: "Inter_500Medium" },
   rowHint: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 1 },
-  versionBlock: { alignItems: "center", paddingVertical: 24, gap: 4 },
+  versionBlock: { alignItems: "center", paddingVertical: 24, gap: 8, paddingHorizontal: 20 },
+  disclaimerText: { fontSize: 11, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 16 },
   versionText: { fontSize: 13, fontFamily: "Inter_500Medium" },
   versionSub: { fontSize: 12, fontFamily: "Inter_400Regular" },
 });

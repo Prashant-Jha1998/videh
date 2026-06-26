@@ -77,7 +77,7 @@ export type ReelsAdsRules = {
   feedAdsEnabled: boolean;
   /** @deprecated Use feedAdMinGap — kept for admin backward compatibility */
   feedAdEveryVideos: number;
-  /** Min videos between home-feed ads (YouTube-style variable spacing). */
+  /** Min videos between home-feed ads (in-stream video variable spacing). */
   feedAdMinGap: number;
   /** Max videos between home-feed ads. */
   feedAdMaxGap: number;

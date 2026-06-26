@@ -2,7 +2,7 @@ import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 
-/** Subtle tiled overlay on web empty / chat panes (WhatsApp doodle feel). */
+/** Subtle tiled overlay on web empty / chat panes (Videh doodle feel). */
 export function ChatWallpaperPattern() {
   const colors = useColors();
   if (Platform.OS !== "web") return null;

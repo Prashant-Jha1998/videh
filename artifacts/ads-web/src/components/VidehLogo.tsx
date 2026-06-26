@@ -14,7 +14,7 @@ export function VidehLogo({ size = 36 }: { size?: number }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "linear-gradient(135deg, #00a884 0%, #008069 100%)",
+          background: "linear-gradient(135deg, #5B4FE8 0%, #008069 100%)",
           borderRadius: 8,
           color: "white",
           fontWeight: 700,

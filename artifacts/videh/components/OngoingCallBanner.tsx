@@ -27,7 +27,7 @@ export function OngoingCallBanner({ contactName, isVideo, durationLabel, onRetur
           </Text>
           <Text style={styles.sub} numberOfLines={1}>Tap to return to {contactName}</Text>
         </View>
-        <Ionicons name="chevron-up" size={22} color="#d9fdd3" />
+        <Ionicons name="chevron-up" size={22} color="#E0DCFF" />
       </TouchableOpacity>
       <TouchableOpacity style={styles.endBtn} onPress={onEnd} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
         <Ionicons name="call" size={20} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
@@ -52,7 +52,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
     borderRadius: 14,
     paddingVertical: 12,
     paddingHorizontal: 14,

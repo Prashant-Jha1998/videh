@@ -24,6 +24,8 @@ import { ReelsFeedAdCard } from "@/components/ReelsFeedAdCard";
 import { ReelsFeedVideoMenu, type FeedVideoMenuAction } from "@/components/ReelsFeedVideoMenu";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { interpolate } from "@/lib/i18n";
 import {
   addReelsVideoToPlaylist,
   createReelsPlaylist,
@@ -187,6 +189,7 @@ export default function VideoTabScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useApp();
+  const { t } = useUiPreferences();
   const [videos, setVideos] = useState<ReelsVideo[]>([]);
   const [adPlacements, setAdPlacements] = useState<ReelsFeedAdPlacement[]>([]);
   const videoCountRef = useRef(0);
@@ -207,6 +210,8 @@ export default function VideoTabScreen() {
   const [hiddenVideoIds, setHiddenVideoIds] = useState<Set<number>>(new Set());
   const [hiddenChannelIds, setHiddenChannelIds] = useState<Set<number>>(new Set());
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+  const [feedError, setFeedError] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
   const loadingMoreRef = useRef(false);
   const loadedOnceRef = useRef(false);
 
@@ -269,6 +274,7 @@ export default function VideoTabScreen() {
       const feed = await feedPromise;
       applyFeed(feed);
       loadedOnceRef.current = true;
+      setFeedError(false);
       setLoading(false);
       if ((feed.videos ?? []).length > 0) {
         void saveReelsFeedCache(uid, {
@@ -285,6 +291,7 @@ export default function VideoTabScreen() {
       setMyPlaylists(ch.playlists ?? []);
       void refreshHidden();
     } catch {
+      setFeedError(true);
       setLoading(false);
     }
   }, [user?.dbId, user?.sessionToken, applyFeed, refreshHidden]);
@@ -293,6 +300,7 @@ export default function VideoTabScreen() {
     if (!user?.dbId || !nextCursor || loadingMoreRef.current) return;
     loadingMoreRef.current = true;
     setLoadingMore(true);
+    setLoadMoreError(false);
     try {
       const feed = await fetchReelsFeed(user.dbId, nextCursor, user.sessionToken);
       const incoming = feed.videos ?? [];
@@ -314,6 +322,8 @@ export default function VideoTabScreen() {
         ]);
       }
       setNextCursor(feed.nextCursor ?? null);
+    } catch {
+      setLoadMoreError(true);
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);
@@ -344,7 +354,17 @@ export default function VideoTabScreen() {
   };
 
   const openVideo = (v: ReelsVideo) => {
-    router.push({ pathname: "/reels/watch/[id]", params: { id: String(v.id) } });
+    router.push({ pathname: "/reels/watch/[id]", params: { id: String(v.id) } } as never);
+  };
+
+  const openChannel = (item: ReelsVideo) => {
+    if (item.channelHandle) {
+      router.push({ pathname: "/reels/channel/[handle]", params: { handle: item.channelHandle } } as never);
+    }
+  };
+
+  const openUpload = () => {
+    router.push("/reels/upload" as never);
   };
 
   const openProfile = () => {
@@ -555,11 +575,10 @@ export default function VideoTabScreen() {
 
       <View style={styles.infoRow}>
         <TouchableOpacity
-          onPress={() =>
-            item.channelHandle &&
-            router.push({ pathname: "/reels/channel/[handle]", params: { handle: item.channelHandle } })
-          }
+          onPress={() => openChannel(item)}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          disabled={!item.channelHandle}
+          style={!item.channelHandle ? { opacity: 0.6 } : undefined}
         >
           <ChannelAvatar
             uri={item.channelAvatarUrl}
@@ -606,7 +625,8 @@ export default function VideoTabScreen() {
             <TouchableOpacity
               key="explore"
               style={[styles.chipIcon, { backgroundColor: colors.muted }]}
-              onPress={() => router.push("/reels/search")}
+              onPress={() => router.push("/reels/search" as never)}
+              accessibilityLabel={t("reels.explore")}
             >
               <Ionicons name="compass-outline" size={20} color={colors.foreground} />
             </TouchableOpacity>
@@ -639,16 +659,44 @@ export default function VideoTabScreen() {
 
   const listHeader = (
     <>
+      {feedError ? (
+        <TouchableOpacity
+          style={[styles.errorBanner, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => void loadInitial({ silent: true })}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="cloud-offline-outline" size={22} color={colors.destructive} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.bannerTitle, { color: colors.foreground }]}>{t("reels.feedError")}</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>{t("reels.feedErrorHint")}</Text>
+          </View>
+          <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold", fontSize: 13 }}>{t("reels.retry")}</Text>
+        </TouchableOpacity>
+      ) : null}
       {hasChannel === false ? (
         <TouchableOpacity
           style={[styles.setupBanner, { backgroundColor: colors.card, borderColor: colors.border }]}
-          onPress={() => router.push("/reels/setup")}
+          onPress={() => router.push("/reels/setup" as never)}
         >
           <Ionicons name="add-circle-outline" size={22} color={colors.primary} />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.bannerTitle, { color: colors.foreground }]}>Create your channel</Text>
+            <Text style={[styles.bannerTitle, { color: colors.foreground }]}>{t("reels.createChannel")}</Text>
             <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
-              Upload videos and grow subscribers
+              {t("reels.createChannelHint")}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
+        </TouchableOpacity>
+      ) : hasChannel ? (
+        <TouchableOpacity
+          style={[styles.setupBanner, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={openUpload}
+        >
+          <Ionicons name="cloud-upload-outline" size={22} color={colors.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.bannerTitle, { color: colors.foreground }]}>{t("reels.uploadBannerTitle")}</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+              {t("reels.uploadBannerHint")}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
@@ -668,8 +716,13 @@ export default function VideoTabScreen() {
         <Text style={[styles.logoText, { color: colors.foreground }]}>Videh</Text>
       </View>
       <View style={styles.headerActions}>
+        {hasChannel ? (
+          <TouchableOpacity onPress={openUpload} style={styles.iconBtn} accessibilityLabel={t("reels.uploadVideo")}>
+            <Ionicons name="videocam-outline" size={24} color={colors.foreground} />
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
-          onPress={() => router.push("/reels/notifications")}
+          onPress={() => router.push("/reels/notifications" as never)}
           style={styles.iconBtn}
         >
           <Ionicons name="notifications-outline" size={24} color={colors.foreground} />
@@ -688,7 +741,7 @@ export default function VideoTabScreen() {
             <Ionicons name="person-circle-outline" size={26} color={colors.foreground} />
           )}
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.push("/reels/search")} style={styles.iconBtn}>
+        <TouchableOpacity onPress={() => router.push("/reels/search" as never)} style={styles.iconBtn}>
           <Ionicons name="search" size={24} color={colors.foreground} />
         </TouchableOpacity>
       </View>
@@ -746,21 +799,60 @@ export default function VideoTabScreen() {
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
           <View style={styles.center}>
-            <Text style={{ color: colors.mutedForeground }}>
-              {feedCategory === "all" ? "No videos yet. Be the first to post!" : "No videos in this category yet."}
+            <Ionicons name="play-circle-outline" size={56} color={colors.mutedForeground} />
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
+              {!user?.dbId
+                ? t("reels.signInHint")
+                : feedCategory === "all"
+                  ? t("reels.noVideos")
+                  : t("reels.noCategoryVideos")}
             </Text>
+            <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
+              {!user?.dbId
+                ? ""
+                : feedCategory === "all"
+                  ? t("reels.noVideosHint")
+                  : t("reels.noCategoryHint")}
+            </Text>
+            {hasChannel && user?.dbId ? (
+              <TouchableOpacity style={[styles.emptyCta, { backgroundColor: colors.primary }]} onPress={openUpload}>
+                <Text style={styles.emptyCtaText}>{t("reels.uploadVideo")}</Text>
+              </TouchableOpacity>
+            ) : hasChannel === false && user?.dbId ? (
+              <TouchableOpacity
+                style={[styles.emptyCta, { backgroundColor: colors.primary }]}
+                onPress={() => router.push("/reels/setup" as never)}
+              >
+                <Text style={styles.emptyCtaText}>{t("reels.createChannel")}</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         }
         onEndReached={() => void loadMore()}
         onEndReachedThreshold={0.35}
         ListFooterComponent={
-          loadingMore ? (
+          loadMoreError ? (
+            <TouchableOpacity style={styles.footerRetry} onPress={() => void loadMore()}>
+              <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>{t("reels.loadMoreError")} · {t("reels.retry")}</Text>
+            </TouchableOpacity>
+          ) : loadingMore ? (
             <View style={styles.footerLoader}>
               <ActivityIndicator color={colors.primary} />
             </View>
           ) : null
         }
       />
+
+      {hasChannel ? (
+        <TouchableOpacity
+          style={[styles.fab, { backgroundColor: colors.primary }]}
+          activeOpacity={0.85}
+          onPress={openUpload}
+          accessibilityLabel={t("reels.uploadVideo")}
+        >
+          <Ionicons name="add" size={28} color="#fff" />
+        </TouchableOpacity>
+      ) : null}
 
       <ReelsFeedVideoMenu
         visible={menuVideo != null}
@@ -863,7 +955,37 @@ const styles = StyleSheet.create({
     elevation: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  center: { alignItems: "center", justifyContent: "center", padding: 32 },
+  center: { alignItems: "center", justifyContent: "center", padding: 32, gap: 10 },
+  emptyTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", textAlign: "center", marginTop: 8 },
+  emptyHint: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 18 },
+  emptyCta: { marginTop: 12, paddingHorizontal: 20, paddingVertical: 11, borderRadius: 22 },
+  emptyCtaText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 14 },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    margin: 12,
+    marginBottom: 0,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  footerRetry: { alignItems: "center", paddingVertical: 16 },
+  fab: {
+    position: "absolute",
+    bottom: 96,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.28,
+    shadowRadius: 5,
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",

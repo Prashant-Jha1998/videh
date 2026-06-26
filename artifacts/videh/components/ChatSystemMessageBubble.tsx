@@ -14,7 +14,7 @@ type Props = {
   onChangeTimer?: () => void;
 };
 
-/** WhatsApp-style centered info card when disappearing messages timer changes. */
+/** Videh centered info card when disappearing messages timer changes. */
 export function ChatSystemMessageBubble({ text, isDark, viewerUserId, onChangeTimer }: Props) {
   const payload = parseChatSystemPayload(text);
   if (!payload) return null;

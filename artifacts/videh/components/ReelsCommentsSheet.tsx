@@ -3,6 +3,7 @@ import { Image } from "expo-image";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   StyleSheet,
   Text,
@@ -12,6 +13,7 @@ import {
 } from "react-native";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { useColors } from "@/hooks/useColors";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
 import {
   fetchReelsCommentReplies,
   fetchReelsComments,
@@ -92,9 +94,11 @@ export function ReelsCommentsSheet({
   onCommentPosted,
 }: Props) {
   const colors = useColors();
+  const { t } = useUiPreferences();
   const [comments, setComments] = useState<ReelsComment[]>([]);
   const [sort, setSort] = useState<ReelsCommentSort>("top");
   const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [replyTarget, setReplyTarget] = useState<ReelsComment | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
@@ -166,34 +170,41 @@ export function ReelsCommentsSheet({
 
   const sendComment = async () => {
     const text = commentText.trim();
-    if (!text) return;
-    await postReelsComment(
-      videoId,
-      userId,
-      text,
-      sessionToken,
-      replyTarget?.id ?? null,
-    );
-    setCommentText("");
-    const parentId = replyTarget?.parentId ?? replyTarget?.id ?? null;
-    setReplyTarget(null);
-    await loadComments();
-    if (parentId) {
-      setRepliesMap((prev) => {
-        const next = { ...prev };
-        delete next[parentId];
-        return next;
-      });
-      if (expandedIds.has(parentId)) {
-        void loadReplies(parentId);
+    if (!text || sending) return;
+    setSending(true);
+    try {
+      await postReelsComment(
+        videoId,
+        userId,
+        text,
+        sessionToken,
+        replyTarget?.id ?? null,
+      );
+      setCommentText("");
+      const parentId = replyTarget?.parentId ?? replyTarget?.id ?? null;
+      setReplyTarget(null);
+      await loadComments();
+      if (parentId) {
+        setRepliesMap((prev) => {
+          const next = { ...prev };
+          delete next[parentId];
+          return next;
+        });
+        if (expandedIds.has(parentId)) {
+          void loadReplies(parentId);
+        }
       }
+      if (parentId) {
+        setComments((prev) => prev.map((c) => (
+          c.id === parentId ? { ...c, replyCount: c.replyCount + 1 } : c
+        )));
+      }
+      onCommentPosted?.();
+    } catch {
+      Alert.alert(t("common.error"), t("reels.commentFailed"));
+    } finally {
+      setSending(false);
     }
-    if (parentId) {
-      setComments((prev) => prev.map((c) => (
-        c.id === parentId ? { ...c, replyCount: c.replyCount + 1 } : c
-      )));
-    }
-    onCommentPosted?.();
   };
 
   const startReply = (comment: ReelsComment) => {
@@ -403,12 +414,12 @@ export function ReelsCommentsSheet({
               onChangeText={setCommentText}
               multiline
             />
-            <TouchableOpacity onPress={() => void sendComment()} disabled={!commentText.trim()}>
-              <Ionicons
-                name="send"
-                size={22}
-                color={commentText.trim() ? colors.primary : colors.muted}
-              />
+            <TouchableOpacity onPress={() => void sendComment()} disabled={!commentText.trim() || sending}>
+              {sending ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Ionicons name="send" size={22} color={commentText.trim() ? colors.primary : colors.mutedForeground} />
+              )}
             </TouchableOpacity>
           </View>
         </View>

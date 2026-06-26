@@ -163,6 +163,7 @@ export function coerceAlbumMessageFields<T extends {
   mediaUrl?: string;
   albumUrls?: string[];
 }>(msg: T): T {
+  if (msg.type === "deleted" || msg.text.trim() === "This message was deleted") return msg;
   const urls = resolveAlbumUrls(msg.text, { albumUrls: msg.albumUrls, mediaUrl: msg.mediaUrl });
   if (!urls || urls.length < 2) return msg;
   const display = albumMessageDisplayText(msg.text, urls.length);

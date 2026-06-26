@@ -1,5 +1,8 @@
+import { ErrorUtils } from "react-native";
+
 /**
- * Catches unhandled promise rejections so they don't take down the JS runtime on some RN builds.
+ * Catches unhandled promise rejections and fatal JS errors so they are less likely
+ * to take down the JS runtime on some RN builds.
  */
 export function installGlobalErrorHandlers(): void {
   const g = globalThis as typeof globalThis & {
@@ -9,10 +12,16 @@ export function installGlobalErrorHandlers(): void {
 
   if (typeof g.addEventListener === "function") {
     g.addEventListener("unhandledrejection", (event: PromiseRejectionEvent) => {
-      if (__DEV__) {
-        console.warn("[Videh] Unhandled promise rejection:", event.reason);
-      }
+      console.warn("[Videh] Unhandled promise rejection:", event.reason);
       event.preventDefault?.();
+    });
+  }
+
+  const prevHandler = ErrorUtils.getGlobalHandler?.();
+  if (typeof ErrorUtils.setGlobalHandler === "function") {
+    ErrorUtils.setGlobalHandler((error, isFatal) => {
+      console.error("[Videh] Global error:", error, isFatal ? "(fatal)" : "");
+      prevHandler?.(error, isFatal);
     });
   }
 

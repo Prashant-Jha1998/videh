@@ -48,7 +48,7 @@ export function WebCallsListPane({
           backgroundColor: "#f0f2f5",
           fontSize: 20,
           fontWeight: 600,
-          color: "#111b21",
+          color: "#14131F",
         }}
       >
         Calls
@@ -83,7 +83,7 @@ export function WebCallsListPane({
                 <Avatar name={name} url={row.other_user_avatar} size={49} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                    <span style={{ fontWeight: 600, color: missed ? "#ea0038" : "#111b21", fontSize: 16 }}>{name}</span>
+                    <span style={{ fontWeight: 600, color: missed ? "#ea0038" : "#14131F", fontSize: 16 }}>{name}</span>
                     <span style={{ fontSize: 12, color: "#667781" }}>{formatCallTime(row.created_at)}</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#667781", fontSize: 14 }}>

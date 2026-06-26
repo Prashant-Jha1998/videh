@@ -22,8 +22,14 @@ import { AddCallParticipantModal } from "@/components/AddCallParticipantModal";
 import { GroupCallGrid, type RemoteCallPeer } from "@/components/GroupCallGrid";
 import { useCallSession } from "@/context/CallSessionContext";
 import { useApp } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
 import type { InCallAudioRoute } from "@/lib/inCallAudio";
-import { phaseLabel } from "@/lib/callState";
+import {
+  CALL_STATUS_KEYS,
+  incomingCallLabel,
+  outgoingRingingLabel,
+  ringingPeopleLabel,
+} from "@/lib/callStatusLabels";
 import { useOutgoingCallCameraPreview } from "@/lib/callLocalPreview";
 
 const CALL_CONTROLS_HIDE_MS = 6000;
@@ -81,6 +87,7 @@ export default function CallScreen() {
     redialFromOutcome,
   } = useCallSession();
   const { chats } = useApp();
+  const { t } = useUiPreferences();
 
   const [addPeopleOpen, setAddPeopleOpen] = useState(false);
   const [addingPeople, setAddingPeople] = useState(false);
@@ -188,16 +195,14 @@ export default function CallScreen() {
 
   const displayStatus = error
     ? error === "NATIVE_WEBRTC_UNAVAILABLE"
-      ? "Connecting..."
+      ? t(CALL_STATUS_KEYS.connecting)
       : `Error: ${error}`
-    : callAnswered || mediaReady
-    ? statusText
     : statusText
     || (incoming && !joined
-      ? phaseLabel("incoming_ringing", isVideo)
+      ? incomingCallLabel(t, isVideo)
       : ringingCount > 1
-      ? `Ringing ${ringingCount} people...`
-      : phaseLabel("outgoing_ringing", isVideo));
+      ? ringingPeopleLabel(t, ringingCount)
+      : outgoingRingingLabel(t, isVideo));
 
   const isOneToOne = participantCount <= 2;
   const contactAvatar = useMemo(() => {
@@ -258,7 +263,7 @@ export default function CallScreen() {
     return () => sub.remove();
   }, [isVideo, joined, scheduleHideControls]);
 
-  // ── WhatsApp-style outgoing audio call screen ──────────────────────────────
+  // ── Videh outgoing audio call screen ──────────────────────────────
   if (outgoingRinging && isOneToOne && !isVideo) {
     return (
       <View style={[styles.waRoot, { paddingTop: topPad, paddingBottom: insets.bottom + 28 }]}>
@@ -331,7 +336,7 @@ export default function CallScreen() {
     if (hasRemoteVideo && joined) {
       return (
         <View style={[styles.remoteVideo, styles.videoPlaceholder]}>
-          <Text style={styles.callStatus}>Connecting video…</Text>
+          <Text style={styles.callStatus}>{t(CALL_STATUS_KEYS.connectingVideo)}</Text>
         </View>
       );
     }
@@ -353,7 +358,7 @@ export default function CallScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: isVideo ? "#0B141A" : "#1A1A2E", paddingTop: isVideo ? 0 : topPad, paddingBottom: isVideo ? 0 : insets.bottom + 30 }]}>
+    <View style={[styles.container, { backgroundColor: isVideo ? "#12101F" : "#1A1A2E", paddingTop: isVideo ? 0 : topPad, paddingBottom: isVideo ? 0 : insets.bottom + 30 }]}>
       {isVideo ? (
         <View style={styles.videoStage}>
           <Pressable style={styles.videoContainer} onPress={showCallControls}>
@@ -455,7 +460,7 @@ export default function CallScreen() {
       <Text style={styles.callTypeLabel}>{isVideo ? "Videh video call" : "Videh voice call"}</Text>
       {!isOneToOne && participantCount > 2 && (
         <View style={styles.conferencePill}>
-          <Ionicons name="people" size={13} color="#d9fdd3" />
+          <Ionicons name="people" size={13} color="#E0DCFF" />
           <Text style={styles.conferenceText}>
             Conference call · {acceptedCount}/{participantCount} joined
           </Text>
@@ -479,7 +484,7 @@ export default function CallScreen() {
           {joined && (
             <View style={styles.encryptBadge}>
               <Ionicons name="lock-closed" size={12} color="rgba(255,255,255,0.5)" />
-              <Text style={styles.encryptText}>End-to-end encrypted</Text>
+              <Text style={styles.encryptText}>Secured with TLS encryption</Text>
             </View>
           )}
         </View>
@@ -579,10 +584,10 @@ function ControlBtn({ icon, label, onPress, active }: { icon: string; label: str
 
 const styles = StyleSheet.create({
   container: { flex: 1, alignItems: "center" },
-  // ── WhatsApp outgoing style ──
+  // ── Videh outgoing style ──
   waRoot: {
     flex: 1,
-    backgroundColor: "#0B141A",
+    backgroundColor: "#12101F",
     alignItems: "center",
   },
   waTop: {
@@ -655,7 +660,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     marginTop: 8,
   },
-  conferenceText: { color: "#d9fdd3", fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  conferenceText: { color: "#E0DCFF", fontSize: 12, fontFamily: "Inter_600SemiBold" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   videoStage: { flex: 1, width: "100%", position: "relative" },
   videoContainer: { flex: 1, width: "100%", position: "relative" },

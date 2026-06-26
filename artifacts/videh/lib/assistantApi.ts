@@ -116,7 +116,7 @@ export async function runAssistantCommand(
 export async function fetchAssistantGreeting(
   token: string | null | undefined,
   userId: number,
-  locale: AssistantLangCode = "hi",
+  locale: AssistantLangCode = "en",
 ): Promise<{ speak: string; langCode?: AssistantLangCode; speechLocale?: string }> {
   const res = await fetch(`${getApiUrl()}/api/assistant/greeting/${userId}?locale=${locale}`, {
     headers: authHeaders(token),
@@ -128,7 +128,7 @@ export async function fetchAssistantGreeting(
     speechLocale?: string;
   };
   return {
-    speak: data.speak ?? "Videh aapki seva mein hazir hai.",
+    speak: data.speak ?? "Videh is ready. How can I help?",
     langCode: data.langCode,
     speechLocale: data.speechLocale,
   };

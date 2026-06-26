@@ -21,7 +21,7 @@ function timeGreeting(lang: AssistantLangCode, now = new Date()): string {
     ur: ["صبح بخیر", "السلام علیکم", "شام بخیر", "شب بخیر"],
   };
 
-  const row = map[lang] ?? map.hi!;
+  const row = map[lang] ?? map.en!;
   if (morning) return row[0];
   if (afternoon) return row[1];
   if (evening) return row[2];
@@ -45,7 +45,7 @@ const SERVICE_LINE: Partial<Record<AssistantLangCode, string>> = {
 export function buildActivationGreeting(userName: string, lang: AssistantLangCode = "en"): string {
   const first = firstName(userName);
   const tg = timeGreeting(lang);
-  const line = SERVICE_LINE[lang] ?? SERVICE_LINE.hi!;
+  const line = SERVICE_LINE[lang] ?? SERVICE_LINE.en!;
   if (lang === "en") return `${tg}, ${first}. ${line}`;
   return `${tg}, ${first} ji. ${line}`;
 }

@@ -109,7 +109,7 @@ const AVATAR = 168;
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: "#0B141A",
+    backgroundColor: "#12101F",
     alignItems: "center",
   },
   top: {
@@ -190,7 +190,7 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
     maxWidth: 96,
   },
   actionLblGreen: {
-    color: "#00A884",
+    color: "#5B4FE8",
     fontSize: 11,
     fontFamily: "Inter_600SemiBold",
     textAlign: "center",

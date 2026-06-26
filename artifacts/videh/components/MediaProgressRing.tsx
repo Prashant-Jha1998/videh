@@ -11,13 +11,13 @@ type Props = {
   children?: React.ReactNode;
 };
 
-/** WhatsApp-style circular progress (0–100). */
+/** Videh circular progress (0–100). */
 export function MediaProgressRing({
   size = 44,
   strokeWidth = 3,
   progress,
   trackColor = "rgba(0,0,0,0.12)",
-  progressColor = "#00A884",
+  progressColor = "#5B4FE8",
   children,
 }: Props) {
   const radius = (size - strokeWidth) / 2;

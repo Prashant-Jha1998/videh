@@ -90,16 +90,16 @@ export default function SettingsScreen() {
   };
 
   const inviteFriend = useCallback(async () => {
-    const message = "Use Videh - India's fastest messaging app!\n\nFeatures: Broadcasts, group ledger, SOS safety, real-time translation, scheduled messages, and much more.\n\nDownload: https://videh.app";
+    const message = "Try Videh — chat, calls, stories, and Videh Video in one app.\n\nDownload: https://videh.co.in/download.html";
     try {
       const { Share } = await import("react-native");
-      await Share.share({ message, title: "Videh — India's Best Messaging App" });
+      await Share.share({ message, title: "Invite to Videh" });
     } catch {}
   }, []);
 
   const rows: SettingRow[] = useMemo(
     () => [
-      { icon: "mic-circle-outline", iconBg: "#00A884", label: t("settings.heyVideh"), value: t("settings.heyVidehSub"), onPress: showHeyVidehComingSoon },
+      { icon: "mic-circle-outline", iconBg: "#5B4FE8", label: t("settings.heyVideh"), value: t("settings.heyVidehSub"), onPress: showHeyVidehComingSoon },
       { icon: "key-outline", iconBg: "#2196F3", label: t("settings.row.account"), value: t("settings.row.accountSub"), onPress: () => router.push("/settings/account") },
       { icon: "lock-closed-outline", iconBg: "#9C27B0", label: t("settings.row.privacy"), value: t("settings.row.privacySub"), onPress: () => router.push("/settings/privacy") },
       { icon: "color-palette-outline", iconBg: "#7C3AED", label: t("settings.appTheme"), value: t("settings.appThemeSub"), onPress: () => router.push("/settings/theme" as Href) },
@@ -116,7 +116,7 @@ export default function SettingsScreen() {
       { icon: "person-add-outline", iconBg: "#8BC34A", label: t("settings.row.invite"), onPress: inviteFriend },
       {
         icon: "phone-portrait-outline",
-        iconBg: "#00A884",
+        iconBg: "#5B4FE8",
         label: t("settings.row.updates"),
         value: t("settings.row.updatesSub"),
         onPress: () =>
@@ -138,7 +138,7 @@ export default function SettingsScreen() {
           <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/settings/qr-code")}>
             <Ionicons name="grid-outline" size={22} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerBtn}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/contacts")}>
             <Ionicons name="search-outline" size={22} color="#fff" />
           </TouchableOpacity>
         </View>

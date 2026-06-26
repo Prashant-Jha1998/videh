@@ -1,10 +1,10 @@
 /* Videh Web — Settings design system */
 .vs-root {
-  --vs-primary: #00a884;
+  --vs-primary: #5B4FE8;
   --vs-primary-dark: #008069;
   --vs-primary-soft: rgba(0, 168, 132, 0.1);
   --vs-primary-ring: rgba(0, 168, 132, 0.28);
-  --vs-text: #111b21;
+  --vs-text: #14131F;
   --vs-muted: #667781;
   --vs-border: #e9edef;
   --vs-surface: #ffffff;
@@ -541,7 +541,7 @@ button.vs-row:hover {
 /* Theme grid */
 .vs-theme-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   padding: 16px 18px;
 }
@@ -1105,7 +1105,7 @@ button.vs-row:hover {
   width: 100%;
   height: 48px;
   border-radius: 6px;
-  background: var(--vw-chat-bg, #e5ddd5);
+  background: var(--vw-chat-bg, #EDEAF5);
 }
 
 .vs-wallpaper-chip__preview--aurora {

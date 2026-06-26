@@ -3,7 +3,7 @@ import { getApiUrl } from "../api";
 import type { ContactShareRow } from "../loadDeviceContactsForShare";
 import { normalizePhone } from "../videhContacts";
 
-/** Videh contacts from existing chats (WhatsApp Web–style when device contacts unavailable). */
+/** Videh contacts from existing chats (Videh Web–style when device contacts unavailable). */
 export function chatsToContactShareRows(chats: Chat[], myUserId?: number): ContactShareRow[] {
   const rows: ContactShareRow[] = [];
   const seen = new Set<number>();

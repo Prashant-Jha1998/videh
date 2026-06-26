@@ -26,7 +26,7 @@ export function WebFilterChips({ chips, activeId, onChange }: Props) {
               {
                 backgroundColor: active
                   ? colors.isDark
-                    ? "#005C4B"
+                    ? "#3D3566"
                     : colors.primary + "22"
                   : colors.isDark
                     ? "#202C33"

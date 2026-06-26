@@ -82,7 +82,7 @@ export async function stopIncomingCallExperience(callId?: string, opts?: { force
 }
 
 /**
- * Background: local sticky notification only (WhatsApp-style).
+ * Background: local sticky notification only (Videh).
  * Foreground: in-app overlay — no CallKeep banner.
  */
 export function presentIncomingCallUi(

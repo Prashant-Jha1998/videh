@@ -51,7 +51,7 @@ export function ManageBusinessMessagesSheet({
 
           <View style={styles.menuBlock}>
             <View style={styles.menuRow}>
-              <Ionicons name="notifications-outline" size={22} color="#111B21" />
+              <Ionicons name="notifications-outline" size={22} color="#14131F" />
               <View style={styles.menuTextCol}>
                 <Text style={styles.menuLabel}>Notifications</Text>
                 <Text style={styles.menuHint}>Mute or unmute messages from this business</Text>
@@ -59,7 +59,7 @@ export function ManageBusinessMessagesSheet({
               <Switch
                 value={!isMuted}
                 onValueChange={(on) => onToggleMute(!on)}
-                trackColor={{ false: "#CBD5E1", true: "#00A884" }}
+                trackColor={{ false: "#CBD5E1", true: "#5B4FE8" }}
                 thumbColor="#FFFFFF"
               />
             </View>
@@ -111,7 +111,7 @@ const styles = StyleSheet.create({
   },
   closeBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   titleCol: { flex: 1, alignItems: "center" },
-  sheetTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", color: "#111B21" },
+  sheetTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", color: "#14131F" },
   sheetSubtitle: { fontSize: 13, fontFamily: "Inter_400Regular", color: "#667781", marginTop: 2 },
   menuBlock: { paddingTop: 4 },
   menuRow: {
@@ -122,7 +122,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   menuTextCol: { flex: 1, minWidth: 0 },
-  menuLabel: { fontSize: 16, fontFamily: "Inter_500Medium", color: "#111B21" },
+  menuLabel: { fontSize: 16, fontFamily: "Inter_500Medium", color: "#14131F" },
   menuHint: { fontSize: 13, fontFamily: "Inter_400Regular", color: "#667781", marginTop: 3, lineHeight: 18 },
   blockLabel: { color: "#EA0038" },
   divider: {

@@ -8,7 +8,7 @@ type Props = {
   textColor: string;
 };
 
-/** Small incoming-message-style bubble with animated dots (WhatsApp-like). */
+/** Small incoming-message-style bubble with animated dots (Videh-like). */
 export function TypingIndicator({ label, bubbleColor, dotColor, textColor }: Props) {
   const a = useRef(new Animated.Value(0)).current;
   const b = useRef(new Animated.Value(0)).current;

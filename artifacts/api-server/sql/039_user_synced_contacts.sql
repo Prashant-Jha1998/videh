@@ -1,4 +1,4 @@
--- Phone address book synced from mobile app for Videh Web contact picker (WhatsApp-style).
+-- Phone address book synced from mobile app for Videh Web contact picker (Videh).
 CREATE TABLE IF NOT EXISTS user_synced_contacts (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   phone TEXT NOT NULL,

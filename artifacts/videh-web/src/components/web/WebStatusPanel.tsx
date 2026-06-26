@@ -4,7 +4,7 @@ import { webApi, type WebStatus } from "../../lib/webApi";
 import { Avatar } from "./webUiShared";
 
 const TEXT_BG_COLORS = [
-  "#00A884", "#128C7E", "#075E54", "#2563EB", "#7C3AED", "#DB2777",
+  "#5B4FE8", "#128C7E", "#075E54", "#2563EB", "#7C3AED", "#DB2777",
   "#DC2626", "#EA580C", "#CA8A04", "#16A34A", "#0891B2", "#374151",
 ];
 
@@ -297,7 +297,7 @@ export function WebStatusPanel({
         )}
       </div>
       <div className="vw-status-panel__footer">
-        🔒 Your status updates are end-to-end encrypted
+        🔒 Status updates are stored securely and delivered over TLS
       </div>
       {composeOpen ? (
         <StatusComposeModal

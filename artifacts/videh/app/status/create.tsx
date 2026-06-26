@@ -117,7 +117,7 @@ function normalizePhone(raw: string): string {
   return `+${digits}`;
 }
 
-const TEXT_BG_COLORS = ["#00A884", "#128C7E", "#075E54", "#2563EB", "#7C3AED", "#DB2777", "#DC2626", "#EA580C", "#CA8A04", "#16A34A", "#0891B2", "#374151", "#1F2937", "#6B21A8", "#BE123C"];
+const TEXT_BG_COLORS = ["#5B4FE8", "#128C7E", "#075E54", "#2563EB", "#7C3AED", "#DB2777", "#DC2626", "#EA580C", "#CA8A04", "#16A34A", "#0891B2", "#374151", "#1F2937", "#6B21A8", "#BE123C"];
 const TEXT_COLORS = ["#FFFFFF", "#000000", "#F3F4F6", "#FEF9C3", "#ECFDF5"];
 
 function mediaExt(uri: string, type: "image" | "video"): string {
@@ -541,7 +541,7 @@ export default function StatusCreateScreen() {
 
   if (stage === "audience") {
     return (
-      <View style={[styles.container, { backgroundColor: "#111B21", paddingTop: insets.top + 8 }]}>
+      <View style={[styles.container, { backgroundColor: "#14131F", paddingTop: insets.top + 8 }]}>
         <View style={styles.audienceHeader}>
           <TouchableOpacity onPress={() => setStage("compose")} style={styles.iconBtn}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
@@ -589,7 +589,7 @@ export default function StatusCreateScreen() {
               )}
               <Text style={styles.limitHint}>Selected {selectedAudienceIds.length}/{MAX_STORY_PARTICIPANTS}</Text>
               {audienceLoading ? (
-                <ActivityIndicator color="#00A884" style={{ marginVertical: 16 }} />
+                <ActivityIndicator color="#5B4FE8" style={{ marginVertical: 16 }} />
               ) : (
                 <ScrollView style={styles.membersList} contentContainerStyle={{ paddingBottom: 14 }}>
                   {filteredAudience.map((m) => {
@@ -597,7 +597,7 @@ export default function StatusCreateScreen() {
                     return (
                       <TouchableOpacity key={m.id} style={styles.memberRow} onPress={() => toggleAudienceContact(m.id)}>
                         <Text style={styles.memberName}>{m.name}</Text>
-                        <Ionicons name={selected ? "checkmark-circle" : "ellipse-outline"} size={22} color={selected ? "#00A884" : "#8ea2ad"} />
+                        <Ionicons name={selected ? "checkmark-circle" : "ellipse-outline"} size={22} color={selected ? "#5B4FE8" : "#8ea2ad"} />
                       </TouchableOpacity>
                     );
                   })}
@@ -736,14 +736,14 @@ export default function StatusCreateScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
           <View style={[styles.captionBar, { paddingBottom: insets.bottom + 8 }]}>
             <View style={styles.statusAudiencePill}>
-              <Ionicons name="link-outline" size={13} color="#d9fdd3" />
+              <Ionicons name="link-outline" size={13} color="#E0DCFF" />
               <Text style={styles.statusAudienceText}>{storyMusicName ? `Music: ${storyMusicName.slice(0, 16)}` : "Status (Contacts)"}</Text>
             </View>
             <View style={[styles.captionInput, { backgroundColor: "rgba(0,0,0,0.6)" }]}>
               <Ionicons name="happy-outline" size={22} color="rgba(255,255,255,0.7)" />
               <TextInput value={caption} onChangeText={setCaption} placeholder="Add a caption..." placeholderTextColor="rgba(255,255,255,0.5)" style={styles.captionText} multiline />
             </View>
-            <TouchableOpacity style={[styles.sendBtn, { backgroundColor: "#00A884" }]} onPress={proceedToAudience}><Ionicons name="arrow-forward" size={22} color="#fff" /></TouchableOpacity>
+            <TouchableOpacity style={[styles.sendBtn, { backgroundColor: "#5B4FE8" }]} onPress={proceedToAudience}><Ionicons name="arrow-forward" size={22} color="#fff" /></TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
         <Modal visible={textModalVisible} transparent animationType="fade" onRequestClose={() => setTextModalVisible(false)}>
@@ -812,7 +812,7 @@ export default function StatusCreateScreen() {
                         <Text style={styles.musicTitle} numberOfLines={1}>{track.title}</Text>
                         <Text style={styles.musicArtist} numberOfLines={1}>{track.artist} • {track.duration}</Text>
                       </View>
-                      {selected ? <Ionicons name="checkmark-circle" size={20} color="#00A884" /> : null}
+                      {selected ? <Ionicons name="checkmark-circle" size={20} color="#5B4FE8" /> : null}
                       <TouchableOpacity style={styles.musicSaveBtn} onPress={() => toggleSavedMusic(track.id)}>
                         <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={22} color="#fff" />
                       </TouchableOpacity>
@@ -853,7 +853,7 @@ export default function StatusCreateScreen() {
             <TouchableOpacity key={c} style={[styles.colorDot, { backgroundColor: c }, bgColor === c && styles.colorDotSelected]} onPress={() => { setBgColor(c); Haptics.selectionAsync(); }} />
           ))}
         </ScrollView>
-        <TouchableOpacity style={[styles.postBtn, { backgroundColor: text.trim() ? "#00A884" : "rgba(255,255,255,0.3)" }]} onPress={proceedToAudience} disabled={!text.trim()}>
+        <TouchableOpacity style={[styles.postBtn, { backgroundColor: text.trim() ? "#5B4FE8" : "rgba(255,255,255,0.3)" }]} onPress={proceedToAudience} disabled={!text.trim()}>
           <Text style={styles.postBtnText}>Next</Text>
           <Ionicons name="arrow-forward" size={18} color="#fff" />
         </TouchableOpacity>
@@ -894,7 +894,7 @@ const styles = StyleSheet.create({
   trimHint: { width: "100%", color: "rgba(255,255,255,0.68)", fontSize: 11, fontWeight: "600" },
   trimBtn: { backgroundColor: "rgba(255,255,255,0.14)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 5 },
   trimBtnText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-  trimLabel: { color: "#d9fdd3", fontSize: 11, fontWeight: "700" },
+  trimLabel: { color: "#E0DCFF", fontSize: 11, fontWeight: "700" },
   mediaPreview: { flex: 1, width: W },
   storyOverlayWrap: { position: "absolute", minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, transform: [{ translateX: -40 }, { translateY: -24 }] },
   storyOverlaySelected: { borderWidth: 1.5, borderColor: "#fff", backgroundColor: "rgba(0,0,0,0.16)" },
@@ -905,23 +905,23 @@ const styles = StyleSheet.create({
   drawModeText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   captionBar: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 12, paddingTop: 8, gap: 10, flexWrap: "wrap" },
   statusAudiencePill: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", backgroundColor: "rgba(17,27,33,0.92)", borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 2 },
-  statusAudienceText: { color: "#d9fdd3", fontSize: 11, fontWeight: "600" },
+  statusAudienceText: { color: "#E0DCFF", fontSize: 11, fontWeight: "600" },
   captionInput: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 24, paddingHorizontal: 14, paddingVertical: 10, minHeight: 48 },
   captionText: { flex: 1, color: "#fff", fontSize: 15, maxHeight: 100 },
   sendBtn: { width: 50, height: 50, borderRadius: 25, alignItems: "center", justifyContent: "center" },
   pickMediaBtn: { alignItems: "center", gap: 16 },
   pickMediaText: { color: "#fff", fontSize: 16, fontWeight: "600" },
   editorModalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center", padding: 24 },
-  editorModalCard: { width: "100%", borderRadius: 16, backgroundColor: "#111B21", padding: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  editorModalCard: { width: "100%", borderRadius: 16, backgroundColor: "#14131F", padding: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
   editorModalTitle: { color: "#fff", fontSize: 18, fontWeight: "800", marginBottom: 12 },
-  editorModalInput: { backgroundColor: "#1F2C34", color: "#fff", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16 },
+  editorModalInput: { backgroundColor: "#1E1D2E", color: "#fff", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16 },
   editorModalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 14 },
-  editorModalBtn: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: "#2A3942" },
-  editorModalBtnText: { color: "#d9fdd3", fontWeight: "700" },
-  editorModalPrimary: { backgroundColor: "#00A884" },
+  editorModalBtn: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: "#2A2838" },
+  editorModalBtnText: { color: "#E0DCFF", fontWeight: "700" },
+  editorModalPrimary: { backgroundColor: "#5B4FE8" },
   editorModalPrimaryText: { color: "#fff", fontWeight: "800" },
   stickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  stickerBtn: { width: 54, height: 54, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#1F2C34" },
+  stickerBtn: { width: 54, height: 54, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#1E1D2E" },
   stickerText: { fontSize: 28 },
   musicSheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", justifyContent: "flex-end" },
   musicSheet: { maxHeight: "82%", backgroundColor: "#20242A", borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingHorizontal: 14, paddingTop: 8 },
@@ -944,17 +944,17 @@ const styles = StyleSheet.create({
   audienceHeader: { flexDirection: "row", alignItems: "flex-start", gap: 8, paddingHorizontal: 8, paddingBottom: 8 },
   audienceTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
   audienceSub: { color: "#9db0b8", fontSize: 12, marginTop: 2 },
-  audienceCard: { backgroundColor: "#1F2C34", borderRadius: 14, marginHorizontal: 14, marginTop: 10, padding: 12 },
+  audienceCard: { backgroundColor: "#1E1D2E", borderRadius: 14, marginHorizontal: 14, marginTop: 10, padding: 12 },
   settingLabel: { color: "#dfe8eb", fontSize: 13, fontWeight: "700", marginBottom: 8 },
-  settingInput: { backgroundColor: "#2A3942", color: "#fff", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, borderWidth: 1, borderColor: "#3f515b" },
+  settingInput: { backgroundColor: "#2A2838", color: "#fff", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, borderWidth: 1, borderColor: "#3f515b" },
   modeRow: { flexDirection: "row", gap: 8, marginBottom: 6 },
-  modeBtn: { flex: 1, backgroundColor: "#2A3942", borderRadius: 10, paddingVertical: 10, alignItems: "center", borderWidth: 1, borderColor: "#3f515b" },
-  modeBtnActive: { borderColor: "#00A884", backgroundColor: "#00A88422" },
+  modeBtn: { flex: 1, backgroundColor: "#2A2838", borderRadius: 10, paddingVertical: 10, alignItems: "center", borderWidth: 1, borderColor: "#3f515b" },
+  modeBtnActive: { borderColor: "#5B4FE8", backgroundColor: "#5B4FE822" },
   modeBtnText: { color: "#fff", fontSize: 13, fontWeight: "600" },
-  searchWrap: { marginTop: 8, backgroundColor: "#2A3942", borderRadius: 10, borderWidth: 1, borderColor: "#3f515b", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10 },
+  searchWrap: { marginTop: 8, backgroundColor: "#2A2838", borderRadius: 10, borderWidth: 1, borderColor: "#3f515b", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10 },
   searchInput: { color: "#fff", flex: 1, fontSize: 14, paddingVertical: 10 },
   chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  chip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, backgroundColor: "#00A884" },
+  chip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, backgroundColor: "#5B4FE8" },
   chipText: { color: "#fff", fontSize: 12, fontWeight: "600" },
   limitHint: { color: "#91a3ab", marginTop: 8, fontSize: 12 },
   membersList: { marginTop: 8, maxHeight: 150 },

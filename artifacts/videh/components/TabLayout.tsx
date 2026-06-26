@@ -9,6 +9,7 @@ import { WEB_DESKTOP_MIN_WIDTH } from "@/lib/web/webDesktop";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 function NativeTabLayout() {
   const { t, locale } = useUiPreferences();
@@ -129,6 +130,16 @@ export function ClassicTabLayout() {
 }
 
 export default function TabLayout() {
-  if (isLiquidGlassAvailable()) return <NativeTabLayout />;
-  return <ClassicTabLayout />;
+  if (isLiquidGlassAvailable()) {
+    return (
+      <ErrorBoundary>
+        <NativeTabLayout />
+      </ErrorBoundary>
+    );
+  }
+  return (
+    <ErrorBoundary>
+      <ClassicTabLayout />
+    </ErrorBoundary>
+  );
 }

@@ -21,6 +21,8 @@ import { ReelsChannelAboutSheet } from "@/components/ReelsChannelAboutSheet";
 import { ReelsOwnerVideoMenu, type OwnerVideoMenuAction } from "@/components/ReelsOwnerVideoMenu";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { interpolate } from "@/lib/i18n";
 import {
   formatVideoCountLabel,
   linkDisplayHost,
@@ -69,6 +71,7 @@ export default function ReelsChannelScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useApp();
+  const { t } = useUiPreferences();
   const [channel, setChannel] = useState<ReelsChannel | null>(null);
   const [videos, setVideos] = useState<ReelsVideo[]>([]);
   const [links, setLinks] = useState<ReelsChannelLink[]>([]);
@@ -270,7 +273,7 @@ export default function ReelsChannelScreen() {
 
   const confirmDeletePlaylist = (pl: ReelsPlaylist) => {
     if (!user?.dbId || !channel?.isOwner) return;
-    Alert.alert("Delete playlist?", `"${pl.title}" delete ho jayegi.`, [
+    Alert.alert("Delete playlist?", interpolate(t("reels.deletePlaylistConfirm"), { title: pl.title }), [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
@@ -299,8 +302,20 @@ export default function ReelsChannelScreen() {
 
   if (!channel) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.mutedForeground }}>Channel not found</Text>
+      <View style={[styles.center, { backgroundColor: colors.background, paddingHorizontal: 32 }]}>
+        <Ionicons name="person-circle-outline" size={56} color={colors.mutedForeground} />
+        <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold", fontSize: 16, marginTop: 12 }}>
+          {t("reels.channelNotFound")}
+        </Text>
+        <Text style={{ color: colors.mutedForeground, textAlign: "center", marginTop: 8 }}>
+          {t("reels.channelNotFoundHint")}
+        </Text>
+        <TouchableOpacity
+          style={{ marginTop: 20, backgroundColor: colors.primary, paddingHorizontal: 20, paddingVertical: 11, borderRadius: 22 }}
+          onPress={() => router.back()}
+        >
+          <Text style={{ color: "#fff", fontFamily: "Inter_600SemiBold" }}>{t("reels.goBack")}</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -346,12 +361,16 @@ export default function ReelsChannelScreen() {
               onAbout={() => setAboutOpen(true)}
               onSubscribe={async () => {
                 if (!user?.dbId) return;
-                if (channel.isSubscribed) {
-                  await unsubscribeReelsChannel(channel.id, user.dbId, user.sessionToken);
-                } else {
-                  await subscribeReelsChannel(channel.id, user.dbId, user.sessionToken);
+                try {
+                  if (channel.isSubscribed) {
+                    await unsubscribeReelsChannel(channel.id, user.dbId, user.sessionToken);
+                  } else {
+                    await subscribeReelsChannel(channel.id, user.dbId, user.sessionToken);
+                  }
+                  void load();
+                } catch {
+                  Alert.alert(t("common.error"), t("reels.subscribeFailed"));
                 }
-                void load();
               }}
             />
 
@@ -388,9 +407,20 @@ export default function ReelsChannelScreen() {
         }
         ListEmptyComponent={
           tab === "playlists" ? null : (
-            <Text style={{ color: colors.mutedForeground, padding: 20 }}>
-              {tab === "home" ? "No videos yet" : "No videos posted yet"}
-            </Text>
+            <View style={{ alignItems: "center", padding: 24, gap: 10 }}>
+              <Ionicons name="videocam-outline" size={44} color={colors.mutedForeground} />
+              <Text style={{ color: colors.mutedForeground, textAlign: "center" }}>
+                {channel.isOwner ? t("reels.noChannelVideosOwner") : t("reels.noChannelVideos")}
+              </Text>
+              {channel.isOwner ? (
+                <TouchableOpacity
+                  style={{ marginTop: 8, backgroundColor: colors.primary, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20 }}
+                  onPress={() => router.push("/reels/upload" as never)}
+                >
+                  <Text style={{ color: "#fff", fontFamily: "Inter_600SemiBold" }}>{t("reels.uploadVideo")}</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
           )
         }
         renderItem={({ item }) => (

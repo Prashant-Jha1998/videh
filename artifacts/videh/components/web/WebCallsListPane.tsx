@@ -6,6 +6,7 @@ import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { WEB_LIST_PANE_WIDTH } from "@/lib/web/webDesktop";
 import { WebFilterChips } from "@/components/web/WebFilterChips";
+import { filterCallLogs } from "@/lib/callLogFilter";
 
 function formatCallTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -28,12 +29,10 @@ export function WebCallsListPane({ width = WEB_LIST_PANE_WIDTH }: Props) {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("all");
 
-  const filtered = useMemo(() => {
-    let list = tab === "missed" ? callLogs.filter((c) => c.status === "missed") : callLogs;
-    const q = search.trim().toLowerCase();
-    if (q) list = list.filter((c) => c.name.toLowerCase().includes(q) || (c.phone ?? "").includes(q));
-    return list;
-  }, [callLogs, search, tab]);
+  const filtered = useMemo(
+    () => filterCallLogs(callLogs, { tab: tab as "all" | "missed", query: search }),
+    [callLogs, search, tab],
+  );
 
   return (
     <View style={[styles.pane, { width, borderRightColor: colors.border, backgroundColor: colors.background }]}>

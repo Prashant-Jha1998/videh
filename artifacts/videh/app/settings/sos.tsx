@@ -311,7 +311,7 @@ export default function SosScreen() {
 
       {/* Info card */}
       <View style={styles.infoCard}>
-        <Ionicons name="shield-checkmark" size={32} color="#00A884" />
+        <Ionicons name="shield-checkmark" size={32} color="#5B4FE8" />
         <Text style={styles.infoTitle}>Emergency Safety Feature</Text>
         <Text style={styles.infoText}>
           Press and hold SOS to send an emergency alert. Your latest location is shared with all emergency contacts.
@@ -344,7 +344,7 @@ export default function SosScreen() {
       <View style={styles.section}>
         {isTrackingLiveLocation && (
           <View style={styles.trackingBanner}>
-            <Ionicons name="navigate" size={16} color="#00A884" />
+            <Ionicons name="navigate" size={16} color="#5B4FE8" />
             <Text style={styles.trackingText}>Live location updates running (every 30s)</Text>
             <Pressable onPress={stopLiveLocationUpdates}>
               <Text style={styles.stopTrackingText}>Stop</Text>
@@ -355,16 +355,16 @@ export default function SosScreen() {
           <Text style={styles.sectionTitle}>Emergency Contacts ({contacts.length}/{MAX_SOS_CONTACTS})</Text>
           {contacts.length < MAX_SOS_CONTACTS && (
             <Pressable onPress={() => setShowAdd(true)}>
-              <Ionicons name="add-circle" size={26} color="#00A884" />
+              <Ionicons name="add-circle" size={26} color="#5B4FE8" />
             </Pressable>
           )}
         </View>
 
         {loading ? (
-          <ActivityIndicator color="#00A884" />
+          <ActivityIndicator color="#5B4FE8" />
         ) : contacts.length === 0 ? (
           <Pressable style={styles.addFirstBtn} onPress={() => setShowAdd(true)}>
-            <Ionicons name="person-add" size={20} color="#00A884" />
+            <Ionicons name="person-add" size={20} color="#5B4FE8" />
             <Text style={styles.addFirstTxt}>Add emergency contact</Text>
           </Pressable>
         ) : (
@@ -457,11 +457,11 @@ export default function SosScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#111B21" },
-  header: { flexDirection: "row", alignItems: "center", backgroundColor: "#1F2C34", paddingHorizontal: 12, paddingVertical: 14, gap: 12 },
+  container: { flex: 1, backgroundColor: "#14131F" },
+  header: { flexDirection: "row", alignItems: "center", backgroundColor: "#1E1D2E", paddingHorizontal: 12, paddingVertical: 14, gap: 12 },
   backBtn: { },
   headerTitle: { color: "#fff", fontSize: 18, fontWeight: "700" },
-  infoCard: { backgroundColor: "#1F2C34", margin: 16, borderRadius: 14, padding: 20, alignItems: "center", gap: 10 },
+  infoCard: { backgroundColor: "#1E1D2E", margin: 16, borderRadius: 14, padding: 20, alignItems: "center", gap: 10 },
   infoTitle: { color: "#E9EEF0", fontSize: 16, fontWeight: "700", textAlign: "center" },
   infoText: { color: "#8696A0", fontSize: 14, textAlign: "center", lineHeight: 20 },
   sosButton: { backgroundColor: "#E74C3C", marginHorizontal: 32, borderRadius: 100, aspectRatio: 1, alignItems: "center", justifyContent: "center", gap: 5, maxHeight: 180, alignSelf: "center", width: 180, paddingHorizontal: 18 },
@@ -470,34 +470,34 @@ const styles = StyleSheet.create({
   section: { margin: 16, marginTop: 24 },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
   sectionTitle: { color: "#E9EEF0", fontSize: 16, fontWeight: "700" },
-  addFirstBtn: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#1F2C34", borderRadius: 12, padding: 16 },
-  addFirstTxt: { color: "#00A884", fontSize: 15, fontWeight: "600" },
-  contactRow: { flexDirection: "row", alignItems: "center", backgroundColor: "#1F2C34", borderRadius: 12, padding: 12, marginBottom: 8, gap: 12 },
-  contactAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#2A3942", alignItems: "center", justifyContent: "center" },
+  addFirstBtn: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#1E1D2E", borderRadius: 12, padding: 16 },
+  addFirstTxt: { color: "#5B4FE8", fontSize: 15, fontWeight: "600" },
+  contactRow: { flexDirection: "row", alignItems: "center", backgroundColor: "#1E1D2E", borderRadius: 12, padding: 12, marginBottom: 8, gap: 12 },
+  contactAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#2A2838", alignItems: "center", justifyContent: "center" },
   contactAvatarTxt: { color: "#fff", fontSize: 18, fontWeight: "700" },
   contactName: { color: "#E9EEF0", fontSize: 15, fontWeight: "600" },
   contactPhone: { color: "#8696A0", fontSize: 13 },
-  linkedBadge: { color: "#00A884", fontSize: 12, fontWeight: "600" },
+  linkedBadge: { color: "#5B4FE8", fontSize: 12, fontWeight: "600" },
   inlineRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 },
   verifiedBadge: { color: "#7FD0BE", fontSize: 11, fontWeight: "600" },
-  verifyBtn: { backgroundColor: "#00A88422", borderWidth: 1, borderColor: "#00A884", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginRight: 8 },
-  verifyBtnTxt: { color: "#00A884", fontSize: 12, fontWeight: "700" },
-  trackingBanner: { backgroundColor: "#1F2C34", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 10, flexDirection: "row", alignItems: "center", gap: 8 },
+  verifyBtn: { backgroundColor: "#5B4FE822", borderWidth: 1, borderColor: "#5B4FE8", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginRight: 8 },
+  verifyBtnTxt: { color: "#5B4FE8", fontSize: 12, fontWeight: "700" },
+  trackingBanner: { backgroundColor: "#1E1D2E", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 10, flexDirection: "row", alignItems: "center", gap: 8 },
   trackingText: { color: "#C5D2D8", fontSize: 12, flex: 1, flexShrink: 1, paddingRight: 8 },
   stopTrackingText: { color: "#E74C3C", fontSize: 12, fontWeight: "700" },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
-  modal: { backgroundColor: "#1F2C34", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, position: "absolute", bottom: 0, left: 0, right: 0 },
+  modal: { backgroundColor: "#1E1D2E", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, position: "absolute", bottom: 0, left: 0, right: 0 },
   modalTitle: { color: "#fff", fontSize: 18, fontWeight: "700", marginBottom: 12 },
   label: { color: "#8696A0", fontSize: 13, marginBottom: 4, marginTop: 12 },
-  input: { backgroundColor: "#2A3942", color: "#FFFFFF", borderRadius: 10, padding: 12, fontSize: 16, borderWidth: 1, borderColor: "#3C4B54" },
+  input: { backgroundColor: "#2A2838", color: "#FFFFFF", borderRadius: 10, padding: 12, fontSize: 16, borderWidth: 1, borderColor: "#3C4B54" },
   hint: { color: "#8FA3AD", fontSize: 12, marginTop: 6, lineHeight: 18 },
-  saveBtn: { backgroundColor: "#00A884", borderRadius: 12, padding: 14, alignItems: "center", marginTop: 20 },
+  saveBtn: { backgroundColor: "#5B4FE8", borderRadius: 12, padding: 14, alignItems: "center", marginTop: 20 },
   saveBtnTxt: { color: "#fff", fontSize: 16, fontWeight: "700" },
   countdownCenter: { flex: 1, alignItems: "center", justifyContent: "center" },
-  countdownBox: { backgroundColor: "#1F2C34", borderRadius: 20, padding: 32, alignItems: "center", gap: 12, width: 280 },
+  countdownBox: { backgroundColor: "#1E1D2E", borderRadius: 20, padding: 32, alignItems: "center", gap: 12, width: 280 },
   countdownTitle: { color: "#fff", fontSize: 22, fontWeight: "700" },
   countdownNum: { color: "#E74C3C", fontSize: 80, fontWeight: "900" },
   countdownSub: { color: "#8696A0", fontSize: 14, textAlign: "center" },
-  cancelBtn: { backgroundColor: "#2A3942", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 32, marginTop: 8 },
+  cancelBtn: { backgroundColor: "#2A2838", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 32, marginTop: 8 },
   cancelBtnTxt: { color: "#fff", fontSize: 16, fontWeight: "600" },
 });

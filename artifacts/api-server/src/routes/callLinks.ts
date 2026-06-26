@@ -10,7 +10,7 @@ function makeToken(): string {
   return randomBytes(16).toString("hex");
 }
 
-/** Create a shareable Videh call link (WhatsApp-style). */
+/** Create a shareable Videh call link (Videh). */
 router.post("/", async (req: Request, res: Response) => {
   const hostId = Number((req as any).authUserId);
   const body = req.body as { chatId?: number; type?: string; title?: string; hoursValid?: number };

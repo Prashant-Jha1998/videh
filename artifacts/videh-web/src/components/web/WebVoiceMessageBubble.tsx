@@ -101,7 +101,7 @@ export function WebVoiceMessageBubble({
   };
 
   const progress = duration > 0 ? Math.min(1, position / duration) : 0;
-  const accent = isMe ? "#008069" : "#00a884";
+  const accent = isMe ? "#008069" : "#5B4FE8";
 
   if (failed) {
     return <div className="vw-voice vw-voice--error">Voice message unavailable</div>;

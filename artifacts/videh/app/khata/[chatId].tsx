@@ -521,7 +521,7 @@ export default function KhataScreen() {
       )}
 
       {loading ? (
-        <ActivityIndicator color="#00A884" style={{ marginTop: 40 }} />
+        <ActivityIndicator color="#5B4FE8" style={{ marginTop: 40 }} />
       ) : screenTab === "balances" ? (
         <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
           {pairwise.length > 0 ? (
@@ -587,7 +587,7 @@ export default function KhataScreen() {
                   {item.note ? <Text style={styles.noteText}>{item.note}</Text> : null}
                   {item.reminder_at && !item.paid && !item.reminder_sent ? (
                     <View style={styles.reminderBadge}>
-                      <Ionicons name="alarm-outline" size={12} color="#00A884" />
+                      <Ionicons name="alarm-outline" size={12} color="#5B4FE8" />
                       <Text style={styles.reminderBadgeTxt}>
                         Reminder {formatReminderLabel(new Date(item.reminder_at))}
                       </Text>
@@ -601,7 +601,7 @@ export default function KhataScreen() {
                 <View style={{ gap: 8 }}>
                   {!item.paid && (
                     <Pressable onPress={() => markPaid(item)} style={styles.payBtn}>
-                      <Ionicons name="checkmark-circle" size={28} color="#00A884" />
+                      <Ionicons name="checkmark-circle" size={28} color="#5B4FE8" />
                     </Pressable>
                   )}
                   <Pressable onPress={() => deleteEntry(item.id)}>
@@ -641,7 +641,7 @@ export default function KhataScreen() {
                     }}
                     style={styles.changeBtn}
                   >
-                    <Ionicons name="create-outline" size={16} color="#00A884" />
+                    <Ionicons name="create-outline" size={16} color="#5B4FE8" />
                     <Text style={styles.changeBtnTxt}>Change people or add manual name</Text>
                   </Pressable>
                 </>
@@ -672,7 +672,7 @@ export default function KhataScreen() {
                     }}
                     style={styles.changeBtn}
                   >
-                    <Ionicons name="create-outline" size={16} color="#00A884" />
+                    <Ionicons name="create-outline" size={16} color="#5B4FE8" />
                     <Text style={styles.changeBtnTxt}>Change creditor or manual name</Text>
                   </Pressable>
                 </>
@@ -776,8 +776,8 @@ export default function KhataScreen() {
                 <Switch
                   value={reminderEnabled}
                   onValueChange={setReminderEnabled}
-                  trackColor={{ false: "#3B4A54", true: "#00A88480" }}
-                  thumbColor={reminderEnabled ? "#00A884" : "#8696A0"}
+                  trackColor={{ false: "#3B4A54", true: "#5B4FE880" }}
+                  thumbColor={reminderEnabled ? "#5B4FE8" : "#8696A0"}
                 />
               </View>
 
@@ -790,12 +790,12 @@ export default function KhataScreen() {
                       display="compact"
                       minimumDate={new Date()}
                       themeVariant="dark"
-                      accentColor="#00A884"
+                      accentColor="#5B4FE8"
                       onChange={(_, d) => { if (d) setReminderAt(d); }}
                     />
                   ) : (
                     <Pressable style={styles.pickerRow} onPress={() => setShowReminderDatePicker(true)}>
-                      <Ionicons name="calendar-outline" size={20} color="#00A884" />
+                      <Ionicons name="calendar-outline" size={20} color="#5B4FE8" />
                       <Text style={styles.pickerRowTxt}>{formatReminderLabel(reminderAt)}</Text>
                       <Ionicons name="chevron-forward" size={18} color="#667781" />
                     </Pressable>
@@ -832,66 +832,66 @@ export default function KhataScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#111B21" },
-  header: { flexDirection: "row", alignItems: "center", backgroundColor: "#1F2C34", paddingHorizontal: 12, paddingVertical: 14 },
+  container: { flex: 1, backgroundColor: "#14131F" },
+  header: { flexDirection: "row", alignItems: "center", backgroundColor: "#1E1D2E", paddingHorizontal: 12, paddingVertical: 14 },
   backBtn: { marginRight: 12 },
   iconBtn: { padding: 4, marginLeft: 4 },
   headerTitle: { color: "#fff", fontSize: 18, fontWeight: "600" },
   headerSub: { color: "#8696A0", fontSize: 13 },
-  summaryBar: { flexDirection: "row", alignItems: "center", backgroundColor: "#2A3942", paddingHorizontal: 16, paddingVertical: 10 },
+  summaryBar: { flexDirection: "row", alignItems: "center", backgroundColor: "#2A2838", paddingHorizontal: 16, paddingVertical: 10 },
   summaryText: { color: "#F0C040", fontSize: 14, fontWeight: "600" },
-  tabs: { flexDirection: "row", backgroundColor: "#1F2C34", paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
-  tab: { flex: 1, paddingVertical: 8, borderRadius: 20, alignItems: "center", backgroundColor: "#2A3942" },
-  tabActive: { backgroundColor: "#00A884" },
+  tabs: { flexDirection: "row", backgroundColor: "#1E1D2E", paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
+  tab: { flex: 1, paddingVertical: 8, borderRadius: 20, alignItems: "center", backgroundColor: "#2A2838" },
+  tabActive: { backgroundColor: "#5B4FE8" },
   tabTxt: { color: "#8696A0", fontSize: 14, fontWeight: "600" },
   tabTxtActive: { color: "#fff" },
   subTabs: { flexDirection: "row", paddingHorizontal: 16, paddingTop: 8, gap: 8 },
-  subTab: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: "#2A3942" },
-  subTabActive: { backgroundColor: "#00A88430" },
+  subTab: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: "#2A2838" },
+  subTabActive: { backgroundColor: "#5B4FE830" },
   subTabTxt: { color: "#8696A0", fontSize: 13, fontWeight: "600" },
-  subTabTxtActive: { color: "#00A884" },
+  subTabTxtActive: { color: "#5B4FE8" },
   sectionTitle: { color: "#E9EEF0", fontSize: 15, fontWeight: "700", marginTop: 4 },
-  balanceCard: { backgroundColor: "#1F2C34", borderRadius: 12, padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  balanceCard: { backgroundColor: "#1E1D2E", borderRadius: 12, padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   balanceMain: { color: "#E9EEF0", fontSize: 15, fontWeight: "600", flex: 1, marginRight: 8 },
-  balanceAmt: { color: "#00A884", fontSize: 16, fontWeight: "800" },
-  positive: { color: "#00A884" },
+  balanceAmt: { color: "#5B4FE8", fontSize: 16, fontWeight: "800" },
+  positive: { color: "#5B4FE8" },
   negative: { color: "#F0C040" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
   emptyText: { color: "#E9EEF0", fontSize: 18, fontWeight: "600" },
   emptySub: { color: "#8696A0", fontSize: 14 },
-  card: { backgroundColor: "#1F2C34", borderRadius: 12, padding: 14, marginBottom: 12, flexDirection: "row", alignItems: "flex-start" },
+  card: { backgroundColor: "#1E1D2E", borderRadius: 12, padding: 14, marginBottom: 12, flexDirection: "row", alignItems: "flex-start" },
   cardPaid: { opacity: 0.65 },
   debtorName: { color: "#E9EEF0", fontSize: 15, fontWeight: "700" },
   creditorName: { color: "#8696A0", fontSize: 15, fontWeight: "600" },
-  amountText: { color: "#00A884", fontSize: 20, fontWeight: "800", marginVertical: 4 },
+  amountText: { color: "#5B4FE8", fontSize: 20, fontWeight: "800", marginVertical: 4 },
   noteText: { color: "#8696A0", fontSize: 14, marginBottom: 4 },
   metaText: { color: "#555E65", fontSize: 12 },
-  paidBadge: { backgroundColor: "#00A88420", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  paidBadgeTxt: { color: "#00A884", fontSize: 12, fontWeight: "600" },
+  paidBadge: { backgroundColor: "#5B4FE820", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  paidBadgeTxt: { color: "#5B4FE8", fontSize: 12, fontWeight: "600" },
   payBtn: {},
   modalRoot: { flex: 1 },
   keyboardAvoider: { flex: 1, justifyContent: "flex-end" },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
-  modal: { backgroundColor: "#1F2C34", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, width: "100%", maxHeight: "88%" },
+  modal: { backgroundColor: "#1E1D2E", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, width: "100%", maxHeight: "88%" },
   modalTitle: { color: "#fff", fontSize: 18, fontWeight: "700", marginBottom: 12 },
   label: { color: "#8696A0", fontSize: 13, marginBottom: 6, marginTop: 12 },
   pickerHint: { color: "#667781", fontSize: 12, marginTop: 4 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  memberChip: { backgroundColor: "#2A3942", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18 },
-  memberChipActive: { backgroundColor: "#00A884" },
+  memberChip: { backgroundColor: "#2A2838", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18 },
+  memberChipActive: { backgroundColor: "#5B4FE8" },
   memberChipText: { color: "#8696A0", fontSize: 13, fontWeight: "600", maxWidth: 140 },
   memberChipTextActive: { color: "#fff" },
-  input: { backgroundColor: "#2A3942", color: "#E9EEF0", borderRadius: 10, padding: 12, fontSize: 15 },
-  saveBtn: { backgroundColor: "#00A884", borderRadius: 12, padding: 14, alignItems: "center", marginTop: 20 },
+  input: { backgroundColor: "#2A2838", color: "#E9EEF0", borderRadius: 10, padding: 12, fontSize: 15 },
+  saveBtn: { backgroundColor: "#5B4FE8", borderRadius: 12, padding: 14, alignItems: "center", marginTop: 20 },
   saveBtnTxt: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  autoBox: { backgroundColor: "#2A3942", borderRadius: 12, padding: 14, gap: 10 },
+  autoBox: { backgroundColor: "#2A2838", borderRadius: 12, padding: 14, gap: 10 },
   autoRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
   autoLabel: { color: "#8696A0", fontSize: 13 },
   autoValue: { color: "#E9EDEF", fontSize: 16, fontWeight: "700", flex: 1, textAlign: "right" },
   changeBtn: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", marginTop: 8, marginBottom: 4 },
-  changeBtnTxt: { color: "#00A884", fontSize: 14, fontWeight: "600" },
+  changeBtnTxt: { color: "#5B4FE8", fontSize: 14, fontWeight: "600" },
   backAutoBtn: { marginBottom: 8 },
-  backAutoTxt: { color: "#00A884", fontSize: 13, fontWeight: "600" },
+  backAutoTxt: { color: "#5B4FE8", fontSize: 13, fontWeight: "600" },
   reminderRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 16 },
   reminderTitle: { color: "#E9EDEF", fontSize: 15, fontWeight: "700" },
   reminderSub: { color: "#8696A0", fontSize: 12, lineHeight: 17, marginTop: 4 },
@@ -899,7 +899,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    backgroundColor: "#2A3942",
+    backgroundColor: "#2A2838",
     borderRadius: 12,
     padding: 14,
     marginTop: 8,
@@ -919,19 +919,19 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 2,
   },
-  reminderBadgeTxt: { color: "#00A884", fontSize: 12, fontWeight: "600" },
+  reminderBadgeTxt: { color: "#5B4FE8", fontSize: 12, fontWeight: "600" },
   partyBlock: { marginTop: 4 },
   modeRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
   modeChip: {
     flex: 1,
     paddingVertical: 9,
     borderRadius: 20,
-    backgroundColor: "#2A3942",
+    backgroundColor: "#2A2838",
     alignItems: "center",
     borderWidth: 1,
     borderColor: "transparent",
   },
-  modeChipActive: { backgroundColor: "rgba(0,168,132,0.2)", borderColor: "#00A884" },
+  modeChipActive: { backgroundColor: "rgba(0,168,132,0.2)", borderColor: "#5B4FE8" },
   modeChipText: { color: "#8696A0", fontSize: 12, fontWeight: "700" },
   modeChipTextActive: { color: "#00E5B0" },
   manualBanner: {
@@ -939,19 +939,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     marginBottom: 10,
-    backgroundColor: "#2A3942",
+    backgroundColor: "#2A2838",
     padding: 12,
     borderRadius: 10,
   },
   quickRow: { flexDirection: "row", gap: 8, marginTop: 4 },
   quickBtn: {
     flex: 1,
-    backgroundColor: "#2A3942",
+    backgroundColor: "#2A2838",
     paddingVertical: 10,
     borderRadius: 10,
     alignItems: "center",
   },
-  quickBtnText: { color: "#00A884", fontSize: 12, fontWeight: "700" },
+  quickBtnText: { color: "#5B4FE8", fontSize: 12, fontWeight: "700" },
   manualTag: {
     backgroundColor: "#3B4A54",
     paddingHorizontal: 6,

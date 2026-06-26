@@ -144,7 +144,7 @@ export function InStreamAdPreview({
             ↺ Replay ad preview
           </button>
         </div>
-        <p className="ads-preview-hint">After skip — main video resumes (like YouTube)</p>
+        <p className="ads-preview-hint">After skip — main video resumes (after the skip timer)</p>
       </div>
     );
   }

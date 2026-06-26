@@ -223,7 +223,7 @@ function AssistantSettingsContent() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
         <View style={[styles.hero, { backgroundColor: colors.card }]}>
           <View style={styles.heroIcon}>
-            <Ionicons name="mic-circle" size={56} color="#00A884" />
+            <Ionicons name="mic-circle" size={56} color="#5B4FE8" />
           </View>
           <Text style={[styles.heroTitle, { color: colors.foreground }]}>Videh AI voice assistant</Text>
           <Text style={[styles.heroSub, { color: colors.mutedForeground }]}>
@@ -260,7 +260,7 @@ function AssistantSettingsContent() {
             <Switch
               value={Boolean(prefs?.enabled)}
               onValueChange={(v) => void setEnabled(v)}
-              trackColor={{ true: "#00A884" }}
+              trackColor={{ true: "#5B4FE8" }}
             />
           </View>
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
@@ -269,11 +269,11 @@ function AssistantSettingsContent() {
             <Switch
               value={listenLocked}
               onValueChange={(v) => void toggleListenLocked(v)}
-              trackColor={{ true: "#00A884" }}
+              trackColor={{ true: "#5B4FE8" }}
             />
           </View>
           <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-            App open hone par &quot;Hey Videh&quot; sunne ke liye mic chahiye. Lock screen par Android mic band kar sakta hai — pehle unlock karke try karein. Phone ke Settings → Languages → Voice input mein speech-to-text engine select hona chahiye (alag se Google app install karne ki zaroorat nahi).
+            The microphone is required to hear &quot;Hey Videh&quot; while the app is open. On the lock screen Android may block the mic — unlock first, then try. In Settings → Languages → Voice input, select a speech-to-text engine (you do not need a separate Google app).
           </Text>
         </View>
 
@@ -312,7 +312,7 @@ function AssistantSettingsContent() {
                       width: 6,
                       height: 8 + meter * 20 + ((i * 3) % 8),
                       borderRadius: 3,
-                      backgroundColor: "#00A884",
+                      backgroundColor: "#5B4FE8",
                       opacity: 0.35 + meter * 0.65,
                     }}
                   />
@@ -354,7 +354,7 @@ function AssistantSettingsContent() {
                     <Ionicons
                       name={playingIdx === i ? "hourglass-outline" : "play"}
                       size={16}
-                      color="#00A884"
+                      color="#5B4FE8"
                     />
                     <Text style={styles.playChipText}>
                       {playingIdx === i ? "Playing…" : "Play"}
@@ -384,19 +384,19 @@ function AssistantSettingsContent() {
           )}
         </View>
 
-        <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>EXAMPLE PHRASES (apne contacts / groups ke naam use karein)</Text>
+        <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>EXAMPLE PHRASES (use your contact or group names)</Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           {[
-            "[Naam] ko call karo / video call lagao",
-            "[Naam] ko message bhejo …",
-            "Aaj kis kis ka message aaya",
-            "Kis ka call miss hua",
-            "Kis group mein kitne message hain",
-            "Kitne unread messages hain",
-            "Mere chats kaun kaun hain",
-            "Sab messages read kar do",
-            "Privacy setting kahan hai",
-            "Theme kaise change karein",
+            "Call [name] / video call [name]",
+            "Message [name] …",
+            "Who messaged me today",
+            "Who did I miss a call from",
+            "How many messages in each group",
+            "How many unread messages",
+            "List my chats",
+            "Mark all messages read",
+            "Where are privacy settings",
+            "How do I change the theme",
           ].map((cmd) => (
             <Text key={cmd} style={[styles.cmd, { color: colors.mutedForeground }]}>• {cmd}</Text>
           ))}
@@ -407,7 +407,7 @@ function AssistantSettingsContent() {
             <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>Test now — speak a command</Text>
           </TouchableOpacity>
           <Text style={[styles.hint, { color: colors.mutedForeground, marginTop: 10 }]}>
-            [Naam] = jo contact ya group aapki chat list mein dikhta hai. Fixed examples nahi — aap jo chahein bol sakte hain. Ek line: &quot;Hey Videh [naam] ko call karo&quot;.
+            [name] = a contact or group from your chat list. Examples are not fixed — say what you need. One line: &quot;Hey Videh, call [name]&quot;.
           </Text>
         </View>
       </ScrollView>
@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
     borderRadius: 28,
     paddingVertical: 14,
   },
@@ -477,6 +477,6 @@ const styles = StyleSheet.create({
   },
   sampleLabel: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   playChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6 },
-  playChipText: { color: "#00A884", fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  playChipText: { color: "#5B4FE8", fontSize: 13, fontFamily: "Inter_600SemiBold" },
   cmd: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 22 },
 });

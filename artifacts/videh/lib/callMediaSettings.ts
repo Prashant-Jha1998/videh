@@ -23,7 +23,7 @@ export async function setCallLowDataMode(enabled: boolean): Promise<void> {
 
 export type CameraFacing = "user" | "environment";
 
-/** WebRTC getUserMedia constraints (WhatsApp-style low data for calls). */
+/** WebRTC getUserMedia constraints (Videh low data for calls). */
 export function buildCallMediaConstraints(
   isVideo: boolean,
   lowData: boolean,

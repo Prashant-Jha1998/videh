@@ -55,7 +55,7 @@ export async function applyVidehNotificationSounds(): Promise<void> {
       sound: soundName,
       bypassDnd: true,
       enableLights: true,
-      lightColor: "#00A884",
+      lightColor: "#5B4FE8",
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
   }

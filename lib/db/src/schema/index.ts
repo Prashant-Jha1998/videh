@@ -124,7 +124,7 @@ export const statuses = pgTable("statuses", {
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   content: text("content").notNull(),
   type: text("type").notNull().default("text"),
-  backgroundColor: text("background_color").notNull().default("#00A884"),
+  backgroundColor: text("background_color").notNull().default("#5B4FE8"),
   mediaUrl: text("media_url"),
   expiresAt: timestamp("expires_at", { withTimezone: true })
     .notNull()

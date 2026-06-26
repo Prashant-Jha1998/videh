@@ -29,7 +29,7 @@ function isSseKeepalive(type: string): boolean {
   return type === "ping" || type === "ready";
 }
 
-/** SSE for chat events — EventSource on web, XHR stream on React Native (WhatsApp-style instant). */
+/** SSE for chat events — EventSource on web, XHR stream on React Native (Videh instant). */
 export function connectChatEventStream(
   userId: number,
   token: string | null,

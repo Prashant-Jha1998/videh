@@ -67,7 +67,7 @@ export function WebDesktopShell({ children, forceMainContent }: Props) {
             icon="call-outline"
             title="Calls on Videh Web"
             subtitle="Start a voice or video call from a chat, or pick a contact."
-            footer="Your personal calls are end-to-end encrypted."
+            footer="Your personal calls use TLS encryption in transit."
             actions={[
               { icon: "videocam-outline", label: "Start call", onPress: () => void webStartCall(router) },
               {
@@ -104,7 +104,7 @@ export function WebDesktopShell({ children, forceMainContent }: Props) {
             icon="chatbubbles-outline"
             title="Videh Web"
             subtitle="Send and receive messages without keeping your phone online. Use Videh on up to 4 linked devices."
-            footer="End-to-end encrypted"
+            footer="TLS-secured in transit"
           />
         );
     }

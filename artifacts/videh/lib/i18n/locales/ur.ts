@@ -78,7 +78,7 @@ export const ur = locale({
   "chats.noMessagesYet": "ابھی کوئی پیغام نہیں",
   "chats.noArchived": "کوئی آرکائیو چیٹ نہیں",
   "chats.noArchivedHint": "آرکائیو چیٹ یہاں دکھائی دیں گی۔",
-  "chats.emptyHint": "اپنے رابطوں سے گفتگو شروع کریں۔\nآپ کے پیغامات اینڈ ٹو اینڈ انکرپٹ ہیں۔",
+  "chats.emptyHint": "اپنے رابطوں سے گفتگو شروع کریں۔\nآپ کے پیغامات ٹرانزٹ میں TLS سے محفوظ ہیں۔",
   "chats.startChat": "چیٹ شروع کریں",
   "chats.noSearchResults": "\"{query}\" کے لیے کوئی نتیجہ نہیں",
   "chats.unlockAndOpen": "ان لاک کر کے کھولیں",

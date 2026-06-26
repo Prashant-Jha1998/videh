@@ -15,6 +15,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { interpolate } from "@/lib/i18n";
 import {
   fetchReelsVideoNotifications,
   formatTimeAgo,
@@ -105,7 +107,9 @@ export default function ReelsNotificationsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useApp();
+  const { t } = useUiPreferences();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [notifications, setNotifications] = useState<ReelsVideoNotification[]>([]);
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -116,9 +120,13 @@ export default function ReelsNotificationsScreen() {
       return;
     }
     setLoading(true);
+    setLoadError(false);
     try {
       const res = await fetchReelsVideoNotifications(user.dbId, user.sessionToken);
       setNotifications(res.notifications ?? []);
+    } catch {
+      setLoadError(true);
+      setNotifications([]);
     } finally {
       setLoading(false);
     }
@@ -266,13 +274,24 @@ export default function ReelsNotificationsScreen() {
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
         </View>
+      ) : loadError ? (
+        <View style={styles.center}>
+          <Ionicons name="cloud-offline-outline" size={48} color={colors.mutedForeground} />
+          <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold", marginTop: 12 }}>{t("reels.notificationsError")}</Text>
+          <TouchableOpacity onPress={() => void load()} style={{ marginTop: 12 }}>
+            <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>{t("reels.retry")}</Text>
+          </TouchableOpacity>
+        </View>
       ) : sections.length === 0 ? (
         <View style={styles.center}>
           <Ionicons name="notifications-off-outline" size={48} color={colors.mutedForeground} />
-          <Text style={{ color: colors.mutedForeground, marginTop: 12, textAlign: "center", paddingHorizontal: 32 }}>
+          <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold", marginTop: 12, textAlign: "center" }}>
+            {t("reels.noNotifications")}
+          </Text>
+          <Text style={{ color: colors.mutedForeground, marginTop: 8, textAlign: "center", paddingHorizontal: 32 }}>
             {search.trim()
-              ? "No matching video notifications."
-              : "Subscribe to channels to get notified when they upload new videos."}
+              ? interpolate(t("reels.noSearchResults"), { query: search.trim() })
+              : t("reels.noNotificationsHint")}
           </Text>
         </View>
       ) : (

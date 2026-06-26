@@ -23,6 +23,7 @@ import {
   type AnimatedWallpaperId,
 } from "@/lib/themeAppearance";
 import { getPerChatTheme, setPerChatTheme } from "@/lib/perChatTheme";
+import { useThemeGridCardWidth } from "@/lib/themeGridLayout";
 
 export default function ChatThemeScreen() {
   const { chatId, name } = useLocalSearchParams<{ chatId: string; name?: string }>();
@@ -31,6 +32,7 @@ export default function ChatThemeScreen() {
   const router = useRouter();
   const { appThemeId, refreshPerChatThemes } = useUiPreferences();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+  const themeCardWidth = useThemeGridCardWidth();
 
   const [themeId, setThemeId] = useState(appThemeId);
   const [bubbleSent, setBubbleSent] = useState<string | undefined>();
@@ -99,7 +101,13 @@ export default function ChatThemeScreen() {
               <TouchableOpacity
                 key={t.id}
                 onPress={() => setThemeId(t.id)}
-                style={[styles.card, { borderColor: selected ? colors.primary : colors.border }]}
+                style={[
+                  styles.card,
+                  {
+                    width: themeCardWidth,
+                    borderColor: selected ? colors.primary : colors.border,
+                  },
+                ]}
               >
                 <LinearGradient colors={t.colors} style={styles.swatch} />
                 <Text style={[styles.cardTxt, { color: colors.foreground }]} numberOfLines={1}>{t.name}</Text>
@@ -176,7 +184,7 @@ const styles = StyleSheet.create({
   sub: { fontSize: 13, marginTop: 6, marginBottom: 16, lineHeight: 20 },
   label: { fontSize: 14, fontFamily: "Inter_700Bold", marginTop: 12, marginBottom: 8 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  card: { width: "30%", borderWidth: 1.5, borderRadius: 10, padding: 6, alignItems: "center" },
+  card: { borderWidth: 1.5, borderRadius: 10, padding: 6, alignItems: "center" },
   swatch: { width: "100%", aspectRatio: 1, borderRadius: 8 },
   cardTxt: { fontSize: 10, marginTop: 4 },
   row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },

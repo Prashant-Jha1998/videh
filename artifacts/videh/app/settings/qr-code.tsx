@@ -326,7 +326,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#E9EDEF",
   },
-  qrLogoText: { color: "#00A884", fontSize: 22, fontFamily: "Inter_800ExtraBold" },
+  qrLogoText: { color: "#5B4FE8", fontSize: 22, fontFamily: "Inter_800ExtraBold" },
   privacy: {
     marginTop: 24,
     fontSize: 14,

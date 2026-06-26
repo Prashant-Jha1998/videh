@@ -148,18 +148,18 @@ export default function KhataPickChatScreen() {
       </View>
 
       <Text style={styles.sub}>
-        Shop, family, ya koi bhi — Videh par na ho to bhi udhar/credit yahan likh sakte hain.
+        Track credit or debit for shops, family, or anyone — even if they are not on Videh.
       </Text>
 
       <Pressable style={styles.addCard} onPress={() => setShowAdd(true)}>
         <View style={styles.addIcon}>
-          <Ionicons name="book-outline" size={22} color="#00A884" />
+          <Ionicons name="book-outline" size={22} color="#5B4FE8" />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.addTitle}>Naya khata (Videh par nahi)</Text>
-          <Text style={styles.addMeta}>Naam likho — alag ledger ban jayega</Text>
+          <Text style={styles.addTitle}>New ledger (not on Videh)</Text>
+          <Text style={styles.addMeta}>Enter a name to create a separate ledger</Text>
         </View>
-        <Ionicons name="add-circle" size={26} color="#00A884" />
+        <Ionicons name="add-circle" size={26} color="#5B4FE8" />
       </Pressable>
 
       <SectionList
@@ -173,12 +173,12 @@ export default function KhataPickChatScreen() {
         renderSectionFooter={({ section }) => {
           if (section.title !== "Not on Videh") return null;
           if (loadingNotebooks) {
-            return <ActivityIndicator color="#00A884" style={{ marginVertical: 16 }} />;
+            return <ActivityIndicator color="#5B4FE8" style={{ marginVertical: 16 }} />;
           }
           if (section.data.length === 0) {
             return (
               <Text style={styles.sectionEmpty}>
-                Abhi koi alag khata nahi. Upar &quot;Naya khata&quot; dabayein.
+                No separate ledgers yet. Tap &quot;New ledger&quot; above.
               </Text>
             );
           }
@@ -193,7 +193,7 @@ export default function KhataPickChatScreen() {
               <Ionicons
                 name={item.kind === "notebook" ? "book-outline" : item.isGroup ? "people" : "person"}
                 size={20}
-                color="#00A884"
+                color="#5B4FE8"
               />
             </View>
             <View style={{ flex: 1 }}>
@@ -210,7 +210,7 @@ export default function KhataPickChatScreen() {
           </Pressable>
         )}
         ListEmptyComponent={
-          <Text style={styles.empty}>No Videh chats yet. Use &quot;Naya khata&quot; for people not on Videh.</Text>
+          <Text style={styles.empty}>No Videh chats yet. Use &quot;New ledger&quot; for people not on Videh.</Text>
         }
       />
 
@@ -221,13 +221,13 @@ export default function KhataPickChatScreen() {
         >
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowAdd(false)} />
           <View style={[styles.modalCard, { paddingBottom: insets.bottom + 16 }]}>
-            <Text style={styles.modalTitle}>Naya khata</Text>
+            <Text style={styles.modalTitle}>New ledger</Text>
             <Text style={styles.modalSub}>
-              Jis vyakti ya dukaan ka naam likhoge, unka alag khata banega. Videh account zaroori nahi.
+              Enter a person or shop name to create their ledger. A Videh account is not required.
             </Text>
             <TextInput
               style={styles.input}
-              placeholder="Naam (jaise: Monty, Kirana shop)"
+              placeholder="Name (e.g. Monty, Kirana shop)"
               placeholderTextColor="#667781"
               value={contactName}
               onChangeText={setContactName}
@@ -258,7 +258,7 @@ export default function KhataPickChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#111B21" },
+  root: { flex: 1, backgroundColor: "#14131F" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -266,7 +266,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: "#1F2C34",
+    backgroundColor: "#1E1D2E",
   },
   title: { color: "#fff", fontSize: 18, fontWeight: "700", flex: 1 },
   sub: { color: "#8696A0", fontSize: 14, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
@@ -293,7 +293,7 @@ const styles = StyleSheet.create({
   addTitle: { color: "#E9EDEF", fontSize: 15, fontWeight: "700" },
   addMeta: { color: "#8696A0", fontSize: 12, marginTop: 2 },
   sectionTitle: {
-    color: "#00A884",
+    color: "#5B4FE8",
     fontSize: 13,
     fontWeight: "700",
     textTransform: "uppercase",
@@ -306,7 +306,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    backgroundColor: "#1F2C34",
+    backgroundColor: "#1E1D2E",
     borderRadius: 12,
     padding: 14,
     marginBottom: 10,
@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   modalCard: {
-    backgroundColor: "#1F2C34",
+    backgroundColor: "#1E1D2E",
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 20,
@@ -336,20 +336,20 @@ const styles = StyleSheet.create({
   modalTitle: { color: "#E9EDEF", fontSize: 18, fontWeight: "700", marginBottom: 6 },
   modalSub: { color: "#8696A0", fontSize: 14, marginBottom: 14, lineHeight: 20 },
   input: {
-    backgroundColor: "#111B21",
+    backgroundColor: "#14131F",
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: "#E9EDEF",
     fontSize: 16,
     borderWidth: 1,
-    borderColor: "#2A3942",
+    borderColor: "#2A2838",
   },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 12, marginTop: 16 },
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
   cancelText: { color: "#8696A0", fontSize: 16, fontWeight: "600" },
   saveBtn: {
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 20,

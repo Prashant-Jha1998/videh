@@ -67,7 +67,7 @@ export async function openRazorpayCheckout(options: {
       name: options.name ?? "Videh",
       description: options.description ?? "Story boost",
       prefill: options.prefill,
-      theme: { color: "#00A884" },
+      theme: { color: "#5B4FE8" },
       handler: (response) => resolve(response),
       modal: {
         ondismiss: () => reject(new Error("Payment cancelled")),

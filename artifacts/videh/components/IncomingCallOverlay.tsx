@@ -201,7 +201,7 @@ export function IncomingCallOverlay({ call, onAccept, onDecline, onDeclineWithMe
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: "#0B141A",
+    backgroundColor: "#12101F",
     alignItems: "center",
   },
   top: {
@@ -278,7 +278,7 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
     alignItems: "center",
     justifyContent: "center",
   },

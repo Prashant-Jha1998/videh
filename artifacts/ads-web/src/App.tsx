@@ -577,7 +577,7 @@ export default function App() {
 
               <Panel title={`Live campaigns (${dashboard?.summary.running_campaigns ?? 0} chal rahi hain)`}>
                 {(dashboard?.campaigns.filter((c) => c.is_running) ?? []).length === 0 ? (
-                  <p style={S.sub}>Abhi koi campaign live nahi hai. Campaign banao, ad submit karo, admin approve ke baad chalegi.</p>
+                  <p style={S.sub}>No campaigns are live yet. Create a campaign, submit an ad, and it will run after admin approval.</p>
                 ) : (
                   <div className="ads-table-wrap"><table className="ads-table">
                     <thead>
@@ -771,7 +771,7 @@ export default function App() {
                     </thead>
                     <tbody>
                       {campaigns.map((c) => (
-                        <tr key={c.id} style={{ background: selectedCampaign === c.id ? "#e8f5f0" : undefined, cursor: "pointer" }}
+                        <tr key={c.id} style={{ background: selectedCampaign === c.id ? "#E8E6FF" : undefined, cursor: "pointer" }}
                           onClick={() => {
                             setSelectedCampaign(c.id);
                             if (isCampaignObjective(c.objective)) {
@@ -860,7 +860,7 @@ export default function App() {
               />
               {pricing?.adFormats?.find((f) => f.id === selectedAdFormatId && !f.live) ? (
                 <p style={{ color: "#e37400", fontSize: 13, margin: "10px 0" }}>
-                  Ye format catalog mein hai — player support jald aa raha hai. Abhi bhi submit kar sakte ho (admin review).
+                  This format is in the catalog — full player support is coming soon. You can still submit for admin review.
                 </p>
               ) : null}
 
@@ -1023,13 +1023,13 @@ export default function App() {
                 {submittingAd ? "Uploading…" : "Submit for review"}
               </button>
               <p className="ads-form-note">
-                Ad public tab tak nahi dikhega jab tak Videh admin approve na kare.
+                The ad will not appear publicly until a Videh admin approves it.
               </p>
                 </div>
 
                 <aside className="ads-create-previews" aria-label="Ad previews">
               <div className="ads-preview-block">
-                <div className="ads-preview-label">Preview — in-stream ad (YouTube-style)</div>
+                <div className="ads-preview-label">Preview — in-stream ad (in-stream video)</div>
                 <InStreamAdPreview
                   videoSrc={videoPreviewSrc}
                   iconSrc={imagePreviewSrc}
@@ -1193,7 +1193,7 @@ function AdFormatsCatalog({
                       {recommendedIds?.includes(f.id) ? (
                         <span style={{
                           fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
-                          background: "#e8f5f0", color: "#00A884",
+                          background: "#E8E6FF", color: "#5B4FE8",
                         }}>
                           RECOMMENDED
                         </span>
@@ -1286,9 +1286,9 @@ const S: Record<string, React.CSSProperties> = {
   sidebar: { width: 240, background: "#fff", borderRight: "1px solid #dadce0", display: "flex", flexDirection: "column", padding: "16px 12px" },
   nav: { display: "flex", flexDirection: "column", gap: 4, flex: 1, marginTop: 20 },
   navBtn: { textAlign: "left", padding: "10px 12px", border: "none", background: "transparent", borderRadius: 8, cursor: "pointer", color: "#5f6368" },
-  navOn: { textAlign: "left", padding: "10px 12px", border: "none", background: "#e8f5f0", borderRadius: 8, cursor: "pointer", color: "#00A884", fontWeight: 600 },
+  navOn: { textAlign: "left", padding: "10px 12px", border: "none", background: "#E8E6FF", borderRadius: 8, cursor: "pointer", color: "#5B4FE8", fontWeight: 600 },
   sideFoot: { borderTop: "1px solid #e8eaed", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 },
-  balancePill: { background: "#e8f5f0", color: "#00A884", fontWeight: 700, padding: "8px 12px", borderRadius: 8, fontSize: 14 },
+  balancePill: { background: "#E8E6FF", color: "#5B4FE8", fontWeight: 700, padding: "8px 12px", borderRadius: 8, fontSize: 14 },
   mainCol: { flex: 1, display: "flex", flexDirection: "column" },
   topBar: { background: "#fff", borderBottom: "1px solid #dadce0", padding: "16px 24px" },
   main: { padding: "20px 24px 48px", maxWidth: 1100 },
@@ -1299,12 +1299,12 @@ const S: Record<string, React.CSSProperties> = {
   sub: { margin: "4px 0 0", color: "#5f6368", fontSize: 14 },
   tabRow: { display: "flex", gap: 8, margin: "16px 0" },
   tab: { flex: 1, padding: "10px", border: "1px solid #dadce0", background: "#fff", borderRadius: 8, cursor: "pointer" },
-  tabOn: { flex: 1, padding: "10px", border: "1px solid #00A884", background: "#e8f5f0", borderRadius: 8, cursor: "pointer", fontWeight: 600 },
+  tabOn: { flex: 1, padding: "10px", border: "1px solid #5B4FE8", background: "#E8E6FF", borderRadius: 8, cursor: "pointer", fontWeight: 600 },
   authDivider: { display: "flex", alignItems: "center", gap: 10, margin: "4px 0 14px" },
   authDividerLine: { flex: 1, height: 1, background: "#e8eaed" },
   authDividerText: { fontSize: 11, fontWeight: 600, color: "#80868b", textTransform: "uppercase", letterSpacing: "0.04em" },
   input: { width: "100%", padding: "10px 12px", marginBottom: 10, borderRadius: 8, border: "1px solid #dadce0", fontSize: 14 },
-  primary: { padding: "11px 20px", background: "#00A884", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer", width: "100%" },
+  primary: { padding: "11px 20px", background: "#5B4FE8", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer", width: "100%" },
   ghost: { padding: "8px", background: "transparent", border: "1px solid #dadce0", borderRadius: 8, cursor: "pointer" },
   err: { color: "#d93025", fontSize: 13 },
   statGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12, marginBottom: 16 },
@@ -1325,14 +1325,14 @@ const S: Record<string, React.CSSProperties> = {
   formatGridCompact: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 8 },
   formatCard: { textAlign: "left", padding: 14, border: "1px solid #dadce0", background: "#fff", borderRadius: 10, cursor: "pointer" },
   formatCardCompact: { textAlign: "left", padding: 10, border: "1px solid #dadce0", background: "#fff", borderRadius: 8, cursor: "pointer" },
-  formatCardOn: { border: "2px solid #00A884", background: "#e8f5f0" },
+  formatCardOn: { border: "2px solid #5B4FE8", background: "#E8E6FF" },
   preview: { margin: "16px 0", padding: 14, background: "#f8f9fa", borderRadius: 10 },
   previewLabel: { fontSize: 11, color: "#80868b", marginBottom: 8, textTransform: "uppercase", fontWeight: 600 },
   previewCard: { background: "#fff", borderRadius: 10, overflow: "hidden", border: "1px solid #e8eaed", maxWidth: 360 },
   previewSponsored: { fontSize: 11, color: "#80868b", padding: "8px 12px" },
   previewImg: { width: "100%", height: 160, objectFit: "cover" },
   previewBody: { padding: 12 },
-  fakeBtnTeal: { display: "inline-block", background: "#00A884", color: "#fff", padding: "8px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, marginTop: 8 },
+  fakeBtnTeal: { display: "inline-block", background: "#5B4FE8", color: "#fff", padding: "8px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, marginTop: 8 },
   fakeBtnGreen: { display: "inline-block", background: "#01875f", color: "#fff", padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600 },
   fakeBtnBlack: { display: "inline-block", background: "#000", color: "#fff", padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600 },
   payBanner: { background: "#fef7e0", border: "1px solid #f9e6b0", borderRadius: 10, padding: 16, marginBottom: 16 },

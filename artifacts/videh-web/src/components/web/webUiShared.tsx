@@ -1,8 +1,8 @@
 import type { ChatMember } from "../../lib/webApi";
 
-export const WA_GREEN = "#00a884";
+export const WA_GREEN = "#5B4FE8";
 export const WA_BG = "#f0f2f5";
-export const WA_TEXT = "#111b21";
+export const WA_TEXT = "#14131F";
 export const WA_MUTED = "#667781";
 
 export function initials(name: string) {
@@ -70,7 +70,7 @@ export function Avatar({
           position: "absolute",
           inset: 0,
           borderRadius: "50%",
-          border: `2.5px solid ${ring === "unviewed" ? "var(--vw-primary, #00a884)" : "#8696a0"}`,
+          border: `2.5px solid ${ring === "unviewed" ? "var(--vw-primary, #5B4FE8)" : "#8696a0"}`,
         }}
       />
       <div style={{ position: "absolute", top: 2, left: 2 }}>{core}</div>

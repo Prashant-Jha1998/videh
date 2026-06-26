@@ -135,18 +135,18 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
   const showConfirm = mode === "signup" || mode === "reset";
   const showGoogle = mode === "login" || mode === "signup";
   const inputClass =
-    "w-full rounded-xl border border-gray-200 bg-white pl-10 pr-4 py-3 text-sm text-[#111b21] placeholder:text-[#8696a0] focus:outline-none focus:ring-2 focus:ring-[#00a884]/35 focus:border-[#00a884]";
+    "w-full rounded-xl border border-gray-200 bg-white pl-10 pr-4 py-3 text-sm text-[#14131F] placeholder:text-[#8696a0] focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/35 focus:border-[#5B4FE8]";
 
   return (
-    <div className="fixed inset-0 z-[60] bg-[#0b141a]/92 flex items-center justify-center p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-[60] bg-[#12101F]/92 flex items-center justify-center p-4 overflow-y-auto">
       <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-gray-200/80 p-6 md:p-8 my-4 max-h-[calc(100vh-2rem)] overflow-y-auto">
         <div className="flex justify-between items-start gap-3 mb-6">
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-2">
               <img src="/videh_icon_foreground.png" alt="" className="h-8 w-8 rounded-lg" />
-              <span className="text-xs font-semibold uppercase tracking-wide text-[#00a884]">Videh Business API</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-[#5B4FE8]">Videh Business API</span>
             </div>
-            <h2 className="text-2xl font-bold text-[#111b21]">{title}</h2>
+            <h2 className="text-2xl font-bold text-[#14131F]">{title}</h2>
             <p className="text-sm text-[#667781] mt-1 leading-relaxed">
               {mode === "signup"
                 ? "Create your account before applying for the Business API."
@@ -160,7 +160,7 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
           <button
             type="button"
             onClick={onClose}
-            className="text-[#667781] hover:text-[#111b21] text-sm font-medium shrink-0 px-2 py-1 rounded-lg hover:bg-gray-100"
+            className="text-[#667781] hover:text-[#14131F] text-sm font-medium shrink-0 px-2 py-1 rounded-lg hover:bg-gray-100"
           >
             Close
           </button>
@@ -170,7 +170,7 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
           <p className="mb-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>
         ) : null}
         {info ? (
-          <p className="mb-4 text-sm text-[#00a884] bg-[#00a884]/10 border border-[#00a884]/20 rounded-lg px-3 py-2">{info}</p>
+          <p className="mb-4 text-sm text-[#5B4FE8] bg-[#5B4FE8]/10 border border-[#5B4FE8]/20 rounded-lg px-3 py-2">{info}</p>
         ) : null}
         {devOtpHint ? (
           <p className="mb-4 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -227,7 +227,7 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
               <input
                 value={otp}
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                className="w-full mt-1.5 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-[#00a884]/35 focus:border-[#00a884]"
+                className="w-full mt-1.5 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-[#5B4FE8]/35 focus:border-[#5B4FE8]"
                 placeholder="000000"
                 inputMode="numeric"
               />
@@ -273,7 +273,7 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
           type="button"
           disabled={busy}
           onClick={() => void submit()}
-          className="mt-6 w-full bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold py-3 rounded-xl disabled:opacity-60 flex items-center justify-center gap-2 transition-colors"
+          className="mt-6 w-full bg-[#5B4FE8] hover:bg-[#008f6f] text-white font-semibold py-3 rounded-xl disabled:opacity-60 flex items-center justify-center gap-2 transition-colors"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           {mode === "signup" ? "Create account" : mode === "login" ? "Sign in" : mode === "forgot" ? "Send reset code" : "Update password"}
@@ -282,12 +282,12 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
         <div className="mt-4 text-center text-sm text-[#667781] space-y-2">
           {mode === "login" ? (
             <>
-              <button type="button" className="text-[#00a884] font-semibold hover:underline" onClick={() => onSwitchMode("forgot")}>
+              <button type="button" className="text-[#5B4FE8] font-semibold hover:underline" onClick={() => onSwitchMode("forgot")}>
                 Forgot password?
               </button>
               <p>
                 New here?{" "}
-                <button type="button" className="text-[#00a884] font-semibold hover:underline" onClick={() => onSwitchMode("signup")}>
+                <button type="button" className="text-[#5B4FE8] font-semibold hover:underline" onClick={() => onSwitchMode("signup")}>
                   Create account
                 </button>
               </p>
@@ -296,13 +296,13 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
           {mode === "signup" ? (
             <p>
               Already have an account?{" "}
-              <button type="button" className="text-[#00a884] font-semibold hover:underline" onClick={() => onSwitchMode("login")}>
+              <button type="button" className="text-[#5B4FE8] font-semibold hover:underline" onClick={() => onSwitchMode("login")}>
                 Sign in
               </button>
             </p>
           ) : null}
           {mode === "forgot" || mode === "reset" ? (
-            <button type="button" className="text-[#00a884] font-semibold hover:underline" onClick={() => onSwitchMode("login")}>
+            <button type="button" className="text-[#5B4FE8] font-semibold hover:underline" onClick={() => onSwitchMode("login")}>
               Back to sign in
             </button>
           ) : null}

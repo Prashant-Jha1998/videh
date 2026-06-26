@@ -47,6 +47,7 @@ import { useColors } from "@/hooks/useColors";
 import { useChatAppearance } from "@/hooks/useChatAppearance";
 import { AnimatedChatWallpaper } from "@/components/AnimatedChatWallpaper";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { interpolate } from "@/lib/i18n";
 import { useApp, type Message } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
@@ -107,9 +108,9 @@ import {
   isInvertedChatBackAtBottom,
   SCROLL_PIN_DEBOUNCE_MS,
   shouldAnimateChatPin,
-  WHATSAPP_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
-  WHATSAPP_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
-} from "@/lib/whatsappChatScroll";
+  CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
+  CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
+} from "@/lib/chatScrollBehavior";
 import { extractUrls, primaryUrlFromText } from "@/lib/chatUrls";
 import { ComposerLinkPreview } from "@/components/ComposerLinkPreview";
 import { pickWebFile } from "@/lib/web/webFilePicker";
@@ -120,6 +121,7 @@ import { ThemedHeader } from "@/components/ThemedHeader";
 import { BusinessIntroCard, BusinessSecureBanner, formatBusinessJoinedLabel } from "@/components/BusinessChatIntro";
 import { ManageBusinessMessagesSheet } from "@/components/ManageBusinessMessagesSheet";
 import { ChatEncryptionNotice, UnsavedContactCard } from "@/components/UnsavedContactCard";
+import { ChatEmptyState } from "@/components/ChatEmptyState";
 import { dismissGroupWelcome, isGroupWelcomeDismissed } from "@/lib/groupWelcomeDismiss";
 import {
   encodeLocationPayload,
@@ -208,7 +210,7 @@ function messagesWithDateRows(msgs: Message[]): ChatListRow[] {
   return out;
 }
 
-/** Inverted FlatList: index 0 = newest at visual bottom (WhatsApp RN pattern). */
+/** Inverted FlatList: index 0 = newest at visual bottom (Videh RN pattern). */
 function messagesWithDateRowsInverted(msgs: Message[]): ChatListRow[] {
   const out: ChatListRow[] = [];
   for (let i = msgs.length - 1; i >= 0; i--) {
@@ -576,7 +578,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
             {avatarUri ? (
               <Image source={{ uri: avatarUri }} style={{ width: 34, height: 34, borderRadius: 17 }} contentFit="cover" />
             ) : (
-              <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#00A884", alignItems: "center", justifyContent: "center" }}>
+              <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#5B4FE8", alignItems: "center", justifyContent: "center" }}>
                 <Ionicons name="person" size={18} color="#fff" />
               </View>
             )}
@@ -588,7 +590,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
                 width: 16,
                 height: 16,
                 borderRadius: 8,
-                backgroundColor: "#00A884",
+                backgroundColor: "#5B4FE8",
                 alignItems: "center",
                 justifyContent: "center",
                 borderWidth: 1.5,
@@ -705,7 +707,7 @@ function ViewOnceOpenedBubble({ kind }: { kind: "image" | "video" }) {
   );
 }
 
-/** Quoted reply bar â€” tap scrolls to original message (WhatsApp-style). */
+/** Quoted reply bar â€” tap scrolls to original message (Videh). */
 function ReplyQuoteStrip({
   senderLabel,
   previewText,
@@ -864,7 +866,7 @@ function MediaUploadOverlay({
           size={48}
           strokeWidth={3}
           progress={progress}
-          progressColor="#00A884"
+          progressColor="#5B4FE8"
           trackColor="rgba(255,255,255,0.35)"
         >
           <Text style={styles.mediaUploadPct}>{progress}%</Text>
@@ -1181,7 +1183,7 @@ export default function ChatScreen() {
   const messagesReadyRef = useRef(false);
   const messagesLenRef = useRef(0);
 
-  // Live messages: 1s poll + push/SSE signal + AppContext backup (WhatsApp-style instant)
+  // Live messages: 1s poll + push/SSE signal + AppContext backup (Videh instant)
   useFocusEffect(
     useCallback(() => {
       void loadEnterIsSend().then(setEnterIsSend);
@@ -1835,7 +1837,7 @@ export default function ChatScreen() {
     keyboardAnimatingRef.current = false;
   }, []);
 
-  /** WhatsApp: track keyboard animation without forcing scroll (composer uses KeyboardStickyView). */
+  /** Videh: track keyboard animation without forcing scroll (composer uses KeyboardStickyView). */
   useGenericKeyboardHandler(
     {
       onStart: () => {
@@ -1872,7 +1874,7 @@ export default function ChatScreen() {
     if (!keyboardVisible) keyboardAnimatingRef.current = false;
   }, [keyboardVisible]);
 
-  /** WhatsApp: keyboard opens at bottom → one quiet pin so latest stays above keyboard. */
+  /** Videh: keyboard opens at bottom → one quiet pin so latest stays above keyboard. */
   useEffect(() => {
     if (searching) return;
     const justOpened = keyboardVisible && !prevKeyboardVisibleRef.current;
@@ -3576,11 +3578,11 @@ export default function ChatScreen() {
       {!selectionActive && replyTo && !editTarget && (
         <View style={[styles.replyPreviewBar, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
           <Pressable
-            style={[styles.replyPreview, { borderLeftColor: "#00A884" }]}
+            style={[styles.replyPreview, { borderLeftColor: "#5B4FE8" }]}
             onPress={() => scrollToQuotedMessage(replyTo.id)}
           >
             <View style={styles.replyPreviewTextCol}>
-              <Text style={[styles.replyPreviewLabel, { color: "#00A884" }]} numberOfLines={1}>
+              <Text style={[styles.replyPreviewLabel, { color: "#5B4FE8" }]} numberOfLines={1}>
                 {replyQuoteSenderLabel({
                   replyQuotedSenderId: replyTo.senderId === "me" ? String(user?.dbId ?? "") : replyTo.senderId,
                   replySenderName: replyTo.senderName,
@@ -4059,8 +4061,8 @@ export default function ChatScreen() {
               : {
                   minIndexForVisible: 0,
                   autoscrollToTopThreshold: readingHistory || showJumpToLatest
-                    ? WHATSAPP_MVCP_HISTORY_AUTOSCROLL_THRESHOLD
-                    : WHATSAPP_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
+                    ? CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD
+                    : CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
                 }
           }
           initialNumToRender={12}
@@ -4126,11 +4128,28 @@ export default function ChatScreen() {
                 </Text>
               </View>
             ) : showEmptyStateLabel ? (
-              <View style={styles.initWrap}>
-                <Text style={[styles.initText, { color: colors.mutedForeground }]}>
-                  {t("chats.noMessagesYet")}
-                </Text>
-              </View>
+              <ChatEmptyState
+                displayName={displayName}
+                initials={initials}
+                avatarUrl={contactAvatar}
+                avatarBg={avatarBg}
+                isGroup={chat?.isGroup}
+                memberCount={chat?.members?.length}
+                isDark={colors.isDark}
+                sayHiLabel={interpolate(t("chat.emptySayHi"), { name: displayName.split(" ")[0] || displayName })}
+                groupHintLabel={t("chat.emptyGroupHint")}
+                callsDisabled={Boolean(blockState.iBlockedThem || blockState.theyBlockedMe)}
+                onVoiceCall={
+                  chatId && !chat?.isGroup
+                    ? () => router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })
+                    : undefined
+                }
+                onVideoCall={
+                  chatId && !chat?.isGroup
+                    ? () => router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })
+                    : undefined
+                }
+              />
             ) : null
           }
         />
@@ -4772,7 +4791,7 @@ const styles = StyleSheet.create({
     width: 220,
     height: 160,
     borderRadius: 10,
-    backgroundColor: "#1f2c34",
+    backgroundColor: "#1E1D2E",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -4792,7 +4811,7 @@ const styles = StyleSheet.create({
     width: 220,
     minHeight: 72,
     borderRadius: 10,
-    backgroundColor: "#1f2c34",
+    backgroundColor: "#1E1D2E",
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 16,
@@ -4812,7 +4831,7 @@ const styles = StyleSheet.create({
   callBubbleIcon: { flexShrink: 0 },
   callBubbleText: { flex: 1, fontSize: 14.5, fontFamily: "Inter_500Medium", lineHeight: 19 },
   translatedBox: { marginTop: 6, paddingTop: 6, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.15)" },
-  translatedLabel: { fontSize: 10, color: "#00A884", fontFamily: "Inter_600SemiBold", marginBottom: 3 },
+  translatedLabel: { fontSize: 10, color: "#5B4FE8", fontFamily: "Inter_600SemiBold", marginBottom: 3 },
   docCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, minWidth: 220 },
   docIcon: { width: 48, height: 48, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   docName: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
@@ -4858,7 +4877,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 3,
     borderColor: "#fff",
-    backgroundColor: "#00A884",
+    backgroundColor: "#5B4FE8",
   },
   locationPinStem: {
     width: 0,
@@ -4899,11 +4918,11 @@ const styles = StyleSheet.create({
   stopShareRow: { paddingVertical: 12, alignItems: "center", borderTopWidth: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.96)" },
   stopShareText: { color: "#c62828", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   contactCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, minWidth: 220, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },
-  contactCardAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#00A88440", alignItems: "center", justifyContent: "center" },
-  contactCardAvatarTxt: { color: "#00A884", fontSize: 18, fontWeight: "700" },
+  contactCardAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#5B4FE840", alignItems: "center", justifyContent: "center" },
+  contactCardAvatarTxt: { color: "#5B4FE8", fontSize: 18, fontWeight: "700" },
   contactCardName: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
   contactCardPhone: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
-  contactCallBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#00A88420", alignItems: "center", justifyContent: "center" },
+  contactCallBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#5B4FE820", alignItems: "center", justifyContent: "center" },
   linkPreview: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, paddingTop: 4, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },
   linkText: { flex: 1, fontSize: 12, fontFamily: "Inter_400Regular" },
   msgMeta: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 2 },

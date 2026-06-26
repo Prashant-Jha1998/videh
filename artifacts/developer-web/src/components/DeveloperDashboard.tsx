@@ -251,8 +251,8 @@ export function DeveloperDashboard() {
   return (
     <section id="dashboard" className="py-16 px-4 bg-[#f0f2f5] border-t border-gray-200">
       <div className="max-w-4xl mx-auto">
-        <h2 className="text-2xl font-bold text-[#111b21] mb-1 flex items-center gap-2">
-          <Key className="h-6 w-6 text-[#00a884]" />
+        <h2 className="text-2xl font-bold text-[#14131F] mb-1 flex items-center gap-2">
+          <Key className="h-6 w-6 text-[#5B4FE8]" />
           Developer console
         </h2>
         <p className="text-[#667781] text-sm mb-6">
@@ -263,15 +263,15 @@ export function DeveloperDashboard() {
         <div className="rounded-2xl bg-white border border-gray-200 p-4 md:p-5 mb-6 space-y-3">
           {signedInEmail ? (
             <p className="text-sm text-[#667781]">
-              Signed in as <strong className="text-[#111b21]">{signedInEmail}</strong>
+              Signed in as <strong className="text-[#14131F]">{signedInEmail}</strong>
             </p>
           ) : (
             <p className="text-sm text-[#667781]">
-              <a href="#login" className="text-[#00a884] font-semibold hover:underline">
+              <a href="#login" className="text-[#5B4FE8] font-semibold hover:underline">
                 Sign in
               </a>{" "}
               or{" "}
-              <a href="#signup" className="text-[#00a884] font-semibold hover:underline">
+              <a href="#signup" className="text-[#5B4FE8] font-semibold hover:underline">
                 create an account
               </a>{" "}
               to open your console.
@@ -282,14 +282,14 @@ export function DeveloperDashboard() {
               type="button"
               disabled={busy}
               onClick={() => void load()}
-              className="inline-flex items-center gap-2 bg-[#00a884] text-white font-semibold px-5 py-2.5 rounded-xl disabled:opacity-60"
+              className="inline-flex items-center gap-2 bg-[#5B4FE8] text-white font-semibold px-5 py-2.5 rounded-xl disabled:opacity-60"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               Refresh
             </button>
             <a
               href="#apply"
-              className="inline-flex items-center gap-2 border border-[#00a884] text-[#00a884] font-semibold px-5 py-2.5 rounded-xl text-sm"
+              className="inline-flex items-center gap-2 border border-[#5B4FE8] text-[#5B4FE8] font-semibold px-5 py-2.5 rounded-xl text-sm"
             >
               <Plus className="h-4 w-4" />
               {data ? "Continue application" : "Start application"}
@@ -303,15 +303,15 @@ export function DeveloperDashboard() {
           <div className="rounded-2xl bg-white border border-gray-200 overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
               <div>
-                <p className="font-semibold text-[#111b21]">{data.lead.company_name || "Your company"}</p>
+                <p className="font-semibold text-[#14131F]">{data.lead.company_name || "Your company"}</p>
                 <p className="text-sm text-[#667781]">
-                  <span className="font-mono text-[#00a884]">{data.lead.reference_code}</span>
+                  <span className="font-mono text-[#5B4FE8]">{data.lead.reference_code}</span>
                   {" · "}
                   {STATUS_LABELS[data.lead.status] ?? data.lead.status}
                 </p>
               </div>
               {data.lead.status === "draft" || (data.lead.wizard_step && data.lead.wizard_step !== "done") ? (
-                <a href="#apply" className="text-sm font-semibold text-[#00a884] hover:underline">
+                <a href="#apply" className="text-sm font-semibold text-[#5B4FE8] hover:underline">
                   Continue application →
                 </a>
               ) : null}
@@ -331,8 +331,8 @@ export function DeveloperDashboard() {
                   onClick={() => setTab(id)}
                   className={`flex items-center gap-2 px-5 py-3 text-sm font-semibold border-b-2 whitespace-nowrap ${
                     tab === id
-                      ? "border-[#00a884] text-[#00a884]"
-                      : "border-transparent text-[#667781] hover:text-[#111b21]"
+                      ? "border-[#5B4FE8] text-[#5B4FE8]"
+                      : "border-transparent text-[#667781] hover:text-[#14131F]"
                   }`}
                 >
                   <Icon className="h-4 w-4" />
@@ -347,11 +347,11 @@ export function DeveloperDashboard() {
                   <div className="grid sm:grid-cols-2 gap-3">
                     <div className="rounded-xl bg-[#f0f2f5] p-4">
                       <p className="text-xs text-[#667781] uppercase font-semibold">Plan</p>
-                      <p className="font-semibold text-[#111b21] mt-1">{data.lead.plan_id ?? "—"}</p>
+                      <p className="font-semibold text-[#14131F] mt-1">{data.lead.plan_id ?? "—"}</p>
                     </div>
                     <div className="rounded-xl bg-[#f0f2f5] p-4">
                       <p className="text-xs text-[#667781] uppercase font-semibold">Payment</p>
-                      <p className="font-semibold text-[#111b21] mt-1">
+                      <p className="font-semibold text-[#14131F] mt-1">
                         {data.lead.payment_method_verified ? "Verified" : data.lead.payment_status ?? "Pending"}
                       </p>
                     </div>
@@ -371,12 +371,12 @@ export function DeveloperDashboard() {
                         <div className="rounded-xl bg-[#f0f2f5] p-4 space-y-2 text-sm">
                           {phoneId ? (
                             <p>
-                              Phone Number ID: <code className="text-[#00a884] text-xs">{phoneId}</code>
+                              Phone Number ID: <code className="text-[#5B4FE8] text-xs">{phoneId}</code>
                             </p>
                           ) : null}
                           {businessId ? (
                             <p>
-                              Business Account ID: <code className="text-[#00a884] text-xs">{businessId}</code>
+                              Business Account ID: <code className="text-[#5B4FE8] text-xs">{businessId}</code>
                             </p>
                           ) : null}
                           <p className="text-xs text-[#667781] pt-1">
@@ -388,7 +388,7 @@ export function DeveloperDashboard() {
                     </>
                   ) : phoneId ? (
                     <div className="rounded-xl bg-[#f0f2f5] p-4">
-                      <p className="font-semibold text-[#111b21] mb-2">Channel IDs (API keys after full approval)</p>
+                      <p className="font-semibold text-[#14131F] mb-2">Channel IDs (API keys after full approval)</p>
                       <p>
                         Phone Number ID: <code>{phoneId}</code>
                       </p>
@@ -416,8 +416,8 @@ export function DeveloperDashboard() {
                   </p>
 
                   <div className="rounded-xl border border-gray-200 p-4 space-y-3 bg-[#fafafa]">
-                    <p className="font-semibold text-[#111b21] flex items-center gap-2">
-                      <Send className="h-4 w-4 text-[#00a884]" />
+                    <p className="font-semibold text-[#14131F] flex items-center gap-2">
+                      <Send className="h-4 w-4 text-[#5B4FE8]" />
                       Submit new template
                     </p>
                     <div className="grid sm:grid-cols-2 gap-3">
@@ -467,14 +467,14 @@ export function DeveloperDashboard() {
                       type="button"
                       disabled={submittingTpl}
                       onClick={() => void submitTemplate()}
-                      className="bg-[#00a884] text-white font-semibold px-5 py-2.5 rounded-xl disabled:opacity-60 text-sm"
+                      className="bg-[#5B4FE8] text-white font-semibold px-5 py-2.5 rounded-xl disabled:opacity-60 text-sm"
                     >
                       {submittingTpl ? "Submitting…" : "Submit for approval"}
                     </button>
                   </div>
 
                   <div>
-                    <p className="font-semibold text-[#111b21] mb-3">
+                    <p className="font-semibold text-[#14131F] mb-3">
                       Your templates ({data.approvedCount} approved)
                     </p>
                     {data.templates.length === 0 ? (
@@ -485,14 +485,14 @@ export function DeveloperDashboard() {
                           <li key={t.id} className="rounded-xl border border-gray-100 p-4 text-sm">
                             <div className="flex items-start justify-between gap-2">
                               <div>
-                                <p className="font-mono font-semibold text-[#00a884]">{t.name}</p>
-                                <p className="text-[#111b21]">{t.display_name}</p>
+                                <p className="font-mono font-semibold text-[#5B4FE8]">{t.name}</p>
+                                <p className="text-[#14131F]">{t.display_name}</p>
                                 <p className="text-xs text-[#667781] mt-1">
                                   {t.category} · {t.language}
                                 </p>
                               </div>
                               {t.status === "approved" || t.approved ? (
-                                <span className="inline-flex items-center gap-1 text-xs text-[#00a884] font-semibold">
+                                <span className="inline-flex items-center gap-1 text-xs text-[#5B4FE8] font-semibold">
                                   <CheckCircle2 className="h-4 w-4" /> Approved
                                 </span>
                               ) : (

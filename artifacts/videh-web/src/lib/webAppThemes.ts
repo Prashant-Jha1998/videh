@@ -7,11 +7,12 @@ export type AppThemeOption = {
   colors: [string, string];
 };
 
-export const DEFAULT_APP_THEME_ID = "videh-green";
+export const DEFAULT_APP_THEME_ID = "videh-indigo";
 export const APP_THEME_TRIAL_DAYS = 365;
 
 export const SOLID_APP_THEMES: AppThemeOption[] = [
-  { id: "videh-green", name: "Videh Green", kind: "solid", colors: ["#00A884", "#00A884"] },
+  { id: "videh-indigo", name: "Videh Indigo", kind: "solid", colors: ["#5B4FE8", "#5B4FE8"] },
+  { id: "videh-green", name: "Forest", kind: "solid", colors: ["#10B981", "#10B981"] },
   { id: "emerald", name: "Emerald", kind: "solid", colors: ["#10B981", "#10B981"] },
   { id: "teal", name: "Teal", kind: "solid", colors: ["#14B8A6", "#14B8A6"] },
   { id: "cyan", name: "Cyan", kind: "solid", colors: ["#06B6D4", "#06B6D4"] },
@@ -34,7 +35,7 @@ export const SOLID_APP_THEMES: AppThemeOption[] = [
 ];
 
 export const GRADIENT_APP_THEMES: AppThemeOption[] = [
-  { id: "aurora", name: "Aurora", kind: "gradient", colors: ["#00A884", "#06B6D4"] },
+  { id: "aurora", name: "Aurora", kind: "gradient", colors: ["#5B4FE8", "#06B6D4"] },
   { id: "ocean", name: "Ocean", kind: "gradient", colors: ["#0EA5E9", "#14B8A6"] },
   { id: "royal", name: "Royal", kind: "gradient", colors: ["#2563EB", "#7C3AED"] },
   { id: "sunset", name: "Sunset", kind: "gradient", colors: ["#F97316", "#DB2777"] },

@@ -31,6 +31,21 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
   }
 });
 
+router.delete("/user/:userId", async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    await query(
+      `DELETE FROM calls WHERE caller_id = $1::int OR callee_id = $1::int`,
+      [userId],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "clear calls error");
+    res.status(500).json({ success: false });
+  }
+});
+
 router.post("/", async (req: Request, res: Response) => {
   const { callerId, calleeId, type, status, durationSeconds, chatId } = req.body as {
     callerId?: number; calleeId?: number; type?: string;

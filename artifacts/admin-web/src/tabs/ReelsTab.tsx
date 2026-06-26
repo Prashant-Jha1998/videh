@@ -342,7 +342,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
       });
       await load();
     } catch (e) {
-      onErr(e instanceof Error ? e.message : "Approve failed — pehle preview complete karein");
+      onErr(e instanceof Error ? e.message : "Approve failed — complete the preview first");
     }
   };
 
@@ -1046,7 +1046,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
                 </tbody>
               </table>
               {adsOverview.runningCampaigns.length === 0 ? (
-                <p className="admin-empty">Abhi koi campaign live nahi chal rahi.</p>
+                <p className="admin-empty">No campaigns are running live right now.</p>
               ) : null}
             </div>
           </div>
@@ -1149,7 +1149,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
           <div className="admin-alert">
             <strong>Advertiser ads — review before public</strong>
             <p>
-              Dekho creative (image/video/links), policy check karo, phir <strong>Approve</strong> karo.
+              Review the creative (image/video/links), run the policy check, then <strong>Approve</strong>.
               Approve ke baad hi ad home feed aur video player par dikhega.
             </p>
           </div>
@@ -1210,7 +1210,7 @@ export function ReelsTab({ onErr }: { onErr: (m: string | null) => void }) {
                 </tbody>
               </table>
               {adReviewQueue.length === 0 ? (
-                <p className="admin-empty">Koi pending advertiser ad nahi.</p>
+                <p className="admin-empty">No pending advertiser ads.</p>
               ) : null}
             </div>
           </div>

@@ -1,4 +1,4 @@
--- Reels comments: threaded replies + per-comment likes (YouTube-style)
+-- Reels comments: threaded replies + per-comment likes (in-stream video)
 
 ALTER TABLE reels_video_comments
   ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES reels_video_comments(id) ON DELETE CASCADE;

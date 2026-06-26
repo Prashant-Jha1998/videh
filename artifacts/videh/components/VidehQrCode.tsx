@@ -42,7 +42,7 @@ type Props = {
 export function VidehQrCode({
   value,
   size = 220,
-  color = "#111B21",
+  color = "#14131F",
   backgroundColor = "#ffffff",
 }: Props) {
   const cells = useMemo(() => createQrMatrix(value), [value]);

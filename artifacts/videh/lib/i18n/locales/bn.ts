@@ -78,7 +78,7 @@ export const bn = locale({
   "chats.noMessagesYet": "এখনও কোনো বার্তা নেই",
   "chats.noArchived": "কোনো আর্কাইভ চ্যাট নেই",
   "chats.noArchivedHint": "আর্কাইভ চ্যাট এখানে দেখাবে।",
-  "chats.emptyHint": "আপনার পরিচিতিদের সাথে কথোপকথন শুরু করুন।\nআপনার বার্তা এন্ড-টু-এন্ড এনক্রিপ্টেড।",
+  "chats.emptyHint": "আপনার পরিচিতিদের সাথে কথোপকথন শুরু করুন।\nআপনার বার্তা ট্রানজিটে TLS দিয়ে সুরক্ষিত।",
   "chats.startChat": "চ্যাট শুরু করুন",
   "chats.noSearchResults": "\"{query}\" এর জন্য কোনো ফলাফল নেই",
   "chats.unlockAndOpen": "আনলক করে খুলুন",

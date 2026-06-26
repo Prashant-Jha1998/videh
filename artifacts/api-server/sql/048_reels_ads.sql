@@ -1,4 +1,4 @@
--- YouTube-style reels video ads + advertiser portal (ads.videh.co.in)
+-- in-stream video reels video ads + advertiser portal (ads.videh.co.in)
 
 CREATE TABLE IF NOT EXISTS reels_advertisers (
   id SERIAL PRIMARY KEY,
