@@ -3207,6 +3207,10 @@ export default function ChatScreen() {
   const hasIntroCards = showBusinessIntro || showUnsavedContactCard || showGroupWelcomeCard;
   const isChatEmpty = messagesReady && !searching && listRows.length === 0;
   const showEmptyStateLabel = isChatEmpty && !hasIntroCards;
+  /** Inverted list only when there are rows — empty/intro chrome stays upright on Android. */
+  const messageListInverted = !searching && chatListData.length > 0;
+  const wrapInvertedListChrome = (node: React.ReactNode) =>
+    messageListInverted ? <InvertedListSlot>{node}</InvertedListSlot> : node;
 
   useFocusEffect(
     useCallback(() => {
@@ -3979,27 +3983,60 @@ export default function ChatScreen() {
 
       <View style={styles.chatKeyboardAvoid}>
         <View style={styles.chatBody}>
+          {showEmptyStateLabel ? (
+            <View
+              style={[
+                styles.chatEmptyOverlay,
+                { paddingBottom: listVisualBottomPad, paddingTop: listTopPadding },
+              ]}
+              pointerEvents="box-none"
+            >
+              <ChatEmptyState
+                displayName={displayName}
+                initials={initials}
+                avatarUrl={contactAvatar}
+                avatarBg={avatarBg}
+                isGroup={chat?.isGroup}
+                memberCount={chat?.members?.length}
+                isDark={colors.isDark}
+                sayHiLabel={interpolate(t("chat.emptySayHi"), { name: displayName.split(" ")[0] || displayName })}
+                groupHintLabel={t("chat.emptyGroupHint")}
+                callsDisabled={Boolean(blockState.iBlockedThem || blockState.theyBlockedMe)}
+                onVoiceCall={
+                  chatId && !chat?.isGroup
+                    ? () => router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })
+                    : undefined
+                }
+                onVideoCall={
+                  chatId && !chat?.isGroup
+                    ? () => router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })
+                    : undefined
+                }
+              />
+            </View>
+          ) : null}
           <FlatList
             style={styles.messageList}
             ref={listRef}
-          inverted={!searching}
+            pointerEvents={showEmptyStateLabel ? "none" : "auto"}
+          inverted={messageListInverted}
           data={chatListData}
           ListHeaderComponent={
-            !searching && remoteTypingNames.length > 0 ? (
-              <InvertedListSlot>
-                <TypingIndicator
-                  bubbleColor={colors.chatBubbleReceived}
-                  dotColor={colors.mutedForeground}
-                  textColor={colors.mutedForeground}
-                  label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
-                />
-              </InvertedListSlot>
-            ) : null
+            !searching && remoteTypingNames.length > 0
+              ? wrapInvertedListChrome(
+                  <TypingIndicator
+                    bubbleColor={colors.chatBubbleReceived}
+                    dotColor={colors.mutedForeground}
+                    textColor={colors.mutedForeground}
+                    label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
+                  />,
+                )
+              : null
           }
           ListFooterComponent={
-            !searching ? (
-              <InvertedListSlot>
-                <>
+            !searching
+              ? wrapInvertedListChrome(
+                  <>
                   {loadingOlder ? (
                     <View style={styles.olderLoader}>
                       <ActivityIndicator size="small" color={colors.primary} />
@@ -4051,9 +4088,9 @@ export default function ChatScreen() {
                       />
                     </>
                   ) : null}
-                </>
-              </InvertedListSlot>
-            ) : null
+                </>,
+              )
+              : null
           }
           keyExtractor={(row) => {
             if (row.rowType === "date") return row.id;
@@ -4067,11 +4104,7 @@ export default function ChatScreen() {
               paddingTop: listVisualBottomPad,
               paddingBottom: listTopPadding,
               flexGrow: 1,
-              justifyContent: searching
-                ? "flex-start"
-                : showEmptyStateLabel
-                  ? "center"
-                  : undefined,
+              justifyContent: searching ? "flex-start" : undefined,
             },
           ]}
           extraData={listExtraData}
@@ -4080,7 +4113,7 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS !== "web"}
           maintainVisibleContentPosition={
-            searching
+            searching || !messageListInverted
               ? undefined
               : {
                   minIndexForVisible: 0,
@@ -4137,49 +4170,24 @@ export default function ChatScreen() {
           }}
           ListEmptyComponent={
             initializing ? (
-              <InvertedListSlot>
+              wrapInvertedListChrome(
                 <View style={styles.initWrap}>
                   <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.starting")}</Text>
-                </View>
-              </InvertedListSlot>
+                </View>,
+              )
             ) : searching ? (
               <View style={styles.initWrap}>
                 <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.noResults")}</Text>
               </View>
             ) : !messagesReady ? (
-              <InvertedListSlot>
+              wrapInvertedListChrome(
                 <View style={styles.initWrap}>
                   <ActivityIndicator size="small" color={colors.primary} />
                   <Text style={[styles.initText, { color: colors.mutedForeground, marginTop: 10 }]}>
                     {t("chat.loadingMessages")}
                   </Text>
-                </View>
-              </InvertedListSlot>
-            ) : showEmptyStateLabel ? (
-              <InvertedListSlot>
-                <ChatEmptyState
-                  displayName={displayName}
-                  initials={initials}
-                  avatarUrl={contactAvatar}
-                  avatarBg={avatarBg}
-                  isGroup={chat?.isGroup}
-                  memberCount={chat?.members?.length}
-                  isDark={colors.isDark}
-                  sayHiLabel={interpolate(t("chat.emptySayHi"), { name: displayName.split(" ")[0] || displayName })}
-                  groupHintLabel={t("chat.emptyGroupHint")}
-                  callsDisabled={Boolean(blockState.iBlockedThem || blockState.theyBlockedMe)}
-                  onVoiceCall={
-                    chatId && !chat?.isGroup
-                      ? () => router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })
-                      : undefined
-                  }
-                  onVideoCall={
-                    chatId && !chat?.isGroup
-                      ? () => router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })
-                      : undefined
-                  }
-                />
-              </InvertedListSlot>
+                </View>,
+              )
             ) : null
           }
         />
@@ -4625,6 +4633,12 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   chatKeyboardAvoid: { flex: 1, minHeight: 0, flexDirection: "column" },
   chatBody: { flex: 1, minHeight: 0, position: "relative" },
+  chatEmptyOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+  },
   composerWrap: { flexShrink: 0 },
   messageList: { flex: 1, minHeight: 0 },
   messageListContent: { paddingHorizontal: 10, paddingTop: 8 },
