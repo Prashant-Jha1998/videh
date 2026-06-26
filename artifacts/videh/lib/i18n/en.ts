@@ -30,7 +30,7 @@ export const en: Record<string, string> = {
   "settings.row.helpSub": "Help centre, contact us, privacy policy",
   "settings.row.invite": "Invite a friend",
   "settings.row.updates": "App updates",
-  "settings.row.updatesSub": "v1.0.36 — Latest version",
+  "settings.row.updatesSub": "v1.0.37 — Latest version",
   "settings.logout": "Log out",
   "settings.heyVideh": "Hey Videh",
   "settings.heyVidehSub": "Coming soon",
@@ -47,7 +47,7 @@ export const en: Record<string, string> = {
   "settings.chooseLibrary": "Choose from Library",
   "settings.permissionCamera": "Please allow camera access.",
   "settings.permissionPhotos": "Please allow photo library access.",
-  "settings.updatesTitle": "Videh v1.0.36",
+  "settings.updatesTitle": "Videh v1.0.37",
   "settings.updatesBody":
     "You are on the latest version.\n\nHighlights:\n• Broadcast lists\n• Two-step verification\n• Accessibility settings\n• Multi-language support\n• Document, location, and contact sharing",
   "common.cancel": "Cancel",

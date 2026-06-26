@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import React from "react";
 import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useColors } from "@/hooks/useColors";
 import { THIRD_PARTY_BRAND_DISCLAIMER } from "@/lib/legalDisclaimers";
 
 const SECTIONS = [
