@@ -64,7 +64,7 @@ function isMediaMessageType(type: Message["type"]): boolean {
     || type === "document"
   );
 }
-import { collectPendingLocalMessages, mergeServerWithPending } from "@/lib/mergePendingChatMessages";
+import { collectPendingLocalMessages, mergeServerWithPending, preserveHistoricallyLoadedMessages, serverWindowMatchesLocalTail } from "@/lib/mergePendingChatMessages";
 import {
   loadChatMessageCache,
   rememberChatMessagesInStore,
@@ -1291,24 +1291,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           const prevMsgs = c.messages ?? [];
           const prevStable = prevMsgs.filter((m) => !m.id.startsWith("hint_"));
           const hasPendingHints = prevMsgs.some((m) => m.id.startsWith("hint_"));
+          const sameServerWindow = (a: Message, b: Message) =>
+            a.id === b.id
+            && a.text === b.text
+            && a.status === b.status
+            && a.type === b.type
+            && a.mediaUrl === b.mediaUrl
+            && (a.albumUrls?.length ?? 0) === (b.albumUrls?.length ?? 0)
+            && (a.reactions?.length ?? 0) === (b.reactions?.length ?? 0);
           if (
             !hasPendingHints
-            && prevStable.length === msgs.length
-            && prevStable.every((m, i) => {
-              const n = msgs[i];
-              return m.id === n.id
-                && m.text === n.text
-                && m.status === n.status
-                && m.type === n.type
-                && m.mediaUrl === n.mediaUrl
-                && (m.albumUrls?.length ?? 0) === (n.albumUrls?.length ?? 0)
-                && (m.reactions?.length ?? 0) === (n.reactions?.length ?? 0);
-            })
+            && serverWindowMatchesLocalTail(prevStable, msgs, sameServerWindow)
           ) {
             return c;
           }
-          const pendingLocal = collectPendingLocalMessages(prevMsgs, msgs);
-          const merged = mergeServerWithPending(msgs, pendingLocal);
+          const serverWithHistory = preserveHistoricallyLoadedMessages(prevStable, msgs);
+          const pendingLocal = collectPendingLocalMessages(prevMsgs, serverWithHistory);
+          const merged = mergeServerWithPending(serverWithHistory, pendingLocal);
           mergedMessages = merged;
           return { ...c, messages: merged };
         });

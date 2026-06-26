@@ -1765,6 +1765,9 @@ export default function ChatScreen() {
     if (loadingOlderRef.current || !hasMoreOlderRef.current || searching || !chatId) return;
     const oldest = messages.find((m) => !m.id.startsWith("tmp_"));
     if (!oldest) return;
+    if (!userScrolledUpRef.current) {
+      markUserScrolledUp();
+    }
     loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
@@ -1774,7 +1777,7 @@ export default function ChatScreen() {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [chatId, loadOlderMessages, messages, searching]);
+  }, [chatId, loadOlderMessages, messages, searching, markUserScrolledUp]);
   const handleListScroll = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
       syncScrollAwayFromBottom(contentOffsetY, contentHeight, layoutHeight);
@@ -1788,13 +1791,18 @@ export default function ChatScreen() {
         && Date.now() - lastOlderLoadAtRef.current > 700
       ) {
         lastOlderLoadAtRef.current = Date.now();
+        if (!userScrolledUpRef.current) {
+          markUserScrolledUp();
+        }
         void tryLoadOlderMessages();
       }
     },
-    [syncScrollAwayFromBottom, tryLoadOlderMessages, searching],
+    [syncScrollAwayFromBottom, tryLoadOlderMessages, searching, markUserScrolledUp],
   );
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevMessageCountRef = useRef(0);
+  const prevOldestMessageIdRef = useRef<string | null>(null);
+  const prevNewestMessageIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     cancelAllScrollPins();
@@ -1808,6 +1816,8 @@ export default function ChatScreen() {
     frozenMessageCountRef.current = 0;
     hasMoreOlderRef.current = true;
     prevMessageCountRef.current = 0;
+    prevOldestMessageIdRef.current = null;
+    prevNewestMessageIdRef.current = null;
     hadRemoteTypingRef.current = false;
     return () => cancelAllScrollPins();
   }, [chatId, cancelAllScrollPins, applyReadingHistoryMode]);
@@ -1955,13 +1965,22 @@ export default function ChatScreen() {
       return;
     }
     const count = messages.length;
-    if (count > prevMessageCountRef.current && !blocksAutoScroll() && !userDraggingRef.current) {
+    const stableMessages = messages.filter((m) => !m.id.startsWith("tmp_") && !m.id.startsWith("hint_"));
+    const oldestId = stableMessages[0]?.id ?? null;
+    const newestId = stableMessages[stableMessages.length - 1]?.id ?? null;
+    const grewFromOlderLoad =
+      count > prevMessageCountRef.current
+      && oldestId !== prevOldestMessageIdRef.current
+      && newestId === prevNewestMessageIdRef.current;
+    if (count > prevMessageCountRef.current && !blocksAutoScroll() && !userDraggingRef.current && !grewFromOlderLoad) {
       const delta = count - prevMessageCountRef.current;
       scrollToLatestIfFollowing(
         shouldAnimateChatPin(delta, keyboardAnimatingRef.current),
         "messages-delta",
       );
     }
+    prevOldestMessageIdRef.current = oldestId;
+    prevNewestMessageIdRef.current = newestId;
     prevMessageCountRef.current = count;
   }, [messages.length, messagesReady, searching, scrollToLatestIfFollowing, scheduleOpenChatPin, blocksAutoScroll]);
 

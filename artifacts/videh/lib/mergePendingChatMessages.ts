@@ -166,3 +166,33 @@ export function mergeServerWithPending(serverMessages: Message[], pendingLocal: 
   merged.sort((a, b) => a.timestamp - b.timestamp);
   return merged;
 }
+
+/** Keep paginated older rows when refresh only fetches the latest server window. */
+export function preserveHistoricallyLoadedMessages(
+  prevMessages: Message[],
+  serverMessages: Message[],
+): Message[] {
+  if (!serverMessages.length) return serverMessages;
+  const serverIds = new Set(serverMessages.map((m) => m.id));
+  const oldestServerTs = serverMessages[0]!.timestamp;
+  const olderKept = prevMessages.filter((m) => {
+    if (m.id.startsWith("hint_") || m.id.startsWith("tmp_")) return false;
+    if (serverIds.has(m.id)) return false;
+    return m.timestamp < oldestServerTs;
+  });
+  if (!olderKept.length) return serverMessages;
+  return [...olderKept, ...serverMessages].sort((a, b) => a.timestamp - b.timestamp);
+}
+
+/** Compare the tail of local history with the latest server page (same length as `serverMessages`). */
+export function serverWindowMatchesLocalTail(
+  prevMessages: Message[],
+  serverMessages: Message[],
+  isSameMessage: (a: Message, b: Message) => boolean,
+): boolean {
+  if (!serverMessages.length) return prevMessages.length === 0;
+  const stable = prevMessages.filter((m) => !m.id.startsWith("hint_") && !m.id.startsWith("tmp_"));
+  if (stable.length < serverMessages.length) return false;
+  const tail = stable.slice(-serverMessages.length);
+  return tail.every((m, i) => isSameMessage(m, serverMessages[i]!));
+}
