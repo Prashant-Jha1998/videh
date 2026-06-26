@@ -3,7 +3,6 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import cron from "node-cron";
-import { isValidPushToken, sendPushBatch } from "./lib/pushNotify";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +11,7 @@ import businessApiV1Router from "./routes/business-api-v1";
 import { logger } from "./lib/logger";
 import { query } from "./lib/db";
 import { stateAcquireLock, stateDelete } from "./lib/sharedState";
+import { notifyChatMessageDelivered } from "./lib/dispatchChatMessage";
 import { runAdminSlaEscalationJob } from "./lib/adminEscalation";
 import { ensureAdminUsersTable } from "./lib/adminUsers";
 import { enforceAllOverdueBillingHolds } from "./lib/developerBilling";
@@ -128,13 +128,20 @@ cron.schedule("* * * * *", async () => {
       []
     );
     for (const sm of due.rows) {
-      // Insert as a real message
-      await query(
+      const insertResult = await query(
         `INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id)
-         VALUES ($1,$2,$3,$4,$5)`,
-        [sm.chat_id, sm.sender_id, sm.content, sm.type, sm.reply_to_id ?? null]
+         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+        [sm.chat_id, sm.sender_id, sm.content, sm.type, sm.reply_to_id ?? null],
       );
-      // Mark as sent
+      const message = insertResult.rows[0] as {
+        id: number;
+        chat_id: number;
+        sender_id: number;
+        content: string;
+        type: string;
+        media_url?: string | null;
+      };
+
       await query("UPDATE scheduled_messages SET sent = TRUE WHERE id = $1", [sm.id]);
       if (sm.khata_entry_id) {
         await query(
@@ -143,26 +150,14 @@ cron.schedule("* * * * *", async () => {
         );
       }
 
-      // Push to all chat members
-      const members = await query(
-        `SELECT u.id AS user_id, u.push_token FROM chat_members cm
-         JOIN users u ON u.id = cm.user_id
-         WHERE cm.chat_id = $1 AND cm.user_id != $2`,
-        [sm.chat_id, sm.sender_id]
-      );
-      const rows = members.rows as { user_id: number; push_token: string | null }[];
-      if (rows.length > 0) {
-        const batch = rows
-          .filter((r) => isValidPushToken(r.push_token))
-          .map((r) => ({
-            token: r.push_token!,
-            title: sm.sender_name ?? "Videh",
-            body: sm.content.slice(0, 100),
-            data: { chatId: String(sm.chat_id), type: "message" },
-          }));
-        if (batch.length > 0) await sendPushBatch(batch);
-      }
-      logger.info({ scheduledId: sm.id }, "Scheduled message sent");
+      await notifyChatMessageDelivered({
+        message,
+        senderName: sm.sender_name,
+        senderId: Number(sm.sender_id),
+        chatId: Number(sm.chat_id),
+      });
+
+      logger.info({ scheduledId: sm.id, messageId: message.id }, "Scheduled message sent");
     }
     await stateDelete("jobs:scheduled-messages:lock");
   } catch (err) {

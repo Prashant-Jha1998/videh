@@ -122,6 +122,7 @@ import { BusinessIntroCard, BusinessSecureBanner, formatBusinessJoinedLabel } fr
 import { ManageBusinessMessagesSheet } from "@/components/ManageBusinessMessagesSheet";
 import { ChatEncryptionNotice, UnsavedContactCard } from "@/components/UnsavedContactCard";
 import { ChatEmptyState } from "@/components/ChatEmptyState";
+import { InvertedListSlot } from "@/components/InvertedListSlot";
 import { dismissGroupWelcome, isGroupWelcomeDismissed } from "@/lib/groupWelcomeDismiss";
 import {
   encodeLocationPayload,
@@ -3985,69 +3986,73 @@ export default function ChatScreen() {
           data={chatListData}
           ListHeaderComponent={
             !searching && remoteTypingNames.length > 0 ? (
-              <TypingIndicator
-                bubbleColor={colors.chatBubbleReceived}
-                dotColor={colors.mutedForeground}
-                textColor={colors.mutedForeground}
-                label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
-              />
+              <InvertedListSlot>
+                <TypingIndicator
+                  bubbleColor={colors.chatBubbleReceived}
+                  dotColor={colors.mutedForeground}
+                  textColor={colors.mutedForeground}
+                  label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
+                />
+              </InvertedListSlot>
             ) : null
           }
           ListFooterComponent={
             !searching ? (
-              <>
-                {loadingOlder ? (
-                  <View style={styles.olderLoader}>
-                    <ActivityIndicator size="small" color={colors.primary} />
-                  </View>
-                ) : null}
-                {showBusinessIntro && businessChannelInfo ? (
-                  <>
-                    <BusinessSecureBanner />
-                    <BusinessIntroCard
-                      displayName={businessChannelInfo.displayName}
-                      logoUrl={businessChannelInfo.logoUrl ?? contactAvatar}
-                      joinedLabel={formatBusinessJoinedLabel(businessChannelInfo.joinedAt)}
-                      isDark={colors.isDark}
-                      onManageMessages={() => setManageBusinessOpen(true)}
-                    />
-                  </>
-                ) : null}
-                {showGroupWelcomeCard && groupWelcomePreview ? (
-                  <>
-                    <ChatEncryptionNotice />
-                    <GroupWelcomeCard
-                      addedByPhone={groupWelcomePreview.addedByPhone}
-                      addedByName={groupWelcomePreview.addedByName}
-                      creatorIsContact={groupWelcomePreview.creatorIsContact}
-                      memberCount={groupWelcomePreview.memberCount}
-                      contactsInGroupCount={groupWelcomePreview.contactsInGroupCount}
-                      createdLabel={formatDateChipLabel(groupWelcomePreview.createdAtMs)}
-                      isDark={colors.isDark}
-                      onExitGroup={handleExitGroup}
-                      onStay={handleStayInGroup}
-                      onReport={handleReportGroup}
-                    />
-                  </>
-                ) : null}
-                {showUnsavedContactCard && peerContactPreview ? (
-                  <>
-                    <ChatEncryptionNotice />
-                    <UnsavedContactCard
-                      phone={peerContactPreview.phone}
-                      profileName={peerContactPreview.profileName}
-                      initials={initials}
-                      avatarUrl={contactAvatar}
-                      avatarBg={avatarBg}
-                      commonGroupCount={peerContactPreview.commonGroupCount}
-                      isDark={colors.isDark}
-                      onBlock={handleMenuBlockToggle}
-                      onAdd={() => { void handleAddUnsavedContact(); }}
-                      onReport={() => handleMenuReport(false)}
-                    />
-                  </>
-                ) : null}
-              </>
+              <InvertedListSlot>
+                <>
+                  {loadingOlder ? (
+                    <View style={styles.olderLoader}>
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    </View>
+                  ) : null}
+                  {showBusinessIntro && businessChannelInfo ? (
+                    <>
+                      <BusinessSecureBanner />
+                      <BusinessIntroCard
+                        displayName={businessChannelInfo.displayName}
+                        logoUrl={businessChannelInfo.logoUrl ?? contactAvatar}
+                        joinedLabel={formatBusinessJoinedLabel(businessChannelInfo.joinedAt)}
+                        isDark={colors.isDark}
+                        onManageMessages={() => setManageBusinessOpen(true)}
+                      />
+                    </>
+                  ) : null}
+                  {showGroupWelcomeCard && groupWelcomePreview ? (
+                    <>
+                      <ChatEncryptionNotice />
+                      <GroupWelcomeCard
+                        addedByPhone={groupWelcomePreview.addedByPhone}
+                        addedByName={groupWelcomePreview.addedByName}
+                        creatorIsContact={groupWelcomePreview.creatorIsContact}
+                        memberCount={groupWelcomePreview.memberCount}
+                        contactsInGroupCount={groupWelcomePreview.contactsInGroupCount}
+                        createdLabel={formatDateChipLabel(groupWelcomePreview.createdAtMs)}
+                        isDark={colors.isDark}
+                        onExitGroup={handleExitGroup}
+                        onStay={handleStayInGroup}
+                        onReport={handleReportGroup}
+                      />
+                    </>
+                  ) : null}
+                  {showUnsavedContactCard && peerContactPreview ? (
+                    <>
+                      <ChatEncryptionNotice />
+                      <UnsavedContactCard
+                        phone={peerContactPreview.phone}
+                        profileName={peerContactPreview.profileName}
+                        initials={initials}
+                        avatarUrl={contactAvatar}
+                        avatarBg={avatarBg}
+                        commonGroupCount={peerContactPreview.commonGroupCount}
+                        isDark={colors.isDark}
+                        onBlock={handleMenuBlockToggle}
+                        onAdd={() => { void handleAddUnsavedContact(); }}
+                        onReport={() => handleMenuReport(false)}
+                      />
+                    </>
+                  ) : null}
+                </>
+              </InvertedListSlot>
             ) : null
           }
           keyExtractor={(row) => {
@@ -4132,43 +4137,49 @@ export default function ChatScreen() {
           }}
           ListEmptyComponent={
             initializing ? (
-              <View style={styles.initWrap}>
-                <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.starting")}</Text>
-              </View>
+              <InvertedListSlot>
+                <View style={styles.initWrap}>
+                  <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.starting")}</Text>
+                </View>
+              </InvertedListSlot>
             ) : searching ? (
               <View style={styles.initWrap}>
                 <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.noResults")}</Text>
               </View>
             ) : !messagesReady ? (
-              <View style={styles.initWrap}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={[styles.initText, { color: colors.mutedForeground, marginTop: 10 }]}>
-                  {t("chat.loadingMessages")}
-                </Text>
-              </View>
+              <InvertedListSlot>
+                <View style={styles.initWrap}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={[styles.initText, { color: colors.mutedForeground, marginTop: 10 }]}>
+                    {t("chat.loadingMessages")}
+                  </Text>
+                </View>
+              </InvertedListSlot>
             ) : showEmptyStateLabel ? (
-              <ChatEmptyState
-                displayName={displayName}
-                initials={initials}
-                avatarUrl={contactAvatar}
-                avatarBg={avatarBg}
-                isGroup={chat?.isGroup}
-                memberCount={chat?.members?.length}
-                isDark={colors.isDark}
-                sayHiLabel={interpolate(t("chat.emptySayHi"), { name: displayName.split(" ")[0] || displayName })}
-                groupHintLabel={t("chat.emptyGroupHint")}
-                callsDisabled={Boolean(blockState.iBlockedThem || blockState.theyBlockedMe)}
-                onVoiceCall={
-                  chatId && !chat?.isGroup
-                    ? () => router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })
-                    : undefined
-                }
-                onVideoCall={
-                  chatId && !chat?.isGroup
-                    ? () => router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })
-                    : undefined
-                }
-              />
+              <InvertedListSlot>
+                <ChatEmptyState
+                  displayName={displayName}
+                  initials={initials}
+                  avatarUrl={contactAvatar}
+                  avatarBg={avatarBg}
+                  isGroup={chat?.isGroup}
+                  memberCount={chat?.members?.length}
+                  isDark={colors.isDark}
+                  sayHiLabel={interpolate(t("chat.emptySayHi"), { name: displayName.split(" ")[0] || displayName })}
+                  groupHintLabel={t("chat.emptyGroupHint")}
+                  callsDisabled={Boolean(blockState.iBlockedThem || blockState.theyBlockedMe)}
+                  onVoiceCall={
+                    chatId && !chat?.isGroup
+                      ? () => router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })
+                      : undefined
+                  }
+                  onVideoCall={
+                    chatId && !chat?.isGroup
+                      ? () => router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })
+                      : undefined
+                  }
+                />
+              </InvertedListSlot>
             ) : null
           }
         />

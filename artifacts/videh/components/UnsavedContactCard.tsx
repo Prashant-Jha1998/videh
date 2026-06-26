@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { useRouter } from "expo-router";
 import React from "react";
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { formatDisplayPhone } from "@/lib/videhContacts";
@@ -24,15 +25,27 @@ function commonGroupsLabel(count: number): string {
 }
 
 export function ChatEncryptionNotice() {
+  const router = useRouter();
+
+  const onLearnMore = () => {
+    router.push("/legal/privacy");
+  };
+
   return (
     <View style={styles.encryptWrap}>
-      <View style={styles.encryptPill}>
+      <TouchableOpacity
+        style={styles.encryptPill}
+        onPress={onLearnMore}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel="Learn more about message security"
+      >
         <Ionicons name="lock-closed" size={14} color="#C9A227" />
         <Text style={styles.encryptText}>
           Messages and calls are protected with TLS while data travels between your device and Videh servers.{" "}
-          <Text style={styles.encryptLink}>Learn more</Text>
+          <Text style={styles.encryptLink} onPress={onLearnMore}>Learn more</Text>
         </Text>
-      </View>
+      </TouchableOpacity>
     </View>
   );
 }

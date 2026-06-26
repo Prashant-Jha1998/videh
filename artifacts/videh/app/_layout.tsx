@@ -134,6 +134,7 @@ function RootLayoutNav() {
   const {
     session: activeCallSession,
     joined: activeCallJoined,
+    callAnswered: activeCallAnswered,
     duration: callDuration,
     presentIncomingCall,
     acceptIncoming,
@@ -1020,7 +1021,7 @@ function RootLayoutNav() {
           }}
         />
       ) : null}
-      {activeCallSession?.engineActive && !activeCallSession.ringing && !onCallRoute && !onActiveCallChatRoute ? (
+      {activeCallSession?.engineActive && activeCallAnswered && !activeCallSession.ringing && !onCallRoute && !onActiveCallChatRoute ? (
         <OngoingCallBanner
           contactName={activeCallSession.contactName}
           isVideo={activeCallSession.isVideo}

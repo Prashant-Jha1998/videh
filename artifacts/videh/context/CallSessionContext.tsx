@@ -21,7 +21,7 @@ import {
   stopCallAlert,
 } from "@/lib/callRingtone";
 import { addUsersToOngoingCall } from "@/lib/callParticipants";
-import { CONNECTING_TIMEOUT_MS, INCOMING_RING_TIMEOUT_MS } from "@/lib/callConstants";
+import { CONNECTING_TIMEOUT_MS, INCOMING_RING_TIMEOUT_MS, OUTGOING_RING_STATUS_POLL_MS } from "@/lib/callConstants";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import { videhSignalingPost } from "@/lib/videhCall/signalingClient";
 import { chooseInCallAudioRoute, wakeScreenForIncomingCall, type InCallAudioRoute } from "@/lib/inCallAudio";
@@ -34,6 +34,7 @@ import {
 } from "@/lib/incomingCallUiBridge";
 import { rejectIncomingCall } from "@/lib/rejectIncomingCall";
 import { fetchIncomingCallDetails } from "@/lib/fetchIncomingCallDetails";
+import { mergeAcceptedUserIds, isOutgoingPeerAccepted } from "@/lib/callAcceptance";
 import { isRemotePartyAccepted, isCallCaller } from "@/lib/callRole";
 import { stopIncomingCallExperience } from "@/lib/incomingCallExperience";
 import { dismissIncomingCallNotification } from "@/lib/incomingCallNotification";
@@ -153,6 +154,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const [inviteeUserIds, setInviteeUserIds] = useState<number[]>([]);
   const [statusHint, setStatusHint] = useState<string | null>(null);
   const [duration, setDuration] = useState(0);
+  const [serverConnectedAt, setServerConnectedAt] = useState<number | null>(null);
+  const callStartedAtRef = useRef<number | null>(null);
   const [callOutcome, setCallOutcome] = useState<CallOutcome | null>(null);
   const [outcomeSnapshot, setOutcomeSnapshot] = useState<{
     contactName: string;
@@ -171,6 +174,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const sessionEngineActiveRef = useRef(false);
   const negotiateBumpedForCallRef = useRef<string | null>(null);
   const [negotiateBump, setNegotiateBump] = useState(0);
+  const participantStatusesRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     sessionCallIdRef.current = session?.callId ?? null;
@@ -282,6 +286,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
   const clearSession = useCallback(() => {
     setSession(null);
     setDuration(0);
+    setServerConnectedAt(null);
+    callStartedAtRef.current = null;
+    participantStatusesRef.current = {};
     setStatusHint(null);
     endedTonePlayed.current = false;
     endingCallRef.current = false;
@@ -878,7 +885,13 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (session.isIncoming && !session.engineActive) return;
     const polledCallId = session.callId;
     statusPollMissRef.current = 0;
-    const pollMs = call.joined ? 800 : session.engineActive ? 500 : 400;
+    const pollMs = call.joined
+      ? 800
+      : session.engineActive
+        ? 500
+        : session.isIncoming
+          ? 400
+          : OUTGOING_RING_STATUS_POLL_MS;
     const missLimit = call.joined ? 6 : 4;
     const timer = setInterval(() => {
       void webrtcFetch(`/calls/${polledCallId}/status?userId=${userId}`, user?.sessionToken)
@@ -895,6 +908,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           ended?: boolean;
           acceptedUserIds?: number[];
           callerId?: number;
+          connectedAt?: number | null;
           statuses?: Record<string, string>;
         };
           if (sessionCallIdRef.current !== polledCallId) return;
@@ -911,7 +925,14 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           setRingingCount(data.ringingCount ?? 0);
           setParticipantCount((prev) => data.call?.participantCount ?? prev);
           const polledAcceptedIds = Array.isArray(data.acceptedUserIds) ? data.acceptedUserIds : [];
-          if (polledAcceptedIds.length > 0) setAcceptedUserIds(polledAcceptedIds);
+          const mergedAccepted = mergeAcceptedUserIds(polledAcceptedIds, data.statuses);
+          if (mergedAccepted.length > 0) setAcceptedUserIds(mergedAccepted);
+          if (data.statuses && typeof data.statuses === "object") {
+            participantStatusesRef.current = data.statuses;
+          }
+          if (typeof data.connectedAt === "number" && data.connectedAt > 0) {
+            setServerConnectedAt(data.connectedAt);
+          }
           if (typeof data.callerId === "number") setCallerId(data.callerId);
           if (data.statuses && typeof data.statuses === "object") {
             setInviteeUserIds(
@@ -921,8 +942,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
             );
           }
 
-          const remoteAccepted =
-            polledAcceptedIds.some((id) => id !== userId) || (data.acceptedCount ?? 1) > 1;
+          const remoteAccepted = isOutgoingPeerAccepted(userId, mergedAccepted, data.statuses);
           if (remoteAccepted) {
             void stopCallAlert();
             setStatusHint(null);
@@ -1011,12 +1031,24 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (call.connectionPhase !== "connected") {
+      callStartedAtRef.current = null;
       setDuration(0);
       return;
     }
-    const t = setInterval(() => setDuration((d) => d + 1), 1000);
+    if (serverConnectedAt && serverConnectedAt > 0) {
+      callStartedAtRef.current = serverConnectedAt;
+    } else if (!callStartedAtRef.current) {
+      callStartedAtRef.current = Date.now();
+    }
+    const tick = () => {
+      const base = callStartedAtRef.current;
+      if (!base) return;
+      setDuration(Math.max(0, Math.floor((Date.now() - base) / 1000)));
+    };
+    tick();
+    const t = setInterval(tick, 1000);
     return () => clearInterval(t);
-  }, [call.connectionPhase]);
+  }, [call.connectionPhase, serverConnectedAt]);
 
   useEffect(() => {
     if (!session?.engineActive || session.ringing || !call.joined) {
@@ -1057,16 +1089,9 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
         }
         // FIX: acceptedUserIds now comes directly in the SSE payload (we added it
         // to publishCallSignal in webrtc.ts). Use it to immediately unblock WebRTC.
-        if (Array.isArray(signal.acceptedUserIds) && signal.acceptedUserIds.length > 0) {
-          setAcceptedUserIds(signal.acceptedUserIds);
-        } else if ((signal.acceptedCount ?? 0) > 0 && userId) {
-          setAcceptedUserIds((prev) => {
-            const ids = new Set(prev);
-            ids.add(userId);
-            if (typeof signal.callerId === "number" && signal.callerId > 0) ids.add(signal.callerId);
-            return [...ids];
-          });
-        }
+        const mergedAccept = mergeAcceptedUserIds(signal.acceptedUserIds, signal.statuses);
+        if (signal.acceptingUserId) mergedAccept.push(signal.acceptingUserId);
+        if (mergedAccept.length > 0) setAcceptedUserIds([...new Set(mergedAccept)]);
         if (typeof signal.callerId === "number" && signal.callerId > 0) {
           setCallerId(signal.callerId);
         }
@@ -1075,8 +1100,26 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
           via: "sse",
           userId,
           acceptedUserIds: signal.acceptedUserIds,
+          acceptingUserId: signal.acceptingUserId,
           acceptedCount: signal.acceptedCount,
         });
+        negotiateBumpedForCallRef.current = null;
+        setNegotiateBump((n) => n + 1);
+        void webrtcFetch(`/calls/${callId}/status?userId=${userId}`, user?.sessionToken)
+          .then(async (res) => {
+            if (!res.ok) return;
+            const statusData = (await res.json()) as {
+              acceptedUserIds?: number[];
+              statuses?: Record<string, string>;
+              connectedAt?: number | null;
+            };
+            const merged = mergeAcceptedUserIds(statusData.acceptedUserIds, statusData.statuses);
+            if (merged.length > 0) setAcceptedUserIds(merged);
+            if (typeof statusData.connectedAt === "number" && statusData.connectedAt > 0) {
+              setServerConnectedAt(statusData.connectedAt);
+            }
+          })
+          .catch(() => {});
         setSession((prev) => {
           if (!prev || prev.callId !== callId) return prev;
           if (prev.isIncoming && prev.ringing) return prev;
@@ -1093,7 +1136,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
       setSession((prev) => (prev ? { ...prev, isVideo: nextVideo } : prev));
     });
     return unsub;
-  }, [handleServerCallEnded, userId, bumpNegotiation]);
+  }, [handleServerCallEnded, userId, user?.sessionToken, bumpNegotiation]);
 
   useEffect(() => registerCallSessionDismissHandler(handleUiDismissRequest), [handleUiDismissRequest]);
   useEffect(() => registerCallSessionEndHandler(handleServerCallEnded), [handleServerCallEnded]);
@@ -1130,7 +1173,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     if (call.connectionPhase === "reconnecting") {
       return t(CALL_STATUS_KEYS.reconnecting);
     }
-    if (call.joined || remotePartyAccepted) {
+    if (session.engineActive && !session.ringing && !callAnswered) {
       const hint = resolveCallStatusHint(statusHint, t);
       if (hint) return hint;
       return t(CALL_STATUS_KEYS.connecting);

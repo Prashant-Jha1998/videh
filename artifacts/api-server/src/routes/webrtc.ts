@@ -60,7 +60,7 @@ const ringExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
  * FIX: Was 12_000ms — caused the callee to get the first ringing push/signal
  * very late. 4s is much more responsive while still avoiding spam.
  */
-const RING_REMINDER_MS = 4_000;
+const RING_REMINDER_MS = 2_000;
 const ringReminderTimers = new Map<string, ReturnType<typeof setInterval>>();
 
 function callIsOrphanStale(call: CallInvite): boolean {
@@ -612,6 +612,7 @@ router.post("/calls", async (req: Request, res: Response) => {
         payload: {
           ...serializeIncoming(invite, callerId),
           callerId,
+          statuses: invite.statuses,
           action: "ringing",
         },
       });
@@ -770,6 +771,8 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
       callId: call.callId,
       channel: call.channel,
       callerId: call.callerId,
+      acceptingUserId: userId,
+      statuses: call.statuses,
       // Include acceptedUserIds explicitly for caller to start WebRTC immediately
       acceptedUserIds: acceptedUserIdsFromCall(call),
       acceptedCount: Object.values(call.statuses).filter((s) => s === "accepted").length,
@@ -848,6 +851,7 @@ router.get("/calls/:callId/status", async (req: Request, res: Response) => {
     statuses: call.statuses,
     acceptedUserIds,
     callerId: call.callerId,
+    connectedAt: call.connectedAt ?? null,
   });
 });
 

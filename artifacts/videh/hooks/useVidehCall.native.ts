@@ -14,12 +14,12 @@ export type { VidehCallState } from "./videhCallTypes";
 
 type Role = "caller" | "callee";
 /** Fast poll while the call is still negotiating (offer/answer/ICE exchange). */
-const SIGNAL_POLL_MS = 250;
+const SIGNAL_POLL_MS = 120;
 /** Slow poll once connected — only needed to catch ICE restarts / renegotiation. */
-const SIGNAL_POLL_CONNECTED_MS = 1500;
+const SIGNAL_POLL_CONNECTED_MS = 1200;
 const ICE_RESTART_DELAY_MS = 5000;
 const DISCONNECT_GRACE_MS = 4500;
-const CONNECT_STABLE_MS = 350;
+const CONNECT_STABLE_MS = 200;
 
 /** 0 = single shared call channel (no _peer_ suffix on server invite channel). */
 const SINGLE_PEER_KEY = 0;

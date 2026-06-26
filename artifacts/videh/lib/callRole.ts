@@ -1,3 +1,5 @@
+import { isOutgoingPeerAccepted } from "@/lib/callAcceptance";
+
 /** True when this user should see incoming Accept/Decline UI (they are the callee, not the caller). */
 export function shouldPresentIncomingCall(opts: {
   userId: number;
@@ -27,8 +29,14 @@ export function isCallCaller(userId: number, callerId?: number): boolean {
 export function isRemotePartyAccepted(
   userId: number,
   acceptedUserIds: number[],
-  opts?: { isIncoming?: boolean; engineActive?: boolean; ringing?: boolean; acceptedCount?: number },
+  opts?: {
+    isIncoming?: boolean;
+    engineActive?: boolean;
+    ringing?: boolean;
+    acceptedCount?: number;
+    statuses?: Record<string, string>;
+  },
 ): boolean {
   if (opts?.isIncoming) return Boolean(opts.engineActive && !opts.ringing);
-  return acceptedUserIds.some((id) => id !== userId);
+  return isOutgoingPeerAccepted(userId, acceptedUserIds, opts?.statuses);
 }

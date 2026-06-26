@@ -9,6 +9,8 @@ export type CallSignalPayload = {
   callerId?: number;
   acceptedCount?: number;
   acceptedUserIds?: number[];
+  acceptingUserId?: number;
+  statuses?: Record<string, string>;
 };
 
 /** Normalize SSE / realtime payloads (fields may be nested under `payload`). */
@@ -23,6 +25,18 @@ export function resolveCallSignal(raw: Record<string, unknown>): CallSignalPaylo
   const acceptedUserIds = Array.isArray(acceptedUserIdsRaw)
     ? acceptedUserIdsRaw.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)
     : undefined;
+  const statusesRaw = merged.statuses;
+  const statuses =
+    statusesRaw && typeof statusesRaw === "object" && !Array.isArray(statusesRaw)
+      ? Object.fromEntries(
+          Object.entries(statusesRaw as Record<string, unknown>).map(([k, v]) => [k, String(v)]),
+        )
+      : undefined;
+  const acceptingUserIdRaw = merged.acceptingUserId;
+  const acceptingUserId =
+    acceptingUserIdRaw != null && Number.isFinite(Number(acceptingUserIdRaw))
+      ? Number(acceptingUserIdRaw)
+      : undefined;
   return {
     action: String(merged.action ?? ""),
     callId: callId != null ? String(callId) : undefined,
@@ -35,6 +49,8 @@ export function resolveCallSignal(raw: Record<string, unknown>): CallSignalPaylo
     callerId: merged.callerId != null ? Number(merged.callerId) : undefined,
     acceptedCount: merged.acceptedCount != null ? Number(merged.acceptedCount) : undefined,
     acceptedUserIds: acceptedUserIds?.length ? acceptedUserIds : undefined,
+    acceptingUserId,
+    statuses,
   };
 }
 
