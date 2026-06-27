@@ -362,12 +362,16 @@ export default function StatusCreateScreen() {
   };
 
   const prepareMediaForStoryUpload = async (uri: string, type: "image" | "video") => {
-    if (!uri || uri.startsWith("file://") || uri.startsWith("http://") || uri.startsWith("https://")) return uri;
+    if (!uri || uri.startsWith("http://") || uri.startsWith("https://") || uri.startsWith("data:")) return uri;
     const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
     if (!cacheDir) return uri;
     const target = `${cacheDir}story_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${mediaExt(uri, type)}`;
-    await FileSystem.copyAsync({ from: uri, to: target });
-    return target;
+    try {
+      await FileSystem.copyAsync({ from: uri, to: target });
+      return target;
+    } catch {
+      return uri;
+    }
   };
 
   const pickMedia = async () => {

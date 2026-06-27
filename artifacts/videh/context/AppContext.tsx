@@ -389,6 +389,7 @@ interface AppContextType {
   forwardMessage: (chatId: string, messageId: string, targetChatId: string) => void;
   starredMessages: Message[];
   updateAvatar: (base64: string, mimeType?: string) => Promise<void>;
+  updateGroupAvatar: (chatId: string, localUri: string) => Promise<void>;
   createDirectChat: (otherUserId: number, otherName: string, otherAvatar?: string) => Promise<string>;
   loadMessages: (chatId: string) => Promise<void>;
   applyIncomingMessageHint: (signal: ChatMessageSignal) => void;
@@ -630,16 +631,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       name: `status_${Date.now()}.${ext}`,
       type: mime,
     } as any);
-    const res = await fetch(`${BASE_URL}/api/statuses/media`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: form,
-    });
-    const data = await res.json().catch(() => ({})) as { success?: boolean; url?: string; message?: string };
-    if (!res.ok || !data.success || !data.url) {
-      throw new Error(data.message ?? "Could not upload story media.");
+    let lastError = "Could not upload story media.";
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const res = await fetch(`${BASE_URL}/api/statuses/media`, {
+          method: "POST",
+          headers: authHeaders(),
+          body: form,
+        });
+        const data = await res.json().catch(() => ({})) as { success?: boolean; url?: string; message?: string };
+        if (res.ok && data.success && data.url) return data.url;
+        lastError = data.message ?? lastError;
+      } catch {
+        /* retry */
+      }
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+      }
     }
-    return data.url;
+    throw new Error(lastError);
   }, []);
 
   const uploadChatMedia = useCallback(async (uri: string, fallbackMime: string): Promise<string> => {
@@ -1016,6 +1026,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setUserState(updated);
       await AsyncStorage.setItem("videh_user", JSON.stringify(updated));
     }
+  }, []);
+
+  const updateGroupAvatar = useCallback(async (chatId: string, localUri: string) => {
+    const u = userRef.current;
+    if (!u?.dbId) return;
+    const base64 = await FileSystem.readAsStringAsync(localUri, { encoding: FileSystem.EncodingType.Base64 });
+    const mimeType = localUri.toLowerCase().includes(".png") ? "image/png" : "image/jpeg";
+    const data = await api(`/chats/${chatId}/group-avatar`, {
+      method: "PUT",
+      body: JSON.stringify({ requesterId: u.dbId, base64, mimeType }),
+    }) as { success?: boolean; groupAvatarUrl?: string; message?: string };
+    if (!data.success || !data.groupAvatarUrl) {
+      throw new Error(data.message ?? "Could not update group photo.");
+    }
+    const avatar = resolvePublicAssetUrl(data.groupAvatarUrl) ?? data.groupAvatarUrl;
+    setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, avatar } : c)));
   }, []);
 
   const logout = useCallback(async () => {
@@ -2727,25 +2753,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const createGroup = useCallback((name: string, memberIds: number[], groupAvatarUrl?: string) => {
+  const createGroup = useCallback((name: string, memberIds: number[], groupAvatarUri?: string) => {
     const u = userRef.current;
     if (!u?.dbId) return;
     const creatorId = u.dbId;
-    api("/chats/group", {
-      method: "POST",
-      body: JSON.stringify({ creatorId, name, memberIds, groupAvatarUrl: groupAvatarUrl ?? null }),
-    }).then((data: any) => {
-      if (data?.success && data.chatId) {
-        const now = Date.now();
-        setChats((prev) => [{
-          id: String(data.chatId), name, unreadCount: 0, isGroup: true,
-          members: memberIds.map(String), messages: [], isPinned: false, isMuted: false,
-          avatar: groupAvatarUrl ?? undefined,
-          lastMessageTime: now,
-        }, ...prev.filter((c) => c.id !== String(data.chatId))]);
-        void loadChats(creatorId);
+    void (async () => {
+      let groupAvatarUrl: string | null = null;
+      if (groupAvatarUri) {
+        try {
+          if (
+            groupAvatarUri.startsWith("http://")
+            || groupAvatarUri.startsWith("https://")
+            || groupAvatarUri.startsWith("data:")
+          ) {
+            groupAvatarUrl = groupAvatarUri;
+          } else {
+            const base64 = await FileSystem.readAsStringAsync(groupAvatarUri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            const mimeType = groupAvatarUri.toLowerCase().includes(".png") ? "image/png" : "image/jpeg";
+            groupAvatarUrl = `data:${mimeType};base64,${base64}`;
+          }
+        } catch {
+          /* skip avatar on read failure */
+        }
       }
-    }).catch(() => {});
+      try {
+        const data = await api("/chats/group", {
+          method: "POST",
+          body: JSON.stringify({ creatorId, name, memberIds, groupAvatarUrl }),
+        }) as { success?: boolean; chatId?: number };
+        if (data?.success && data.chatId) {
+          const now = Date.now();
+          const avatar = groupAvatarUrl ? (resolvePublicAssetUrl(groupAvatarUrl) ?? groupAvatarUrl) : undefined;
+          setChats((prev) => [{
+            id: String(data.chatId), name, unreadCount: 0, isGroup: true,
+            members: memberIds.map(String), messages: [], isPinned: false, isMuted: false,
+            avatar,
+            lastMessageTime: now,
+          }, ...prev.filter((c) => c.id !== String(data.chatId))]);
+          void loadChats(creatorId);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
   }, [loadChats]);
 
   const addStatus = useCallback(async (content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string, videoDurationMs?: number | null, editorData?: StoryEditorData) => {
@@ -3210,7 +3262,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       user, isAuthenticated, isInitialized, chats, statuses, contacts, callLogs,
       setUser, logout, sendMessage, createGroup, markAsRead, markAllAsRead,
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
-      starMessage, keepMessage, forwardMessage, starredMessages, updateAvatar,
+      starMessage, keepMessage, forwardMessage, starredMessages, updateAvatar, updateGroupAvatar,
       createDirectChat, loadMessages, applyIncomingMessageHint, loadOlderMessages, refreshChats, clearAllChatHistory,
       deleteChatsFromList, hideChatsInList, hiddenChatIds, chatDeletedAtMap,
       sendImageMessage, sendPreparedMediaMessage, sendAlbumMessage, consumeViewOnceMessage, sendAudioMessage, sendDocumentMessage, cancelDocumentUpload,

@@ -1636,6 +1636,52 @@ router.put("/:chatId/members/:memberId/send-permission", async (req: Request, re
   }
 });
 
+// Update group profile photo (admin only)
+router.put("/:chatId/group-avatar", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { requesterId, base64, mimeType } = req.body as {
+    requesterId?: number;
+    base64?: string;
+    mimeType?: string;
+  };
+  const userId = Number(requesterId);
+  if (!userId || !base64) {
+    res.status(400).json({ success: false, message: "requesterId and base64 are required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    const member = await query(
+      `SELECT c.is_group, cm.is_admin
+       FROM chats c
+       JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $2
+       WHERE c.id = $1`,
+      [chatId, userId],
+    );
+    if (!member.rows[0]) {
+      res.status(404).json({ success: false, message: "Group not found or you are not a member." });
+      return;
+    }
+    if (!member.rows[0].is_group) {
+      res.status(400).json({ success: false, message: "Profile photos are only available for groups." });
+      return;
+    }
+    if (!member.rows[0].is_admin) {
+      res.status(403).json({ success: false, message: "Only group admins can change the group photo." });
+      return;
+    }
+    const dataUrl = `data:${mimeType ?? "image/jpeg"};base64,${base64}`;
+    const result = await query(
+      "UPDATE chats SET group_avatar_url = $1 WHERE id = $2 RETURNING group_avatar_url",
+      [dataUrl, chatId],
+    );
+    res.json({ success: true, groupAvatarUrl: result.rows[0]?.group_avatar_url ?? dataUrl });
+  } catch (err) {
+    req.log.error({ err }, "update group avatar");
+    res.status(500).json({ success: false, message: "Could not update group photo." });
+  }
+});
+
 // Update group description
 router.put("/:chatId/description", async (req: Request, res: Response) => {
   const { chatId } = req.params;

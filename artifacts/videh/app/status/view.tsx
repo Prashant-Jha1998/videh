@@ -227,6 +227,8 @@ export default function ViewStatusScreen() {
   const progress = useRef(new Animated.Value(0)).current;
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
   const pausedProgressRef = useRef(0);
+  const statusesRef = useRef(statuses);
+  statusesRef.current = statuses;
   const longPressActiveRef = useRef(false);
   const longPressConsumedRef = useRef(false);
   const wasPausedBeforeHoldRef = useRef(false);
@@ -280,14 +282,20 @@ export default function ViewStatusScreen() {
     }
   }, [currentStatus?.id, isMyStatus, user?.dbId, markStatusViewedLocally]);
 
+  const currentStoryId = ids[currentIdx];
+  const currentStoryType = currentStatus?.type;
+  const currentStoryTrimEndMs = currentStatus?.editorData?.trimEndMs;
+  const currentStoryTrimStartMs = currentStatus?.editorData?.trimStartMs;
+
   // Start progress animation
   const startAnim = useCallback((idx: number, fromValue = 0) => {
     progress.setValue(fromValue);
-    const status = statuses.find((s) => s.id === ids[idx]);
+    const status = statusesRef.current.find((s) => s.id === ids[idx]);
     const trimmedVideoMs = status?.type === "video" && status.editorData?.trimEndMs
       ? Math.max(1000, (normalizeStoryTrimMs(status.editorData.trimEndMs) ?? 8000) - (normalizeStoryTrimMs(status.editorData.trimStartMs) ?? 0))
       : null;
     const duration = (trimmedVideoMs ?? ((status?.type === "image" || status?.type === "video") ? 8000 : 5000)) * (1 - fromValue);
+    if (duration <= 0) return;
     const anim = Animated.timing(progress, { toValue: 1, duration, useNativeDriver: false });
     animRef.current = anim;
     anim.start(({ finished }) => {
@@ -298,16 +306,25 @@ export default function ViewStatusScreen() {
         router.back();
       }
     });
-  }, [ids, statuses]);
+  }, [ids, progress, router]);
 
   useEffect(() => {
     animRef.current?.stop();
-    const status = statuses.find((s) => s.id === ids[currentIdx]);
-    const waitingForVideo = status?.type === "video" && Boolean(resolvedMediaUrl) && !videoReady && !mediaLoadFailed;
+    const waitingForVideo = currentStoryType === "video" && Boolean(resolvedMediaUrl) && !videoReady && !mediaLoadFailed;
     if (waitingForVideo) return;
     startAnim(currentIdx);
     return () => animRef.current?.stop();
-  }, [currentIdx, videoReady, mediaLoadFailed, ids, statuses, resolvedMediaUrl, startAnim]);
+  }, [
+    currentIdx,
+    currentStoryId,
+    currentStoryType,
+    currentStoryTrimEndMs,
+    currentStoryTrimStartMs,
+    videoReady,
+    mediaLoadFailed,
+    resolvedMediaUrl,
+    startAnim,
+  ]);
 
   useEffect(() => {
     setUseNativeImageFallback(false);
@@ -707,11 +724,15 @@ export default function ViewStatusScreen() {
                 value={reply}
                 onChangeText={setReply}
                 placeholder={isBoostedStory ? "Reply to this boosted story..." : `Reply to ${currentStatus.userName}...`}
-                placeholderTextColor="rgba(255,255,255,0.5)"
+                placeholderTextColor="rgba(20,19,31,0.45)"
+                cursorColor="#5B4FE8"
+                selectionColor="rgba(91,79,232,0.35)"
                 onFocus={pauseStory}
                 onBlur={resumeStory}
                 returnKeyType="send"
                 onSubmitEditing={sendReply}
+                autoCorrect
+                autoCapitalize="sentences"
               />
               {reply.length > 0 ? (
                 <TouchableOpacity onPress={sendReply} style={styles.sendBtn}>
@@ -791,8 +812,8 @@ const styles = StyleSheet.create({
   reactionBtnActive: { backgroundColor: "rgba(255,255,255,0.2)", transform: [{ scale: 1.15 }] },
   reactionEmoji: { fontSize: 25 },
   replyRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  replyBar: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.3)", borderRadius: 50, paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
-  replyInput: { flex: 1, color: "#fff", fontSize: 14 },
+  replyBar: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.94)", borderWidth: 1, borderColor: "rgba(0,0,0,0.08)", borderRadius: 50, paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
+  replyInput: { flex: 1, color: "#14131F", fontSize: 15, paddingVertical: 0, minHeight: 22 },
   sendBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#7C6CF0", alignItems: "center", justifyContent: "center" },
   reactionToggle: { width: 50, height: 50, borderRadius: 25, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.3)", alignItems: "center", justifyContent: "center" },
   reactionToggleActive: { borderColor: "#fff", backgroundColor: "rgba(255,255,255,0.15)" },

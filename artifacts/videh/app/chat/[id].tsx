@@ -103,9 +103,6 @@ import {
   isChatScrolledUp,
   isChatBackAtBottom,
   isCompactChatText,
-  isInvertedChatNearBottom,
-  isInvertedChatScrolledUp,
-  isInvertedChatBackAtBottom,
   SCROLL_PIN_DEBOUNCE_MS,
   shouldAnimateChatPin,
   CHAT_NEAR_BOTTOM_PX,
@@ -122,7 +119,6 @@ import { BusinessIntroCard, BusinessSecureBanner, formatBusinessJoinedLabel } fr
 import { ManageBusinessMessagesSheet } from "@/components/ManageBusinessMessagesSheet";
 import { ChatEncryptionNotice, UnsavedContactCard } from "@/components/UnsavedContactCard";
 import { ChatEmptyState } from "@/components/ChatEmptyState";
-import { InvertedListSlot } from "@/components/InvertedListSlot";
 import { dismissGroupWelcome, isGroupWelcomeDismissed } from "@/lib/groupWelcomeDismiss";
 import {
   encodeLocationPayload,
@@ -211,25 +207,6 @@ function messagesWithDateRows(msgs: Message[]): ChatListRow[] {
       prevDay = day;
     }
     out.push({ rowType: "msg", message: m });
-  }
-  return out;
-}
-
-/** Inverted FlatList: index 0 = newest at visual bottom (Videh RN pattern). */
-function messagesWithDateRowsInverted(msgs: Message[]): ChatListRow[] {
-  const out: ChatListRow[] = [];
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i];
-    out.push({ rowType: "msg", message: m });
-    const day = startOfLocalDay(m.timestamp);
-    const hasOlderSameDay = i > 0 && startOfLocalDay(msgs[i - 1].timestamp) === day;
-    if (!hasOlderSameDay) {
-      out.push({
-        rowType: "date",
-        id: `date-${day}`,
-        label: formatDateChipLabel(m.timestamp),
-      });
-    }
   }
   return out;
 }
@@ -1326,7 +1303,6 @@ export default function ChatScreen() {
   }, [messages]);
 
   const listRows = useMemo(() => messagesWithDateRows(messagesForDisplay), [messagesForDisplay]);
-  const listRowsInverted = useMemo(() => messagesWithDateRowsInverted(messagesForDisplay), [messagesForDisplay]);
   const [composerHeight, setComposerHeight] = useState(56);
   const [readingHistory, setReadingHistory] = useState(false);
   const chatContactName = name ?? chat?.name ?? "Chat";
@@ -1340,7 +1316,7 @@ export default function ChatScreen() {
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollToQuotedMessage = useCallback((quotedId: string) => {
-    const rows = searching ? listRows : listRowsInverted;
+    const rows = listRows;
     const index = rows.findIndex((r) => r.rowType === "msg" && r.message.id === quotedId);
     if (index < 0) {
       Alert.alert("Message not found", "This message is not loaded. Scroll up to load older messages.");
@@ -1359,7 +1335,7 @@ export default function ChatScreen() {
       Animated.timing(flashAnim, { toValue: 0, duration: 700, useNativeDriver: false }),
     ]).start();
     flashTimerRef.current = setTimeout(() => setFlashMessageId(null), 950);
-  }, [listRows, listRowsInverted, searching, flashAnim]);
+  }, [listRows, flashAnim]);
 
   const peerNameForVideo = name ?? chat?.name ?? "Chat";
 
@@ -1420,23 +1396,25 @@ export default function ChatScreen() {
         return;
       }
       let cancelled = false;
-      fetch(`${BASE_URL}/api/chats/${chatId}/messaging-permission?userId=${user.dbId}`)
+      fetch(`${BASE_URL}/api/chats/${chatId}/messaging-permission?userId=${user.dbId}`, {
+        headers: user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : undefined,
+      })
         .then((r) => r.json())
         .then((d: { success?: boolean; canSendMessages?: boolean; policy?: string }) => {
           if (cancelled) return;
           if (d.success && typeof d.canSendMessages === "boolean" && typeof d.policy === "string") {
             setGroupSendPermission({ canSend: d.canSendMessages, policy: d.policy });
           } else {
-            setGroupSendPermission({ canSend: false, policy: "everyone" });
+            setGroupSendPermission(null);
           }
         })
         .catch(() => {
-          if (!cancelled) setGroupSendPermission({ canSend: false, policy: "everyone" });
+          if (!cancelled) setGroupSendPermission(null);
         });
       return () => {
         cancelled = true;
       };
-    }, [chatId, chat?.isGroup, user?.dbId]),
+    }, [chatId, chat?.isGroup, user?.dbId, user?.sessionToken]),
   );
 
   useFocusEffect(
@@ -1464,7 +1442,7 @@ export default function ChatScreen() {
     !initializing
     && !blockState.iBlockedThem
     && !blockState.theyBlockedMe
-    && (editTarget != null || !chat?.isGroup || groupSendPermission?.canSend === true);
+    && (editTarget != null || !chat?.isGroup || groupSendPermission?.canSend !== false);
 
   const openChatVideoFullScreen = useCallback(
     async (mediaUri: string, senderIsMe: boolean, ts: number) => {
@@ -1649,11 +1627,7 @@ export default function ChatScreen() {
       const useAnimated = pendingPinAnimatedRef.current;
       pendingPinAnimatedRef.current = false;
       lastPinAtRef.current = Date.now();
-      if (searching) {
-        listRef.current?.scrollToEnd({ animated: useAnimated });
-      } else {
-        listRef.current?.scrollToOffset({ offset: 0, animated: useAnimated });
-      }
+      listRef.current?.scrollToEnd({ animated: useAnimated });
     });
   }, [searching, blocksAutoScroll, logScrollRequest]);
   const pinToLatest = useCallback(
@@ -1735,24 +1709,18 @@ export default function ChatScreen() {
   scheduleOpenChatPinRef.current = scheduleOpenChatPin;
   const syncScrollAwayFromBottom = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
-      const away = searching
-        ? isChatScrolledUp(contentOffsetY, contentHeight, layoutHeight, userScrolledUpRef.current)
-        : isInvertedChatScrolledUp(contentOffsetY, userScrolledUpRef.current);
-      lastNearBottomRef.current = searching
-        ? !away
-        : isInvertedChatNearBottom(contentOffsetY);
+      const away = isChatScrolledUp(contentOffsetY, contentHeight, layoutHeight, userScrolledUpRef.current);
+      lastNearBottomRef.current = isChatNearBottom(contentOffsetY, contentHeight, layoutHeight);
       if (away && !userScrolledUpRef.current) {
         markUserScrolledUp();
       }
     },
-    [markUserScrolledUp, searching],
+    [markUserScrolledUp],
   );
   const tryClearReadingHistory = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
       if (!userScrolledUpRef.current) return;
-      const backAtBottom = searching
-        ? isChatBackAtBottom(contentOffsetY, contentHeight, layoutHeight)
-        : isInvertedChatBackAtBottom(contentOffsetY);
+      const backAtBottom = isChatBackAtBottom(contentOffsetY, contentHeight, layoutHeight);
       if (!backAtBottom) return;
       cancelAllScrollPins();
       userScrolledUpRef.current = false;
@@ -1763,7 +1731,7 @@ export default function ChatScreen() {
       setUnreadBelowCount((p) => (p > 0 ? 0 : p));
       if (chatId) chatScrollMemoryRef.current.set(chatId, false);
     },
-    [messages.length, cancelAllScrollPins, applyReadingHistoryMode, searching, chatId],
+    [messages.length, cancelAllScrollPins, applyReadingHistoryMode, chatId],
   );
   const finishScrollInteraction = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
@@ -1796,9 +1764,7 @@ export default function ChatScreen() {
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
       lastScrollOffsetRef.current = contentOffsetY;
       syncScrollAwayFromBottom(contentOffsetY, contentHeight, layoutHeight);
-      const nearOlderEdge = searching
-        ? contentOffsetY < 140
-        : contentOffsetY + layoutHeight >= contentHeight - 140;
+      const nearOlderEdge = contentOffsetY < 140;
       if (
         nearOlderEdge
         && hasMoreOlderRef.current
@@ -3287,26 +3253,24 @@ export default function ChatScreen() {
     && groupWelcomePreview.createdByUserId !== user?.dbId;
   const hasIntroCards = showBusinessIntro || showUnsavedContactCard || showGroupWelcomeCard;
   const chatListData = useMemo((): ChatListRow[] => {
-    const base = searching ? listRows : listRowsInverted;
-    if (searching) return base;
-    const tail: ChatListRow[] = [];
+    if (searching) return listRows;
+    const head: ChatListRow[] = [];
     if (loadingOlder) {
-      tail.push({ rowType: "loading_older", id: "loading-older" });
+      head.push({ rowType: "loading_older", id: "loading-older" });
     }
     if (showGroupWelcomeCard && groupWelcomePreview) {
-      tail.push({ rowType: "group_welcome", id: "intro-group" });
+      head.push({ rowType: "group_welcome", id: "intro-group" });
     }
     if (showUnsavedContactCard && peerContactPreview) {
-      tail.push({ rowType: "unsaved_contact", id: "intro-unsaved" });
+      head.push({ rowType: "unsaved_contact", id: "intro-unsaved" });
     }
     if (showBusinessIntro && businessChannelInfo) {
-      tail.push({ rowType: "business_intro", id: "intro-business" });
+      head.push({ rowType: "business_intro", id: "intro-business" });
     }
-    return tail.length ? [...base, ...tail] : base;
+    return head.length ? [...head, ...listRows] : listRows;
   }, [
     searching,
     listRows,
-    listRowsInverted,
     loadingOlder,
     showGroupWelcomeCard,
     groupWelcomePreview,
@@ -3317,9 +3281,6 @@ export default function ChatScreen() {
   ]);
   const isChatEmpty = messagesReady && !searching && listRows.length === 0;
   const showEmptyStateLabel = isChatEmpty && !hasIntroCards;
-  const hasMessageRows = (searching ? listRows : listRowsInverted).length > 0;
-  /** Invert only when real messages exist — intro-only chats stay upright. */
-  const messageListInverted = !searching && hasMessageRows;
   const messagesScrollAnchorKey = useMemo(() => {
     const first = messagesForDisplay[0]?.id ?? "";
     const last = messagesForDisplay[messagesForDisplay.length - 1]?.id ?? "";
@@ -3328,17 +3289,13 @@ export default function ChatScreen() {
 
   /** Keep viewport fixed while reading history across poll/merge refreshes. */
   useEffect(() => {
-    if (searching || !readingHistory || !messageListInverted) return;
+    if (searching || !readingHistory) return;
     const offset = lastScrollOffsetRef.current;
-    if (offset <= CHAT_NEAR_BOTTOM_PX) return;
     const frame = requestAnimationFrame(() => {
       listRef.current?.scrollToOffset({ offset, animated: false });
     });
     return () => cancelAnimationFrame(frame);
-  }, [messagesScrollAnchorKey, readingHistory, searching, messageListInverted]);
-
-  const wrapInvertedListChrome = (node: React.ReactNode) =>
-    messageListInverted ? <InvertedListSlot>{node}</InvertedListSlot> : node;
+  }, [messagesScrollAnchorKey, readingHistory, searching]);
 
   useFocusEffect(
     useCallback(() => {
@@ -3765,7 +3722,7 @@ export default function ChatScreen() {
         </View>
       )}
 
-      {chat?.isGroup && groupSendPermission && !groupSendPermission.canSend && !editTarget && (
+      {chat?.isGroup && groupSendPermission?.canSend === false && !editTarget && (
         <View style={[styles.groupLockBanner, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
           <Ionicons name="lock-closed-outline" size={18} color={colors.mutedForeground} />
           <Text style={[styles.groupLockBannerText, { color: colors.foreground }]}>
@@ -4147,33 +4104,33 @@ export default function ChatScreen() {
             style={styles.messageList}
             ref={listRef}
             pointerEvents={showEmptyStateLabel ? "none" : "auto"}
-          inverted={messageListInverted}
+          inverted={false}
           data={chatListData}
-          ListHeaderComponent={
+          ListHeaderComponent={null}
+          ListFooterComponent={
             !searching && remoteTypingNames.length > 0
-              ? wrapInvertedListChrome(
+              ? (
                   <TypingIndicator
                     bubbleColor={colors.chatBubbleReceived}
                     dotColor={colors.mutedForeground}
                     textColor={colors.mutedForeground}
                     label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
-                  />,
+                  />
                 )
               : null
           }
-          ListFooterComponent={null}
           keyExtractor={(row) => {
             if (row.rowType === "date") return row.id;
             if (row.rowType !== "msg") return row.id;
             const m = row.message;
             return m.id.startsWith("tmp_") ? `${m.id}-${m.timestamp}` : m.id;
           }}
-          renderItem={(props) => wrapInvertedListChrome(renderChatListRow(props))}
+          renderItem={renderChatListRow}
           contentContainerStyle={[
             styles.messageListContent,
             {
-              paddingTop: listVisualBottomPad,
-              paddingBottom: listTopPadding,
+              paddingTop: listTopPadding,
+              paddingBottom: listVisualBottomPad,
               flexGrow: 1,
               justifyContent: searching ? "flex-start" : undefined,
             },
@@ -4184,7 +4141,7 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS !== "web"}
           maintainVisibleContentPosition={
-            searching || !messageListInverted
+            searching
               ? undefined
               : {
                   minIndexForVisible: 0,
@@ -4199,10 +4156,12 @@ export default function ChatScreen() {
             scrollLockRef.current = true;
             userDraggingRef.current = true;
             cancelAllScrollPins();
-            if (!searching && messageListInverted) {
-              const y = e.nativeEvent.contentOffset.y;
+            if (!searching) {
+              const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+              const y = contentOffset.y;
               lastScrollOffsetRef.current = y;
-              if (y > CHAT_NEAR_BOTTOM_PX) {
+              const distFromBottom = contentSize.height - layoutMeasurement.height - y;
+              if (distFromBottom > CHAT_NEAR_BOTTOM_PX) {
                 markUserScrolledUp();
               }
             }

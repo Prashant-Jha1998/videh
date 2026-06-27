@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as Contacts from "expo-contacts";
 import type { ExistingContact } from "expo-contacts";
+import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -135,7 +136,7 @@ export default function ChatInfoScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
-  const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, reportUser, createDirectChat } = useApp();
+  const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, reportUser, createDirectChat, updateGroupAvatar } = useApp();
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
   const authedJsonHeaders = useCallback(() => ({
@@ -174,6 +175,7 @@ export default function ChatInfoScreen() {
   const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false);
   const [mediaTotalCount, setMediaTotalCount] = useState(0);
   const [groupMessagingPolicy, setGroupMessagingPolicy] = useState<"everyone" | "admins_only" | "allowlist">("everyone");
+  const [groupAvatarUploading, setGroupAvatarUploading] = useState(false);
 
   const chatOtherUserId = useRef<number | null>(null);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
@@ -451,6 +453,32 @@ export default function ChatInfoScreen() {
     }
   };
 
+  const pickGroupPhoto = async () => {
+    if (!isGroup || !isAdmin || !id || groupAvatarUploading) return;
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.status !== "granted") {
+      Alert.alert("Permission required", "Photo library access is required to set a group photo.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.75,
+    });
+    if (result.canceled || !result.assets[0]?.uri) return;
+    setGroupAvatarUploading(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      await updateGroupAvatar(id, result.assets[0].uri);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      Alert.alert("Could not update", err instanceof Error ? err.message : "Please try again.");
+    } finally {
+      setGroupAvatarUploading(false);
+    }
+  };
+
   const openGroupMessagingPicker = () => {
     if (!isAdmin) return;
     Alert.alert(
@@ -683,7 +711,14 @@ export default function ChatInfoScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 60 }} showsVerticalScrollIndicator={false}>
         {/* Profile block */}
         <View style={[styles.profileBlock, { backgroundColor: colors.card }]}>
-          <TouchableOpacity onPress={() => setPhotoVisible(true)} activeOpacity={0.85} style={styles.bigAvatarShell}>
+          <TouchableOpacity
+            onPress={() => {
+              if (isGroup && isAdmin) void pickGroupPhoto();
+              else setPhotoVisible(true);
+            }}
+            activeOpacity={0.85}
+            style={styles.bigAvatarShell}
+          >
             {chat?.avatar ? (
               <Image source={{ uri: chat.avatar }} style={styles.bigAvatar} contentFit="cover" />
             ) : (
@@ -691,6 +726,16 @@ export default function ChatInfoScreen() {
                 <Text style={styles.bigAvatarText}>{initials}</Text>
               </View>
             )}
+            {groupAvatarUploading ? (
+              <View style={styles.avatarUploadOverlay}>
+                <ActivityIndicator color="#fff" />
+              </View>
+            ) : null}
+            {isGroup && isAdmin ? (
+              <View style={[styles.avatarEditBadge, { backgroundColor: colors.primary }]}>
+                <Ionicons name="camera" size={16} color="#fff" />
+              </View>
+            ) : null}
             {isChatDisappearingEnabled(disappearing) ? <DisappearTimerBadge size={22} variant="profile" /> : null}
           </TouchableOpacity>
           <Text style={[styles.contactName, { color: colors.foreground }]}>{name ?? chat?.name}</Text>
@@ -1305,6 +1350,25 @@ const styles = StyleSheet.create({
 
   profileBlock: { alignItems: "center", paddingVertical: 24, paddingHorizontal: 16, marginBottom: 8 },
   bigAvatarShell: { position: "relative", alignSelf: "center" },
+  avatarEditBadge: {
+    position: "absolute",
+    right: 0,
+    bottom: 0,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#fff",
+  },
+  avatarUploadOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 60,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   bigAvatar: { width: 96, height: 96, borderRadius: 48, alignItems: "center", justifyContent: "center" },
   bigAvatarText: { color: "#fff", fontSize: 36, fontFamily: "Inter_700Bold" },
   cameraOverlay: { position: "absolute", bottom: 0, right: 0, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 12, padding: 4 },
