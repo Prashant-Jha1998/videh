@@ -73,8 +73,23 @@ export function chatClearCutoff(
   chatId: string,
   globalClearedAt: number,
   deletedMap: ChatDeletedAtMap,
+  serverClearedMap?: ChatDeletedAtMap,
 ): number {
-  return Math.max(globalClearedAt, deletedMap[String(chatId)] ?? 0);
+  const id = String(chatId);
+  return Math.max(
+    globalClearedAt,
+    deletedMap[id] ?? 0,
+    serverClearedMap?.[id] ?? 0,
+  );
+}
+
+/** Drop messages at or before the user's clear/delete cutoff (WhatsApp-style list delete). */
+export function filterMessagesAfterClearCutoff<T extends { timestamp: number }>(
+  messages: T[],
+  cutoffMs: number,
+): T[] {
+  if (!cutoffMs || cutoffMs <= 0) return messages;
+  return messages.filter((m) => m.timestamp > cutoffMs);
 }
 
 /** Videh: chat reappears only when a message arrives after delete (not on delete itself). */

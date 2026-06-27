@@ -16,6 +16,14 @@ export async function ensureViewOnceColumns(): Promise<void> {
   viewOnceColsReady = true;
 }
 
+let statusReplyColReady = false;
+export async function ensureStatusReplyColumn(): Promise<void> {
+  if (statusReplyColReady) return;
+  await query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS status_reply_id INTEGER REFERENCES statuses(id) ON DELETE SET NULL`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_messages_status_reply ON messages(status_reply_id) WHERE status_reply_id IS NOT NULL`);
+  statusReplyColReady = true;
+}
+
 /** Only chat members with a message referencing this file may stream it. */
 export async function userCanAccessChatMedia(userId: number, filename: string): Promise<boolean> {
   if (!userId || !filename) return false;

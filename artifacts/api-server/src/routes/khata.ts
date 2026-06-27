@@ -332,7 +332,7 @@ router.post("/", async (req: Request, res: Response) => {
     amount,
     note,
     reminderAt,
-    enableReminder,
+    notifyInChat,
   } = req.body as {
     chatId?: number;
     createdBy?: number;
@@ -344,6 +344,8 @@ router.post("/", async (req: Request, res: Response) => {
     note?: string | null;
     reminderAt?: string;
     enableReminder?: boolean;
+    /** Post a Khata summary in chat immediately (default: only when no reminder is scheduled). */
+    notifyInChat?: boolean;
   };
 
   if (!chatId || !createdBy || amount == null) {
@@ -458,13 +460,21 @@ router.post("/", async (req: Request, res: Response) => {
       entry.reminder_scheduled_id = reminderScheduledId;
     }
 
-    const msgContent = `📒 Khata: ${resolvedDebtorName} owes ${resolvedCreditorName} ₹${parsedAmount.toFixed(2)}${note?.trim() ? ` — ${note.trim()}` : ""}`;
-    await query(
-      `INSERT INTO messages (chat_id, sender_id, content, type) VALUES ($1,$2,$3,'text')`,
-      [chatId, createdBy, msgContent],
-    );
+    const shouldNotifyInChat = notifyInChat === true || (notifyInChat !== false && !reminderScheduledId);
+    if (shouldNotifyInChat) {
+      const msgContent = `📒 Khata: ${resolvedDebtorName} owes ${resolvedCreditorName} ₹${parsedAmount.toFixed(2)}${note?.trim() ? ` — ${note.trim()}` : ""}`;
+      await query(
+        `INSERT INTO messages (chat_id, sender_id, content, type) VALUES ($1,$2,$3,'text')`,
+        [chatId, createdBy, msgContent],
+      );
+    }
 
-    res.json({ success: true, entry, reminderScheduled: Boolean(reminderScheduledId) });
+    res.json({
+      success: true,
+      entry,
+      reminderScheduled: Boolean(reminderScheduledId),
+      notifiedInChat: shouldNotifyInChat,
+    });
   } catch (err) {
     req.log.error({ err }, "add khata error");
     res.status(500).json({ success: false, message: "Server error" });

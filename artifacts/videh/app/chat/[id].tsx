@@ -83,7 +83,7 @@ import {
 import { guessMimeFromFilename } from "@/lib/prepareFileUpload";
 import { stashBatchMedia } from "@/lib/chatMediaBatch";
 import { uploadChatMediaWithProgress } from "@/lib/chatMediaUpload";
-import { launchChatPhotoCamera, launchChatVideoCamera } from "@/lib/openChatCamera";
+import { filterMessagesAfterClearCutoff } from "@/lib/chatListDelete";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { albumBubbleCaptionText, displayAlbumUrls, isAlbumMessage, resolveAlbumUrls } from "@/lib/chatAlbumMessage";
 import { ChatAlbumGalleryModal } from "@/components/ChatAlbumGalleryModal";
@@ -106,6 +106,9 @@ import {
   SCROLL_PIN_DEBOUNCE_MS,
   shouldAnimateChatPin,
   CHAT_NEAR_BOTTOM_PX,
+  CHAT_COMPOSER_CLEARANCE_PX,
+  CHAT_TYPING_FOOTER_PX,
+  CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
   CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
 } from "@/lib/chatScrollBehavior";
 import { extractUrls, primaryUrlFromText } from "@/lib/chatUrls";
@@ -143,6 +146,13 @@ import { useCallSession } from "@/context/CallSessionContext";
 import { ReturnToCallChatBar } from "@/components/ReturnToCallChatBar";
 import { normalizeMessageType } from "@/lib/normalizeMessage";
 import { messageReplyPreviewText, replyQuoteSenderLabel } from "@/lib/messageReplyPreview";
+import { canEditChatMessage } from "@/lib/messageEdit";
+import {
+  buildStatusViewRouteParams,
+  statusReplyIconName,
+  statusReplyOwnerLabel,
+  statusReplyPreviewSubtitle,
+} from "@/lib/statusReply";
 import { downloadUrlToDevice } from "@/lib/web/webDownload";
 import { formatPresenceSubtitle, type PresenceView } from "@/lib/presence";
 import { setAssistantChatInputFocused } from "@/lib/assistantPause";
@@ -733,6 +743,87 @@ function ReplyQuoteStrip({
   );
 }
 
+/** Story/status reply preview — tap opens the original status (WhatsApp-style). */
+function StatusReplyStrip({
+  ownerLabel,
+  subtitle,
+  iconName,
+  thumbUri,
+  thumbBg,
+  isMe,
+  sessionToken,
+  onPress,
+}: {
+  ownerLabel: string;
+  subtitle: string;
+  iconName: "image-outline" | "videocam-outline" | "text-outline";
+  thumbUri?: string;
+  thumbBg: string;
+  isMe: boolean;
+  sessionToken?: string | null;
+  onPress: () => void;
+}) {
+  const accent = "#008069";
+  const subtitleColor = isMe ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.5)";
+  const resolvedThumb = thumbUri ? (resolvePublicAssetUrl(thumbUri) ?? thumbUri) : undefined;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.statusReplyStrip,
+        {
+          backgroundColor: isMe ? "rgba(0,0,0,0.06)" : "rgba(0,0,0,0.04)",
+          opacity: pressed ? 0.88 : 1,
+        },
+      ]}
+    >
+      <View style={styles.statusReplyTextCol}>
+        <Text style={[styles.statusReplyTitle, { color: accent }]} numberOfLines={1}>
+          {ownerLabel} • Status
+        </Text>
+        <View style={styles.statusReplySubtitleRow}>
+          <Ionicons name={iconName} size={14} color={subtitleColor} />
+          <Text style={[styles.statusReplySubtitle, { color: subtitleColor }]} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        </View>
+      </View>
+      {resolvedThumb ? (
+        <Image
+          source={{
+            uri: resolvedThumb,
+            ...(sessionToken ? { headers: authFetchHeaders(sessionToken) } : {}),
+          }}
+          style={styles.statusReplyThumb}
+          contentFit="cover"
+        />
+      ) : (
+        <View style={[styles.statusReplyThumb, { backgroundColor: thumbBg }]}>
+          {iconName === "text-outline" ? (
+            <Text style={styles.statusReplyThumbText} numberOfLines={3}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+/** Quick forward on media/document bubbles (WhatsApp-style side arrow). */
+function MediaForwardButton({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableOpacity
+      style={styles.mediaForwardBtn}
+      onPress={onPress}
+      hitSlop={10}
+      activeOpacity={0.75}
+    >
+      <Ionicons name="arrow-redo" size={18} color="rgba(90,90,90,0.9)" />
+    </TouchableOpacity>
+  );
+}
+
 function CallMessageBubble({
   meta,
   isMe,
@@ -1047,13 +1138,13 @@ export default function ChatScreen() {
   }>();
 
   const {
-    chats, user, sendMessage, sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage,
+    chats, statuses, user, sendMessage, sendImageMessage, sendPreparedMediaMessage, consumeViewOnceMessage, sendAudioMessage,
     sendDocumentMessage, cancelDocumentUpload, sendContactMessage,
     setTyping, clearTyping, markAsRead, deleteMessage, deleteForEveryone,
     editMessage, reactToMessage, starMessage, keepMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
-    loadMessages, loadOlderMessages, forwardMessage, updateLocationOnServer, stopLiveLocationSession, setActiveChatId,
-    typingByChatId, reportRemoteTyping, patchChatMessage,
+    loadMessages, loadOlderMessages, updateLocationOnServer, stopLiveLocationSession, setActiveChatId,
+    typingByChatId, reportRemoteTyping, patchChatMessage, getChatClearCutoff,
   } = useApp();
 
   const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
@@ -1069,6 +1160,7 @@ export default function ChatScreen() {
   const [messagesReady, setMessagesReady] = useState(false);
   const [disappearAfterSeconds, setDisappearAfterSeconds] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [selectionMenuOpen, setSelectionMenuOpen] = useState(false);
   const [peerPresence, setPeerPresence] = useState<PresenceView | null>(null);
 
   // Search
@@ -1085,9 +1177,7 @@ export default function ChatScreen() {
   // Translation
   const [translatedMsgs, setTranslatedMsgs] = useState<Record<string, string>>({});
 
-  // Forward modal
-  const [forwardIds, setForwardIds] = useState<string[]>([]);
-  const [forwardSearch, setForwardSearch] = useState("");
+  // Forward screen opens via /chat/forward route (full screen, WhatsApp-style).
 
   // Share contact â€” full-screen picker (Alert.alert only fits ~3 buttons on Android)
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
@@ -1273,10 +1363,11 @@ export default function ChatScreen() {
     setDisappearAfterSeconds(chat?.disappearAfterSeconds ?? null);
   }, [chat?.disappearAfterSeconds, chatId]);
   const disappearingOn = isChatDisappearingEnabled(disappearAfterSeconds);
-  const allMessages = useMemo(
-    () => (chat?.messages ?? []).filter((m) => !isDisappearingMessageExpired(m)),
-    [chat?.messages],
-  );
+  const allMessages = useMemo(() => {
+    const cutoff = chatId ? getChatClearCutoff(chatId) : 0;
+    const base = filterMessagesAfterClearCutoff(chat?.messages ?? [], cutoff);
+    return base.filter((m) => !isDisappearingMessageExpired(m));
+  }, [chat?.messages, chatId, getChatClearCutoff]);
   const selectionActive = selectedIds.length > 0;
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
@@ -1284,6 +1375,7 @@ export default function ChatScreen() {
     setSelectedIds([]);
     setBulkDeleteOpen(false);
     setReactionTarget(null);
+    setSelectionMenuOpen(false);
   }, []);
 
   /** Close reaction bar only — keep message selected for delete / forward / etc. */
@@ -1337,16 +1429,50 @@ export default function ChatScreen() {
     flashTimerRef.current = setTimeout(() => setFlashMessageId(null), 950);
   }, [listRows, flashAnim]);
 
-  const peerNameForVideo = name ?? chat?.name ?? "Chat";
+  const openStatusReply = useCallback(async (msg: Message) => {
+    if (!msg.statusReplyId || !user?.dbId) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const local = buildStatusViewRouteParams(
+      msg.statusReplyId,
+      msg.statusReplyOwnerId ?? "",
+      statuses,
+      user.dbId,
+    );
+    if (local) {
+      router.push({ pathname: "/status/view", params: local });
+      return;
+    }
+    try {
+      const headers: Record<string, string> = {};
+      if (user.sessionToken) headers.Authorization = `Bearer ${user.sessionToken}`;
+      const r = await fetch(
+        `${BASE_URL}/api/statuses/${msg.statusReplyId}/reply-context?viewerId=${user.dbId}`,
+        { headers },
+      );
+      const data = await r.json() as { success?: boolean; ids?: string[] };
+      if (data.success && data.ids?.length) {
+        router.push({
+          pathname: "/status/view",
+          params: { ids: data.ids.join(","), id: msg.statusReplyId },
+        });
+        return;
+      }
+    } catch {
+      /* fall through */
+    }
+    Alert.alert("Status unavailable", "This status has expired or is no longer available.");
+  }, [statuses, user?.dbId, user?.sessionToken, router]);
 
-  const videhForwardTargets = useMemo(() => {
-    const q = forwardSearch.trim().toLowerCase();
-    return chats.filter((c) => {
-      if (!c.id || c.id.startsWith("new_") || c.id === chatId) return false;
-      if (!q) return true;
-      return c.name.toLowerCase().includes(q);
+  const openForwardScreen = useCallback((ids: string[]) => {
+    if (!chatId || ids.length === 0) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push({
+      pathname: "/chat/forward",
+      params: { chatId, messageIds: ids.join(",") },
     });
-  }, [chats, chatId, forwardSearch]);
+  }, [chatId, router]);
+
+  const peerNameForVideo = name ?? chat?.name ?? "Chat";
 
   const headerStatusText = useMemo(() => {
     if (remoteTypingNames.length > 0) {
@@ -1576,6 +1702,8 @@ export default function ChatScreen() {
   const lastNearBottomRef = useRef(true);
   const scrollCoalesceRef = useRef<number | null>(null);
   const composerPinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Block auto pin-to-bottom while older pages load (prevents jump to latest). */
+  const suppressAutoPinUntilRef = useRef(0);
 
   type ChatScrollIntent = "auto" | "fab" | "open" | "quote";
 
@@ -1585,7 +1713,12 @@ export default function ChatScreen() {
   }, []);
 
   const blocksAutoScroll = useCallback(() => {
-    return userScrolledUpRef.current || readingHistoryRef.current;
+    return (
+      userScrolledUpRef.current
+      || readingHistoryRef.current
+      || loadingOlderRef.current
+      || Date.now() < suppressAutoPinUntilRef.current
+    );
   }, []);
 
   const logScrollRequest = useCallback(
@@ -1634,6 +1767,10 @@ export default function ChatScreen() {
     (animated = false, opts?: { force?: boolean; source?: string }) => {
       const source = opts?.source ?? "pinToLatest";
       const intent: ChatScrollIntent = opts?.force ? "open" : "auto";
+      if (!opts?.force && Date.now() < suppressAutoPinUntilRef.current) {
+        logScrollRequest(source, intent, true);
+        return;
+      }
       if (userDraggingRef.current) {
         logScrollRequest(source, intent, true);
         return;
@@ -1697,6 +1834,14 @@ export default function ChatScreen() {
       pendingScrollToEndRef.current = false;
       if (chatId) chatScrollMemoryRef.current.set(chatId, false);
       forceScrollToLatest(animated, { bypassDrag: true, intent: "fab", source: "pinChatToBottom" });
+      setTimeout(
+        () => forceScrollToLatest(animated, { bypassDrag: true, intent: "fab", source: "pinChatToBottom-delay" }),
+        100,
+      );
+      setTimeout(
+        () => forceScrollToLatest(animated, { bypassDrag: true, intent: "fab", source: "pinChatToBottom-delay2" }),
+        280,
+      );
     },
     [messages.length, cancelAllScrollPins, forceScrollToLatest, applyReadingHistoryMode, chatId],
   );
@@ -1737,9 +1882,16 @@ export default function ChatScreen() {
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
       syncScrollAwayFromBottom(contentOffsetY, contentHeight, layoutHeight);
       tryClearReadingHistory(contentOffsetY, contentHeight, layoutHeight);
-      if (!blocksAutoScroll() && !searching && lastNearBottomRef.current) {
-        pinToLatest(false, { source: "finishScrollInteraction" });
+      if (
+        loadingOlderRef.current
+        || Date.now() < suppressAutoPinUntilRef.current
+        || blocksAutoScroll()
+        || searching
+        || !lastNearBottomRef.current
+      ) {
+        return;
       }
+      pinToLatest(false, { source: "finishScrollInteraction" });
     },
     [syncScrollAwayFromBottom, tryClearReadingHistory, searching, blocksAutoScroll, pinToLatest],
   );
@@ -1750,6 +1902,7 @@ export default function ChatScreen() {
     if (!userScrolledUpRef.current) {
       markUserScrolledUp();
     }
+    suppressAutoPinUntilRef.current = Date.now() + 3000;
     loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
@@ -1758,6 +1911,7 @@ export default function ChatScreen() {
     } finally {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
+      suppressAutoPinUntilRef.current = Date.now() + 2000;
     }
   }, [chatId, loadOlderMessages, messages, searching, markUserScrolledUp]);
   const handleListScroll = useCallback(
@@ -1827,7 +1981,9 @@ export default function ChatScreen() {
   }, []);
   const onKeyboardAnimEnd = useCallback(() => {
     keyboardAnimatingRef.current = false;
-  }, []);
+    if (searching || blocksAutoScroll() || !lastNearBottomRef.current) return;
+    pinToLatest(false, { source: "keyboard-anim-end" });
+  }, [searching, blocksAutoScroll, pinToLatest]);
 
   /** Videh: track keyboard animation without forcing scroll (composer uses KeyboardStickyView). */
   useGenericKeyboardHandler(
@@ -1846,7 +2002,8 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
-    KeyboardController.setInputMode(AndroidSoftInputModes.SOFT_INPUT_ADJUST_NOTHING);
+    // Resize the window so the message list shrinks above keyboard (WhatsApp-style).
+    KeyboardController.setInputMode(AndroidSoftInputModes.SOFT_INPUT_ADJUST_RESIZE);
     return () => {
       KeyboardController.setDefaultMode();
     };
@@ -1866,21 +2023,15 @@ export default function ChatScreen() {
     if (!keyboardVisible) keyboardAnimatingRef.current = false;
   }, [keyboardVisible]);
 
-  /** Videh: keyboard opens at bottom → one quiet pin so latest stays above keyboard. */
+  /** Videh: keyboard opens → keep latest messages above composer (WhatsApp-style). */
   useEffect(() => {
     if (searching) return;
     const justOpened = keyboardVisible && !prevKeyboardVisibleRef.current;
     prevKeyboardVisibleRef.current = keyboardVisible;
-    if (
-      justOpened
-      && !blocksAutoScroll()
-      && lastNearBottomRef.current
-      && !userDraggingRef.current
-      && !emojiPanelOpenRef.current
-    ) {
-      pinToLatest(false, { source: "keyboard-open" });
+    if (justOpened && !userDraggingRef.current && !emojiPanelOpenRef.current) {
+      pinChatToBottom(false);
     }
-  }, [keyboardVisible, searching, pinToLatest, blocksAutoScroll]);
+  }, [keyboardVisible, searching, pinChatToBottom]);
 
   /** Emoji panel replaces keyboard — keep latest visible above panel. */
   useEffect(() => {
@@ -1954,6 +2105,9 @@ export default function ChatScreen() {
       count > prevMessageCountRef.current
       && oldestId !== prevOldestMessageIdRef.current
       && newestId === prevNewestMessageIdRef.current;
+    if (grewFromOlderLoad) {
+      suppressAutoPinUntilRef.current = Date.now() + 2500;
+    }
     const tailUnchanged = newestId === prevNewestMessageIdRef.current;
     const shouldPinNewTail =
       count > prevMessageCountRef.current
@@ -1973,28 +2127,40 @@ export default function ChatScreen() {
     prevMessageCountRef.current = count;
   }, [messages.length, messagesReady, searching, scrollToLatestIfFollowing, scheduleOpenChatPin, blocksAutoScroll]);
 
-  /** Inverted list: reserve space above sticky composer + keyboard/emoji at visual bottom. */
+  /** Reserve space above composer + keyboard. Android RESIZE shrinks the list; iOS needs kb inset. */
   const listVisualBottomPad = useMemo(() => {
     if (searching) return 8;
-    const kbInset = keyboardVisible ? Math.max(0, keyboardHeight) : 0;
+    const typingInset = remoteTypingNames.length > 0 ? CHAT_TYPING_FOOTER_PX : 0;
     const emojiInset =
       emojiPanelOpen && !selectionActive && voiceRecPhase === "idle" && !keyboardVisible
         ? CHAT_EMOJI_PANEL_HEIGHT
         : 0;
-    return Math.max(10, composerHeight + kbInset + emojiInset + 8);
-  }, [searching, composerHeight, keyboardVisible, keyboardHeight, emojiPanelOpen, selectionActive, voiceRecPhase]);
+    const iosKbInset =
+      Platform.OS === "ios" && keyboardVisible ? Math.max(0, keyboardHeight) : 0;
+    const overlayInset =
+      iosKbInset > 0 || emojiInset > 0
+        ? composerHeight + iosKbInset + emojiInset + CHAT_COMPOSER_CLEARANCE_PX
+        : 0;
+    return Math.max(10, overlayInset + typingInset + 8);
+  }, [
+    searching,
+    composerHeight,
+    keyboardVisible,
+    keyboardHeight,
+    emojiPanelOpen,
+    selectionActive,
+    voiceRecPhase,
+    remoteTypingNames.length,
+  ]);
   const listTopPadding = 12;
-  const jumpFabBottom = useMemo(
-    () => {
-      const kbInset = keyboardVisible ? keyboardHeight : 0;
-      const emojiInset =
-        emojiPanelOpen && !selectionActive && voiceRecPhase === "idle" && !keyboardVisible
-          ? CHAT_EMOJI_PANEL_HEIGHT
-          : 0;
-      return Math.max(12, composerHeight + kbInset + emojiInset + 16);
-    },
-    [composerHeight, keyboardVisible, keyboardHeight, emojiPanelOpen, selectionActive, voiceRecPhase],
-  );
+  const jumpFabBottom = useMemo(() => {
+    const kbInset = keyboardVisible && Platform.OS === "ios" ? keyboardHeight : 0;
+    const emojiInset =
+      emojiPanelOpen && !selectionActive && voiceRecPhase === "idle" && !keyboardVisible
+        ? CHAT_EMOJI_PANEL_HEIGHT
+        : 0;
+    return Math.max(12, composerHeight + kbInset + emojiInset + 16);
+  }, [composerHeight, keyboardVisible, keyboardHeight, emojiPanelOpen, selectionActive, voiceRecPhase]);
   const onComposerLayout = useCallback(
     (e: { nativeEvent: { layout: { height: number } } }) => {
       const h = Math.ceil(e.nativeEvent.layout.height);
@@ -2152,9 +2318,14 @@ export default function ChatScreen() {
     }
     if (editTarget) {
       if (!editText.trim()) return;
-      editMessage(chatId, editTarget.id, editText.trim());
-      setEditTarget(null);
-      setEditText("");
+      void editMessage(chatId, editTarget.id, editText.trim())
+        .then(() => {
+          setEditTarget(null);
+          setEditText("");
+        })
+        .catch((err) => {
+          Alert.alert("Cannot edit", err instanceof Error ? err.message : "This message can no longer be edited.");
+        });
       return;
     }
     if (!text.trim()) return;
@@ -2553,7 +2724,7 @@ export default function ChatScreen() {
             onPress: () => { void saveImageToGallery(msg.mediaUrl!); },
           }]
         : []),
-      ...(!msg.isViewOnce ? [{ text: "Forward", onPress: () => { setForwardSearch(""); setForwardIds([msg.id]); } }] : []),
+      ...(!msg.isViewOnce ? [{ text: "Forward", onPress: () => openForwardScreen([msg.id]) }] : []),
       { text: "Star", onPress: () => { if (chatId) starMessage(chatId, msg.id); } },
       ...(disappearingOn && msg.expiresAt && !msg.isKept && msg.type !== "system"
         ? [{
@@ -2566,19 +2737,13 @@ export default function ChatScreen() {
             },
           }]
         : []),
-      { text: "Translate", onPress: () => Alert.alert("Translate to:", "", [
-          { text: "à¤¹à¤¿à¤‚à¤¦à¥€ (Hindi)", onPress: () => translateMsg(msg, "hi") },
-          { text: "English", onPress: () => translateMsg(msg, "en") },
-          { text: "à¦¬à¦¾à¦‚à¦²à¦¾ (Bengali)", onPress: () => translateMsg(msg, "bn") },
-          { text: "à®¤à®®à®¿à®´à¯ (Tamil)", onPress: () => translateMsg(msg, "ta") },
-          { text: "à°¤à±†à°²à±à°—à± (Telugu)", onPress: () => translateMsg(msg, "te") },
-          { text: "à¤®à¤°à¤¾à¤ à¥€ (Marathi)", onPress: () => translateMsg(msg, "mr") },
-          { text: "Cancel", style: "cancel" },
-        ]) },
+      { text: "Translate", onPress: () => openTranslatePicker(msg) },
     ];
     if (isMe) {
       opts.push({ text: "Info", onPress: () => router.push({ pathname: "/chat/message-info", params: { chatId: chatId!, messageId: msg.id } }) });
-      opts.push({ text: "Edit", onPress: () => { setEditTarget(msg); setEditText(msg.text); inputRef.current?.focus(); } });
+      if (canEditChatMessage(msg, true)) {
+        opts.push({ text: "Edit", onPress: () => beginEditMessage(msg) });
+      }
     }
     opts.push({
       text: "Delete",
@@ -2607,6 +2772,30 @@ export default function ChatScreen() {
       Alert.alert("Error", "Network error");
     }
   }, []);
+
+  const openTranslatePicker = useCallback((msg: Message) => {
+    if (!msg.text?.trim()) return;
+    Alert.alert("Translate to:", "", [
+      { text: "हिंदी (Hindi)", onPress: () => translateMsg(msg, "hi") },
+      { text: "English", onPress: () => translateMsg(msg, "en") },
+      { text: "বাংলা (Bengali)", onPress: () => translateMsg(msg, "bn") },
+      { text: "தமிழ் (Tamil)", onPress: () => translateMsg(msg, "ta") },
+      { text: "తెలుగు (Telugu)", onPress: () => translateMsg(msg, "te") },
+      { text: "मराठी (Marathi)", onPress: () => translateMsg(msg, "mr") },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [translateMsg]);
+
+  const beginEditMessage = useCallback((msg: Message) => {
+    if (!canEditChatMessage(msg, msg.senderId === "me")) {
+      Alert.alert("Cannot edit", "You can only edit your messages within 15 minutes of sending.");
+      return;
+    }
+    setEditTarget(msg);
+    setEditText(msg.text);
+    clearSelection();
+    inputRef.current?.focus();
+  }, [clearSelection]);
 
   const openDisappearSettings = useCallback(() => {
     if (!chatId) return;
@@ -2729,6 +2918,18 @@ export default function ChatScreen() {
     const deletedMeLabel = colors.isDark ? "rgba(255,255,255,0.72)" : "rgba(0,0,0,0.52)";
     const deletedMeIcon = colors.isDark ? "rgba(255,255,255,0.58)" : "rgba(0,0,0,0.42)";
     const deletedMeTime = colors.isDark ? "rgba(255,255,255,0.62)" : "rgba(0,0,0,0.42)";
+    const canQuickForward =
+      !selectionActive
+      && !isDeleted
+      && !item.isViewOnce
+      && (isImage || isVideo || isAlbum || isDocument);
+    const hasMediaFrame =
+      !isDeleted && !isViewOnceOpened && !isViewOncePending && (isImage || isVideo || isAlbum || isDocument);
+    const bubbleFill = hasMediaFrame && isMe
+      ? colors.primary
+      : isMe
+        ? colors.chatBubbleSent
+        : colors.chatBubbleReceived;
     const msgRow = (
       <View style={[styles.msgRowOuter, isSelected && styles.msgRowOuterBleed]}>
         {isFlashing ? (
@@ -2739,6 +2940,15 @@ export default function ChatScreen() {
         ) : null}
         {isSelected ? (
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: selectionRowTint }]} pointerEvents="none" />
+        ) : null}
+        <View
+          style={[
+            styles.msgRowInner,
+            isMe ? styles.msgRowInnerRight : styles.msgRowInnerLeft,
+          ]}
+        >
+        {canQuickForward && isMe ? (
+          <MediaForwardButton onPress={() => openForwardScreen([item.id])} />
         ) : null}
         <Pressable
           onPress={() => {
@@ -2768,7 +2978,7 @@ export default function ChatScreen() {
             });
           }}
           delayLongPress={400}
-          style={[styles.msgWrap, isMe ? styles.msgRight : styles.msgLeft]}
+          style={[styles.msgWrap, isMe ? styles.msgRight : styles.msgLeft, styles.msgWrapInRow]}
         >
         {/* Forwarded label */}
         {item.isForwarded && !isDeleted && (
@@ -2785,12 +2995,35 @@ export default function ChatScreen() {
             style={[
               styles.bubble,
               showSvgTail && styles.bubbleWithTailShape,
-              { backgroundColor: isMe ? colors.chatBubbleSent : colors.chatBubbleReceived },
+              { backgroundColor: bubbleFill },
               (isImage || isVideo || isAlbum || isLocation || isViewOnceOpened || isViewOncePending) && styles.bubbleImg,
+              hasMediaFrame && styles.bubbleMediaFrame,
+              hasMediaFrame && !isMe && {
+                borderWidth: 1,
+                borderColor: colors.isDark ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.07)",
+              },
               isDeleted && styles.bubbleDeleted,
               compactTextBubble && styles.bubbleCompact,
             ]}
           >
+          {/* Status reply strip */}
+          {item.statusReplyId && !isDeleted && (
+            <StatusReplyStrip
+              ownerLabel={statusReplyOwnerLabel(item, user?.dbId)}
+              subtitle={statusReplyPreviewSubtitle(item.statusReplyType, item.statusReplyContent)}
+              iconName={statusReplyIconName(item.statusReplyType)}
+              thumbUri={
+                item.statusReplyType === "image" || item.statusReplyType === "video"
+                  ? item.statusReplyMediaUrl
+                  : undefined
+              }
+              thumbBg={item.statusReplyBackgroundColor ?? "#5B4FE8"}
+              isMe={isMe}
+              sessionToken={user?.sessionToken}
+              onPress={() => { void openStatusReply(item); }}
+            />
+          )}
+
           {/* Reply strip */}
           {item.replyToId && item.replyText && !isDeleted && (
             <ReplyQuoteStrip
@@ -3059,7 +3292,7 @@ export default function ChatScreen() {
           </View>
           {showSvgTail ? (
             <ChatBubbleTail
-              fill={isMe ? colors.chatBubbleSent : colors.chatBubbleReceived}
+              fill={bubbleFill}
               side={isMe ? "right" : "left"}
             />
           ) : null}
@@ -3081,6 +3314,10 @@ export default function ChatScreen() {
           </View>
         )}
       </Pressable>
+        {canQuickForward && !isMe ? (
+          <MediaForwardButton onPress={() => openForwardScreen([item.id])} />
+        ) : null}
+        </View>
       </View>
     );
 
@@ -3634,6 +3871,36 @@ export default function ChatScreen() {
     ? groupMembers.filter((m) => m.name.toLowerCase().startsWith(mentionQuery.toLowerCase()) && m.id !== user?.dbId)
     : [];
   const selectedMessage = selectedIds.length === 1 ? allMessages.find((m) => m.id === selectedIds[0]) : null;
+  const selectionMenuItems = useMemo(() => {
+    if (!selectedMessage || selectedMessage.type === "deleted") return [];
+    const items: { label: string; icon?: string; onPress: () => void }[] = [
+      {
+        label: "Verify security code",
+        icon: "shield-checkmark-outline",
+        onPress: () => {
+          Alert.alert(
+            "Security",
+            "Messages and calls are protected with TLS while data travels between your device and Videh servers.",
+          );
+        },
+      },
+    ];
+    if (canEditChatMessage(selectedMessage, selectedMessage.senderId === "me")) {
+      items.push({
+        label: "Edit",
+        icon: "pencil-outline",
+        onPress: () => beginEditMessage(selectedMessage),
+      });
+    }
+    if (selectedMessage.text?.trim()) {
+      items.push({
+        label: "Translate",
+        icon: "language-outline",
+        onPress: () => openTranslatePicker(selectedMessage),
+      });
+    }
+    return items;
+  }, [selectedMessage, beginEditMessage, openTranslatePicker]);
   const canOpenMessageInfo = Boolean(chatId && selectedMessage && selectedMessage.senderId === "me" && selectedMessage.type !== "deleted");
 
   const openSelectedMessageInfo = () => {
@@ -3800,6 +4067,7 @@ export default function ChatScreen() {
                     setEmojiPanelOpen(false);
                     setAssistantChatInputFocused(true);
                     if (chatId && inputVal.length > 0) setTyping(chatId);
+                    pinChatToBottom(false);
                   }}
                   onBlur={() => {
                     setAssistantChatInputFocused(false);
@@ -3942,9 +4210,8 @@ export default function ChatScreen() {
                   return m && m.type !== "deleted" && !m.isViewOnce;
                 });
                 if (ids.length === 0) return;
-                setForwardSearch("");
-                setForwardIds(ids);
                 clearSelection();
+                openForwardScreen(ids);
               }}
             >
               <Ionicons name="arrow-redo-outline" size={21} color="#fff" />
@@ -3952,15 +4219,10 @@ export default function ChatScreen() {
             <TouchableOpacity style={styles.headerBtn} onPress={() => setBulkDeleteOpen(true)}>
               <Ionicons name="trash-outline" size={22} color="#fff" />
             </TouchableOpacity>
-            {selectedIds.length === 1 ? (
+            {selectedIds.length === 1 && selectionMenuItems.length > 0 ? (
               <TouchableOpacity
                 style={styles.headerBtn}
-                onPress={() => {
-                  const m = allMessages.find((x) => x.id === selectedIds[0]);
-                  if (!m) return;
-                  clearSelection();
-                  showMessageContextMenu(m);
-                }}
+                onPress={() => setSelectionMenuOpen(true)}
               >
                 <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
               </TouchableOpacity>
@@ -4040,6 +4302,12 @@ export default function ChatScreen() {
         visible={menuOpen}
         onClose={() => setMenuOpen(false)}
         items={chatMenuItems}
+        topOffset={topPad + 46}
+      />
+      <DropdownMenu
+        visible={selectionMenuOpen}
+        onClose={() => setSelectionMenuOpen(false)}
+        items={selectionMenuItems}
         topOffset={topPad + 46}
       />
 
@@ -4145,7 +4413,9 @@ export default function ChatScreen() {
               ? undefined
               : {
                   minIndexForVisible: 0,
-                  autoscrollToTopThreshold: CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
+                  autoscrollToTopThreshold: readingHistory
+                    ? CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD
+                    : CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
                 }
           }
           initialNumToRender={12}
@@ -4561,56 +4831,6 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
-      {/* Forward modal */}
-      <DismissibleModal visible={forwardIds.length > 0} onClose={() => { setForwardIds([]); setForwardSearch(""); }} animationType="slide">
-        <View style={styles.forwardModalWrap}>
-          <View style={[styles.forwardSheet, { backgroundColor: colors.card }]}>
-            <Text style={[styles.attachTitle, { color: colors.foreground }]}>
-              Forward {forwardIds.length > 1 ? `${forwardIds.length} messages` : "to Videh chat"}
-            </Text>
-            <Text style={[styles.forwardHint, { color: colors.mutedForeground }]}>
-              Only your Videh contacts and groups. Not shared outside Videh.
-            </Text>
-            <TextInput
-              value={forwardSearch}
-              onChangeText={setForwardSearch}
-              placeholder={t("chat.searchChats")}
-              placeholderTextColor={colors.mutedForeground}
-              style={[styles.forwardSearchInput, { color: colors.foreground, borderColor: colors.border }]}
-            />
-            <ScrollView keyboardShouldPersistTaps="handled">
-              {videhForwardTargets.length === 0 ? (
-                <Text style={[styles.forwardEmpty, { color: colors.mutedForeground }]}>
-                  No other Videh chats found.
-                </Text>
-              ) : videhForwardTargets.map((c) => (
-                <TouchableOpacity key={c.id} style={styles.forwardRow} onPress={() => {
-                  if (chatId && forwardIds.length > 0) {
-                    for (const id of forwardIds) forwardMessage(chatId, id, c.id);
-                  }
-                  const count = forwardIds.length;
-                  setForwardIds([]);
-                  setForwardSearch("");
-                  Alert.alert("Forwarded", count > 1 ? `Sent ${count} messages to ${c.name}` : `Sent to ${c.name} on Videh`);
-                }}>
-                  <View style={[styles.forwardAvatar, { backgroundColor: `hsl(${(c.name.charCodeAt(0) * 37) % 360},50%,40%)` }]}>
-                    {c.avatar ? <Image source={{ uri: c.avatar }} style={{ width: 40, height: 40, borderRadius: 20 }} contentFit="cover" /> : (
-                      <Text style={{ color: "#fff", fontFamily: "Inter_700Bold" }}>{c.name[0]?.toUpperCase()}</Text>
-                    )}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.forwardName, { color: colors.foreground }]}>{c.name}</Text>
-                    <Text style={[styles.forwardSub, { color: colors.mutedForeground }]}>
-                      {c.isGroup ? "Group" : "Videh contact"}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </DismissibleModal>
-
       <ChatAlbumGalleryModal
         visible={!!albumGallery}
         urls={albumGallery?.urls ?? []}
@@ -4747,6 +4967,24 @@ const styles = StyleSheet.create({
   msgSwipeContainer: { overflow: "hidden" },
   msgRowOuter: { width: "100%", position: "relative" },
   msgRowOuterBleed: { marginHorizontal: -10 },
+  msgRowInner: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 6,
+    maxWidth: "100%",
+  },
+  msgRowInnerLeft: { alignSelf: "flex-start" },
+  msgRowInnerRight: { alignSelf: "flex-end" },
+  msgWrapInRow: { flexShrink: 1, maxWidth: W * 0.82 },
+  mediaForwardBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(232,234,237,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
   swipeReplyRail: { justifyContent: "center", alignItems: "center" },
   msgWrap: { marginVertical: 2 },
   msgLeft: { alignItems: "flex-start" },
@@ -4806,6 +5044,10 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 12,
     borderBottomRightRadius: 12,
   },
+  /** WhatsApp-style colored frame around shared media (Videh indigo for sent). */
+  bubbleMediaFrame: {
+    padding: 3,
+  },
   replyStrip: {
     borderLeftWidth: 4,
     paddingLeft: 10,
@@ -4821,13 +5063,45 @@ const styles = StyleSheet.create({
   replyStripTextCol: { minWidth: 0, flexShrink: 1 },
   replyWho: { fontSize: 12.5, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
   replyText: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 17 },
+  statusReplyStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 6,
+    marginTop: 2,
+    marginHorizontal: 2,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    maxWidth: "100%",
+    minWidth: 0,
+  },
+  statusReplyTextCol: { flex: 1, minWidth: 0 },
+  statusReplyTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold", marginBottom: 3 },
+  statusReplySubtitleRow: { flexDirection: "row", alignItems: "center", gap: 5, minWidth: 0 },
+  statusReplySubtitle: { fontSize: 13, fontFamily: "Inter_400Regular", flexShrink: 1 },
+  statusReplyThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 6,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statusReplyThumbText: {
+    fontSize: 9,
+    fontFamily: "Inter_500Medium",
+    color: "#fff",
+    paddingHorizontal: 4,
+    textAlign: "center",
+  },
   msgText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
-  msgImage: { width: W * 0.62, height: W * 0.62, borderRadius: 12 },
+  msgImage: { width: W * 0.62, height: W * 0.62, borderRadius: 9 },
   imageFallbackBg: { backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 8 },
   imageFallbackText: { color: "#fff", fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  msgVideo: { width: W * 0.62, height: W * 0.62, borderRadius: 12, backgroundColor: "#000" },
+  msgVideo: { width: W * 0.62, height: W * 0.62, borderRadius: 9, backgroundColor: "#000" },
   videoFallbackBg: { alignItems: "center", justifyContent: "center" },
-  videoThumbWrap: { position: "relative", width: W * 0.62, height: W * 0.62, borderRadius: 12, overflow: "hidden" },
+  videoThumbWrap: { position: "relative", width: W * 0.62, height: W * 0.62, borderRadius: 9, overflow: "hidden" },
   videoThumbOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
@@ -4843,9 +5117,9 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   videoThumbDuration: { color: "#fff", fontSize: 12, fontFamily: "Inter_600SemiBold", textShadowColor: "rgba(0,0,0,0.75)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 },
-  videoLoadingWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 12, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
+  videoLoadingWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 9, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
   videoLoadingText: { color: "#fff", fontSize: 12, fontFamily: "Inter_500Medium" },
-  videoErrorWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 12, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
+  videoErrorWrap: { width: W * 0.62, height: W * 0.62, borderRadius: 9, backgroundColor: "#111827", alignItems: "center", justifyContent: "center", gap: 6 },
   videoErrorText: { color: "#fff", fontSize: 12, fontFamily: "Inter_500Medium" },
   mediaBubbleWrap: { position: "relative" },
   mediaUploadOverlay: {
@@ -4853,7 +5127,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     zIndex: 4,
-    borderRadius: 8,
+    borderRadius: 9,
     overflow: "hidden",
   },
   mediaUploadDim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.38)" },
@@ -5171,7 +5445,6 @@ const styles = StyleSheet.create({
   attachTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", marginBottom: 16, textAlign: "center" },
   reactionPickerWrap: { flex: 1, justifyContent: "flex-end", alignItems: "center" },
   reactionPicker: { alignSelf: "center", flexDirection: "row", gap: 4, borderRadius: 28, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, elevation: 12, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
-  forwardModalWrap: { flex: 1, justifyContent: "flex-end" },
   reactionPickerBtn: { paddingHorizontal: 3, paddingVertical: 2 },
   reactionPickerPlus: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", marginLeft: 2, backgroundColor: "#f1f5f9" },
   deleteCard: {
@@ -5200,22 +5473,6 @@ const styles = StyleSheet.create({
   deleteAction: { paddingVertical: 10 },
   deleteActionText: { fontSize: 17, color: "#0f9d7a", fontFamily: "Inter_500Medium", textAlign: "center" },
   deleteCancelText: { fontSize: 17, color: "#64748b", fontFamily: "Inter_500Medium", textAlign: "center" },
-  forwardSheet: { borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, maxHeight: "70%" },
-  forwardHint: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18, marginBottom: 10 },
-  forwardSearchInput: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: Platform.OS === "ios" ? 10 : 8,
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-    marginBottom: 8,
-  },
-  forwardEmpty: { textAlign: "center", paddingVertical: 24, fontFamily: "Inter_400Regular", fontSize: 14 },
-  forwardRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 12 },
-  forwardSub: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
-  forwardAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", overflow: "hidden" },
-  forwardName: { fontSize: 15, fontFamily: "Inter_500Medium", flex: 1 },
   mediaPreviewModal: { flex: 1, backgroundColor: "rgba(0,0,0,0.98)" },
   mediaPreviewHeader: { paddingTop: 46, paddingHorizontal: 12, paddingBottom: 8, flexDirection: "row", alignItems: "center" },
   mediaPreviewBtn: { padding: 8 },

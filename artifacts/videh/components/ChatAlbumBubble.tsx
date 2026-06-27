@@ -105,7 +105,7 @@ export function ChatAlbumBubble({
       <AlbumTile
         uri={list[0]}
         sessionToken={sessionToken}
-        style={{ width, height: h, borderRadius: 12 }}
+        style={{ width, height: h, borderRadius: 9 }}
         onPress={() => onOpenImage(list[0], 0)}
       />
     );
@@ -117,13 +117,13 @@ export function ChatAlbumBubble({
         <AlbumTile
           uri={list[0]}
           sessionToken={sessionToken}
-          style={{ width: half, height: h, borderTopLeftRadius: 12, borderBottomLeftRadius: 12 }}
+          style={{ width: half, height: h, borderTopLeftRadius: 9, borderBottomLeftRadius: 9 }}
           onPress={() => onOpenImage(list[0], 0)}
         />
         <AlbumTile
           uri={list[1]}
           sessionToken={sessionToken}
-          style={{ width: half, height: h, borderTopRightRadius: 12, borderBottomRightRadius: 12 }}
+          style={{ width: half, height: h, borderTopRightRadius: 9, borderBottomRightRadius: 9 }}
           onPress={() => onOpenImage(list[1], 1)}
         />
       </View>
@@ -136,20 +136,20 @@ export function ChatAlbumBubble({
         <AlbumTile
           uri={list[0]}
           sessionToken={sessionToken}
-          style={{ width: half, height: h, borderTopLeftRadius: 12, borderBottomLeftRadius: 12 }}
+          style={{ width: half, height: h, borderTopLeftRadius: 9, borderBottomLeftRadius: 9 }}
           onPress={() => onOpenImage(list[0], 0)}
         />
         <View style={{ width: half, height: h, gap: GAP }}>
           <AlbumTile
             uri={list[1]}
             sessionToken={sessionToken}
-            style={{ width: half, height: quarterH, borderTopRightRadius: 12 }}
+            style={{ width: half, height: quarterH, borderTopRightRadius: 9 }}
             onPress={() => onOpenImage(list[1], 1)}
           />
           <AlbumTile
             uri={list[2]}
             sessionToken={sessionToken}
-            style={{ width: half, height: quarterH, borderBottomRightRadius: 12 }}
+            style={{ width: half, height: quarterH, borderBottomRightRadius: 9 }}
             onPress={() => onOpenImage(list[2], 2)}
           />
         </View>
@@ -166,13 +166,13 @@ export function ChatAlbumBubble({
         <AlbumTile
           uri={visible[0]}
           sessionToken={sessionToken}
-          style={{ width: half, height: quarterH, borderTopLeftRadius: 12 }}
+          style={{ width: half, height: quarterH, borderTopLeftRadius: 9 }}
           onPress={() => onOpenImage(visible[0], 0)}
         />
         <AlbumTile
           uri={visible[1]}
           sessionToken={sessionToken}
-          style={{ width: half, height: quarterH, borderTopRightRadius: 12 }}
+          style={{ width: half, height: quarterH, borderTopRightRadius: 9 }}
           onPress={() => onOpenImage(visible[1], 1)}
         />
       </View>
@@ -180,13 +180,13 @@ export function ChatAlbumBubble({
         <AlbumTile
           uri={visible[2]}
           sessionToken={sessionToken}
-          style={{ width: half, height: quarterH, borderBottomLeftRadius: 12 }}
+          style={{ width: half, height: quarterH, borderBottomLeftRadius: 9 }}
           onPress={() => onOpenImage(visible[2], 2)}
         />
         <AlbumTile
           uri={visible[3]}
           sessionToken={sessionToken}
-          style={{ width: half, height: quarterH, borderBottomRightRadius: 12 }}
+          style={{ width: half, height: quarterH, borderBottomRightRadius: 9 }}
           overlay={extra > 0 ? `+${extra}` : undefined}
           onPress={() => onOpenImage(visible[3], extra > 0 ? 3 : 3)}
         />

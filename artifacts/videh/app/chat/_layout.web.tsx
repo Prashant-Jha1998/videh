@@ -28,6 +28,7 @@ export default function ChatWebLayout() {
       <Stack.Screen name="[id]" />
       <Stack.Screen name="send-location" options={{ presentation: "card" }} />
       <Stack.Screen name="message-info" />
+      <Stack.Screen name="forward" options={{ presentation: "card" }} />
       <Stack.Screen name="media-compose" options={{ presentation: "fullScreenModal" }} />
       <Stack.Screen name="media-compose-batch" options={{ presentation: "fullScreenModal" }} />
       <Stack.Screen name="document-compose" options={{ presentation: "fullScreenModal" }} />

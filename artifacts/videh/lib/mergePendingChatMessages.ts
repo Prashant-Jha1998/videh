@@ -171,11 +171,13 @@ export function mergeServerWithPending(serverMessages: Message[], pendingLocal: 
 export function preserveHistoricallyLoadedMessages(
   prevMessages: Message[],
   serverMessages: Message[],
+  clearCutoffMs = 0,
 ): Message[] {
   if (!serverMessages.length) return serverMessages;
   const serverIds = new Set(serverMessages.map((m) => m.id));
   const oldestServerTs = serverMessages[0]!.timestamp;
   const olderKept = prevMessages.filter((m) => {
+    if (clearCutoffMs > 0 && m.timestamp <= clearCutoffMs) return false;
     if (m.id.startsWith("hint_") || m.id.startsWith("tmp_")) return false;
     if (serverIds.has(m.id)) return false;
     return m.timestamp < oldestServerTs;

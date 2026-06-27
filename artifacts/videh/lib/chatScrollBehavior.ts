@@ -11,6 +11,10 @@
  * 7. Keyboard open/close while reading history → preserve viewport (MVCP + no pin calls).
  */
 
+/** Extra clearance so the last bubble stays above composer + keyboard. */
+export const CHAT_COMPOSER_CLEARANCE_PX = 14;
+/** Room for the typing indicator row above the composer. */
+export const CHAT_TYPING_FOOTER_PX = 38;
 export const CHAT_NEAR_BOTTOM_PX = 80;
 export const CHAT_SCROLL_AWAY_PX = 110;
 export const CHAT_BACK_TO_BOTTOM_PX = 48;

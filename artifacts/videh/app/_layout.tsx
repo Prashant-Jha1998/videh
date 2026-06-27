@@ -70,6 +70,8 @@ import {
 import { rejectIncomingCall } from "@/lib/rejectIncomingCall";
 import { loadCachedSilenceUnknownCallers } from "@/lib/privacySettings";
 import type { Chat } from "@/context/AppContext";
+import { ShareIntentBridge } from "@/components/ShareIntentBridge";
+import { ShareIntentProvider } from "expo-share-intent";
 
 function isKnownCaller(chatId: number, callerId: number | undefined, chatList: Chat[]): boolean {
   if (callerId && callerId > 0) {
@@ -931,6 +933,7 @@ function RootLayoutNav() {
   return (
     <>
       <AppStatusBar />
+      <ShareIntentBridge />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="auth/phone" options={{ headerShown: false }} />
@@ -944,6 +947,7 @@ function RootLayoutNav() {
         <Stack.Screen name="call" options={{ headerShown: false, presentation: "fullScreenModal" }} />
         <Stack.Screen name="join-call" options={{ headerShown: false, presentation: "modal" }} />
         <Stack.Screen name="contacts" options={{ headerShown: false }} />
+        <Stack.Screen name="share-to-chat" options={{ headerShown: false, presentation: "card" }} />
         <Stack.Screen name="status/view" options={{ headerShown: false, presentation: "fullScreenModal" }} />
         <Stack.Screen name="status/viewers" options={{ headerShown: false }} />
         <Stack.Screen name="new-group" options={{ headerShown: false }} />
@@ -1067,6 +1071,7 @@ export default function RootLayout() {
   if (!fontsReady) return null;
 
   return (
+    <ShareIntentProvider>
     <SafeAreaProvider>
       <UiPreferencesProvider>
         <ErrorBoundary>
@@ -1086,6 +1091,7 @@ export default function RootLayout() {
         </ErrorBoundary>
       </UiPreferencesProvider>
     </SafeAreaProvider>
+    </ShareIntentProvider>
   );
 }
 

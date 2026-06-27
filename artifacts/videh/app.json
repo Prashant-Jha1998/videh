@@ -2,7 +2,7 @@
   "expo": {
     "name": "Videh",
     "slug": "videh",
-    "version": "1.0.43",
+    "version": "1.0.44",
     "orientation": "portrait",
     "icon": "./assets/images/videh_icon_foreground.png",
     "scheme": "videh",
@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 116,
+      "versionCode": 117,
       "androidStatusBar": {
         "backgroundColor": "#5B4FE8",
         "barStyle": "light-content",
@@ -222,6 +222,20 @@
       "@config-plugins/react-native-callkeep",
       "./plugins/withVidehCallPip.js",
       "./plugins/withVidehPipModule.js",
+      [
+        "expo-share-intent",
+        {
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsText": true,
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+            "NSExtensionActivationSupportsImageWithMaxCount": 5,
+            "NSExtensionActivationSupportsMovieWithMaxCount": 1,
+            "NSExtensionActivationSupportsFileWithMaxCount": 1
+          },
+          "androidIntentFilters": ["text/*", "image/*"],
+          "androidMultiIntentFilters": ["image/*", "video/*", "*/*"]
+        }
+      ],
       [
         "expo-location",
         {

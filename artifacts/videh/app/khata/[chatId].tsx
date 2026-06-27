@@ -289,6 +289,7 @@ export default function KhataScreen() {
           amount: parsedAmount,
           note: note.trim() || null,
           enableReminder: reminderEnabled,
+          notifyInChat: !reminderEnabled,
           ...(reminderEnabled ? { reminderAt: reminderAt.toISOString() } : {}),
           ...(debtorMode === "member"
             ? { debtorUserId }
@@ -305,7 +306,7 @@ export default function KhataScreen() {
         if (d.reminderScheduled) {
           Alert.alert(
             "Entry saved",
-            `A polite Videh reminder will be sent in this chat on ${formatReminderLabel(reminderAt)}, even if someone has blocked the other person.`,
+            `Khata saved. A polite reminder will be sent in this chat on ${formatReminderLabel(reminderAt)} only — not now.`,
           );
         }
       } else Alert.alert("Could not save entry", d.message ?? "Please try again.");
@@ -770,7 +771,7 @@ export default function KhataScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.reminderTitle}>Auto reminder</Text>
                   <Text style={styles.reminderSub}>
-                    Videh sends a polite reminder in this chat on your chosen date — even if someone blocked the other person.
+                    On your chosen date, Videh sends a polite reminder in this chat — not when you save the entry.
                   </Text>
                 </View>
                 <Switch

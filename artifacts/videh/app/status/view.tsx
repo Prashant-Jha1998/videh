@@ -5,7 +5,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -23,6 +23,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { useApp } from "@/context/AppContext";
+import type { Status } from "@/context/AppContext";
+import { mapApiStatusRow } from "@/lib/statusReply";
 import { getApiUrl } from "@/lib/api";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { saveStatusToGalleryWithAlert } from "@/lib/saveStatusToLibrary";
@@ -223,17 +225,44 @@ export default function ViewStatusScreen() {
   const [mediaLoadFailed, setMediaLoadFailed] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [fetchedStatuses, setFetchedStatuses] = useState<Record<string, Status>>({});
+
+  const statusCatalog = useMemo(() => {
+    const map = new Map(statuses.map((s) => [s.id, s]));
+    Object.values(fetchedStatuses).forEach((s) => map.set(s.id, s));
+    return map;
+  }, [statuses, fetchedStatuses]);
 
   const progress = useRef(new Animated.Value(0)).current;
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
   const pausedProgressRef = useRef(0);
   const statusesRef = useRef(statuses);
   statusesRef.current = statuses;
+  const statusCatalogRef = useRef(statusCatalog);
+  statusCatalogRef.current = statusCatalog;
   const longPressActiveRef = useRef(false);
   const longPressConsumedRef = useRef(false);
   const wasPausedBeforeHoldRef = useRef(false);
 
-  const currentStatus = statuses.find((s) => s.id === ids[currentIdx]);
+  const currentStatus = statusCatalog.get(ids[currentIdx]);
+
+  useEffect(() => {
+    if (!user?.dbId) return;
+    const missing = ids.filter((id) => !statusCatalog.has(id));
+    if (!missing.length) return;
+    const headers: Record<string, string> = {};
+    if (user.sessionToken) headers.Authorization = `Bearer ${user.sessionToken}`;
+    missing.forEach((id) => {
+      fetch(`${BASE_URL}/api/statuses/${id}/reply-context?viewerId=${user.dbId}`, { headers })
+        .then((r) => r.json())
+        .then((data: { success?: boolean; status?: Record<string, unknown> }) => {
+          if (!data.success || !data.status) return;
+          const mapped = mapApiStatusRow(data.status, user.dbId!, user.name, user.avatar);
+          setFetchedStatuses((prev) => ({ ...prev, [id]: mapped }));
+        })
+        .catch(() => {});
+    });
+  }, [ids.join(","), statuses, fetchedStatuses, user?.dbId, user?.sessionToken, user?.name, user?.avatar]);
   const resolvedMediaUrl = currentStatus?.mediaUrl
     ? resolvePublicAssetUrl(currentStatus.mediaUrl) ?? currentStatus.mediaUrl
     : undefined;
@@ -290,7 +319,7 @@ export default function ViewStatusScreen() {
   // Start progress animation
   const startAnim = useCallback((idx: number, fromValue = 0) => {
     progress.setValue(fromValue);
-    const status = statusesRef.current.find((s) => s.id === ids[idx]);
+    const status = statusCatalogRef.current.get(ids[idx]);
     const trimmedVideoMs = status?.type === "video" && status.editorData?.trimEndMs
       ? Math.max(1000, (normalizeStoryTrimMs(status.editorData.trimEndMs) ?? 8000) - (normalizeStoryTrimMs(status.editorData.trimStartMs) ?? 0))
       : null;
@@ -334,7 +363,7 @@ export default function ViewStatusScreen() {
 
   // Unblock story progress if video metadata never arrives (slow network / codec edge cases).
   useEffect(() => {
-    const status = statuses.find((s) => s.id === ids[currentIdx]);
+    const status = statusCatalog.get(ids[currentIdx]);
     if (status?.type !== "video" || !resolvedMediaUrl || videoReady || mediaLoadFailed) return;
     const timer = setTimeout(() => setVideoReady(true), 12000);
     return () => clearTimeout(timer);
@@ -466,10 +495,18 @@ export default function ViewStatusScreen() {
       const replyText = isBoostedStory
         ? `Reply to your boosted story: ${reply.trim()}`
         : reply.trim();
-      sendMessage(chatId, replyText);
+      sendMessage(chatId, replyText, undefined, undefined, {
+        statusId: currentStatus.id,
+        ownerId: currentStatus.userId === "me" ? String(user.dbId) : currentStatus.userId,
+        ownerName: currentStatus.userName ?? "Contact",
+        type: currentStatus.type,
+        mediaUrl: currentStatus.mediaUrl,
+        content: currentStatus.content,
+        backgroundColor: currentStatus.backgroundColor,
+      });
       setReply("");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("Sent!", `Your reply was sent to ${currentStatus.userName ?? "Contact"}.`);
+      router.push({ pathname: "/chat/[id]", params: { id: chatId, name: currentStatus.userName ?? "Contact" } });
     } catch {
       Alert.alert("Error", "Could not send reply.");
     }

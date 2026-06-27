@@ -215,7 +215,11 @@ export default function QrCodeScreen() {
             <View style={styles.qrWrap}>
               <VidehQrCode value={qrValue} size={220} />
               <View style={styles.qrLogo}>
-                <Text style={styles.qrLogoText}>V</Text>
+                <Image
+                  source={require("@/assets/images/videh_icon_foreground.png")}
+                  style={styles.qrLogoImage}
+                  contentFit="contain"
+                />
               </View>
             </View>
           </View>
@@ -317,16 +321,17 @@ const styles = StyleSheet.create({
   qrWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
   qrLogo: {
     position: "absolute",
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
     borderColor: "#E9EDEF",
+    overflow: "hidden",
   },
-  qrLogoText: { color: "#5B4FE8", fontSize: 22, fontFamily: "Inter_800ExtraBold" },
+  qrLogoImage: { width: 40, height: 40 },
   privacy: {
     marginTop: 24,
     fontSize: 14,

@@ -21,11 +21,13 @@ import {
   ensureChatMemberHistoryClearedColumn,
   messageAfterHistoryClearedSql,
 } from "../lib/chatMemberHistory";
+import { messageWithinRetentionSql } from "../lib/messageRetention";
 import { ensureMessageUserHidesTable, hideMessageForUser, messageVisibleToUserSql } from "../lib/messageUserHides";
 import { getPresenceForViewer } from "../lib/presencePrivacy";
 import { canAddUserToGroup, getExtendedPrivacy } from "../lib/userPrivacySettings";
 import {
   deleteChatMediaFile,
+  ensureStatusReplyColumn,
   ensureViewOnceColumns,
   mediaFilenameFromUrl,
   userCanAccessChatMedia,
@@ -203,6 +205,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
     await ensureChatMemberHistoryClearedColumn();
     await ensureMessageUserHidesTable();
     const historySql = messageAfterHistoryClearedSql("cm");
+    const retentionSql = messageWithinRetentionSql("m");
     const result = await query(`
       SELECT
         c.id,
@@ -215,6 +218,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         cm.is_pinned,
         cm.is_archived,
         cm.last_read_at,
+        cm.history_cleared_at,
         last_msg.last_message,
         COALESCE(unread.unread_count, 0) AS unread_count,
         COALESCE(other_members.members, '[]'::json) AS other_members,
@@ -236,6 +240,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         WHERE m.chat_id = c.id AND m.type != 'system' AND ${messageVisibleToUserSql("$1")}
           AND ${messageDisappearVisibleSql()}
           AND ${historySql}
+          AND ${retentionSql}
         ORDER BY m.created_at DESC
         LIMIT 1
       ) last_msg ON TRUE
@@ -249,6 +254,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
           AND ${messageVisibleToUserSql("$1")}
           AND ${messageDisappearVisibleSql()}
           AND ${historySql}
+          AND ${retentionSql}
       ) unread ON TRUE
       LEFT JOIN LATERAL (
         SELECT json_agg(json_build_object(
@@ -594,9 +600,11 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
     await ensureChatMemberHistoryClearedColumn();
     await ensureViewOnceColumns();
     await ensureDisappearingMessageColumns();
+    await ensureStatusReplyColumn();
     const viewerId = Number(userId);
     const viewerParam = before ? "$4" : "$3";
     const historySql = messageAfterHistoryClearedSql("cm");
+    const retentionSql = messageWithinRetentionSql("m");
     const result = await query(`
       SELECT
         m.id, m.chat_id, m.sender_id, m.content, m.type,
@@ -606,13 +614,19 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
         END AS media_url,
         m.reply_to_id, m.is_deleted, m.is_forwarded, m.forward_count,
         m.is_starred, m.is_view_once, m.view_once_opened_at, m.edited_at, m.created_at,
-        m.expires_at, m.is_kept,
+        m.expires_at, m.is_kept, m.status_reply_id,
         u.name AS sender_name, u.avatar_url AS sender_avatar,
         rm.content AS reply_content,
         rm.type AS reply_type,
         rm.sender_id AS reply_sender_id,
         rm.is_deleted AS reply_is_deleted,
         rm_u.name AS reply_sender_name,
+        sr.content AS status_reply_content,
+        sr.type AS status_reply_type,
+        sr.media_url AS status_reply_media_url,
+        sr.background_color AS status_reply_background_color,
+        sr.user_id AS status_reply_owner_id,
+        sr_u.name AS status_reply_owner_name,
         (
           SELECT json_agg(json_build_object('emoji', r.emoji, 'user_id', r.user_id))
           FROM message_reactions r WHERE r.message_id = m.id
@@ -628,10 +642,13 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
       LEFT JOIN users u ON u.id = m.sender_id
       LEFT JOIN messages rm ON rm.id = m.reply_to_id
       LEFT JOIN users rm_u ON rm_u.id = rm.sender_id
+      LEFT JOIN statuses sr ON sr.id = m.status_reply_id
+      LEFT JOIN users sr_u ON sr_u.id = sr.user_id
       WHERE m.chat_id = $1
         AND ${messageVisibleToUserSql(viewerParam)}
         AND ${messageDisappearVisibleSql()}
         AND ${historySql}
+        AND ${retentionSql}
         ${before ? "AND m.created_at < $3" : ""}
       ORDER BY m.created_at DESC
       LIMIT $2
@@ -797,9 +814,10 @@ router.get("/:chatId/messaging-permission", async (req: Request, res: Response) 
 // Send message
 router.post("/:chatId/messages", async (req: Request, res: Response) => {
   const { chatId } = req.params;
-  const { senderId, content, type, replyToId, mediaUrl, isForwarded, forwardCount, isViewOnce } = req.body as {
+  const { senderId, content, type, replyToId, mediaUrl, isForwarded, forwardCount, isViewOnce, statusReplyId } = req.body as {
     senderId?: number; content?: string; type?: string; replyToId?: number;
     mediaUrl?: string; isForwarded?: boolean; forwardCount?: number; isViewOnce?: boolean;
+    statusReplyId?: number;
   };
   if (!senderId || !content) { res.status(400).json({ success: false }); return; }
   if (!assertSameUser(req, res, senderId)) return;
@@ -812,6 +830,7 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
   }
   try {
     await ensureDisappearingMessageColumns();
+    await ensureStatusReplyColumn();
     const activityType = type === "video" ? "video_share" : type === "contact" ? "contact_share" : "chat_message";
     const mod = await enforceModerationForActivity(senderId, activityType, {
       content,
@@ -869,12 +888,13 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     }
 
     const result = await query(`
-      INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once, expires_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once, expires_at, status_reply_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *
     `, [chatId, senderId, content, type ?? "text", replyToId ?? null, mediaUrl ?? null,
         isForwarded ?? false, forwardCount ?? 0, isViewOnce ?? false,
-        computeMessageExpiresAt(await fetchChatDisappearSeconds(chatId), type ?? "text")]);
+        computeMessageExpiresAt(await fetchChatDisappearSeconds(chatId), type ?? "text"),
+        statusReplyId ?? null]);
 
     // Mark as delivered for all other members + gather push tokens
     const members = await query(
@@ -1192,6 +1212,22 @@ router.put("/:chatId/messages/:messageId", async (req: Request, res: Response) =
     return;
   }
   try {
+    const existing = await query(
+      `SELECT created_at FROM messages WHERE id = $1 AND sender_id = $2 AND is_deleted = FALSE`,
+      [messageId, userId],
+    );
+    if (!existing.rows[0]) {
+      res.status(404).json({ success: false, message: "Message not found" });
+      return;
+    }
+    const ageMs = Date.now() - new Date(existing.rows[0].created_at as string).getTime();
+    if (ageMs > 15 * 60 * 1000) {
+      res.status(403).json({
+        success: false,
+        message: "You can only edit messages within 15 minutes of sending.",
+      });
+      return;
+    }
     if (hasContent && hasMedia) {
       await query(
         "UPDATE messages SET content = $1, media_url = $2, edited_at = NOW() WHERE id = $3 AND sender_id = $4 AND is_deleted = FALSE",

@@ -230,4 +230,26 @@ cron.schedule("*/5 * * * *", async () => {
   }
 });
 
+/** Daily — permanently delete chat messages older than 90 days. */
+cron.schedule("15 3 * * *", async () => {
+  try {
+    const lockKey = "jobs:message-retention:lock";
+    if (!(await stateAcquireLock(lockKey, 50 * 60_000))) return;
+    const { purgeMessagesBeyondRetention } = await import("./lib/messageRetention");
+    let total = 0;
+    for (let i = 0; i < 40; i += 1) {
+      const batch = await purgeMessagesBeyondRetention(500);
+      total += batch;
+      if (batch < 500) break;
+    }
+    if (total > 0) {
+      logger.info({ deleted: total }, "Purged messages beyond 90-day retention");
+    }
+    await stateDelete(lockKey);
+  } catch (err) {
+    await stateDelete("jobs:message-retention:lock").catch(() => {});
+    logger.error({ err }, "Message retention purge cron error");
+  }
+});
+
 export default app;

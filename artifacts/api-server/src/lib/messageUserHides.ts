@@ -18,10 +18,9 @@ export async function ensureMessageUserHidesTable(): Promise<void> {
   tableReady = true;
 }
 
-/** SQL fragment: message visible to viewer (not hidden, not deleted). */
+/** SQL fragment: message visible to viewer (not hidden; deleted tombstones still show). */
 export function messageVisibleToUserSql(viewerParam: string): string {
-  return `m.is_deleted = FALSE
-    AND NOT EXISTS (
+  return `NOT EXISTS (
       SELECT 1 FROM message_user_hides h
       WHERE h.message_id = m.id AND h.user_id = ${viewerParam}::int
     )`;

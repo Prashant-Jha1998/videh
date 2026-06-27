@@ -42,6 +42,7 @@ import { ensureUploadableFileUri } from "@/lib/prepareFileUpload";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { encodeVoiceMessageText, stripWaveformMeta } from "@/lib/voiceWaveform";
 import { messageReplyPreviewText } from "@/lib/messageReplyPreview";
+import { messageFromStatusReplyMeta, type StatusReplyMeta } from "@/lib/statusReply";
 import {
   albumChatPreview,
   albumMessageDisplayText,
@@ -64,7 +65,7 @@ function isMediaMessageType(type: Message["type"]): boolean {
     || type === "document"
   );
 }
-import { collectPendingLocalMessages, mergeServerWithPending, preserveHistoricallyLoadedMessages, serverWindowMatchesLocalTail } from "@/lib/mergePendingChatMessages";
+import { globalMessageRetentionCutoffMs } from "@/lib/chatMessageRetention";
 import {
   loadChatMessageCache,
   rememberChatMessagesInStore,
@@ -74,6 +75,7 @@ import {
 } from "@/lib/chatMessageCache";
 import {
   chatClearCutoff,
+  filterMessagesAfterClearCutoff,
   loadChatDeletedAtMap,
   loadHiddenChatIds,
   saveChatDeletedAtMap,
@@ -149,6 +151,14 @@ export interface Message {
   replySenderName?: string;
   replyType?: string;
   replyQuotedSenderId?: string;
+  /** Story/status this message replies to (WhatsApp-style). */
+  statusReplyId?: string;
+  statusReplyOwnerId?: string;
+  statusReplyOwnerName?: string;
+  statusReplyType?: "text" | "image" | "video";
+  statusReplyMediaUrl?: string;
+  statusReplyContent?: string;
+  statusReplyBackgroundColor?: string;
   /** Bytes; shown on document bubbles (Videh-style). */
   fileSizeBytes?: number;
   /** 0–99 while uploading; undefined when sent. */
@@ -181,6 +191,20 @@ function asDeletedMessage(m: Message): Message {
     fileSizeBytes: undefined,
     isViewOnce: false,
     viewOnceOpened: false,
+  };
+}
+
+function mapStatusReplyFields(m: any): Partial<Message> {
+  if (!m.status_reply_id) return {};
+  return {
+    statusReplyId: String(m.status_reply_id),
+    statusReplyOwnerId: m.status_reply_owner_id != null ? String(m.status_reply_owner_id) : undefined,
+    statusReplyOwnerName: m.status_reply_owner_name ?? undefined,
+    statusReplyType: m.status_reply_type ?? undefined,
+    statusReplyMediaUrl:
+      resolvePublicAssetUrl(m.status_reply_media_url) ?? m.status_reply_media_url ?? undefined,
+    statusReplyContent: m.status_reply_content ?? undefined,
+    statusReplyBackgroundColor: m.status_reply_background_color ?? undefined,
   };
 }
 
@@ -275,6 +299,7 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     fileSizeBytes: prevLocal?.fileSizeBytes,
     expiresAt: m.expires_at ? new Date(m.expires_at).getTime() : prevLocal?.expiresAt,
     isKept: m.is_kept ?? prevLocal?.isKept ?? false,
+    ...mapStatusReplyFields(m),
   });
 }
 
@@ -374,6 +399,7 @@ interface AppContextType {
     text: string,
     replyToId?: string,
     replyQuote?: { replyText: string; replySenderName?: string; replyQuotedSenderId?: string; replyType?: string },
+    statusReply?: StatusReplyMeta,
   ) => void;
   createGroup: (name: string, memberIds: number[], groupAvatarUrl?: string) => void;
   markAsRead: (chatId: string) => void;
@@ -405,6 +431,7 @@ interface AppContextType {
   hideChatsInList: (chatIds: string[]) => Promise<void>;
   hiddenChatIds: string[];
   chatDeletedAtMap: ChatDeletedAtMap;
+  getChatClearCutoff: (chatId: string) => number;
   sendImageMessage: (chatId: string, mediaUri: string, caption?: string, isViewOnce?: boolean, mediaKind?: "image" | "video") => void;
   sendPreparedMediaMessage: (
     chatId: string,
@@ -436,7 +463,7 @@ interface AppContextType {
   setTyping: (chatId: string) => void;
   clearTyping: (chatId: string) => void;
   deleteForEveryone: (chatId: string, messageId: string) => void;
-  editMessage: (chatId: string, messageId: string, newText: string) => void;
+  editMessage: (chatId: string, messageId: string, newText: string) => Promise<void>;
   reactToMessage: (chatId: string, messageId: string, emoji: string) => void;
   markStatusViewedLocally: (statusId: string) => void;
   blockUser: (otherUserId: number) => Promise<void>;
@@ -475,6 +502,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const clearedHistoryAtRef = useRef<number>(0);
   const chatDeletedAtRef = useRef<ChatDeletedAtMap>({});
   const [chatDeletedAtMap, setChatDeletedAtMap] = useState<ChatDeletedAtMap>({});
+  const serverHistoryClearedRef = useRef<ChatDeletedAtMap>({});
   const hiddenChatIdsRef = useRef<string[]>([]);
   const [hiddenChatIds, setHiddenChatIds] = useState<string[]>([]);
   const messageCacheStoreRef = useRef<ChatMessageCacheStore>({});
@@ -519,8 +547,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const getClearCutoff = (chatId: string) =>
-    chatClearCutoff(chatId, clearedHistoryAtRef.current, chatDeletedAtRef.current);
+  const getClearCutoff = useCallback(
+    (chatId: string) =>
+      Math.max(
+        chatClearCutoff(
+          chatId,
+          clearedHistoryAtRef.current,
+          chatDeletedAtRef.current,
+          serverHistoryClearedRef.current,
+        ),
+        globalMessageRetentionCutoffMs(),
+      ),
+    [],
+  );
+
+  const filterCachedMessageStore = useCallback(
+    (store: ChatMessageCacheStore): ChatMessageCacheStore => {
+      const next: ChatMessageCacheStore = {};
+      for (const [chatId, msgs] of Object.entries(store)) {
+        const cutoff = getClearCutoff(chatId);
+        const kept = filterMessagesAfterClearCutoff(msgs, cutoff);
+        if (kept.length > 0) next[chatId] = kept;
+      }
+      return next;
+    },
+    [getClearCutoff],
+  );
 
   const maskListFieldsIfCleared = (chat: Chat): Chat => {
     const cutoff = getClearCutoff(chat.id);
@@ -717,6 +769,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const data = await api(`/chats/user/${dbUserId}`) as { success: boolean; chats: any[] };
       if (!data.success || !data.chats) return;
+
+      const nextServerCleared: ChatDeletedAtMap = { ...serverHistoryClearedRef.current };
+      const nextDeletedMap = { ...chatDeletedAtRef.current };
+      let deletedMapChanged = false;
+      for (const row of data.chats) {
+        const id = String(row.id);
+        if (!row.history_cleared_at) continue;
+        const serverTs = new Date(row.history_cleared_at).getTime();
+        if (!Number.isFinite(serverTs)) continue;
+        nextServerCleared[id] = Math.max(nextServerCleared[id] ?? 0, serverTs);
+        if (serverTs > (nextDeletedMap[id] ?? 0)) {
+          nextDeletedMap[id] = serverTs;
+          deletedMapChanged = true;
+        }
+      }
+      serverHistoryClearedRef.current = nextServerCleared;
+      if (deletedMapChanged) {
+        chatDeletedAtRef.current = nextDeletedMap;
+        setChatDeletedAtMap(nextDeletedMap);
+        await saveChatDeletedAtMap(dbUserId, nextDeletedMap);
+      }
+
       const mapped = mapDbChats(data.chats).filter(
         (c) => Boolean(c.lastMessageTime) || Boolean(c.lastMessage) || c.isGroup,
       );
@@ -843,6 +917,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (parsed.dbId) {
             messageCacheStoreRef.current = await loadChatMessageCache(parsed.dbId);
             await reloadChatListDeleteState(parsed.dbId);
+            messageCacheStoreRef.current = filterCachedMessageStore(messageCacheStoreRef.current);
+            schedulePersistChatMessageCache(parsed.dbId, messageCacheStoreRef.current);
             loadChats(parsed.dbId);
             loadCallLogs(parsed.dbId);
             loadStatuses(parsed.dbId);
@@ -955,33 +1031,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const deleteChatsFromList = useCallback(async (chatIds: string[]) => {
     if (chatIds.length === 0) return;
+    const normalizedIds = chatIds.map(String);
     const now = Date.now();
     const nextMap = { ...chatDeletedAtRef.current };
-    for (const id of chatIds) nextMap[String(id)] = now;
+    for (const id of normalizedIds) nextMap[id] = now;
     chatDeletedAtRef.current = nextMap;
     setChatDeletedAtMap(nextMap);
 
     const uid = userRef.current?.dbId;
     if (uid) {
       await saveChatDeletedAtMap(uid, nextMap);
-      await Promise.all(
-        chatIds.map((chatId) =>
-          api(`/chats/${chatId}/clear-history`, {
-            method: "POST",
-            body: JSON.stringify({ userId: uid }),
-          }).catch(() => {}),
-        ),
+      const clearedResults = await Promise.all(
+        normalizedIds.map(async (chatId) => {
+          try {
+            const data = await api(`/chats/${chatId}/clear-history`, {
+              method: "POST",
+              body: JSON.stringify({ userId: uid }),
+            }) as { success?: boolean; clearedAt?: string };
+            if (data.success && data.clearedAt) {
+              const ts = new Date(data.clearedAt).getTime();
+              if (Number.isFinite(ts)) return { chatId, ts };
+            }
+          } catch {
+            /* server may be offline — local cutoff still applies */
+          }
+          return { chatId, ts: now };
+        }),
       );
+      for (const { chatId, ts } of clearedResults) {
+        nextMap[chatId] = Math.max(nextMap[chatId] ?? 0, ts);
+        serverHistoryClearedRef.current[chatId] = Math.max(serverHistoryClearedRef.current[chatId] ?? 0, ts);
+      }
+      chatDeletedAtRef.current = nextMap;
+      setChatDeletedAtMap(nextMap);
+      await saveChatDeletedAtMap(uid, nextMap);
     }
 
-    for (const chatId of chatIds) {
-      delete messageCacheStoreRef.current[String(chatId)];
+    const idSet = new Set(normalizedIds);
+    for (const chatId of normalizedIds) {
+      delete messageCacheStoreRef.current[chatId];
     }
     if (uid) schedulePersistChatMessageCache(uid, messageCacheStoreRef.current);
 
     setChats((prev) =>
       prev.map((c) =>
-        chatIds.includes(c.id)
+        idSet.has(String(c.id))
           ? { ...c, messages: [], lastMessage: undefined, lastMessageTime: undefined, unreadCount: 0 }
           : c,
       ),
@@ -1057,6 +1151,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setHiddenChatIds([]);
     chatDeletedAtRef.current = {};
     setChatDeletedAtMap({});
+    serverHistoryClearedRef.current = {};
     await AsyncStorage.removeItem("videh_user");
   }, []);
 
@@ -1349,9 +1444,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ) {
             return c;
           }
-          const serverWithHistory = preserveHistoricallyLoadedMessages(prevStable, msgs);
+          const serverWithHistory = preserveHistoricallyLoadedMessages(prevStable, msgs, clearedAt);
           const pendingLocal = collectPendingLocalMessages(prevMsgs, serverWithHistory);
-          const merged = mergeServerWithPending(serverWithHistory, pendingLocal);
+          let merged = mergeServerWithPending(serverWithHistory, pendingLocal);
+          merged = filterMessagesAfterClearCutoff(merged, clearedAt);
           mergedMessages = merged;
           return { ...c, messages: merged };
         });
@@ -1486,7 +1582,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             }
             loaded = older.length;
             if (loaded === 0) return c;
-            const merged = [...older, ...c.messages].sort((a, b) => a.timestamp - b.timestamp);
+            const merged = filterMessagesAfterClearCutoff(
+              [...older, ...c.messages].sort((a, b) => a.timestamp - b.timestamp),
+              clearedAt,
+            );
             return { ...c, messages: merged };
           }),
         );
@@ -1770,6 +1869,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     text: string,
     replyToId?: string,
     replyQuote?: { replyText: string; replySenderName?: string; replyQuotedSenderId?: string; replyType?: string },
+    statusReply?: StatusReplyMeta,
   ) => {
     if (!text.trim()) return;
     const u = userRef.current;
@@ -1786,6 +1886,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       replySenderName: replyQuote?.replySenderName,
       replyQuotedSenderId: replyQuote?.replyQuotedSenderId,
       replyType: replyQuote?.replyType,
+      ...(statusReply ? messageFromStatusReplyMeta(statusReply) : {}),
     };
     const chatListPreview = text.length > 120 ? `${text.slice(0, 117).trimEnd()}…` : text;
     const sentAt = Date.now();
@@ -1815,6 +1916,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           content: text,
           type: "text",
           replyToId: replyToId && !replyToId.startsWith("tmp_") ? Number(replyToId) : undefined,
+          statusReplyId: statusReply?.statusId ? Number(statusReply.statusId) : undefined,
         };
         const postOnce = async () => {
           const res = await fetchWithTimeout(`${BASE_URL}/api/chats/${chatId}/messages`, {
@@ -2656,32 +2758,56 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             body: JSON.stringify({ userId: dbId, deleteForEveryone: true }),
           });
           await loadChats(dbId);
-          if (activeChatIdRef.current === chatId) await loadMessages(chatId);
         } catch {
-          /* keep optimistic UI */
+          /* keep optimistic tombstone UI */
         }
       })();
     }
-  }, [loadChats, loadMessages]);
+  }, [loadChats]);
 
-  // Edit message
-  const editMessage = useCallback((chatId: string, messageId: string, newText: string) => {
+  const editMessage = useCallback(async (chatId: string, messageId: string, newText: string) => {
     const u = userRef.current;
-    if (!newText.trim()) return;
-    setChats((prev) =>
-      prev.map((c) =>
+    const trimmed = newText.trim();
+    if (!trimmed) return;
+    let prevMsg: Message | undefined;
+    setChats((prev) => {
+      const chat = prev.find((c) => c.id === chatId);
+      prevMsg = chat?.messages.find((m) => m.id === messageId);
+      return prev.map((c) =>
         c.id === chatId
-          ? { ...c, messages: c.messages.map((m) =>
-              m.id === messageId ? { ...m, text: newText.trim(), isEdited: true, editedAt: Date.now() } : m
-            )}
-          : c
-      )
-    );
-    if (u?.dbId) {
-      api(`/chats/${chatId}/messages/${messageId}`, {
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === messageId ? { ...m, text: trimmed, isEdited: true, editedAt: Date.now() } : m,
+              ),
+            }
+          : c,
+      );
+    });
+    if (!u?.dbId) return;
+    try {
+      const data = await api(`/chats/${chatId}/messages/${messageId}`, {
         method: "PUT",
-        body: JSON.stringify({ userId: u.dbId, content: newText.trim() }),
-      }).catch(() => {});
+        body: JSON.stringify({ userId: u.dbId, content: trimmed }),
+      }) as { success?: boolean; message?: string };
+      if (!data.success) {
+        throw new Error(data.message ?? "Could not edit message.");
+      }
+    } catch (err) {
+      if (prevMsg) {
+        const snapshot = prevMsg;
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) => (m.id === messageId ? snapshot : m)),
+                }
+              : c,
+          ),
+        );
+      }
+      throw err;
     }
   }, []);
 
@@ -3264,7 +3390,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, keepMessage, forwardMessage, starredMessages, updateAvatar, updateGroupAvatar,
       createDirectChat, loadMessages, applyIncomingMessageHint, loadOlderMessages, refreshChats, clearAllChatHistory,
-      deleteChatsFromList, hideChatsInList, hiddenChatIds, chatDeletedAtMap,
+      deleteChatsFromList, hideChatsInList, hiddenChatIds, chatDeletedAtMap, getChatClearCutoff: getClearCutoff,
       sendImageMessage, sendPreparedMediaMessage, sendAlbumMessage, consumeViewOnceMessage, sendAudioMessage, sendDocumentMessage, cancelDocumentUpload,
       sendContactMessage, setTyping, clearTyping,
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,

@@ -761,6 +761,66 @@ router.post("/", async (req: Request, res: Response) => {
   }
 });
 
+/** Open a status from a story-reply bubble (active carousel or expired single view). */
+router.get("/:statusId/reply-context", async (req: Request, res: Response) => {
+  const { statusId } = req.params;
+  const viewerId = Number(req.query.viewerId);
+  if (!viewerId || !assertSameUser(req, res, viewerId)) return;
+  try {
+    const access = await query(
+      `SELECT s.id, s.user_id
+       FROM statuses s
+       WHERE s.id = $1
+         AND (
+           s.user_id = $2
+           OR EXISTS (
+             SELECT 1 FROM messages m
+             JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $2
+             WHERE m.status_reply_id = s.id
+           )
+           OR EXISTS (
+             SELECT 1 FROM status_views sv
+             WHERE sv.status_id = s.id AND sv.viewer_id = $2
+           )
+         )
+       LIMIT 1`,
+      [statusId, viewerId],
+    );
+    if (!access.rows.length) {
+      res.status(404).json({ success: false, message: "Status not found." });
+      return;
+    }
+    const ownerId = Number(access.rows[0].user_id);
+    const statusRow = await query(
+      `SELECT s.*, u.name AS user_name, u.avatar_url AS user_avatar
+       FROM statuses s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.id = $1`,
+      [statusId],
+    );
+    const active = await query(
+      `SELECT id FROM statuses
+       WHERE user_id = $1 AND expires_at > NOW()
+       ORDER BY created_at ASC`,
+      [ownerId],
+    );
+    const activeIds = active.rows.map((r: { id: number }) => String(r.id));
+    const ids = activeIds.includes(String(statusId)) ? activeIds : [String(statusId)];
+    const row = statusRow.rows[0] as Record<string, unknown>;
+    res.json({
+      success: true,
+      ids,
+      status: {
+        ...row,
+        media_url: resolveStatusMediaUrl(req, row.media_url),
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "status reply-context error");
+    res.status(500).json({ success: false });
+  }
+});
+
 // Mark status as viewed
 router.post("/:statusId/view", async (req: Request, res: Response) => {
   const { statusId } = req.params;
