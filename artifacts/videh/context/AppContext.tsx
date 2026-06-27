@@ -581,7 +581,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           : (otherUser?.name?.trim() || otherUser?.phone?.trim() || "Unknown"),
         avatar: resolvePublicAssetUrl(c.is_group ? c.group_avatar_url : otherUser?.avatar_url),
         lastMessage: formatLastMessagePreview(lastMsg),
-        lastMessageTime: lastMsg ? new Date(lastMsg.created_at).getTime() : undefined,
+        lastMessageTime: lastMsg
+          ? new Date(lastMsg.created_at).getTime()
+          : c.member_joined_at
+            ? new Date(c.member_joined_at).getTime()
+            : undefined,
         unreadCount: c.unread_count ?? 0,
         isGroup: c.is_group,
         isOnline: otherUser?.is_online ?? false,
@@ -704,15 +708,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const data = await api(`/chats/user/${dbUserId}`) as { success: boolean; chats: any[] };
       if (!data.success || !data.chats) return;
       const mapped = mapDbChats(data.chats).filter(
-        (c) => Boolean(c.lastMessageTime) || Boolean(c.lastMessage),
+        (c) => Boolean(c.lastMessageTime) || Boolean(c.lastMessage) || c.isGroup,
       );
       await restoreHiddenChatsWithNewActivity(
         mapped
           .filter((c) => typeof c.lastMessageTime === "number" && c.lastMessageTime > 0)
           .map((c) => ({ id: c.id, lastMessageTime: c.lastMessageTime })),
       );
-      setChats((prev) =>
-        mapped.map((newChat) => {
+      setChats((prev) => {
+        const mergedFromServer = mapped.map((newChat) => {
           const old = prev.find((c) => c.id === newChat.id);
           const cached = messageCacheStoreRef.current[String(newChat.id)] as Message[] | undefined;
           const rawMessages =
@@ -732,8 +736,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             isMuted: newChat.isMuted ?? old?.isMuted,
             isArchived: newChat.isArchived ?? old?.isArchived,
           });
-        }),
-      );
+        });
+        const serverIds = new Set(mergedFromServer.map((c) => c.id));
+        const pendingGroups = prev.filter((c) => c.isGroup && !serverIds.has(c.id));
+        return [...pendingGroups, ...mergedFromServer].sort(
+          (a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0),
+        );
+      });
       const prefetchIds = mapped
         .slice()
         .sort((a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0))
@@ -2721,19 +2730,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const createGroup = useCallback((name: string, memberIds: number[], groupAvatarUrl?: string) => {
     const u = userRef.current;
     if (!u?.dbId) return;
+    const creatorId = u.dbId;
     api("/chats/group", {
       method: "POST",
-      body: JSON.stringify({ creatorId: u.dbId, name, memberIds, groupAvatarUrl: groupAvatarUrl ?? null }),
+      body: JSON.stringify({ creatorId, name, memberIds, groupAvatarUrl: groupAvatarUrl ?? null }),
     }).then((data: any) => {
       if (data?.success && data.chatId) {
+        const now = Date.now();
         setChats((prev) => [{
           id: String(data.chatId), name, unreadCount: 0, isGroup: true,
           members: memberIds.map(String), messages: [], isPinned: false, isMuted: false,
           avatar: groupAvatarUrl ?? undefined,
-        }, ...prev]);
+          lastMessageTime: now,
+        }, ...prev.filter((c) => c.id !== String(data.chatId))]);
+        void loadChats(creatorId);
       }
     }).catch(() => {});
-  }, []);
+  }, [loadChats]);
 
   const addStatus = useCallback(async (content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string, videoDurationMs?: number | null, editorData?: StoryEditorData) => {
     const u = userRef.current;

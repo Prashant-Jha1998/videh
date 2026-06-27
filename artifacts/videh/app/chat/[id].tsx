@@ -161,7 +161,11 @@ const REPLY_SWIPE_ACTION_W = 56;
 
 type ChatListRow =
   | { rowType: "date"; id: string; label: string }
-  | { rowType: "msg"; message: Message };
+  | { rowType: "msg"; message: Message }
+  | { rowType: "loading_older"; id: string }
+  | { rowType: "business_intro"; id: string }
+  | { rowType: "group_welcome"; id: string }
+  | { rowType: "unsaved_contact"; id: string };
 
 function startOfLocalDay(ts: number): number {
   const d = new Date(ts);
@@ -1323,7 +1327,6 @@ export default function ChatScreen() {
 
   const listRows = useMemo(() => messagesWithDateRows(messagesForDisplay), [messagesForDisplay]);
   const listRowsInverted = useMemo(() => messagesWithDateRowsInverted(messagesForDisplay), [messagesForDisplay]);
-  const chatListData = searching ? listRows : listRowsInverted;
   const [composerHeight, setComposerHeight] = useState(56);
   const [readingHistory, setReadingHistory] = useState(false);
   const chatContactName = name ?? chat?.name ?? "Chat";
@@ -3142,6 +3145,65 @@ export default function ChatScreen() {
   };
 
   const renderChatListRow = ({ item: row }: { item: ChatListRow }) => {
+    if (row.rowType === "loading_older") {
+      return (
+        <View style={styles.olderLoader}>
+          <ActivityIndicator size="small" color={colors.primary} />
+        </View>
+      );
+    }
+    if (row.rowType === "business_intro" && businessChannelInfo) {
+      return (
+        <>
+          <BusinessSecureBanner />
+          <BusinessIntroCard
+            displayName={businessChannelInfo.displayName}
+            logoUrl={businessChannelInfo.logoUrl ?? contactAvatar}
+            joinedLabel={formatBusinessJoinedLabel(businessChannelInfo.joinedAt)}
+            isDark={colors.isDark}
+            onManageMessages={() => setManageBusinessOpen(true)}
+          />
+        </>
+      );
+    }
+    if (row.rowType === "group_welcome" && groupWelcomePreview) {
+      return (
+        <>
+          <ChatEncryptionNotice />
+          <GroupWelcomeCard
+            addedByPhone={groupWelcomePreview.addedByPhone}
+            addedByName={groupWelcomePreview.addedByName}
+            creatorIsContact={groupWelcomePreview.creatorIsContact}
+            memberCount={groupWelcomePreview.memberCount}
+            contactsInGroupCount={groupWelcomePreview.contactsInGroupCount}
+            createdLabel={formatDateChipLabel(groupWelcomePreview.createdAtMs)}
+            isDark={colors.isDark}
+            onExitGroup={handleExitGroup}
+            onStay={handleStayInGroup}
+            onReport={handleReportGroup}
+          />
+        </>
+      );
+    }
+    if (row.rowType === "unsaved_contact" && peerContactPreview) {
+      return (
+        <>
+          <ChatEncryptionNotice />
+          <UnsavedContactCard
+            phone={peerContactPreview.phone}
+            profileName={peerContactPreview.profileName}
+            initials={initials}
+            avatarUrl={contactAvatar}
+            avatarBg={avatarBg}
+            commonGroupCount={peerContactPreview.commonGroupCount}
+            isDark={colors.isDark}
+            onBlock={handleMenuBlockToggle}
+            onAdd={() => { void handleAddUnsavedContact(); }}
+            onReport={() => handleMenuReport(false)}
+          />
+        </>
+      );
+    }
     if (row.rowType === "date") {
       return (
         <View style={styles.dateChipWrap} pointerEvents="none">
@@ -3224,10 +3286,40 @@ export default function ChatScreen() {
     && !!groupWelcomePreview
     && groupWelcomePreview.createdByUserId !== user?.dbId;
   const hasIntroCards = showBusinessIntro || showUnsavedContactCard || showGroupWelcomeCard;
+  const chatListData = useMemo((): ChatListRow[] => {
+    const base = searching ? listRows : listRowsInverted;
+    if (searching) return base;
+    const tail: ChatListRow[] = [];
+    if (loadingOlder) {
+      tail.push({ rowType: "loading_older", id: "loading-older" });
+    }
+    if (showGroupWelcomeCard && groupWelcomePreview) {
+      tail.push({ rowType: "group_welcome", id: "intro-group" });
+    }
+    if (showUnsavedContactCard && peerContactPreview) {
+      tail.push({ rowType: "unsaved_contact", id: "intro-unsaved" });
+    }
+    if (showBusinessIntro && businessChannelInfo) {
+      tail.push({ rowType: "business_intro", id: "intro-business" });
+    }
+    return tail.length ? [...base, ...tail] : base;
+  }, [
+    searching,
+    listRows,
+    listRowsInverted,
+    loadingOlder,
+    showGroupWelcomeCard,
+    groupWelcomePreview,
+    showUnsavedContactCard,
+    peerContactPreview,
+    showBusinessIntro,
+    businessChannelInfo,
+  ]);
   const isChatEmpty = messagesReady && !searching && listRows.length === 0;
   const showEmptyStateLabel = isChatEmpty && !hasIntroCards;
-  /** Inverted list only when there are rows — empty/intro chrome stays upright on Android. */
-  const messageListInverted = !searching && chatListData.length > 0;
+  const hasMessageRows = (searching ? listRows : listRowsInverted).length > 0;
+  /** Invert only when real messages exist — intro-only chats stay upright. */
+  const messageListInverted = !searching && hasMessageRows;
   const messagesScrollAnchorKey = useMemo(() => {
     const first = messagesForDisplay[0]?.id ?? "";
     const last = messagesForDisplay[messagesForDisplay.length - 1]?.id ?? "";
@@ -4069,71 +4161,14 @@ export default function ChatScreen() {
                 )
               : null
           }
-          ListFooterComponent={
-            !searching
-              ? wrapInvertedListChrome(
-                  <>
-                  {loadingOlder ? (
-                    <View style={styles.olderLoader}>
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    </View>
-                  ) : null}
-                  {showBusinessIntro && businessChannelInfo ? (
-                    <>
-                      <BusinessSecureBanner />
-                      <BusinessIntroCard
-                        displayName={businessChannelInfo.displayName}
-                        logoUrl={businessChannelInfo.logoUrl ?? contactAvatar}
-                        joinedLabel={formatBusinessJoinedLabel(businessChannelInfo.joinedAt)}
-                        isDark={colors.isDark}
-                        onManageMessages={() => setManageBusinessOpen(true)}
-                      />
-                    </>
-                  ) : null}
-                  {showGroupWelcomeCard && groupWelcomePreview ? (
-                    <>
-                      <ChatEncryptionNotice />
-                      <GroupWelcomeCard
-                        addedByPhone={groupWelcomePreview.addedByPhone}
-                        addedByName={groupWelcomePreview.addedByName}
-                        creatorIsContact={groupWelcomePreview.creatorIsContact}
-                        memberCount={groupWelcomePreview.memberCount}
-                        contactsInGroupCount={groupWelcomePreview.contactsInGroupCount}
-                        createdLabel={formatDateChipLabel(groupWelcomePreview.createdAtMs)}
-                        isDark={colors.isDark}
-                        onExitGroup={handleExitGroup}
-                        onStay={handleStayInGroup}
-                        onReport={handleReportGroup}
-                      />
-                    </>
-                  ) : null}
-                  {showUnsavedContactCard && peerContactPreview ? (
-                    <>
-                      <ChatEncryptionNotice />
-                      <UnsavedContactCard
-                        phone={peerContactPreview.phone}
-                        profileName={peerContactPreview.profileName}
-                        initials={initials}
-                        avatarUrl={contactAvatar}
-                        avatarBg={avatarBg}
-                        commonGroupCount={peerContactPreview.commonGroupCount}
-                        isDark={colors.isDark}
-                        onBlock={handleMenuBlockToggle}
-                        onAdd={() => { void handleAddUnsavedContact(); }}
-                        onReport={() => handleMenuReport(false)}
-                      />
-                    </>
-                  ) : null}
-                </>,
-              )
-              : null
-          }
+          ListFooterComponent={null}
           keyExtractor={(row) => {
             if (row.rowType === "date") return row.id;
+            if (row.rowType !== "msg") return row.id;
             const m = row.message;
             return m.id.startsWith("tmp_") ? `${m.id}-${m.timestamp}` : m.id;
           }}
-          renderItem={renderChatListRow}
+          renderItem={(props) => wrapInvertedListChrome(renderChatListRow(props))}
           contentContainerStyle={[
             styles.messageListContent,
             {
@@ -4211,24 +4246,20 @@ export default function ChatScreen() {
           }}
           ListEmptyComponent={
             initializing ? (
-              wrapInvertedListChrome(
-                <View style={styles.initWrap}>
-                  <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.starting")}</Text>
-                </View>,
-              )
+              <View style={styles.initWrap}>
+                <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.starting")}</Text>
+              </View>
             ) : searching ? (
               <View style={styles.initWrap}>
                 <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.noResults")}</Text>
               </View>
             ) : !messagesReady ? (
-              wrapInvertedListChrome(
-                <View style={styles.initWrap}>
-                  <ActivityIndicator size="small" color={colors.primary} />
-                  <Text style={[styles.initText, { color: colors.mutedForeground, marginTop: 10 }]}>
-                    {t("chat.loadingMessages")}
-                  </Text>
-                </View>,
-              )
+              <View style={styles.initWrap}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={[styles.initText, { color: colors.mutedForeground, marginTop: 10 }]}>
+                  {t("chat.loadingMessages")}
+                </Text>
+              </View>
             ) : null
           }
         />

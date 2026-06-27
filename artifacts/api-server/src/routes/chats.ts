@@ -217,7 +217,8 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         cm.last_read_at,
         last_msg.last_message,
         COALESCE(unread.unread_count, 0) AS unread_count,
-        COALESCE(other_members.members, '[]'::json) AS other_members
+        COALESCE(other_members.members, '[]'::json) AS other_members,
+        cm.joined_at AS member_joined_at
       FROM chats c
       JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $1::int
       LEFT JOIN LATERAL (
@@ -258,8 +259,8 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         JOIN users u ON u.id = cm2.user_id
         WHERE cm2.chat_id = c.id AND cm2.user_id != $1::int
       ) other_members ON TRUE
-      WHERE last_msg.last_message IS NOT NULL
-      ORDER BY last_msg.last_created_at DESC NULLS LAST
+      WHERE last_msg.last_message IS NOT NULL OR c.is_group = TRUE
+      ORDER BY COALESCE(last_msg.last_created_at, cm.joined_at) DESC NULLS LAST
     `, [userId]);
 
     const viewerId = Number(userId);

@@ -1,7 +1,7 @@
 import React from "react";
 import { StyleSheet, View } from "react-native";
 
-/** Counter-flip chrome placed in an inverted FlatList header/footer/empty slot. */
+/** Counter-flip a row/chrome inside an inverted FlatList so text renders upright. */
 export function InvertedListSlot({ children }: { children: React.ReactNode }) {
   return <View style={styles.slot}>{children}</View>;
 }
