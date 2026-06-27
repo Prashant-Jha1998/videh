@@ -22,7 +22,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { saveStatusToGalleryWithAlert } from "@/lib/saveStatusToLibrary";
+import { usePlayableAudioUri } from "@/lib/usePlayableAudioUri";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
 import Svg, { Path } from "react-native-svg";
 
@@ -35,19 +37,28 @@ function strokeToPath(points: Array<{ x: number; y: number }>): string {
 
 function VideoStatusPlayer({
   uri,
+  sessionToken,
   paused,
   trimStartMs,
   trimEndMs,
   onLoadError,
+  onReady,
 }: {
   uri: string;
+  sessionToken?: string | null;
   paused: boolean;
   trimStartMs?: number;
   trimEndMs?: number;
   onLoadError: () => void;
+  onReady: () => void;
 }) {
   const videoRef = useRef<AvVideo>(null);
-  const { playableUri, failed, loading } = usePlayableVideoUri(uri);
+  const readyNotifiedRef = useRef(false);
+  const { playableUri, failed, loading } = usePlayableVideoUri(uri, sessionToken);
+
+  useEffect(() => {
+    readyNotifiedRef.current = false;
+  }, [uri]);
 
   useEffect(() => {
     if (failed) onLoadError();
@@ -79,6 +90,10 @@ function VideoStatusPlayer({
       shouldPlay={!paused}
       isLooping={false}
       onLoad={() => {
+        if (!readyNotifiedRef.current) {
+          readyNotifiedRef.current = true;
+          onReady();
+        }
         if (trimStartMs && trimStartMs > 0) {
           videoRef.current?.setPositionAsync(trimStartMs).catch(() => {});
         }
@@ -97,17 +112,18 @@ function VideoStatusPlayer({
   );
 }
 
-function StoryMusicPlayer({ uri, paused }: { uri?: string; paused: boolean }) {
+function StoryMusicPlayer({ uri, sessionToken, paused }: { uri?: string; sessionToken?: string | null; paused: boolean }) {
   const soundRef = useRef<Audio.Sound | null>(null);
+  const { playbackSource, failed } = usePlayableAudioUri(uri, sessionToken);
   useEffect(() => {
-    if (!uri) return;
+    if (!playbackSource || failed) return;
     let mounted = true;
     Audio.setAudioModeAsync({
       playsInSilentModeIOS: true,
       staysActiveInBackground: false,
       shouldDuckAndroid: true,
     }).catch(() => {});
-    Audio.Sound.createAsync({ uri }, { shouldPlay: !paused, isLooping: true, volume: 0.8 })
+    Audio.Sound.createAsync(playbackSource, { shouldPlay: !paused, isLooping: true, volume: 0.8 })
       .then(({ sound: s }) => {
         if (!mounted) {
           void s.unloadAsync();
@@ -121,12 +137,12 @@ function StoryMusicPlayer({ uri, paused }: { uri?: string; paused: boolean }) {
       if (soundRef.current) void soundRef.current.unloadAsync();
       soundRef.current = null;
     };
-  }, [uri]);
+  }, [playbackSource, failed]);
   useEffect(() => {
     if (!soundRef.current) return;
     if (paused) void soundRef.current.pauseAsync();
     else void soundRef.current.playAsync();
-  }, [paused, uri]);
+  }, [paused, playbackSource]);
   return null;
 }
 
@@ -164,6 +180,7 @@ export default function ViewStatusScreen() {
   const [reply, setReply] = useState("");
   const [useNativeImageFallback, setUseNativeImageFallback] = useState(false);
   const [mediaLoadFailed, setMediaLoadFailed] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
   const progress = useRef(new Animated.Value(0)).current;
@@ -174,6 +191,9 @@ export default function ViewStatusScreen() {
   const wasPausedBeforeHoldRef = useRef(false);
 
   const currentStatus = statuses.find((s) => s.id === ids[currentIdx]);
+  const resolvedMediaUrl = currentStatus?.mediaUrl
+    ? resolvePublicAssetUrl(currentStatus.mediaUrl) ?? currentStatus.mediaUrl
+    : undefined;
   const isMyStatus = currentStatus?.userId === "me";
   const isMedia = currentStatus?.type === "image" || currentStatus?.type === "video";
   const isBoostedStory = Boolean(currentStatus?.isBoosted);
@@ -232,13 +252,18 @@ export default function ViewStatusScreen() {
   }, [ids, statuses]);
 
   useEffect(() => {
+    animRef.current?.stop();
+    const status = statuses.find((s) => s.id === ids[currentIdx]);
+    const waitingForVideo = status?.type === "video" && Boolean(resolvedMediaUrl) && !videoReady && !mediaLoadFailed;
+    if (waitingForVideo) return;
     startAnim(currentIdx);
     return () => animRef.current?.stop();
-  }, [currentIdx]);
+  }, [currentIdx, videoReady, mediaLoadFailed, ids, statuses, resolvedMediaUrl, startAnim]);
 
   useEffect(() => {
     setUseNativeImageFallback(false);
     setMediaLoadFailed(false);
+    setVideoReady(false);
   }, [currentStatus?.id, currentStatus?.mediaUrl]);
 
   const pauseStory = useCallback(() => {
@@ -287,7 +312,7 @@ export default function ViewStatusScreen() {
   }, [currentStatus, downloading, pauseStory, resumeStory, user?.sessionToken]);
 
   const visibleMenuItems = [
-    ...(isMedia && currentStatus?.mediaUrl
+    ...(isMedia && resolvedMediaUrl
       ? [{ label: "Download", icon: "download-outline" as const, action: "download" as const }]
       : []),
     ...(!isMyStatus ? MENU_ITEMS : []),
@@ -402,7 +427,7 @@ export default function ViewStatusScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: bgColor, paddingTop: topPad }]}>
-      <StoryMusicPlayer uri={editorData?.musicUri} paused={paused || showMenu} />
+      <StoryMusicPlayer uri={editorData?.musicUri} sessionToken={user?.sessionToken} paused={paused || showMenu} />
 
       {/* ── MULTIPLE PROGRESS BARS ── */}
       <View style={styles.barsWrap}>
@@ -449,7 +474,7 @@ export default function ViewStatusScreen() {
         <TouchableOpacity style={styles.iconBtn} onPress={togglePause}>
           <Ionicons name={paused ? "play" : "pause"} size={17} color="#fff" />
         </TouchableOpacity>
-        {isMedia && currentStatus.mediaUrl ? (
+        {isMedia && resolvedMediaUrl ? (
           <TouchableOpacity
             style={styles.iconBtn}
             onPress={() => { void downloadStory(); }}
@@ -493,7 +518,7 @@ export default function ViewStatusScreen() {
             if (x < W * 0.3) goPrev(); else goNext();
           }}
         >
-          {isMedia && currentStatus.mediaUrl ? (
+          {isMedia && resolvedMediaUrl ? (
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
               {mediaLoadFailed ? (
                 <View style={styles.mediaErrorCard}>
@@ -503,22 +528,24 @@ export default function ViewStatusScreen() {
                 </View>
               ) : currentStatus.type === "video" ? (
                 <VideoStatusPlayer
-                  uri={currentStatus.mediaUrl}
+                  uri={resolvedMediaUrl}
+                  sessionToken={user?.sessionToken}
                   paused={paused}
                   trimStartMs={editorData?.trimStartMs}
                   trimEndMs={editorData?.trimEndMs}
                   onLoadError={() => setMediaLoadFailed(true)}
+                  onReady={() => setVideoReady(true)}
                 />
               ) : useNativeImageFallback ? (
                 <NativeImage
-                  source={{ uri: currentStatus.mediaUrl }}
+                  source={{ uri: resolvedMediaUrl }}
                   style={{ width: W, height: H * 0.75 }}
                   resizeMode="contain"
                   onError={() => setMediaLoadFailed(true)}
                 />
               ) : (
                 <Image
-                  source={{ uri: currentStatus.mediaUrl }}
+                  source={{ uri: resolvedMediaUrl }}
                   style={{ width: W, height: H * 0.75 }}
                   contentFit="contain"
                   onError={() => setUseNativeImageFallback(true)}

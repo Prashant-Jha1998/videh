@@ -775,6 +775,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const me = userRef.current;
       const mapped: Status[] = data.statuses.map((s: any) => {
         const isMe = Number(s.user_id) === Number(dbUserId);
+        const rawEditor = s.editor_data as StoryEditorData | null | undefined;
+        const editorData = rawEditor
+          ? {
+              ...rawEditor,
+              musicUri: rawEditor.musicUri
+                ? resolvePublicAssetUrl(rawEditor.musicUri) ?? rawEditor.musicUri
+                : undefined,
+            }
+          : undefined;
         return {
           id: String(s.id),
           userId: isMe ? "me" : String(s.user_id),
@@ -786,14 +795,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             : (s.user_avatar ?? undefined),
           content: s.content ?? "",
           type: s.type ?? "text",
-          mediaUrl: s.media_url ?? undefined,
+          mediaUrl: resolvePublicAssetUrl(s.media_url) ?? s.media_url ?? undefined,
           timestamp: new Date(s.created_at).getTime(),
           expiresAt: s.expires_at ? new Date(s.expires_at).getTime() : undefined,
           isBoosted: Boolean(s.is_boosted),
           boostEndsAt: s.boost_ends_at ? new Date(s.boost_ends_at).getTime() : undefined,
           boostStatus: s.boost_status ?? undefined,
           boostVerificationNote: s.boost_verification_note ?? undefined,
-          editorData: s.editor_data ?? undefined,
+          editorData,
           viewed: Boolean(s.viewed),
           backgroundColor: s.background_color ?? "#5B4FE8",
         };

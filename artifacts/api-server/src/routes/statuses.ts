@@ -8,7 +8,14 @@ import { query } from "../lib/db";
 import { enforceModerationForActivity } from "../lib/moderation";
 import { assertSameUser, requireAuth } from "../lib/auth";
 import { canSeeUserField } from "../lib/userPrivacySettings";
-import { publicMediaUrl } from "../lib/mediaStorage";
+import { publicMediaUrl, resolveStoredMediaUrl } from "../lib/mediaStorage";
+
+function resolveStatusMediaUrl(req: Request, url: unknown): string | null {
+  const raw = String(url ?? "").trim();
+  if (!raw) return null;
+  if (raw.startsWith("/api/statuses/media/")) return publicMediaUrl(req, raw);
+  return resolveStoredMediaUrl(req, raw) ?? (raw.startsWith("/") ? publicMediaUrl(req, raw) : raw);
+}
 
 const router = Router();
 const MAX_VIDEO_STORY_DURATION_MS = 60000;
@@ -400,7 +407,13 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
       });
     }
 
-    res.json({ success: true, statuses: visible });
+    res.json({
+      success: true,
+      statuses: visible.map((row) => ({
+        ...row,
+        media_url: resolveStatusMediaUrl(req, row.media_url),
+      })),
+    });
   } catch (err) {
     req.log.error({ err }, "get statuses error");
     res.status(500).json({ success: false });
