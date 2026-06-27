@@ -380,9 +380,12 @@ export default function StatusCreateScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], allowsEditing: false, quality: 0.8, base64: false });
     if (result.canceled || !result.assets[0]) { setMode("text"); return; }
     const asset = result.assets[0];
-    if (asset.type === "video" && typeof asset.duration === "number" && asset.duration > MAX_VIDEO_STORY_DURATION_MS) {
-      Alert.alert("Video too long", "You can add a video story up to 1 minute only.");
-      return;
+    if (asset.type === "video" && typeof asset.duration === "number") {
+      const durationMs = asset.duration < 1000 ? Math.round(asset.duration * 1000) : Math.round(asset.duration);
+      if (durationMs > MAX_VIDEO_STORY_DURATION_MS) {
+        Alert.alert("Video too long", "You can add a video story up to 1 minute only.");
+        return;
+      }
     }
     if (typeof asset.fileSize === "number" && asset.fileSize > MAX_STORY_MEDIA_BYTES) {
       Alert.alert("Video too large", "Please choose a story video under 150 MB.");
@@ -390,12 +393,16 @@ export default function StatusCreateScreen() {
     }
     setMediaUri(asset.uri);
     setMediaType(asset.type === "video" ? "video" : "image");
-    const nextDurationMs = asset.type === "video"
-      ? (typeof asset.duration === "number" && asset.duration > 0 ? asset.duration : MAX_VIDEO_STORY_DURATION_MS)
-      : null;
-    setMediaDurationMs(nextDurationMs);
-    setTrimStartMs(0);
-    setTrimEndMs(asset.type === "video" && nextDurationMs ? Math.min(nextDurationMs, MAX_VIDEO_STORY_DURATION_MS) : null);
+    if (asset.type === "video" && typeof asset.duration === "number" && asset.duration > 0) {
+      const durationMs = asset.duration < 1000 ? Math.round(asset.duration * 1000) : Math.round(asset.duration);
+      setMediaDurationMs(durationMs);
+      setTrimStartMs(0);
+      setTrimEndMs(Math.min(durationMs, MAX_VIDEO_STORY_DURATION_MS));
+    } else {
+      setMediaDurationMs(null);
+      setTrimStartMs(0);
+      setTrimEndMs(null);
+    }
     setMediaSizeBytes(typeof asset.fileSize === "number" ? asset.fileSize : null);
   };
 
@@ -512,9 +519,12 @@ export default function StatusCreateScreen() {
     const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images", "videos"], allowsEditing: false, quality: 0.8, base64: false });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
-      if (asset.type === "video" && typeof asset.duration === "number" && asset.duration > MAX_VIDEO_STORY_DURATION_MS) {
-        Alert.alert("Video too long", "You can add a video story up to 1 minute only.");
-        return;
+      if (asset.type === "video" && typeof asset.duration === "number") {
+        const durationMs = asset.duration < 1000 ? Math.round(asset.duration * 1000) : Math.round(asset.duration);
+        if (durationMs > MAX_VIDEO_STORY_DURATION_MS) {
+          Alert.alert("Video too long", "You can add a video story up to 1 minute only.");
+          return;
+        }
       }
       if (typeof asset.fileSize === "number" && asset.fileSize > MAX_STORY_MEDIA_BYTES) {
         Alert.alert("Video too large", "Please choose a story video under 150 MB.");
@@ -522,12 +532,16 @@ export default function StatusCreateScreen() {
       }
       setMediaUri(asset.uri);
       setMediaType(asset.type === "video" ? "video" : "image");
-      const nextDurationMs = asset.type === "video"
-        ? (typeof asset.duration === "number" && asset.duration > 0 ? asset.duration : MAX_VIDEO_STORY_DURATION_MS)
-        : null;
-      setMediaDurationMs(nextDurationMs);
-      setTrimStartMs(0);
-      setTrimEndMs(asset.type === "video" && nextDurationMs ? Math.min(nextDurationMs, MAX_VIDEO_STORY_DURATION_MS) : null);
+      if (asset.type === "video" && typeof asset.duration === "number" && asset.duration > 0) {
+        const durationMs = asset.duration < 1000 ? Math.round(asset.duration * 1000) : Math.round(asset.duration);
+        setMediaDurationMs(durationMs);
+        setTrimStartMs(0);
+        setTrimEndMs(Math.min(durationMs, MAX_VIDEO_STORY_DURATION_MS));
+      } else {
+        setMediaDurationMs(null);
+        setTrimStartMs(0);
+        setTrimEndMs(null);
+      }
       setMediaSizeBytes(typeof asset.fileSize === "number" ? asset.fileSize : null);
       setMode("media");
     }

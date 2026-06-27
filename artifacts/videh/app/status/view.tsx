@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Audio, ResizeMode, Video as AvVideo } from "expo-av";
+import { useEvent } from "expo";
+import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -35,6 +37,79 @@ function strokeToPath(points: Array<{ x: number; y: number }>): string {
   return points.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 }
 
+function normalizeStoryTrimMs(value: number | undefined): number | undefined {
+  if (value == null || !Number.isFinite(value) || value <= 0) return undefined;
+  // Some Android pickers report duration in seconds instead of milliseconds.
+  if (value < 1000) return Math.round(value * 1000);
+  return Math.round(value);
+}
+
+function VideoStatusPlayerSurface({
+  uri,
+  paused,
+  trimStartMs,
+  trimEndMs,
+  onReady,
+  onLoadError,
+}: {
+  uri: string;
+  paused: boolean;
+  trimStartMs?: number;
+  trimEndMs?: number;
+  onReady: () => void;
+  onLoadError: () => void;
+}) {
+  const readyNotifiedRef = useRef(false);
+  const startMs = normalizeStoryTrimMs(trimStartMs) ?? 0;
+  const endMs = normalizeStoryTrimMs(trimEndMs);
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = false;
+    p.muted = false;
+    p.volume = 1;
+    p.timeUpdateEventInterval = 0.25;
+  });
+  const { status } = useEvent(player, "statusChange", { status: player.status });
+
+  useEffect(() => {
+    readyNotifiedRef.current = false;
+  }, [uri]);
+
+  useEffect(() => {
+    if (status === "error") onLoadError();
+  }, [status, onLoadError]);
+
+  useEffect(() => {
+    if (status !== "readyToPlay" || readyNotifiedRef.current) return;
+    readyNotifiedRef.current = true;
+    if (startMs > 0) player.currentTime = startMs / 1000;
+    onReady();
+    if (!paused) player.play();
+  }, [status, startMs, paused, player, onReady]);
+
+  useEffect(() => {
+    if (status !== "readyToPlay") return;
+    if (paused) player.pause();
+    else player.play();
+  }, [paused, status, player]);
+
+  useEffect(() => {
+    if (!endMs) return;
+    const timer = setInterval(() => {
+      if (player.currentTime * 1000 >= endMs) player.pause();
+    }, 200);
+    return () => clearInterval(timer);
+  }, [player, endMs]);
+
+  return (
+    <VideoView
+      player={player}
+      style={{ width: W, height: H * 0.75 }}
+      contentFit="contain"
+      nativeControls={false}
+    />
+  );
+}
+
 function VideoStatusPlayer({
   uri,
   sessionToken,
@@ -52,26 +127,11 @@ function VideoStatusPlayer({
   onLoadError: () => void;
   onReady: () => void;
 }) {
-  const videoRef = useRef<AvVideo>(null);
-  const readyNotifiedRef = useRef(false);
   const { playableUri, failed, loading } = usePlayableVideoUri(uri, sessionToken);
-
-  useEffect(() => {
-    readyNotifiedRef.current = false;
-  }, [uri]);
 
   useEffect(() => {
     if (failed) onLoadError();
   }, [failed, onLoadError]);
-
-  useEffect(() => {
-    if (!playableUri) return;
-    if (paused) {
-      videoRef.current?.pauseAsync().catch(() => {});
-    } else {
-      videoRef.current?.playAsync().catch(() => {});
-    }
-  }, [paused, playableUri]);
 
   if (loading) {
     return <ActivityIndicator color="#fff" />;
@@ -81,33 +141,14 @@ function VideoStatusPlayer({
   }
 
   return (
-    <AvVideo
-      ref={videoRef}
-      source={{ uri: playableUri }}
-      style={{ width: W, height: H * 0.75 }}
-      useNativeControls={false}
-      resizeMode={ResizeMode.CONTAIN}
-      shouldPlay={!paused}
-      isLooping={false}
-      onLoad={() => {
-        if (!readyNotifiedRef.current) {
-          readyNotifiedRef.current = true;
-          onReady();
-        }
-        if (trimStartMs && trimStartMs > 0) {
-          videoRef.current?.setPositionAsync(trimStartMs).catch(() => {});
-        }
-        if (!paused) {
-          videoRef.current?.playAsync().catch(() => {});
-        }
-      }}
-      onError={onLoadError}
-      onPlaybackStatusUpdate={(status) => {
-        if (!status.isLoaded || !trimEndMs) return;
-        if ((status.positionMillis ?? 0) >= trimEndMs) {
-          videoRef.current?.pauseAsync().catch(() => {});
-        }
-      }}
+    <VideoStatusPlayerSurface
+      key={playableUri}
+      uri={playableUri}
+      paused={paused}
+      trimStartMs={trimStartMs}
+      trimEndMs={trimEndMs}
+      onReady={onReady}
+      onLoadError={onLoadError}
     />
   );
 }
@@ -200,6 +241,14 @@ export default function ViewStatusScreen() {
   const editorData = currentStatus?.editorData;
 
   useEffect(() => {
+    void Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+    });
+  }, []);
+
+  useEffect(() => {
     // Move status group to Viewed instantly when viewer opens.
     ids.forEach((id) => markStatusViewedLocally(id));
   }, [ids.join(","), markStatusViewedLocally]);
@@ -236,7 +285,7 @@ export default function ViewStatusScreen() {
     progress.setValue(fromValue);
     const status = statuses.find((s) => s.id === ids[idx]);
     const trimmedVideoMs = status?.type === "video" && status.editorData?.trimEndMs
-      ? Math.max(1000, status.editorData.trimEndMs - (status.editorData.trimStartMs ?? 0))
+      ? Math.max(1000, (normalizeStoryTrimMs(status.editorData.trimEndMs) ?? 8000) - (normalizeStoryTrimMs(status.editorData.trimStartMs) ?? 0))
       : null;
     const duration = (trimmedVideoMs ?? ((status?.type === "image" || status?.type === "video") ? 8000 : 5000)) * (1 - fromValue);
     const anim = Animated.timing(progress, { toValue: 1, duration, useNativeDriver: false });
@@ -265,6 +314,14 @@ export default function ViewStatusScreen() {
     setMediaLoadFailed(false);
     setVideoReady(false);
   }, [currentStatus?.id, currentStatus?.mediaUrl]);
+
+  // Unblock story progress if video metadata never arrives (slow network / codec edge cases).
+  useEffect(() => {
+    const status = statuses.find((s) => s.id === ids[currentIdx]);
+    if (status?.type !== "video" || !resolvedMediaUrl || videoReady || mediaLoadFailed) return;
+    const timer = setTimeout(() => setVideoReady(true), 12000);
+    return () => clearTimeout(timer);
+  }, [currentIdx, ids, statuses, resolvedMediaUrl, videoReady, mediaLoadFailed]);
 
   const pauseStory = useCallback(() => {
     if (paused) return;

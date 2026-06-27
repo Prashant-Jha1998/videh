@@ -136,6 +136,11 @@ export function usePlayableVideoUri(uri: string | undefined, sessionToken?: stri
     }
 
     if (absolute.startsWith("http://") || absolute.startsWith("https://")) {
+      const canStreamDirectly = absolute.includes("/api/statuses/media/");
+      if (canStreamDirectly) {
+        setPlayableUri(absolute);
+        return;
+      }
       const prepareRemote = async () => {
         try {
           const localUri = await getCachedVideoFile(absolute, sessionToken);
