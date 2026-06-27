@@ -36,7 +36,7 @@ export function formatChatBubbleTime(timestamp: number): string {
   const h = date.getHours();
   const m = date.getMinutes().toString().padStart(2, "0");
   const ampm = h >= 12 ? "pm" : "am";
-  return `${h % 12 || 12}:${m} ${ampm}`;
+  return `${h % 12 || 12}:${m}\u00A0${ampm}`;
 }
 
 /** Short relative label for full-screen media headers (Videh-style). */

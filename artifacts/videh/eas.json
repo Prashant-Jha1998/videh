@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v118-launch-crash-fix"
+        "key": "apk-release-v119-keyboard-bubble-fix"
       }
     },
     "production": {

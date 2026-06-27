@@ -1983,8 +1983,8 @@ export default function ChatScreen() {
   const onKeyboardAnimEnd = useCallback(() => {
     keyboardAnimatingRef.current = false;
     if (searching || blocksAutoScroll() || !lastNearBottomRef.current) return;
-    pinToLatest(false, { source: "keyboard-anim-end" });
-  }, [searching, blocksAutoScroll, pinToLatest]);
+    pinChatToBottom(false);
+  }, [searching, blocksAutoScroll, pinChatToBottom]);
 
   /** Videh: track keyboard animation without forcing scroll (composer uses KeyboardStickyView). */
   useGenericKeyboardHandler(
@@ -2003,8 +2003,8 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
-    // Resize the window so the message list shrinks above keyboard (WhatsApp-style).
-    KeyboardController.setInputMode(AndroidSoftInputModes.SOFT_INPUT_ADJUST_RESIZE);
+    // v1.0.40: list padding + KeyboardStickyView (not window resize).
+    KeyboardController.setInputMode(AndroidSoftInputModes.SOFT_INPUT_ADJUST_NOTHING);
     return () => {
       KeyboardController.setDefaultMode();
     };
@@ -2029,10 +2029,16 @@ export default function ChatScreen() {
     if (searching) return;
     const justOpened = keyboardVisible && !prevKeyboardVisibleRef.current;
     prevKeyboardVisibleRef.current = keyboardVisible;
-    if (justOpened && !userDraggingRef.current && !emojiPanelOpenRef.current) {
+    if (
+      justOpened
+      && !blocksAutoScroll()
+      && lastNearBottomRef.current
+      && !userDraggingRef.current
+      && !emojiPanelOpenRef.current
+    ) {
       pinChatToBottom(false);
     }
-  }, [keyboardVisible, searching, pinChatToBottom]);
+  }, [keyboardVisible, searching, pinChatToBottom, blocksAutoScroll]);
 
   /** Emoji panel replaces keyboard — keep latest visible above panel. */
   useEffect(() => {
@@ -2128,21 +2134,19 @@ export default function ChatScreen() {
     prevMessageCountRef.current = count;
   }, [messages.length, messagesReady, searching, scrollToLatestIfFollowing, scheduleOpenChatPin, blocksAutoScroll]);
 
-  /** Reserve space above composer + keyboard. Android RESIZE shrinks the list; iOS needs kb inset. */
+  /** Reserve space above sticky composer + keyboard/emoji (v1.0.40 WhatsApp-style). */
   const listVisualBottomPad = useMemo(() => {
     if (searching) return 8;
     const typingInset = remoteTypingNames.length > 0 ? CHAT_TYPING_FOOTER_PX : 0;
+    const kbInset = keyboardVisible ? Math.max(0, keyboardHeight) : 0;
     const emojiInset =
       emojiPanelOpen && !selectionActive && voiceRecPhase === "idle" && !keyboardVisible
         ? CHAT_EMOJI_PANEL_HEIGHT
         : 0;
-    const iosKbInset =
-      Platform.OS === "ios" && keyboardVisible ? Math.max(0, keyboardHeight) : 0;
-    const overlayInset =
-      iosKbInset > 0 || emojiInset > 0
-        ? composerHeight + iosKbInset + emojiInset + CHAT_COMPOSER_CLEARANCE_PX
-        : 0;
-    return Math.max(10, overlayInset + typingInset + 8);
+    return Math.max(
+      10,
+      composerHeight + kbInset + emojiInset + CHAT_COMPOSER_CLEARANCE_PX + typingInset,
+    );
   }, [
     searching,
     composerHeight,
@@ -2155,7 +2159,7 @@ export default function ChatScreen() {
   ]);
   const listTopPadding = 12;
   const jumpFabBottom = useMemo(() => {
-    const kbInset = keyboardVisible && Platform.OS === "ios" ? keyboardHeight : 0;
+    const kbInset = keyboardVisible ? Math.max(0, keyboardHeight) : 0;
     const emojiInset =
       emojiPanelOpen && !selectionActive && voiceRecPhase === "idle" && !keyboardVisible
         ? CHAT_EMOJI_PANEL_HEIGHT
@@ -2169,6 +2173,14 @@ export default function ChatScreen() {
     },
     [composerHeight],
   );
+
+  /** When composer/keyboard inset grows, re-pin tail so messages stay above both. */
+  useEffect(() => {
+    if (searching || blocksAutoScroll() || !lastNearBottomRef.current) return;
+    scrollToLatestIfFollowing(false, "list-bottom-pad");
+    const t = setTimeout(() => scrollToLatestIfFollowing(false, "list-bottom-pad-delay"), 120);
+    return () => clearTimeout(t);
+  }, [listVisualBottomPad, searching, scrollToLatestIfFollowing, blocksAutoScroll]);
 
   useEffect(() => {
     return () => {
@@ -2943,10 +2955,11 @@ export default function ChatScreen() {
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: selectionRowTint }]} pointerEvents="none" />
         ) : null}
         <View
-          style={[
-            styles.msgRowInner,
-            isMe ? styles.msgRowInnerRight : styles.msgRowInnerLeft,
-          ]}
+          style={
+            canQuickForward
+              ? [styles.msgRowInner, isMe ? styles.msgRowInnerRight : styles.msgRowInnerLeft]
+              : styles.msgRowSingle
+          }
         >
         {canQuickForward && isMe ? (
           <MediaForwardButton onPress={() => openForwardScreen([item.id])} />
@@ -2979,7 +2992,7 @@ export default function ChatScreen() {
             });
           }}
           delayLongPress={400}
-          style={[styles.msgWrap, isMe ? styles.msgRight : styles.msgLeft, styles.msgWrapInRow]}
+          style={[styles.msgWrap, isMe ? styles.msgRight : styles.msgLeft, canQuickForward ? styles.msgWrapInRow : null]}
         >
         {/* Forwarded label */}
         {item.isForwarded && !isDeleted && (
@@ -3059,13 +3072,19 @@ export default function ChatScreen() {
                   styles.deletedTextWa,
                   { color: isMe ? deletedMeLabel : colors.mutedForeground },
                 ]}
-                numberOfLines={3}
+                numberOfLines={2}
               >
                 {isMe ? "Deleted for everyone" : "This message was deleted"}
+                <Text style={[styles.deletedTimeWa, { color: isMe ? deletedMeTime : colors.mutedForeground }]}>
+                  {"\u00A0\u00A0"}
+                  {formatChatBubbleTime(item.timestamp)}
+                </Text>
               </Text>
-              <Text style={[styles.deletedTimeWa, { color: isMe ? deletedMeTime : colors.mutedForeground }]}>
-                {formatChatBubbleTime(item.timestamp)}
-              </Text>
+              {isMe ? (
+                <View style={styles.compactTickWrap}>
+                  <TickIcon status={item.status} color={deletedMeTime} />
+                </View>
+              ) : null}
             </View>
           ) : isViewOnceOpened ? (
             <ViewOnceOpenedBubble kind={item.type === "video" ? "video" : "image"} />
@@ -3246,7 +3265,7 @@ export default function ChatScreen() {
                 {renderChatMentionParts(item.text)}
                 <Text style={[styles.msgTime, styles.msgTimeInline, { color: metaTextColor }]}>
                   {item.isEdited ? " edited" : ""}
-                  {"  "}
+                  {"\u00A0\u00A0"}
                   {formatChatBubbleTime(item.timestamp)}
                 </Text>
               </Text>
@@ -3322,7 +3341,11 @@ export default function ChatScreen() {
       </View>
     );
 
-    if (Platform.OS === "web" || isDeleted || selectedIds.length > 0) return msgRow;
+    if (Platform.OS === "web" || selectedIds.length > 0) return msgRow;
+
+    if (isDeleted) {
+      return <View style={[styles.msgSwipeRow, styles.msgSwipeContainer]}>{msgRow}</View>;
+    }
 
     return (
       <Swipeable
@@ -4976,6 +4999,7 @@ const styles = StyleSheet.create({
   },
   msgRowInnerLeft: { alignSelf: "flex-start" },
   msgRowInnerRight: { alignSelf: "flex-end" },
+  msgRowSingle: { width: "100%" },
   msgWrapInRow: { flexShrink: 1, maxWidth: W * 0.82 },
   mediaForwardBtn: {
     width: 36,
@@ -5034,7 +5058,7 @@ const styles = StyleSheet.create({
   },
   /** Bottom corners even; SVG tail sits at corner */
   bubbleWithTailShape: { borderBottomLeftRadius: 10, borderBottomRightRadius: 10 },
-  bubbleDeleted: { paddingVertical: 7, paddingHorizontal: 9, minWidth: 190, maxWidth: W * 0.78 },
+  bubbleDeleted: { paddingVertical: 6, paddingHorizontal: 8 },
   bubbleImg: {
     paddingHorizontal: 0,
     paddingVertical: 0,
@@ -5288,15 +5312,14 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.45)",
   },
   editedLabel: { fontSize: 10, fontFamily: "Inter_400Regular", fontStyle: "italic" },
-  msgTime: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  msgTime: { fontSize: 11, fontFamily: "Inter_400Regular", flexShrink: 0 },
   deletedRowWa: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    paddingVertical: 1,
-    minWidth: 172,
+    alignItems: "flex-end",
+    gap: 6,
+    maxWidth: "100%",
   },
-  deletedIconWa: { marginTop: 1 },
+  deletedIconWa: { marginTop: 1, flexShrink: 0 },
   deletedTextWa: {
     flexShrink: 1,
     fontSize: 14,
@@ -5304,7 +5327,7 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
     lineHeight: 19,
   },
-  deletedTimeWa: { fontSize: 11, fontFamily: "Inter_400Regular", flexShrink: 0, paddingLeft: 4 },
+  deletedTimeWa: { fontSize: 11, fontFamily: "Inter_400Regular", flexShrink: 0 },
   reactionsRow: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 2, marginHorizontal: 4 },
   reactionChip: { flexDirection: "row", alignItems: "center", gap: 2, borderRadius: 12, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 0.5, borderColor: "transparent" },
   reactionEmoji: { fontSize: 14 },
