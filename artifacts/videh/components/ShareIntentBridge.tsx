@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useShareIntent } from "expo-share-intent";
+import { useShareIntentContext } from "expo-share-intent";
 import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import { useApp } from "@/context/AppContext";
@@ -9,9 +9,7 @@ import { stashIncomingShare, peekIncomingShare } from "@/lib/incomingSharePayloa
 export function ShareIntentBridge() {
   const router = useRouter();
   const { isAuthenticated, isInitialized } = useApp();
-  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent({
-    disabled: Platform.OS === "web",
-  });
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
   const handlingRef = useRef(false);
 
   useEffect(() => {

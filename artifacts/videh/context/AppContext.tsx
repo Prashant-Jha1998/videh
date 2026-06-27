@@ -67,6 +67,12 @@ function isMediaMessageType(type: Message["type"]): boolean {
 }
 import { globalMessageRetentionCutoffMs } from "@/lib/chatMessageRetention";
 import {
+  collectPendingLocalMessages,
+  mergeServerWithPending,
+  preserveHistoricallyLoadedMessages,
+  serverWindowMatchesLocalTail,
+} from "@/lib/mergePendingChatMessages";
+import {
   loadChatMessageCache,
   rememberChatMessagesInStore,
   schedulePersistChatMessageCache,

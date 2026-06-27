@@ -69,6 +69,7 @@ import { DocumentMessageBubble } from "@/components/DocumentMessageBubble";
 import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/chatMessageText";
 import { ContactMessageBubble } from "@/components/ContactMessageBubble";
 import { openChatDocument } from "@/lib/openChatDocument";
+import { launchChatPhotoCamera, launchChatVideoCamera } from "@/lib/openChatCamera";
 import { documentFilenameFromText, parseDocumentMessagePayload } from "@/lib/documentMessage";
 import { dedupeEmails, dedupePhones, parseContactMessage } from "@/lib/contactMessage";
 import type { ContactShareRow } from "@/lib/loadDeviceContactsForShare";

@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v117-keyboard-chat-fix"
+        "key": "apk-release-v118-launch-crash-fix"
       }
     },
     "production": {

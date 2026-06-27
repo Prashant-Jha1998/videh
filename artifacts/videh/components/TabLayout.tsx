@@ -23,6 +23,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: "circle.dotted", selected: "circle.fill" }} />
         <Label>{t("tab.status")}</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="video">
+        <Icon sf={{ default: "play.rectangle", selected: "play.rectangle.fill" }} />
+        <Label>{t("tab.video")}</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="calls">
         <Icon sf={{ default: "phone", selected: "phone.fill" }} />
         <Label>{t("tab.calls")}</Label>
@@ -30,10 +34,6 @@ function NativeTabLayout() {
       <NativeTabs.Trigger name="settings">
         <Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />
         <Label>{t("tab.settings")}</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="video">
-        <Icon sf={{ default: "play.rectangle", selected: "play.rectangle.fill" }} />
-        <Label>{t("tab.video")}</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -98,6 +98,15 @@ export function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="video"
+        options={{
+          title: t("tab.video"),
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "play-circle" : "play-circle-outline"} size={24} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="calls"
         options={{
           title: t("tab.calls"),
@@ -112,15 +121,6 @@ export function ClassicTabLayout() {
           title: t("tab.settings"),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "settings" : "settings-outline"} size={24} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="video"
-        options={{
-          title: t("tab.video"),
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "play-circle" : "play-circle-outline"} size={24} color={color} />
           ),
         }}
       />
