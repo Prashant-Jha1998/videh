@@ -92,7 +92,6 @@ import { isGifUri } from "@/lib/imageEdit";
 import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { formatTypingLabel } from "@/lib/typingIndicator";
 import { TypingIndicator } from "@/components/TypingIndicator";
-import { InvertedListSlot } from "@/components/InvertedListSlot";
 import { ChatAlbumBubble } from "@/components/ChatAlbumBubble";
 import { MediaProgressRing } from "@/components/MediaProgressRing";
 import { ChatSystemMessageBubble } from "@/components/ChatSystemMessageBubble";
@@ -3558,9 +3557,6 @@ export default function ChatScreen() {
     return () => cancelAnimationFrame(frame);
   }, [messagesScrollAnchorKey, readingHistory, searching, messageListInverted]);
 
-  const wrapInvertedListChrome = (node: React.ReactNode) =>
-    messageListInverted ? <InvertedListSlot>{node}</InvertedListSlot> : node;
-
   useFocusEffect(
     useCallback(() => {
       if (!chatId || !chat?.isGroup || !user?.dbId) {
@@ -4402,75 +4398,71 @@ export default function ChatScreen() {
           inverted={messageListInverted}
           data={chatListData}
           ListHeaderComponent={
-            !searching && remoteTypingNames.length > 0
-              ? wrapInvertedListChrome(
-                  <TypingIndicator
-                    bubbleColor={colors.chatBubbleReceived}
-                    dotColor={colors.mutedForeground}
-                    textColor={colors.mutedForeground}
-                    label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
-                  />,
-                )
-              : null
+            !searching && remoteTypingNames.length > 0 ? (
+              <TypingIndicator
+                bubbleColor={colors.chatBubbleReceived}
+                dotColor={colors.mutedForeground}
+                textColor={colors.mutedForeground}
+                label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
+              />
+            ) : null
           }
           ListFooterComponent={
-            !searching
-              ? wrapInvertedListChrome(
+            !searching ? (
+              <>
+                {loadingOlder ? (
+                  <View style={styles.olderLoader}>
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  </View>
+                ) : null}
+                {showBusinessIntro && businessChannelInfo ? (
                   <>
-                    {loadingOlder ? (
-                      <View style={styles.olderLoader}>
-                        <ActivityIndicator size="small" color={colors.primary} />
-                      </View>
-                    ) : null}
-                    {showBusinessIntro && businessChannelInfo ? (
-                      <>
-                        <BusinessSecureBanner />
-                        <BusinessIntroCard
-                          displayName={businessChannelInfo.displayName}
-                          logoUrl={businessChannelInfo.logoUrl ?? contactAvatar}
-                          joinedLabel={formatBusinessJoinedLabel(businessChannelInfo.joinedAt)}
-                          isDark={colors.isDark}
-                          onManageMessages={() => setManageBusinessOpen(true)}
-                        />
-                      </>
-                    ) : null}
-                    {showGroupWelcomeCard && groupWelcomePreview ? (
-                      <>
-                        <ChatEncryptionNotice />
-                        <GroupWelcomeCard
-                          addedByPhone={groupWelcomePreview.addedByPhone}
-                          addedByName={groupWelcomePreview.addedByName}
-                          creatorIsContact={groupWelcomePreview.creatorIsContact}
-                          memberCount={groupWelcomePreview.memberCount}
-                          contactsInGroupCount={groupWelcomePreview.contactsInGroupCount}
-                          createdLabel={formatDateChipLabel(groupWelcomePreview.createdAtMs)}
-                          isDark={colors.isDark}
-                          onExitGroup={handleExitGroup}
-                          onStay={handleStayInGroup}
-                          onReport={handleReportGroup}
-                        />
-                      </>
-                    ) : null}
-                    {showUnsavedContactCard && peerContactPreview ? (
-                      <>
-                        <ChatEncryptionNotice />
-                        <UnsavedContactCard
-                          phone={peerContactPreview.phone}
-                          profileName={peerContactPreview.profileName}
-                          initials={initials}
-                          avatarUrl={contactAvatar}
-                          avatarBg={avatarBg}
-                          commonGroupCount={peerContactPreview.commonGroupCount}
-                          isDark={colors.isDark}
-                          onBlock={handleMenuBlockToggle}
-                          onAdd={() => { void handleAddUnsavedContact(); }}
-                          onReport={() => handleMenuReport(false)}
-                        />
-                      </>
-                    ) : null}
-                  </>,
-                )
-              : null
+                    <BusinessSecureBanner />
+                    <BusinessIntroCard
+                      displayName={businessChannelInfo.displayName}
+                      logoUrl={businessChannelInfo.logoUrl ?? contactAvatar}
+                      joinedLabel={formatBusinessJoinedLabel(businessChannelInfo.joinedAt)}
+                      isDark={colors.isDark}
+                      onManageMessages={() => setManageBusinessOpen(true)}
+                    />
+                  </>
+                ) : null}
+                {showGroupWelcomeCard && groupWelcomePreview ? (
+                  <>
+                    <ChatEncryptionNotice />
+                    <GroupWelcomeCard
+                      addedByPhone={groupWelcomePreview.addedByPhone}
+                      addedByName={groupWelcomePreview.addedByName}
+                      creatorIsContact={groupWelcomePreview.creatorIsContact}
+                      memberCount={groupWelcomePreview.memberCount}
+                      contactsInGroupCount={groupWelcomePreview.contactsInGroupCount}
+                      createdLabel={formatDateChipLabel(groupWelcomePreview.createdAtMs)}
+                      isDark={colors.isDark}
+                      onExitGroup={handleExitGroup}
+                      onStay={handleStayInGroup}
+                      onReport={handleReportGroup}
+                    />
+                  </>
+                ) : null}
+                {showUnsavedContactCard && peerContactPreview ? (
+                  <>
+                    <ChatEncryptionNotice />
+                    <UnsavedContactCard
+                      phone={peerContactPreview.phone}
+                      profileName={peerContactPreview.profileName}
+                      initials={initials}
+                      avatarUrl={contactAvatar}
+                      avatarBg={avatarBg}
+                      commonGroupCount={peerContactPreview.commonGroupCount}
+                      isDark={colors.isDark}
+                      onBlock={handleMenuBlockToggle}
+                      onAdd={() => { void handleAddUnsavedContact(); }}
+                      onReport={() => handleMenuReport(false)}
+                    />
+                  </>
+                ) : null}
+              </>
+            ) : null
           }
           keyExtractor={(row) => {
             if (row.rowType === "date") return row.id;
@@ -4564,24 +4556,20 @@ export default function ChatScreen() {
           }}
           ListEmptyComponent={
             initializing ? (
-              wrapInvertedListChrome(
-                <View style={styles.initWrap}>
-                  <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.starting")}</Text>
-                </View>,
-              )
+              <View style={styles.initWrap}>
+                <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.starting")}</Text>
+              </View>
             ) : searching ? (
               <View style={styles.initWrap}>
                 <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.noResults")}</Text>
               </View>
             ) : !messagesReady ? (
-              wrapInvertedListChrome(
-                <View style={styles.initWrap}>
-                  <ActivityIndicator size="small" color={colors.primary} />
-                  <Text style={[styles.initText, { color: colors.mutedForeground, marginTop: 10 }]}>
-                    {t("chat.loadingMessages")}
-                  </Text>
-                </View>,
-              )
+              <View style={styles.initWrap}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={[styles.initText, { color: colors.mutedForeground, marginTop: 10 }]}>
+                  {t("chat.loadingMessages")}
+                </Text>
+              </View>
             ) : null
           }
         />
