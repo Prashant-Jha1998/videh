@@ -218,6 +218,9 @@ export function DeveloperApiPanel({ data, busy, error, leadId, reference, onRefr
                 Base URL: <code>/v1</code> · <code>GET /v1/me</code> ·{" "}
                 <code>POST /v1/&#123;phone-number-id&#125;/messages</code>
               </p>
+              <p className="text-xs text-[#667781] pt-2">
+                Open <strong>Usage guide</strong> in the left sidebar for Node, Python, PHP &amp; Supabase examples.
+              </p>
             </div>
           ) : null}
         </>

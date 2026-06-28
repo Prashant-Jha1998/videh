@@ -18,7 +18,7 @@ import { TemplateMessagePreview } from "./components/TemplateMessagePreview";
 import { OnboardingRequirements } from "./components/OnboardingRequirements";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { ConversationPricing } from "./components/ConversationPricing";
-import { DeveloperDashboard } from "./components/DeveloperDashboard";
+import { DeveloperUsageGuide } from "./components/DeveloperUsageGuide";
 import { DeveloperAuth, type AuthMode } from "./components/DeveloperAuth";
 import { devFetch } from "./lib/devFetch";
 import { isLeadConsoleReady, type ActiveLeadSummary } from "./lib/developerPortalState";
@@ -28,6 +28,7 @@ const NAV = [
   { href: "#features", label: "Features" },
   { href: "#how-it-works", label: "How it works" },
   { href: "#pricing", label: "Pricing" },
+  { href: "#usage-guide", label: "Usage guide" },
   { href: "#api", label: "API" },
   { href: "#dashboard", label: "Developer console" },
   { href: "#get-api", label: "Apply", action: "apply" as const },
@@ -145,13 +146,13 @@ const FAQ = [
 ];
 
 const API_ME = `curl https://developer.videh.co.in/v1/me \\
-  -H "Authorization: Bearer vsec_YOUR_SECRET"`;
+  -H "Authorization: Bearer vsk_YOUR_KEY_ID:vsec_YOUR_SECRET"`;
 
 const API_LIST_TEMPLATES = `curl https://developer.videh.co.in/v1/templates \\
-  -H "Authorization: Bearer vsec_YOUR_SECRET"`;
+  -H "Authorization: Bearer vsk_YOUR_KEY_ID:vsec_YOUR_SECRET"`;
 
 const API_SAMPLE = `curl -X POST https://developer.videh.co.in/v1/PHONE_NUMBER_ID/messages \\
-  -H "Authorization: Bearer vsec_YOUR_SECRET" \\
+  -H "Authorization: Bearer vsk_YOUR_KEY_ID:vsec_YOUR_SECRET" \\
   -H "Content-Type: application/json" \\
   -d '{
     "to": "919876543210",
@@ -433,11 +434,11 @@ export default function App() {
                 <ArrowRight className="h-4 w-4" />
               </a>
               <a
-                href="#api"
+                href="#usage-guide"
                 className="inline-flex items-center gap-2 border border-white/25 hover:bg-white/10 text-white font-semibold px-6 py-3 rounded-xl transition-colors"
               >
                 <Code2 className="h-4 w-4" />
-                View API docs
+                Usage guide
               </a>
             </div>
             <div className="mt-10 flex flex-wrap gap-6 text-sm text-white/60">
@@ -548,6 +549,10 @@ export default function App() {
         </div>
       </section>
 
+      <section id="usage-guide" className="py-20 px-4 bg-gradient-to-b from-white to-[#f0f2f5]">
+        <DeveloperUsageGuide variant="public" />
+      </section>
+
       <section id="api" className="py-20 px-4">
         <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-10 items-start">
           <div>
@@ -556,6 +561,13 @@ export default function App() {
               Integrate in minutes. Send utility OTPs, order updates, or marketing templates from your backend,
               ERP, or no-code automation.
             </p>
+            <a
+              href="#usage-guide"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-[#5B4FE8] hover:underline mb-6"
+            >
+              Full usage guide with Node, Python, PHP &amp; Supabase examples
+              <ArrowRight className="h-4 w-4" />
+            </a>
             <ul className="space-y-3 text-sm">
               {[
                 "Bearer token authentication",

@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BarChart3,
+  BookOpen,
   Building2,
   CheckCircle2,
   CreditCard,
@@ -23,6 +24,7 @@ import {
   DeveloperChannelPanel,
   DeveloperTemplatesPanel,
 } from "./DeveloperPortalPanels";
+import { DeveloperUsageGuidePanel } from "./DeveloperUsageGuide";
 import { useDeveloperPortal } from "../hooks/useDeveloperPortal";
 import { devFetch } from "../lib/devFetch";
 import { getRazorpayLogoUrl } from "../lib/razorpayCheckout";
@@ -34,7 +36,7 @@ declare global {
 }
 
 const SETUP_STEPS = ["plan", "company", "documents", "profile", "channel", "payment"] as const;
-const WORKSPACE_STEPS = ["done", "channel-console", "templates", "api", "billing"] as const;
+const WORKSPACE_STEPS = ["done", "channel-console", "templates", "api", "usage-guide", "billing"] as const;
 const STEPS = [...SETUP_STEPS, ...WORKSPACE_STEPS] as const;
 type Step = (typeof STEPS)[number];
 type SetupStep = (typeof SETUP_STEPS)[number];
@@ -70,6 +72,7 @@ const MODULES: {
   { id: "channel-console", label: "Business channel", subtitle: "Phone number & channel IDs", icon: Phone, section: "workspace" },
   { id: "templates", label: "Message templates", subtitle: "Create & submit for approval", icon: MessageSquare, section: "workspace" },
   { id: "api", label: "API access", subtitle: "Production keys & endpoints", icon: Key, section: "workspace" },
+  { id: "usage-guide", label: "Usage guide", subtitle: "Code examples & integration", icon: BookOpen, section: "workspace" },
   { id: "billing", label: "Billing & usage", subtitle: "Usage metrics & plan", icon: BarChart3, section: "workspace" },
 ];
 
@@ -1244,6 +1247,7 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                       { id: "channel-console" as Step, label: "Business channel", desc: "Phone number & channel IDs" },
                       { id: "templates" as Step, label: "Message templates", desc: "Submit templates for approval" },
                       { id: "api" as Step, label: "API access", desc: "Production keys when approved" },
+                      { id: "usage-guide" as Step, label: "Usage guide", desc: "Code examples by language" },
                       { id: "billing" as Step, label: "Billing & usage", desc: "Usage metrics & plan" },
                     ] as const
                   ).map((item) => (
@@ -1276,6 +1280,12 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
           {step === "channel-console" && <DeveloperChannelPanel {...portalPanelProps} />}
           {step === "templates" && <DeveloperTemplatesPanel {...portalPanelProps} />}
           {step === "api" && <DeveloperApiPanel {...portalPanelProps} />}
+          {step === "usage-guide" && (
+            <DeveloperUsageGuidePanel
+              phoneNumberId={portalPanelProps.data?.account?.videh_phone_number_id ?? undefined}
+              apiKeyId={portalPanelProps.data?.account?.api_key_id ?? undefined}
+            />
+          )}
           {step === "billing" && <DeveloperBillingPanel {...portalPanelProps} />}
     </OnboardingConsoleLayout>
   );
