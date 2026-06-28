@@ -18,6 +18,7 @@ import { TemplateMessagePreview } from "./components/TemplateMessagePreview";
 import { OnboardingRequirements } from "./components/OnboardingRequirements";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { ConversationPricing } from "./components/ConversationPricing";
+import { DeveloperDashboard } from "./components/DeveloperDashboard";
 import { DeveloperUsageGuide } from "./components/DeveloperUsageGuide";
 import { DeveloperAuth, type AuthMode } from "./components/DeveloperAuth";
 import { devFetch } from "./lib/devFetch";
