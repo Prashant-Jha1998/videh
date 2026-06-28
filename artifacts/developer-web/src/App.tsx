@@ -212,8 +212,23 @@ export default function App() {
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
   const [session, setSession] = useState<{ email: string } | null>(null);
   const [activeLead, setActiveLead] = useState<ActiveLeadSummary | null>(null);
+  const [headerSolid, setHeaderSolid] = useState(false);
 
   const consoleReady = isLeadConsoleReady(activeLead);
+
+  useEffect(() => {
+    const onScroll = () => setHeaderSolid(window.scrollY > 56);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  /** Common typo: #usage_guide → #usage-guide */
+  useEffect(() => {
+    if (window.location.hash === "#usage_guide") {
+      window.location.replace(`${window.location.pathname}${window.location.search}#usage-guide`);
+    }
+  }, []);
 
   const refreshSession = useCallback(async () => {
     try {
@@ -334,9 +349,20 @@ export default function App() {
       {wizardOpen ? <OnboardingWizard onClose={closeWizard} onNeedAuth={needAuthForWizard} /> : null}
       {!wizardOpen && !authMode ? (
       <>
-      <header className="fixed top-0 inset-x-0 z-50 glass border-b border-white/10">
+      <header
+        className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 ${
+          headerSolid
+            ? "bg-white/95 backdrop-blur-md border-b border-gray-200 shadow-sm"
+            : "glass border-b border-white/10"
+        }`}
+      >
         <div className="max-w-6xl mx-auto px-4 h-[4.5rem] md:h-20 flex items-center justify-between gap-3">
-          <a href="#" className="flex items-center gap-3 text-white font-bold shrink-0 min-w-0">
+          <a
+            href="#"
+            className={`flex items-center gap-3 font-bold shrink-0 min-w-0 ${
+              headerSolid ? "text-[#14131F]" : "text-white"
+            }`}
+          >
             <span className="flex h-12 w-12 md:h-14 md:w-14 shrink-0 items-center justify-center rounded-2xl bg-white p-1.5 md:p-2 shadow-lg ring-2 ring-white/30">
               <img
                 src="/videh_icon_foreground.png"
@@ -358,7 +384,11 @@ export default function App() {
                   key={l.href}
                   href={href}
                   onClick={open ? openConsole : undefined}
-                  className="text-sm font-semibold text-white/95 px-4 py-2 rounded-lg border border-white/20 bg-white/10 hover:bg-white/20 hover:border-white/30 transition-colors whitespace-nowrap"
+                  className={`text-sm font-semibold px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${
+                    headerSolid
+                      ? "text-[#14131F] border border-gray-200 bg-gray-50 hover:bg-[#5B4FE8]/10 hover:border-[#5B4FE8]/35"
+                      : "text-white/95 border border-white/20 bg-white/10 hover:bg-white/20 hover:border-white/30"
+                  }`}
                 >
                   {l.label}
                 </a>
@@ -368,11 +398,21 @@ export default function App() {
           <div className="shrink-0 flex items-center gap-2">
             {session ? (
               <>
-                <span className="hidden md:inline text-xs text-white/70 truncate max-w-[140px]">{session.email}</span>
+                <span
+                  className={`hidden md:inline text-xs truncate max-w-[140px] ${
+                    headerSolid ? "text-[#667781]" : "text-white/70"
+                  }`}
+                >
+                  {session.email}
+                </span>
                 <button
                   type="button"
                   onClick={() => void logout()}
-                  className="text-sm font-semibold text-white/90 px-3 py-2 rounded-lg border border-white/20 hover:bg-white/10"
+                  className={`text-sm font-semibold px-3 py-2 rounded-lg border transition-colors ${
+                    headerSolid
+                      ? "text-[#14131F] border-gray-200 hover:bg-gray-50"
+                      : "text-white/90 border-white/20 hover:bg-white/10"
+                  }`}
                 >
                   Sign out
                 </button>
@@ -381,13 +421,21 @@ export default function App() {
               <>
                 <a
                   href="#login"
-                  className="text-sm font-semibold text-white/90 px-3 py-2 rounded-lg border border-white/20 hover:bg-white/10"
+                  className={`text-sm font-semibold px-3 py-2 rounded-lg border transition-colors ${
+                    headerSolid
+                      ? "text-[#14131F] border-gray-200 hover:bg-gray-50"
+                      : "text-white/90 border-white/20 hover:bg-white/10"
+                  }`}
                 >
                   Sign in
                 </a>
                 <a
                   href="#signup"
-                  className="text-sm font-semibold text-[#5B4FE8] px-3 py-2 rounded-lg bg-white hover:bg-white/90"
+                  className={`text-sm font-semibold px-3 py-2 rounded-lg transition-colors ${
+                    headerSolid
+                      ? "text-[#5B4FE8] border border-[#5B4FE8]/30 bg-[#5B4FE8]/5 hover:bg-[#5B4FE8]/10"
+                      : "text-[#5B4FE8] bg-white hover:bg-white/90"
+                  }`}
                 >
                   Sign up
                 </a>
