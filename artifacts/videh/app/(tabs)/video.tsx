@@ -367,6 +367,10 @@ export default function VideoTabScreen() {
     router.push("/reels/upload" as never);
   };
 
+  const openLibrary = () => {
+    router.push("/reels/library" as never);
+  };
+
   const openProfile = () => {
     if (myChannel?.handle) {
       router.push({ pathname: "/reels/channel/[handle]", params: { handle: myChannel.handle } });
@@ -721,6 +725,9 @@ export default function VideoTabScreen() {
             <Ionicons name="videocam-outline" size={24} color={colors.foreground} />
           </TouchableOpacity>
         ) : null}
+        <TouchableOpacity onPress={openLibrary} style={styles.iconBtn} accessibilityLabel={t("reels.libraryTitle")}>
+          <Ionicons name="albums-outline" size={24} color={colors.foreground} />
+        </TouchableOpacity>
         <TouchableOpacity
           onPress={() => router.push("/reels/notifications" as never)}
           style={styles.iconBtn}
@@ -734,7 +741,7 @@ export default function VideoTabScreen() {
             </View>
           ) : null}
         </TouchableOpacity>
-        <TouchableOpacity onPress={openProfile} style={styles.iconBtn}>
+        <TouchableOpacity onPress={openProfile} style={styles.iconBtn} accessibilityLabel={t("reels.yourChannel")}>
           {profileAvatarUri ? (
             <Image source={{ uri: profileAvatarUri }} style={styles.profileBtnAvatar} contentFit="cover" />
           ) : (

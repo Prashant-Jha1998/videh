@@ -3,6 +3,7 @@ import { BarChart3, Key, Loader2, Phone, RefreshCw } from "lucide-react";
 import type { PortalData } from "../hooks/useDeveloperPortal";
 import { PORTAL_STATUS_LABELS } from "../hooks/useDeveloperPortal";
 import { BillingUsageMetrics } from "./BillingUsageMetrics";
+import { BillingPolicyNotice } from "./BillingPolicyNotice";
 import { DeveloperBillingInvoices } from "./DeveloperBillingInvoices";
 import { DeveloperApiCredentials } from "./DeveloperApiCredentials";
 import { DeveloperTemplateBuilder } from "./DeveloperTemplateBuilder";
@@ -261,6 +262,8 @@ export function DeveloperBillingPanel({
         <BarChart3 className="h-7 w-7 md:h-8 md:w-8 text-[#5B4FE8]" />
         Usage &amp; invoices
       </h2>
+
+      <BillingPolicyNotice />
 
       {error ? <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p> : null}
 

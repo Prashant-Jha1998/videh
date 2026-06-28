@@ -694,8 +694,8 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
               <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wide">Module 1 of 6</p>
               <h2 className="text-2xl font-bold text-[#14131F]">Choose your plan</h2>
               <p className="text-sm text-[#667781]">
-                Monthly subscription is billed in your company name. If payment fails later, API access is
-                automatically held until payment is captured again.
+                Monthly subscription and API usage are invoiced in your company name. Invoices are due 15 days after
+                the last day of each billing month; overdue balances place API access on hold until paid.
               </p>
               <div className="space-y-3">
                 {(plans.length ? plans : [
@@ -1143,8 +1143,8 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
               <div className="rounded-xl border-2 border-[#5B4FE8]/40 bg-[#5B4FE8]/5 p-4">
                 <p className="text-sm text-[#14131F] font-semibold mb-1">Required before API keys</p>
                 <p className="text-sm text-[#667781]">
-                  Verify debit/credit card or UPI. Usage bills per conversation to your company; failed monthly
-                  payment → API on hold.
+                  Verify debit/credit card or UPI. Usage is billed per conversation; pay invoices by the due date to
+                  maintain uninterrupted API access.
                 </p>
                 {selectedPlan.amountInr > 0 ? (
                   <p className="text-lg font-bold text-[#14131F] mt-4">

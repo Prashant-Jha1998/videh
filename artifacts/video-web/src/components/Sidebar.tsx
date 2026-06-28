@@ -9,6 +9,7 @@ const MAIN: Item[] = [
 ];
 
 const YOU: Item[] = [
+  { icon: "📚", label: "Library", path: "/library" },
   { icon: "◎", label: "Your channel", path: "/studio" },
   { icon: "⬆", label: "Upload video", path: "/upload" },
   { icon: "✎", label: "Channel studio", path: "/studio" },

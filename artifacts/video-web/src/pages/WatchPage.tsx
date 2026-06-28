@@ -16,7 +16,9 @@ import {
   type ReelsComment,
   type ReelsVideo,
 } from "@/lib/reelsApi";
+import { listOfflineVideos, offlineVideoStreamUrl, saveVideoOffline } from "@/lib/offlineDownloads";
 import { navigate } from "@/lib/router";
+import { pushWatchHistory } from "@/lib/watchHistory";
 
 export function WatchPage({ videoId }: { videoId: number }) {
   const { user } = useAuth();
@@ -28,6 +30,9 @@ export function WatchPage({ videoId }: { videoId: number }) {
   const [commentText, setCommentText] = useState("");
   const [error, setError] = useState("");
   const [subscribed, setSubscribed] = useState(false);
+  const [offlineSrc, setOfflineSrc] = useState<string | null>(null);
+  const [downloadMsg, setDownloadMsg] = useState("");
+  const [downloaded, setDownloaded] = useState(false);
   const watchedRef = useRef(0);
   const viewSentRef = useRef(false);
 
@@ -46,6 +51,9 @@ export function WatchPage({ videoId }: { videoId: number }) {
           return;
         }
         setVideo(vRes.video);
+        pushWatchHistory(vRes.video);
+        setDownloaded(listOfflineVideos().some((e) => e.video.id === videoId));
+        void offlineVideoStreamUrl(videoId).then((url) => { if (!cancelled) setOfflineSrc(url); });
         setRelated((feedRes.videos ?? []).filter((x) => x.id !== videoId).slice(0, 12));
         setComments(cRes.comments ?? []);
       })
@@ -104,6 +112,20 @@ export function WatchPage({ videoId }: { videoId: number }) {
     }
   };
 
+  const onDownload = async () => {
+    if (!video) return;
+    setDownloadMsg("");
+    const res = await saveVideoOffline(video);
+    if (res.ok) {
+      setDownloaded(true);
+      const url = await offlineVideoStreamUrl(video.id);
+      if (url) setOfflineSrc(url);
+      setDownloadMsg(res.message ?? "Saved for offline");
+    } else {
+      setDownloadMsg(res.message ?? "Download failed");
+    }
+  };
+
   if (error) return <p className="center-msg error">{error}</p>;
   if (!video) return <p className="center-msg">Loading…</p>;
 
@@ -117,7 +139,7 @@ export function WatchPage({ videoId }: { videoId: number }) {
           controls
           playsInline
           poster={videoThumbnailSrc(video)}
-          src={videoStreamUrl(video.id)}
+          src={offlineSrc ?? videoStreamUrl(video.id)}
           onTimeUpdate={(e) => onTimeUpdate(e.currentTarget)}
         />
         <h1>{video.title}</h1>
@@ -129,7 +151,11 @@ export function WatchPage({ videoId }: { videoId: number }) {
           <button type="button" onClick={toggleSubscribe}>
             {subscribed ? "Subscribed" : "Subscribe"}
           </button>
+          <button type="button" onClick={() => void onDownload()} disabled={downloaded}>
+            {downloaded ? "↓ Saved" : "↓ Download"}
+          </button>
         </div>
+        {downloadMsg ? <p className="yt-muted watch-hint">{downloadMsg}</p> : null}
         <div className="channel-row">
           <button
             type="button"

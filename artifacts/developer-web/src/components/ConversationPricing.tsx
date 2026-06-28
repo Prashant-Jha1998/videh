@@ -1,4 +1,5 @@
 import { MessageCircle, Shield, Zap } from "lucide-react";
+import { BillingPolicyNotice } from "./BillingPolicyNotice";
 
 const BUSINESS_CATEGORIES = [
   { key: "marketing", label: "Marketing", rate: "₹0.78", note: "Promotions & offers (highest)" },
@@ -27,8 +28,8 @@ export function ConversationPricing({ variant = "dark" }: { variant?: Variant })
         </p>
         <h3 className={`text-2xl md:text-3xl font-bold ${title}`}>Pay per conversation, not per SMS</h3>
         <p className={`mt-2 text-sm ${muted}`}>
-          Same industry model: user-initiated vs business-initiated. Payment method must be verified before API
-          access — usage auto-debited monthly; API holds if payment fails.
+          Same industry model: user-initiated vs business-initiated. A verified payment method is required before API
+          access. Usage is invoiced monthly in your company name.
         </p>
       </div>
 
@@ -82,8 +83,11 @@ export function ConversationPricing({ variant = "dark" }: { variant?: Variant })
           <li>Add & verify payment method (₹5 Razorpay check — card/UPI)</li>
           <li>Admin approves documents, profile & templates</li>
           <li>API keys issued — usage billed per conversation to your company</li>
-          <li>If monthly usage payment fails → API automatically on hold</li>
+          <li>Pay monthly invoices by the due date to keep API access active</li>
         </ol>
+        <div className="mt-4">
+          <BillingPolicyNotice variant={dark ? "dark" : "light"} />
+        </div>
         <p className={`mt-3 text-xs ${muted}`}>
           24-hour rule: replies inside 24h after customer message = Service category (often free within window).
         </p>

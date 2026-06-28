@@ -773,6 +773,97 @@ router.post("/channel", async (req: Request, res: Response) => {
   }
 });
 
+async function fetchUserLibraryVideos(
+  req: Request,
+  userId: number,
+  kind: "history" | "liked",
+  limit = 30,
+): Promise<Record<string, unknown>[]> {
+  if (kind === "history") {
+    const rows = await query(
+      `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
+              c.avatar_url AS channel_avatar_url, c.updated_at AS channel_updated_at,
+              h.watched_at
+       FROM (
+         SELECT DISTINCT ON (video_id) video_id, created_at AS watched_at
+         FROM reels_video_views
+         WHERE user_id = $1
+         ORDER BY video_id, created_at DESC
+       ) h
+       JOIN reels_videos v ON v.id = h.video_id
+       JOIN reels_channels c ON c.id = v.channel_id
+       WHERE v.status = 'published' AND v.play_enabled = TRUE
+       ORDER BY h.watched_at DESC
+       LIMIT $2`,
+      [userId, limit],
+    );
+    return rows.rows.map((r) => mapVideoRow(r as Record<string, unknown>, req));
+  }
+  const rows = await query(
+    `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
+            c.avatar_url AS channel_avatar_url, c.updated_at AS channel_updated_at,
+            r.created_at AS liked_at
+     FROM reels_video_reactions r
+     JOIN reels_videos v ON v.id = r.video_id
+     JOIN reels_channels c ON c.id = v.channel_id
+     WHERE r.user_id = $1 AND r.reaction = 'like'
+       AND v.status = 'published' AND v.play_enabled = TRUE
+     ORDER BY r.created_at DESC
+     LIMIT $2`,
+    [userId, limit],
+  );
+  return rows.rows.map((r) => mapVideoRow(r as Record<string, unknown>, req));
+}
+
+router.get("/library", async (req: Request, res: Response) => {
+  const userId = Number(req.query.userId);
+  if (!userId) {
+    res.status(400).json({ success: false, message: "userId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    await ensureReelsTables();
+    const channelRes = await query(
+      `SELECT c.* FROM reels_channels c WHERE c.user_id = $1`,
+      [userId],
+    );
+    const channelRow = channelRes.rows[0] as Record<string, unknown> | undefined;
+    const [history, liked, playlists, myVideos] = await Promise.all([
+      fetchUserLibraryVideos(req, userId, "history"),
+      fetchUserLibraryVideos(req, userId, "liked"),
+      channelRow
+        ? fetchChannelPlaylists(Number(channelRow.id), true)
+        : Promise.resolve([]),
+      channelRow
+        ? query(
+            `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,
+                    c.avatar_url AS channel_avatar_url, c.updated_at AS channel_updated_at
+             FROM reels_videos v
+             JOIN reels_channels c ON c.id = v.channel_id
+             WHERE v.channel_id = $1
+             ORDER BY v.created_at DESC
+             LIMIT 30`,
+            [Number(channelRow.id)],
+          ).then((r) => r.rows.map((row) => mapVideoRow(row as Record<string, unknown>, req)))
+        : Promise.resolve([]),
+    ]);
+    res.json({
+      success: true,
+      channel: channelRow
+        ? mapPublicChannelResponse(req, channelRow, userId)
+        : null,
+      history,
+      liked,
+      playlists,
+      myVideos,
+    });
+  } catch (err) {
+    req.log.error({ err }, "reels library");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 router.get("/channel/me", async (req: Request, res: Response) => {
   const userId = Number(req.query.userId);
   const summary = String(req.query.summary ?? "") === "1";

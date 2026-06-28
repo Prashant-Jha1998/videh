@@ -2,6 +2,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, Download, Loader2, RefreshCw } fr
 import { useCallback, useEffect, useState } from "react";
 import { devFetch } from "../lib/devFetch";
 import { formatBillDate, formatInrRupees } from "../lib/billingDisplay";
+import { BillingPolicyNotice } from "./BillingPolicyNotice";
 import { getRazorpayLogoUrl } from "../lib/razorpayCheckout";
 
 declare global {
@@ -263,6 +264,7 @@ export function DeveloperBillingInvoices({
       <h3 className="text-lg font-bold text-[#14131F]">
         {filter === "current" ? "Current bill" : "Previous bills"}
       </h3>
+      <BillingPolicyNotice variant="compact" />
       <p className="text-xs text-[#667781]">Unpaid bills appear first, then paid bills (by date).</p>
 
       <button

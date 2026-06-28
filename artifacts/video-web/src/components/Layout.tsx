@@ -123,8 +123,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   <button
                     type="button"
                     className="yt-avatar-btn"
-                    aria-label="Account"
-                    onClick={() => navigate("/studio")}
+                    aria-label="Library"
+                    onClick={() => navigate("/library")}
                   >
                     {(user.name?.[0] ?? user.phone?.slice(-1) ?? "V").toUpperCase()}
                   </button>

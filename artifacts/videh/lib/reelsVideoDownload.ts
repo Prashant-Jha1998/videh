@@ -2,6 +2,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import { Alert, Platform } from "react-native";
 import type { ReelsVideo } from "./reelsApi";
+import { registerDownloadedVideo } from "./reelsLibrary";
 
 function safeFileName(title: string, videoId: number): string {
   const base = title.replace(/[^\w\s-]/g, "").trim().slice(0, 60) || `video_${videoId}`;
@@ -36,15 +37,15 @@ export async function saveReelsVideoToDevice(video: ReelsVideo): Promise<void> {
 }
 
 /** Download video to app storage (offline copy). */
-export async function downloadReelsVideoToApp(video: ReelsVideo): Promise<void> {
+export async function downloadReelsVideoToApp(video: ReelsVideo): Promise<boolean> {
   if (Platform.OS === "web") {
     Alert.alert("Download", video.videoUrl);
-    return;
+    return false;
   }
   const dir = FileSystem.documentDirectory;
   if (!dir) {
     Alert.alert("Error", "Storage unavailable.");
-    return;
+    return false;
   }
   const fileName = safeFileName(video.title, video.id);
   const dest = `${dir}downloads/${fileName}`;
@@ -52,7 +53,9 @@ export async function downloadReelsVideoToApp(video: ReelsVideo): Promise<void> 
   const result = await FileSystem.downloadAsync(video.videoUrl, dest);
   if (result.status !== 200) {
     Alert.alert("Download failed", "Could not download this video. Try again.");
-    return;
+    return false;
   }
-  Alert.alert("Downloaded", `"${video.title}" saved in the app.`);
+  await registerDownloadedVideo(video, dest);
+  Alert.alert("Downloaded", `"${video.title}" saved for offline viewing in Library.`);
+  return true;
 }

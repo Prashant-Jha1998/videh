@@ -3,7 +3,9 @@ import { AuthProvider } from "@/context/AuthContext";
 import { Layout } from "@/components/Layout";
 import { ChannelPage } from "@/pages/ChannelPage";
 import { HomePage } from "@/pages/HomePage";
+import { LibraryPage } from "@/pages/LibraryPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { PlaylistPage } from "@/pages/PlaylistPage";
 import { SearchPage } from "@/pages/SearchPage";
 import { StudioPage } from "@/pages/StudioPage";
 import { UploadPage } from "@/pages/UploadPage";
@@ -22,6 +24,10 @@ function RouterView({ route }: { route: Route }) {
       return <UploadPage />;
     case "studio":
       return <StudioPage />;
+    case "library":
+      return <LibraryPage section={route.section} />;
+    case "playlist":
+      return <PlaylistPage handle={route.handle} playlistId={route.id} />;
     case "search":
       return <SearchPage q={route.q} />;
     default:

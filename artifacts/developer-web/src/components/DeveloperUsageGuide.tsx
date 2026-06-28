@@ -69,7 +69,7 @@ const ERRORS = [
   { code: "language_mismatch", http: "400", fix: "Use exact language from template (e.g. en)" },
   { code: "recipient_not_on_videh", http: "404", fix: "User must install Videh and sign up with same mobile" },
   { code: "cannot_message_self", http: "400", fix: "Cannot send to your own business channel phone" },
-  { code: "billing_on_hold", http: "402", fix: "Pay overdue invoice or verify payment method" },
+  { code: "billing_on_hold", http: "402", fix: "Pay any invoice past its due date (due date = last day of billing month + 15 days), or verify your payment method" },
 ];
 
 function CodeBlock({ code, label }: { code: string; label?: string }) {

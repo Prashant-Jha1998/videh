@@ -277,6 +277,43 @@ export async function createPlaylist(
   );
 }
 
+export async function fetchLibrary(userId: number, token: string) {
+  const res = await reelsFetch<{
+    success: boolean;
+    channel: ReelsChannel | null;
+    history: ReelsVideo[];
+    liked: ReelsVideo[];
+    playlists: ReelsPlaylist[];
+    myVideos: ReelsVideo[];
+    message?: string;
+  }>(`/library?userId=${userId}`, { token });
+  if (res.channel) res.channel = normalizeChannel(res.channel);
+  if (res.history) res.history = res.history.map(normalizeVideo);
+  if (res.liked) res.liked = res.liked.map(normalizeVideo);
+  if (res.myVideos) res.myVideos = res.myVideos.map(normalizeVideo);
+  return res;
+}
+
+export async function fetchPlaylist(
+  handle: string,
+  playlistId: number,
+  userId?: number,
+  token?: string | null,
+) {
+  const q = userId ? `?userId=${userId}` : "";
+  const res = await reelsFetch<{
+    success: boolean;
+    playlist: ReelsPlaylist;
+    videos: ReelsVideo[];
+    message?: string;
+  }>(
+    `/channel/${encodeURIComponent(handle.replace(/^@/, ""))}/playlists/${playlistId}${q}`,
+    { token },
+  );
+  if (res.videos) res.videos = res.videos.map(normalizeVideo);
+  return res;
+}
+
 export async function fetchChannel(handle: string, userId?: number, token?: string | null) {
   const q = userId ? `?userId=${userId}` : "";
   const res = await reelsFetch<{

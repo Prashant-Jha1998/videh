@@ -145,6 +145,10 @@ const FAQ = [
     q: "What is the per-conversation cost?",
     a: "User-initiated: ~₹0.35–0.58. Business-initiated marketing: ~₹0.78; utility, authentication, and service: ~₹0.35. The first 100 user-initiated conversations per month are free. Payment method verification is required before API access.",
   },
+  {
+    q: "When are invoices due, and what happens if I pay late?",
+    a: "Each month’s invoice is due 15 days after the last day of that billing month (for example, a January bill is due on 15 February). If payment is not received by the due date, API access is placed on billing hold until the outstanding invoice is settled.",
+  },
 ];
 
 const API_ME = `curl https://developer.videh.co.in/v1/me \\

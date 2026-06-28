@@ -55,6 +55,7 @@ import {
   type ReelsVideoQuality,
 } from "@/lib/reelsVideoQuality";
 import { shareReelsVideoLink } from "@/lib/reelsShare";
+import { pushWatchHistory } from "@/lib/reelsLibrary";
 import { reelsWatchPlayerSize, reelsWatchTopInset } from "@/lib/reelsWatchLayout";
 
 const SCREEN_W = Dimensions.get("window").width;
@@ -248,6 +249,7 @@ export default function ReelsWatchScreen() {
 
     if (res.success && res.video) {
       setVideo(res.video);
+      void pushWatchHistory(res.video);
       setPlayAllowed(res.playAllowed !== false);
       setPlayBlockReasons(res.playBlockReasons ?? []);
       const channelHandle = res.video.channelHandle;

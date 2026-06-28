@@ -299,6 +299,24 @@ export async function fetchMyReelsChannel(
   return res;
 }
 
+export async function fetchReelsLibrary(userId: number, sessionToken?: string | null) {
+  const res = await reelsJson<{
+    success: boolean;
+    channel: ReelsChannel | null;
+    history: ReelsVideo[];
+    liked: ReelsVideo[];
+    playlists: ReelsPlaylist[];
+    myVideos: ReelsVideo[];
+    message?: string;
+  }>(`/library?userId=${userId}`, { sessionToken });
+  if (res.channel) res.channel = normalizeReelsChannel(res.channel);
+  if (res.history) res.history = res.history.map(normalizeReelsVideo);
+  if (res.liked) res.liked = res.liked.map(normalizeReelsVideo);
+  if (res.myVideos) res.myVideos = res.myVideos.map(normalizeReelsVideo);
+  if (res.playlists) res.playlists = res.playlists.map(normalizeReelsPlaylist);
+  return res;
+}
+
 export async function fetchReelsChannel(handle: string, userId?: number, sessionToken?: string | null) {
   const q = userId ? `?userId=${userId}` : "";
   const res = await reelsJson<{

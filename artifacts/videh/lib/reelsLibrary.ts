@@ -3,6 +3,8 @@ import type { ReelsVideo } from "./reelsApi";
 
 const WATCH_LATER_KEY = "reels_watch_later_v1";
 const PLAY_QUEUE_KEY = "reels_play_queue_v1";
+const WATCH_HISTORY_KEY = "reels_watch_history_v1";
+const DOWNLOADS_META_KEY = "reels_downloads_meta_v1";
 const NOT_INTERESTED_KEY = "reels_not_interested_v1";
 const BLOCKED_CHANNELS_KEY = "reels_blocked_channels_v1";
 
@@ -10,6 +12,10 @@ export type SavedReelsVideo = Pick<
   ReelsVideo,
   "id" | "title" | "thumbnailUrl" | "durationSeconds" | "channelHandle" | "videoUrl"
 >;
+
+export type DownloadedReelsVideo = SavedReelsVideo & { localUri: string; savedAt: string };
+
+const MAX_HISTORY = 50;
 
 function normalizeSaved(video: ReelsVideo): SavedReelsVideo {
   return {
@@ -52,6 +58,55 @@ export async function addToWatchLater(video: ReelsVideo): Promise<boolean> {
 export async function removeFromWatchLater(videoId: number): Promise<void> {
   const list = await readList(WATCH_LATER_KEY);
   await writeList(WATCH_LATER_KEY, list.filter((v) => v.id !== videoId));
+}
+
+export async function getWatchHistory(): Promise<SavedReelsVideo[]> {
+  return readList(WATCH_HISTORY_KEY);
+}
+
+export async function pushWatchHistory(video: ReelsVideo): Promise<void> {
+  const list = await readList(WATCH_HISTORY_KEY);
+  const next = [normalizeSaved(video), ...list.filter((v) => v.id !== video.id)].slice(0, MAX_HISTORY);
+  await writeList(WATCH_HISTORY_KEY, next);
+}
+
+export async function clearWatchHistory(): Promise<void> {
+  await writeList(WATCH_HISTORY_KEY, []);
+}
+
+type DownloadMeta = SavedReelsVideo & { localUri: string; savedAt: string };
+
+async function readDownloadsMeta(): Promise<DownloadMeta[]> {
+  try {
+    const raw = await AsyncStorage.getItem(DOWNLOADS_META_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as DownloadMeta[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeDownloadsMeta(list: DownloadMeta[]): Promise<void> {
+  await AsyncStorage.setItem(DOWNLOADS_META_KEY, JSON.stringify(list.slice(0, 30)));
+}
+
+export async function registerDownloadedVideo(video: ReelsVideo, localUri: string): Promise<void> {
+  const list = await readDownloadsMeta();
+  const next: DownloadMeta[] = [
+    { ...normalizeSaved(video), localUri, savedAt: new Date().toISOString() },
+    ...list.filter((v) => v.id !== video.id),
+  ];
+  await writeDownloadsMeta(next);
+}
+
+export async function getDownloadedVideos(): Promise<DownloadedReelsVideo[]> {
+  return readDownloadsMeta();
+}
+
+export async function removeDownloadedVideo(videoId: number): Promise<void> {
+  const list = await readDownloadsMeta();
+  await writeDownloadsMeta(list.filter((v) => v.id !== videoId));
 }
 
 export async function getPlayQueue(): Promise<SavedReelsVideo[]> {
