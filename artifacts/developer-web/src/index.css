@@ -48,6 +48,15 @@ body {
   line-height: 1.6;
 }
 
+.header-nav-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.header-nav-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 /* Google Identity Services button — full width inside auth modal */
 .google-signin-host > div {
   width: 100% !important;

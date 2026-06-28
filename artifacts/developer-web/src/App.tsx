@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Code2,
   Globe,
+  Menu,
   MessageSquare,
   Shield,
   Webhook,
@@ -25,14 +26,14 @@ import { devFetch } from "./lib/devFetch";
 import { isLeadConsoleReady, type ActiveLeadSummary } from "./lib/developerPortalState";
 
 const NAV = [
-  { href: "#requirements", label: "Verification" },
-  { href: "#features", label: "Features" },
-  { href: "#how-it-works", label: "How it works" },
-  { href: "#pricing", label: "Pricing" },
-  { href: "#usage-guide", label: "Usage guide" },
-  { href: "#api", label: "API" },
-  { href: "#dashboard", label: "Developer console" },
-  { href: "#get-api", label: "Apply", action: "apply" as const },
+  { href: "#requirements", label: "Verification", short: "Verify" },
+  { href: "#features", label: "Features", short: "Features" },
+  { href: "#how-it-works", label: "How it works", short: "Steps" },
+  { href: "#pricing", label: "Pricing", short: "Pricing" },
+  { href: "#usage-guide", label: "Usage guide", short: "Guide" },
+  { href: "#api", label: "API", short: "API" },
+  { href: "#dashboard", label: "Developer console", short: "Console" },
+  { href: "#get-api", label: "Apply", short: "Apply", action: "apply" as const },
 ];
 
 const FEATURES = [
@@ -213,11 +214,20 @@ export default function App() {
   const [session, setSession] = useState<{ email: string } | null>(null);
   const [activeLead, setActiveLead] = useState<ActiveLeadSummary | null>(null);
   const [headerSolid, setHeaderSolid] = useState(false);
+  const [navMenuOpen, setNavMenuOpen] = useState(false);
 
   const consoleReady = isLeadConsoleReady(activeLead);
 
+  const visibleNav = NAV.filter((l) => {
+    if (consoleReady && (l.href === "#get-api" || l.href === "#dashboard")) return false;
+    return true;
+  });
+
   useEffect(() => {
-    const onScroll = () => setHeaderSolid(window.scrollY > 56);
+    const onScroll = () => {
+      setHeaderSolid(window.scrollY > 56);
+      setNavMenuOpen(false);
+    };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
@@ -356,26 +366,27 @@ export default function App() {
             : "glass border-b border-white/10"
         }`}
       >
-        <div className="max-w-6xl mx-auto px-4 h-[4.5rem] md:h-20 flex items-center justify-between gap-3">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 w-full min-w-0">
+          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 h-[4.5rem] md:h-20">
           <a
             href="#"
-            className={`flex items-center gap-3 font-bold shrink-0 min-w-0 ${
+            className={`flex items-center gap-2 sm:gap-3 font-bold shrink-0 min-w-0 ${
               headerSolid ? "text-[#14131F]" : "text-white"
             }`}
           >
-            <span className="flex h-12 w-12 md:h-14 md:w-14 shrink-0 items-center justify-center rounded-2xl bg-white p-1.5 md:p-2 shadow-lg ring-2 ring-white/30">
+            <span className="flex h-10 w-10 sm:h-12 sm:w-12 md:h-14 md:w-14 shrink-0 items-center justify-center rounded-2xl bg-white p-1.5 shadow-lg ring-2 ring-white/30">
               <img
                 src="/videh_icon_foreground.png"
                 alt="Videh"
                 className="h-full w-full object-contain"
               />
             </span>
-            <span className="hidden sm:inline leading-tight">
-              Videh <span className="text-[#5B4FE8] font-semibold text-base sm:ml-1">Developer</span>
+            <span className="hidden md:inline leading-tight text-sm lg:text-base">
+              Videh <span className="text-[#5B4FE8] font-semibold">Developer</span>
             </span>
           </a>
-          <nav className="hidden lg:flex items-center justify-center gap-2 flex-1 px-2">
-            {NAV.filter((l) => !(consoleReady && l.href === "#get-api")).map((l) => {
+          <nav className="hidden lg:flex items-center justify-center gap-1 xl:gap-1.5 min-w-0 overflow-x-auto header-nav-scroll px-1">
+            {visibleNav.map((l) => {
               const href = consoleReady && l.href === "#dashboard" ? "#apply" : l.href;
               const open =
                 (consoleReady && l.href === "#dashboard") || ("action" in l && l.action === "apply");
@@ -384,22 +395,68 @@ export default function App() {
                   key={l.href}
                   href={href}
                   onClick={open ? openConsole : undefined}
-                  className={`text-sm font-semibold px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${
+                  className={`text-[11px] xl:text-sm font-semibold px-2 xl:px-3 py-1.5 xl:py-2 rounded-lg transition-colors whitespace-nowrap shrink-0 ${
                     headerSolid
                       ? "text-[#14131F] border border-gray-200 bg-gray-50 hover:bg-[#5B4FE8]/10 hover:border-[#5B4FE8]/35"
                       : "text-white/95 border border-white/20 bg-white/10 hover:bg-white/20 hover:border-white/30"
                   }`}
                 >
-                  {l.label}
+                  <span className="xl:hidden">{l.short}</span>
+                  <span className="hidden xl:inline">{l.label}</span>
                 </a>
               );
             })}
           </nav>
-          <div className="shrink-0 flex items-center gap-2">
+          <div className="shrink-0 flex items-center justify-end gap-1 sm:gap-1.5">
+            <div className="relative lg:hidden">
+              <button
+                type="button"
+                aria-label="Open menu"
+                aria-expanded={navMenuOpen}
+                onClick={() => setNavMenuOpen((o) => !o)}
+                className={`p-2 rounded-lg border transition-colors ${
+                  headerSolid
+                    ? "text-[#14131F] border-gray-200 bg-gray-50"
+                    : "text-white border-white/20 bg-white/10"
+                }`}
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+              {navMenuOpen ? (
+                <div
+                  className={`absolute right-0 top-full mt-2 w-52 rounded-xl border shadow-xl py-2 z-50 ${
+                    headerSolid ? "bg-white border-gray-200" : "bg-[#14131F] border-white/15"
+                  }`}
+                >
+                  {visibleNav.map((l) => {
+                    const href = consoleReady && l.href === "#dashboard" ? "#apply" : l.href;
+                    const open =
+                      (consoleReady && l.href === "#dashboard") || ("action" in l && l.action === "apply");
+                    return (
+                      <a
+                        key={l.href}
+                        href={href}
+                        onClick={(e) => {
+                          setNavMenuOpen(false);
+                          if (open) openConsole(e);
+                        }}
+                        className={`block px-4 py-2.5 text-sm font-semibold ${
+                          headerSolid
+                            ? "text-[#14131F] hover:bg-gray-50"
+                            : "text-white hover:bg-white/10"
+                        }`}
+                      >
+                        {l.label}
+                      </a>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
             {session ? (
               <>
                 <span
-                  className={`hidden md:inline text-xs truncate max-w-[140px] ${
+                  className={`hidden 2xl:inline text-xs truncate max-w-[120px] ${
                     headerSolid ? "text-[#667781]" : "text-white/70"
                   }`}
                 >
@@ -408,7 +465,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => void logout()}
-                  className={`text-sm font-semibold px-3 py-2 rounded-lg border transition-colors ${
+                  className={`text-xs xl:text-sm font-semibold px-2 xl:px-3 py-1.5 xl:py-2 rounded-lg border transition-colors whitespace-nowrap ${
                     headerSolid
                       ? "text-[#14131F] border-gray-200 hover:bg-gray-50"
                       : "text-white/90 border-white/20 hover:bg-white/10"
@@ -421,7 +478,7 @@ export default function App() {
               <>
                 <a
                   href="#login"
-                  className={`text-sm font-semibold px-3 py-2 rounded-lg border transition-colors ${
+                  className={`hidden sm:inline text-xs xl:text-sm font-semibold px-2 xl:px-3 py-1.5 xl:py-2 rounded-lg border transition-colors whitespace-nowrap ${
                     headerSolid
                       ? "text-[#14131F] border-gray-200 hover:bg-gray-50"
                       : "text-white/90 border-white/20 hover:bg-white/10"
@@ -431,7 +488,7 @@ export default function App() {
                 </a>
                 <a
                   href="#signup"
-                  className={`text-sm font-semibold px-3 py-2 rounded-lg transition-colors ${
+                  className={`hidden sm:inline text-xs xl:text-sm font-semibold px-2 xl:px-3 py-1.5 xl:py-2 rounded-lg transition-colors whitespace-nowrap ${
                     headerSolid
                       ? "text-[#5B4FE8] border border-[#5B4FE8]/30 bg-[#5B4FE8]/5 hover:bg-[#5B4FE8]/10"
                       : "text-[#5B4FE8] bg-white hover:bg-white/90"
@@ -444,10 +501,21 @@ export default function App() {
             <a
               href={consoleReady ? "#apply" : "#get-api"}
               onClick={openConsole}
-              className="text-sm font-semibold bg-[#5B4FE8] hover:bg-[#008f6f] text-white px-4 py-2.5 rounded-lg transition-colors shadow-md shadow-[#5B4FE8]/25 whitespace-nowrap"
+              className="text-xs xl:text-sm font-semibold bg-[#5B4FE8] hover:bg-[#008f6f] text-white px-2.5 xl:px-4 py-2 xl:py-2.5 rounded-lg transition-colors shadow-md shadow-[#5B4FE8]/25 whitespace-nowrap"
             >
-              {consoleReady ? "Open console" : "Get API access"}
+              {consoleReady ? (
+                <>
+                  <span className="xl:hidden">Console</span>
+                  <span className="hidden xl:inline">Open console</span>
+                </>
+              ) : (
+                <>
+                  <span className="xl:hidden">Apply</span>
+                  <span className="hidden xl:inline">Get API access</span>
+                </>
+              )}
             </a>
+          </div>
           </div>
         </div>
       </header>
