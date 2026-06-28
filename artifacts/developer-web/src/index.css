@@ -17,12 +17,26 @@
   scroll-behavior: smooth;
 }
 
+html {
+  overflow-x: clip;
+  width: 100%;
+}
+
 body {
   margin: 0;
   font-family: var(--font-sans);
   background: #f4f7f6;
   color: #14131F;
   -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+  width: 100%;
+  max-width: 100%;
+}
+
+#root {
+  overflow-x: clip;
+  width: 100%;
+  max-width: 100%;
 }
 
 .gradient-hero {

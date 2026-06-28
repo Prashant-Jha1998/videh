@@ -95,8 +95,8 @@ export function TemplateVidehPreview({
 
   return (
     <div
-      className={`chat-doodle flex flex-col w-full rounded-2xl border border-white/10 overflow-hidden shadow-2xl shadow-black/50 ${
-        compact ? "" : "sticky top-4"
+      className={`chat-doodle flex flex-col w-full max-w-full min-w-0 rounded-2xl border border-white/10 overflow-hidden shadow-2xl shadow-black/50 ${
+        compact ? "" : "lg:sticky lg:top-4"
       }`}
       style={{ maxHeight: compact ? "420px" : "min(640px, calc(100dvh - 6rem))" }}
     >

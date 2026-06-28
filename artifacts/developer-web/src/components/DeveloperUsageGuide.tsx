@@ -146,7 +146,7 @@ export function DeveloperUsageGuide({ variant = "public", snippetCtx = {} }: Pro
   const ctx = snippetCtx;
 
   return (
-    <div className={isConsole ? "space-y-8" : "max-w-6xl mx-auto space-y-12"}>
+    <div className={isConsole ? "space-y-8 w-full min-w-0 overflow-x-clip" : "max-w-6xl mx-auto space-y-12 w-full min-w-0 px-4 sm:px-0 overflow-x-clip"}>
       {!isConsole ? (
         <div className="text-center max-w-3xl mx-auto">
           <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wider mb-2">Integration guide</p>

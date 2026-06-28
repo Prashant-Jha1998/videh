@@ -347,7 +347,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen w-full max-w-full overflow-x-clip">
       {authMode ? (
         <DeveloperAuth
           mode={authMode}
@@ -372,15 +372,15 @@ export default function App() {
             : "glass border-b border-white/10"
         }`}
       >
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 w-full min-w-0">
-          <div className="flex items-center justify-between gap-2 sm:gap-3 h-[4.5rem] md:h-20 min-w-0">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 w-full min-w-0 overflow-hidden">
+          <div className="flex items-center w-full min-w-0 gap-2 h-14 sm:h-[4.5rem] md:h-20">
           <a
             href="#"
-            className={`relative z-10 flex items-center gap-2 sm:gap-3 font-bold shrink-0 ${
+            className={`relative z-10 flex items-center gap-2 font-bold shrink-0 ${
               headerSolid ? "text-[#14131F]" : "text-white"
             }`}
           >
-            <span className="flex h-10 w-10 sm:h-11 sm:w-11 md:h-12 md:w-12 shrink-0 items-center justify-center rounded-2xl bg-white p-1.5 shadow-lg ring-2 ring-white/30">
+            <span className="flex h-9 w-9 sm:h-11 sm:w-11 md:h-12 md:w-12 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl bg-white p-1 sm:p-1.5 shadow-lg ring-2 ring-white/30">
               <img
                 src="/videh_icon_foreground.png"
                 alt="Videh"
@@ -392,7 +392,7 @@ export default function App() {
             </span>
           </a>
 
-          <nav className="hidden 2xl:flex items-center justify-center gap-2 min-w-0 flex-1 overflow-hidden px-2">
+          <nav className="hidden 2xl:flex flex-1 items-center justify-center gap-2 min-w-0 overflow-hidden px-1">
             {headerBarNav.map((l) => {
               const href = consoleReady && l.href === "#dashboard" ? "#apply" : l.href;
               const open = "action" in l && l.action === "apply";
@@ -413,7 +413,9 @@ export default function App() {
             })}
           </nav>
 
-          <div className="relative z-10 shrink-0 flex items-center justify-end gap-1 sm:gap-1.5 ml-auto 2xl:ml-0">
+          <div className="flex-1 min-w-0 2xl:hidden" aria-hidden />
+
+          <div className="relative z-10 shrink-0 flex items-center gap-1 sm:gap-1.5">
             <div className="relative 2xl:hidden">
               <button
                 type="button"
@@ -515,48 +517,50 @@ export default function App() {
             <a
               href={consoleReady ? "#apply" : "#get-api"}
               onClick={openConsole}
-              className="text-xs sm:text-sm font-semibold bg-[#5B4FE8] hover:bg-[#008f6f] text-white px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-lg transition-colors shadow-md shadow-[#5B4FE8]/25 whitespace-nowrap"
+              className="text-xs sm:text-sm font-semibold bg-[#5B4FE8] hover:bg-[#008f6f] text-white px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-lg transition-colors shadow-md shadow-[#5B4FE8]/25 whitespace-nowrap max-w-[9.5rem] sm:max-w-none truncate sm:overflow-visible"
             >
-              {consoleReady ? "Open console" : "Get API access"}
+              <span className="sm:hidden">{consoleReady ? "Console" : "Apply"}</span>
+              <span className="hidden sm:inline">{consoleReady ? "Open console" : "Get API access"}</span>
             </a>
           </div>
           </div>
         </div>
       </header>
 
-      <section className="gradient-hero pt-28 md:pt-32 pb-16 md:pb-20 px-4 text-white overflow-x-hidden">
-        <div className="max-w-6xl mx-auto grid lg:grid-cols-[1fr_minmax(300px,400px)] gap-10 lg:gap-14 items-start">
+      <section className="gradient-hero pt-24 sm:pt-28 md:pt-32 pb-12 sm:pb-16 md:pb-20 px-4 text-white overflow-x-clip w-full">
+        <div className="max-w-6xl mx-auto w-full min-w-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(260px,400px)] gap-8 lg:gap-14 items-start">
           <motion.div
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
+            className="min-w-0 w-full"
           >
-            <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#5B4FE8] bg-[#5B4FE8]/15 rounded-full px-3 py-1 mb-5">
-              <Zap className="h-3.5 w-3.5" />
-              Videh Business Messaging API · India
+            <p className="inline-flex flex-wrap items-center gap-2 text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-[#5B4FE8] bg-[#5B4FE8]/15 rounded-full px-3 py-1 mb-5 max-w-full">
+              <Zap className="h-3.5 w-3.5 shrink-0" />
+              <span>Videh Business Messaging API · India</span>
             </p>
-            <h1 className="text-4xl md:text-5xl lg:text-[3.25rem] font-extrabold leading-[1.1] tracking-tight mb-5">
+            <h1 className="text-[1.65rem] leading-tight sm:text-4xl md:text-5xl lg:text-[3.25rem] font-extrabold sm:leading-[1.1] tracking-tight mb-5 break-words">
               Official business messaging API for{" "}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00c9a0] to-[#5B4FE8]">
                 your company logo
               </span>
             </h1>
-            <p className="text-lg text-white/75 leading-relaxed mb-8 max-w-xl">
+            <p className="text-base sm:text-lg text-white/75 leading-relaxed mb-8 max-w-xl">
               Pvt Ltd, LLP, Proprietorship — send automated template messages with images, buttons, and
               verified business branding. Videh is your technology partner from onboarding to production API.
             </p>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-col sm:flex-row flex-wrap gap-3">
               <a
                 href="#apply"
                 onClick={openApplyWizard}
-                className="inline-flex items-center gap-2 bg-[#5B4FE8] hover:bg-[#008f6f] text-white font-semibold px-6 py-3 rounded-xl transition-colors"
+                className="inline-flex items-center justify-center gap-2 bg-[#5B4FE8] hover:bg-[#008f6f] text-white font-semibold px-5 sm:px-6 py-3 rounded-xl transition-colors w-full sm:w-auto"
               >
                 Start application
                 <ArrowRight className="h-4 w-4" />
               </a>
               <a
                 href="#usage-guide"
-                className="inline-flex items-center gap-2 border border-white/25 hover:bg-white/10 text-white font-semibold px-6 py-3 rounded-xl transition-colors"
+                className="inline-flex items-center justify-center gap-2 border border-white/25 hover:bg-white/10 text-white font-semibold px-5 sm:px-6 py-3 rounded-xl transition-colors w-full sm:w-auto"
               >
                 <Code2 className="h-4 w-4" />
                 Usage guide
@@ -576,12 +580,12 @@ export default function App() {
           </motion.div>
 
           <motion.div
-            className="w-full flex justify-center lg:justify-end lg:sticky lg:top-28"
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
+            className="w-full min-w-0 flex justify-center lg:justify-end lg:sticky lg:top-28 mt-6 lg:mt-0"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55, delay: 0.1 }}
           >
-            <div className="w-full max-w-[380px]">
+            <div className="w-full max-w-[380px] min-w-0">
               <TemplateMessagePreview />
             </div>
           </motion.div>
@@ -736,7 +740,7 @@ export default function App() {
                 key={p.name}
                 className={`rounded-2xl p-6 border ${
                   p.popular
-                    ? "border-[#5B4FE8] bg-[#5B4FE8]/10 scale-[1.02] shadow-xl shadow-[#5B4FE8]/10"
+                    ? "border-[#5B4FE8] bg-[#5B4FE8]/10 md:scale-[1.02] shadow-xl shadow-[#5B4FE8]/10"
                     : "border-white/10 bg-white/5"
                 }`}
               >
