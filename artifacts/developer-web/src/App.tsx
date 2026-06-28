@@ -54,7 +54,7 @@ const FEATURES = [
   {
     icon: Code2,
     title: "REST API & SDKs",
-    desc: "Send messages from Node, Python, PHP, or Zapier. Sandbox keys before you go live.",
+    desc: "Send messages from Java, Kotlin, Node, Python, Go, PHP, or any HTTPS client. Sandbox keys before you go live.",
   },
   {
     icon: BarChart3,

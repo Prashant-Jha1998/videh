@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AlertTriangle, CheckCircle2, Copy, ExternalLink } from "lucide-react";
 import {
   API_LANG_LABELS,
+  API_LANG_ORDER,
   envSnippet,
   meSnippet,
   sendMessageSnippet,
@@ -15,7 +16,7 @@ type Props = {
   snippetCtx?: SnippetCtx;
 };
 
-const LANGS: ApiLang[] = ["curl", "javascript", "python", "php", "deno"];
+const LANGS: ApiLang[] = API_LANG_ORDER;
 
 const QUICK_STEPS = [
   {
@@ -36,7 +37,7 @@ const QUICK_STEPS = [
   {
     n: "4",
     title: "Send from your backend",
-    desc: "POST /v1/{phone-number-id}/messages from Node, Python, PHP, or an edge function — never from browser JS.",
+    desc: "POST /v1/{phone-number-id}/messages from your backend (Java, Kotlin, Node, Python, etc.) — never from browser JS.",
   },
   {
     n: "5",
@@ -124,7 +125,7 @@ function LangTabs({
             key={l}
             type="button"
             onClick={() => onLang(l)}
-            className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
+            className={`text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${
               lang === l
                 ? "bg-[#5B4FE8] text-white border-[#5B4FE8]"
                 : "bg-white text-[#667781] border-gray-200 hover:border-[#5B4FE8]/40"
@@ -151,9 +152,9 @@ export function DeveloperUsageGuide({ variant = "public", snippetCtx = {} }: Pro
           <p className="text-xs font-semibold text-[#5B4FE8] uppercase tracking-wider mb-2">Integration guide</p>
           <h2 className="text-3xl font-bold text-[#14131F] mb-3">How to use the Videh API in your project</h2>
           <p className="text-[#667781] leading-relaxed">
-            Step-by-step guide with copy-paste code for <strong>cURL</strong>, <strong>Node.js</strong>,{" "}
-            <strong>Python</strong>, <strong>PHP</strong>, and <strong>Deno / Supabase Edge Functions</strong>.
-            Works with any stack that can make HTTPS POST requests from your server.
+            Step-by-step guide with copy-paste code for <strong>12 languages</strong>: cURL, Node.js, Python,{" "}
+            <strong>Java</strong>, <strong>Kotlin</strong>, Go, C# (.NET), PHP, Ruby, Swift, Dart, and Deno.
+            Any stack that can send HTTPS JSON requests works — no official SDK required.
           </p>
         </div>
       ) : (
@@ -346,14 +347,17 @@ export function DeveloperUsageGuide({ variant = "public", snippetCtx = {} }: Pro
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
           {[
             "Node.js / Express / Next.js API routes",
+            "Java / Spring Boot / Jakarta EE",
+            "Kotlin / Android backend (OkHttp, Ktor)",
             "Python / Django / Flask / FastAPI",
+            "Go / Gin / Fiber",
+            "C# / ASP.NET Core / .NET 8",
             "PHP / Laravel / WordPress plugins",
+            "Ruby / Rails / Sinatra",
+            "Swift / Vapor (iOS server-side)",
+            "Dart / Flutter Cloud Functions",
             "Supabase Edge Functions (Deno)",
-            "Firebase Cloud Functions",
             "n8n / Zapier / Make (HTTP module)",
-            "AWS Lambda · Google Cloud Functions",
-            "Bolt.new + Supabase backend",
-            "Any server that can call HTTPS REST",
           ].map((item) => (
             <p key={item} className="flex items-start gap-2 text-white/80">
               <CheckCircle2 className="h-4 w-4 text-[#5B4FE8] shrink-0 mt-0.5" />
