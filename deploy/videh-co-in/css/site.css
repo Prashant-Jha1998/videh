@@ -1,8 +1,12 @@
 :root {
   --brand: #5B4FE8;
-  --brand-dark: #008f6f;
+  --brand-dark: #4A3FD6;
   --brand-light: #7C6CF0;
-  --brand-glow: rgba(0, 168, 132, 0.35);
+  --brand-glow: rgba(91, 79, 232, 0.38);
+  --brand-tint: rgba(91, 79, 232, 0.12);
+  --brand-tint-md: rgba(91, 79, 232, 0.2);
+  --brand-tint-strong: rgba(91, 79, 232, 0.28);
+  --brand-shadow: rgba(91, 79, 232, 0.14);
   --ink: #12101F;
   --text: #14131F;
   --muted: #667781;
@@ -151,7 +155,7 @@ a {
 .hero {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(145deg, #12101F 0%, #152a24 40%, #0d3d32 100%);
+  background: linear-gradient(145deg, #12101F 0%, #1c1838 42%, #2a2460 100%);
   color: #fff;
   padding: clamp(48px, 8vw, 88px) clamp(16px, 4vw, 40px);
 }
@@ -381,7 +385,7 @@ section {
   margin-bottom: 12px;
   padding: 5px 12px;
   border-radius: 999px;
-  background: rgba(0, 168, 132, 0.12);
+  background: rgba(91, 79, 232, 0.12);
   color: var(--brand-dark);
   font-size: 0.78rem;
   font-weight: 700;
@@ -455,8 +459,8 @@ section {
   margin-top: 32px;
   padding: clamp(24px, 4vw, 32px);
   border-radius: 20px;
-  background: linear-gradient(135deg, rgba(0, 168, 132, 0.08), rgba(11, 20, 26, 0.04));
-  border: 1px solid rgba(0, 168, 132, 0.2);
+  background: linear-gradient(135deg, rgba(91, 79, 232, 0.08), rgba(11, 20, 26, 0.04));
+  border: 1px solid var(--brand-tint-md);
 }
 
 /* ——— Videh Creator Program (professional) ——— */
@@ -495,8 +499,8 @@ section {
 }
 
 .creator-metric--highlight {
-  border-color: rgba(0, 168, 132, 0.28);
-  box-shadow: 0 12px 36px rgba(0, 168, 132, 0.12);
+  border-color: var(--brand-tint-strong);
+  box-shadow: 0 12px 36px var(--brand-shadow);
 }
 
 .creator-metric--highlight::before {
@@ -551,7 +555,7 @@ section {
   margin: 0 0 12px;
   padding: 6px 14px;
   border-radius: 999px;
-  background: rgba(0, 168, 132, 0.1);
+  background: rgba(91, 79, 232, 0.1);
   color: var(--brand-dark);
   font-size: 0.75rem;
   font-weight: 800;
@@ -607,7 +611,7 @@ section {
   width: 40px;
   height: 40px;
   border-radius: 12px;
-  background: rgba(0, 168, 132, 0.12);
+  background: rgba(91, 79, 232, 0.12);
   color: var(--brand-dark);
   font-weight: 800;
   font-size: 1.1rem;
@@ -651,15 +655,15 @@ section {
   height: 8px;
   border-radius: 50%;
   background: var(--brand);
-  box-shadow: 0 0 0 3px rgba(0, 168, 132, 0.15);
+  box-shadow: 0 0 0 3px var(--brand-shadow);
 }
 
 .creator-reach-card {
   margin-top: 20px;
   padding: 20px 22px;
   border-radius: 16px;
-  background: linear-gradient(135deg, rgba(0, 168, 132, 0.07), rgba(11, 20, 26, 0.03));
-  border: 1px solid rgba(0, 168, 132, 0.16);
+  background: linear-gradient(135deg, rgba(91, 79, 232, 0.07), rgba(11, 20, 26, 0.03));
+  border: 1px solid rgba(91, 79, 232, 0.16);
 }
 
 .creator-reach-head {
@@ -752,7 +756,7 @@ section {
   width: 48px;
   height: 48px;
   border-radius: 14px;
-  background: rgba(0, 168, 132, 0.12);
+  background: rgba(91, 79, 232, 0.12);
   color: var(--brand);
   display: flex;
   align-items: center;
@@ -859,7 +863,15 @@ section {
 .products-bar {
   background: var(--card);
   border-bottom: 1px solid rgba(17, 27, 33, 0.06);
-  padding: 20px 0 24px;
+  padding: clamp(20px, 4vw, 28px) 0;
+}
+
+.products-heading {
+  margin: 0 0 14px;
+  font-size: clamp(1rem, 2.5vw, 1.15rem);
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.02em;
 }
 
 .products-grid {
@@ -879,6 +891,7 @@ section {
   color: var(--text);
   border: 1px solid rgba(17, 27, 33, 0.08);
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  min-width: 0;
 }
 
 .product-tile:hover {
@@ -889,7 +902,7 @@ section {
 
 .product-tile strong {
   font-size: 1rem;
-  color: var(--text);
+  color: var(--brand);
 }
 
 .product-tile span:last-child {
@@ -901,6 +914,13 @@ section {
 .product-icon {
   font-size: 1.35rem;
   line-height: 1;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--brand-tint);
 }
 
 @media (max-width: 900px) {
@@ -912,6 +932,27 @@ section {
 @media (max-width: 520px) {
   .products-grid {
     grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .product-tile {
+    padding: 16px 14px;
+  }
+}
+
+@media (max-width: 640px) {
+  .strip-inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    text-align: left;
+  }
+  .strip-item {
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .strip-item:last-child {
+    padding-bottom: 0;
+    border-bottom: none;
   }
 }
 
@@ -996,10 +1037,23 @@ section {
 .page-hero .wrap {
   padding: 0;
 }
+.card .btn-primary,
+.content-block .btn-primary {
+  background: var(--brand);
+  color: #fff;
+  box-shadow: 0 6px 22px rgba(91, 79, 232, 0.28);
+}
+.card .btn-primary:hover,
+.content-block .btn-primary:hover {
+  background: var(--brand-dark);
+  box-shadow: 0 8px 28px rgba(91, 79, 232, 0.34);
+}
+
 .page-hero h1 {
   margin: 0 0 8px;
   font-size: clamp(1.8rem, 4vw, 2.4rem);
   font-weight: 800;
+  color: var(--brand);
 }
 .page-hero p {
   margin: 0;
