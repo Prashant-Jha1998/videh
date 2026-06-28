@@ -85,7 +85,7 @@ export async function billConversation(input: BillConversationInput): Promise<Bi
   await query(
     `UPDATE developer_api_accounts SET
        ${col} = ${col} + 1,
-       usage_billing_month_inr = usage_billing_month_inr + $2,
+       usage_billing_month_inr = usage_billing_month_inr + $2::integer,
        messages_sent_month = messages_sent_month + 1,
        messages_sent_total = messages_sent_total + 1
      WHERE id = $1`,
@@ -94,7 +94,7 @@ export async function billConversation(input: BillConversationInput): Promise<Bi
 
   await query(
     `INSERT INTO developer_conversations (account_id, initiator, category, amount_inr, billed)
-     VALUES ($1, $2, $3, $4, true)`,
+     VALUES ($1, $2::text, $3::text, $4::integer, true)`,
     [accountId, initiator, category ?? null, amountPaise],
   );
 

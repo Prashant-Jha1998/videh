@@ -69,9 +69,9 @@ export async function ensureBusinessSenderUser(
   if (existing) {
     await query(
       `UPDATE users SET
-         name = COALESCE(NULLIF($1, ''), NULLIF(name, ''), 'Business'),
+         name = COALESCE(NULLIF($1::text, ''), NULLIF(name, ''), 'Business'),
          avatar_url = CASE
-           WHEN $2 IS NOT NULL AND BTRIM($2) <> '' THEN $2
+           WHEN $2::text IS NOT NULL AND BTRIM($2::text) <> '' THEN $2::text
            ELSE avatar_url
          END,
          updated_at = NOW()
@@ -84,7 +84,7 @@ export async function ensureBusinessSenderUser(
   const e164 = toE164(normalized);
   const ins = await query(
     `INSERT INTO users (phone, name, avatar_url, is_online, last_seen)
-     VALUES ($1, $2, $3, FALSE, NOW()) RETURNING id`,
+     VALUES ($1::text, $2::text, $3::text, FALSE, NOW()) RETURNING id`,
     [e164, label, avatar],
   );
   return (ins.rows[0] as { id: number }).id;
