@@ -3,6 +3,7 @@ import { query } from "./db";
 import { assertApiBillingActive, billConversation, type ConversationCategory } from "./developerBilling";
 import { assertChannelVerifiedForAccount } from "./developerChannel";
 import { deliverBusinessMessageToVidehInbox } from "./developerApiDeliver";
+import { ensureDeveloperPlatformTables } from "./developerPlatform";
 import { ensureDeveloperTemplateTables, normalizePhone, type MessageTemplateRow } from "./developerTemplates";
 
 export type SendMessageBody = {
@@ -34,6 +35,7 @@ export async function sendBusinessMessage(
   phoneNumberIdFromPath: string | undefined,
   body: SendMessageBody,
 ): Promise<SendMessageResult> {
+  await ensureDeveloperPlatformTables();
   await ensureDeveloperTemplateTables();
 
   const acct = await query(

@@ -157,7 +157,11 @@ router.post("/business-messages", async (req, res) => {
     res.status(result.status).json(result.body);
   } catch (err) {
     logger.error({ err }, "v1 business-messages");
-    res.status(500).json({ success: false, error: { code: "server_error", message: "Could not send message" } });
+    const detail = err instanceof Error ? err.message : String(err);
+    res.status(500).json({
+      success: false,
+      error: { code: "server_error", message: "Could not send message", detail },
+    });
   }
 });
 
@@ -169,7 +173,11 @@ router.post("/:phoneNumberId/messages", async (req, res) => {
     res.status(result.status).json(result.body);
   } catch (err) {
     logger.error({ err }, "v1 phone messages");
-    res.status(500).json({ success: false, error: { code: "server_error", message: "Could not send message" } });
+    const detail = err instanceof Error ? err.message : String(err);
+    res.status(500).json({
+      success: false,
+      error: { code: "server_error", message: "Could not send message", detail },
+    });
   }
 });
 

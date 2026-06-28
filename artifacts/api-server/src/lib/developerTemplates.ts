@@ -76,6 +76,9 @@ export async function ensureDeveloperTemplateTables(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await query(
+    `ALTER TABLE developer_api_messages ADD COLUMN IF NOT EXISTS billing_amount_inr INTEGER NOT NULL DEFAULT 0`,
+  );
   await query(`ALTER TABLE developer_message_templates ADD COLUMN IF NOT EXISTS header_text TEXT`);
   await query(`ALTER TABLE developer_message_templates ADD COLUMN IF NOT EXISTS header_media_url TEXT`);
   await query(
