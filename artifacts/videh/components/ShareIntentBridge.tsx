@@ -3,7 +3,7 @@ import { useShareIntentContext } from "expo-share-intent";
 import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import { useApp } from "@/context/AppContext";
-import { stashIncomingShare, peekIncomingShare } from "@/lib/incomingSharePayload";
+import { stashIncomingShare, peekIncomingShare, payloadHasShareableContent } from "@/lib/incomingSharePayload";
 
 /** Routes Android/iOS share sheet opens into Videh chat picker. */
 export function ShareIntentBridge() {
@@ -15,7 +15,7 @@ export function ShareIntentBridge() {
   useEffect(() => {
     if (Platform.OS === "web" || !isInitialized || !isAuthenticated) return;
     void peekIncomingShare().then((pending) => {
-      if (pending) router.push("/share-to-chat");
+      if (pending && payloadHasShareableContent(pending)) router.push("/share-to-chat");
     });
   }, [isAuthenticated, isInitialized, router]);
 
@@ -26,6 +26,8 @@ export function ShareIntentBridge() {
       try {
         await stashIncomingShare(shareIntent);
         resetShareIntent();
+        const pending = await peekIncomingShare();
+        if (!pending || !payloadHasShareableContent(pending)) return;
         if (isAuthenticated) {
           router.push("/share-to-chat");
         } else {

@@ -4,27 +4,28 @@ import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "./expoPush";
 import { isValidPushToken, sendChatPush } from "./pushNotify";
 import { publishChatEvent } from "./realtime";
 import type { SendMessageBody } from "./developerApiSend";
+import {
+  buildBusinessTemplatePayload,
+  businessTemplateMediaUrl,
+  isDeliverableTemplate,
+  serializeBusinessTemplatePayload,
+} from "./businessTemplatePayload";
+import { resolveStoredMediaUrlEnv } from "./mediaStorage";
+import { chatMessagePushPreview } from "./chatMessagePreview";
 
 export type DeliverResult =
   | { ok: true; chatId: number; messageId: number }
   | { ok: false; code: string; message: string };
 
+/** @deprecated Use buildBusinessTemplatePayload — kept for any external imports. */
 export type TemplateDeliveryContent = {
   imageUrl: string | null;
   textContent: string;
 };
 
-/** Make /uploads/... URLs load in the mobile app. */
+/** Make /uploads/... URLs load in the mobile app (CDN-aware). */
 export function toPublicAssetUrl(url: string | null | undefined): string | null {
-  const u = (url ?? "").trim();
-  if (!u) return null;
-  if (/^https?:\/\//i.test(u) || u.startsWith("data:")) return u;
-  const base = (
-    process.env["API_PUBLIC_URL"]?.trim() ||
-    process.env["VIDEH_PUBLIC_URL"]?.trim() ||
-    "https://videh.co.in"
-  ).replace(/\/$/, "");
-  return u.startsWith("/") ? `${base}${u}` : `${base}/${u}`;
+  return resolveStoredMediaUrlEnv(url);
 }
 
 function toE164(normalized91: string): string {
@@ -88,68 +89,6 @@ export async function ensureBusinessSenderUser(
     [e164, label, avatar],
   );
   return (ins.rows[0] as { id: number }).id;
-}
-
-function textParamsFromComponents(components: unknown, type: "header" | "body"): string[] {
-  if (!Array.isArray(components)) return [];
-  const out: string[] = [];
-  for (const raw of components) {
-    if (!raw || typeof raw !== "object") continue;
-    const c = raw as Record<string, unknown>;
-    if (String(c.type ?? "").toLowerCase() !== type) continue;
-    if (!Array.isArray(c.parameters)) continue;
-    for (const p of c.parameters) {
-      if (!p || typeof p !== "object") continue;
-      const param = p as Record<string, unknown>;
-      if (String(param.type ?? "").toLowerCase() === "text") {
-        out.push(String(param.text ?? ""));
-      }
-    }
-  }
-  return out;
-}
-
-function applyVariables(text: string, values: string[]): string {
-  let out = text;
-  values.forEach((val, i) => {
-    out = out.replace(new RegExp(`\\{\\{${i + 1}\\}\\}`, "g"), val);
-  });
-  return out;
-}
-
-/** Videh business template: logo/image header + text body (caption). */
-export function buildTemplateDeliveryContent(
-  tmpl: MessageTemplateRow,
-  body: SendMessageBody,
-  _businessLogoUrl: string | null,
-): TemplateDeliveryContent {
-  const components = body.template?.components;
-  const headerParams = textParamsFromComponents(components, "header");
-  const bodyParams = textParamsFromComponents(components, "body");
-  const headerType = String(tmpl.header_type ?? "NONE").toUpperCase();
-
-  let imageUrl: string | null = null;
-  if (headerType === "IMAGE") {
-    imageUrl = toPublicAssetUrl(tmpl.header_media_url);
-  }
-
-  const textParts: string[] = [];
-  if (headerType === "TEXT" && tmpl.header_text) {
-    textParts.push(applyVariables(tmpl.header_text, headerParams));
-  } else if (headerType !== "NONE" && headerType !== "TEXT" && !imageUrl) {
-    const label =
-      headerType === "VIDEO" ? "🎬 Video" : headerType === "DOCUMENT" ? "📎 Document" : "📷 Image";
-    textParts.push(label);
-  }
-
-  textParts.push(applyVariables(tmpl.body_text, bodyParams));
-  const footer = String(tmpl.footer_text ?? "").trim();
-  if (footer) {
-    textParts.push("");
-    textParts.push(footer);
-  }
-
-  return { imageUrl, textContent: textParts.join("\n").trim() };
 }
 
 async function findOrCreateDirectChat(userId: number, otherUserId: number): Promise<number> {
@@ -241,40 +180,40 @@ export async function deliverBusinessMessageToVidehInbox(input: {
     };
   }
 
-  const { imageUrl, textContent } = buildTemplateDeliveryContent(
-    input.tmpl,
-    input.apiBody,
-    input.businessLogoUrl,
-  );
+  const templatePayload = buildBusinessTemplatePayload(input.tmpl, input.apiBody);
+  const content = serializeBusinessTemplatePayload(templatePayload);
+  const mediaUrl = businessTemplateMediaUrl(templatePayload);
 
-  if (!imageUrl && !textContent.trim()) {
+  const templateCategory = String(input.tmpl.category ?? "utility").toLowerCase();
+  if (templateCategory === "marketing") {
+    const { isBusinessMarketingStopped } = await import("./businessMarketingPrefs");
+    const stopped = await isBusinessMarketingStopped(recipient.id, senderId);
+    if (stopped) {
+      return {
+        ok: false,
+        code: "marketing_opt_out",
+        message:
+          "Recipient has stopped offers and announcements from this business on Videh.",
+      };
+    }
+  }
+
+  if (!isDeliverableTemplate(templatePayload)) {
     return {
       ok: false,
       code: "empty_template_content",
       message:
-        "Template has no deliverable content. Add body text or a valid image header URL, and pass body variables in template.components.",
+        "Template has no deliverable content. Add body text or a valid header, and pass variables in template.components.",
     };
   }
 
-  let messageId: number;
-  const messageType = imageUrl ? "image" : "text";
-  if (imageUrl) {
-    const img = await query(
-      `INSERT INTO messages (chat_id, sender_id, content, type, media_url)
-       VALUES ($1, $2, $3, 'image', $4)
-       RETURNING id`,
-      [chatId, senderId, textContent || "📷 Photo", imageUrl],
-    );
-    messageId = Number(img.rows[0].id);
-  } else {
-    const msg = await query(
-      `INSERT INTO messages (chat_id, sender_id, content, type)
-       VALUES ($1, $2, $3, 'text')
-       RETURNING id`,
-      [chatId, senderId, textContent],
-    );
-    messageId = Number(msg.rows[0].id);
-  }
+  const ins = await query(
+    `INSERT INTO messages (chat_id, sender_id, content, type, media_url)
+     VALUES ($1, $2, $3, 'template', $4)
+     RETURNING id`,
+    [chatId, senderId, content, mediaUrl],
+  );
+  const messageId = Number(ins.rows[0].id);
 
   await query(
     `INSERT INTO message_status (message_id, user_id, status)
@@ -286,20 +225,19 @@ export async function deliverBusinessMessageToVidehInbox(input: {
 
   const senderRow = await query("SELECT name FROM users WHERE id = $1", [senderId]);
   const senderName = (senderRow.rows[0] as { name?: string })?.name ?? input.senderDisplayName ?? "Business";
-  const preview =
-    textContent.length > 60 ? `${textContent.slice(0, 60)}...` : textContent || "New message";
+  const pushPreview = chatMessagePushPreview("template", content);
 
   if (isValidPushToken(recipient.push_token)) {
     await sendChatPush(
       recipient.push_token,
       senderName,
-      preview,
+      pushPreview,
       {
         chatId: String(chatId),
         messageId: String(messageId),
         senderId: String(senderId),
         senderName,
-        messageType: imageUrl ? "image" : "text",
+        messageType: "template",
         type: "message",
         notificationKind: "chat_message",
         businessApi: "true",
@@ -315,9 +253,9 @@ export async function deliverBusinessMessageToVidehInbox(input: {
     userIds: [senderId, recipient.id],
     payload: {
       messageId,
-      content: textContent || (imageUrl ? "📷 Photo" : ""),
-      type: messageType,
-      mediaUrl: imageUrl ?? undefined,
+      content,
+      type: "template",
+      mediaUrl: mediaUrl ?? undefined,
       senderId,
       senderName,
       businessApi: true,

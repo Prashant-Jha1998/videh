@@ -5,6 +5,7 @@ import {
   disappearSystemMessageCopy,
   parseChatSystemPayload,
   promotedAdminMessageCopy,
+  businessMarketingStoppedCopy,
 } from "@/lib/chatSystemMessage";
 
 type Props = {
@@ -12,10 +13,11 @@ type Props = {
   isDark?: boolean;
   viewerUserId?: number;
   onChangeTimer?: () => void;
+  onResumeBusinessMarketing?: () => void;
 };
 
 /** Videh centered info card when disappearing messages timer changes. */
-export function ChatSystemMessageBubble({ text, isDark, viewerUserId, onChangeTimer }: Props) {
+export function ChatSystemMessageBubble({ text, isDark, viewerUserId, onChangeTimer, onResumeBusinessMarketing }: Props) {
   const payload = parseChatSystemPayload(text);
   if (!payload) return null;
 
@@ -29,6 +31,39 @@ export function ChatSystemMessageBubble({ text, isDark, viewerUserId, onChangeTi
       <View style={styles.wrap}>
         <View style={[styles.card, { backgroundColor: bg }]}>
           <Text style={[styles.body, { color: fg }]}>{copy}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (payload.kind === "business_marketing_stopped") {
+    const copy = businessMarketingStoppedCopy(payload.businessName);
+    return (
+      <View style={styles.wrap}>
+        <View style={[styles.card, { backgroundColor: bg }, !isDark && styles.cardLight]}>
+          <Text style={[styles.body, { color: fg, textAlign: "center" }]}>
+            {copy}
+            {onResumeBusinessMarketing ? (
+              <>
+                {" "}
+                <Text style={[styles.link, { color: link }]} onPress={onResumeBusinessMarketing}>
+                  Resume
+                </Text>
+              </>
+            ) : null}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (payload.kind === "business_marketing_resumed") {
+    return (
+      <View style={styles.wrap}>
+        <View style={[styles.card, { backgroundColor: bg }, !isDark && styles.cardLight]}>
+          <Text style={[styles.body, { color: fg, textAlign: "center" }]}>
+            Offers and announcements from {payload.businessName} resumed.
+          </Text>
         </View>
       </View>
     );

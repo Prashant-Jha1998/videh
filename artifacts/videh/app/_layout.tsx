@@ -1071,7 +1071,7 @@ export default function RootLayout() {
   if (!fontsReady) return null;
 
   return (
-    <ShareIntentProvider>
+    <ShareIntentProvider options={{ resetOnBackground: false, debug: __DEV__ }}>
     <SafeAreaProvider>
       <UiPreferencesProvider>
         <ErrorBoundary>

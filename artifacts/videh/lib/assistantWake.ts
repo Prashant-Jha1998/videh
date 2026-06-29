@@ -1,30 +1,31 @@
-/** Wake phrase detection — only "Hey Videh" (and close STT variants), not lone hey/hello. */
+/**
+ * Wake phrase: "Hey Friend" activates Videh assistant.
+ * Assistant name/branding stays Videh — only the wake phrase changed.
+ */
+
+export const ASSISTANT_BRAND_NAME = "Videh";
+export const WAKE_PHRASE_LABEL = "Hey Friend";
 
 const WAKE_PHRASES = [
-  "hey videh",
-  "he videh",
-  "hay videh",
-  "hi videh",
-  "hello videh",
-  "helo videh",
-  "hey vede",
-  "hey vadeh",
-  "hey video",
-  "hey wede",
-  "hey vidhe",
-  "hey vidh",
-  "he video",
-  "hay video",
-  "hi video",
-  "play videh",
-  "ok videh",
-  "oye videh",
-  "हे विदेह",
-  "है विदेह",
-  "हे वीडेह",
-  "हाय विदेह",
-  "विदेह जी",
-  "वीडेह",
+  "hey friend",
+  "he friend",
+  "hay friend",
+  "hi friend",
+  "hello friend",
+  "helo friend",
+  "hey frnd",
+  "hey frend",
+  "hey friends",
+  "ok friend",
+  "oye friend",
+  "hey fren",
+  "hey frined",
+  "hey freind",
+  "हे फ्रेंड",
+  "हाय फ्रेंड",
+  "हे फ्रेंड्स",
+  "हे दोस्त",
+  "हाय दोस्त",
 ].sort((a, b) => b.length - a.length);
 
 const WAKE_REGEX = new RegExp(
@@ -32,19 +33,18 @@ const WAKE_REGEX = new RegExp(
   "i",
 );
 
-/** Must include Videh (or common STT mis-hear) — not just "hey" or "hello". */
-const VIDEH_WORD_RE = /\b(videh|vidhe|vede|vadeh|wede|विदेह|वीडेह)\b/i;
+const FRIEND_WORD_RE = /\b(friend|friends|frnd|frend|fren|frined|freind|फ्रेंड|फ्रेंड्स|दोस्त)\b/i;
 
-/** Full wake phrase only (optional punctuation after). */
+/** Full wake phrase only — not lone "hey" or "hello". */
 const STANDALONE_WAKE_RE =
-  /^(?:hey|he|hay|hi|hello|helo|oye|ok|okay)\s+(?:videh|vidhe|video|vede|vadeh|wede|विदेह|वीडेह)[,.!?\s]*$/i;
+  /^(?:hey|he|hay|hi|hello|helo|oye|ok|okay)\s+(?:friend|friends|frnd|frend|fren|frined|freind|फ्रेंड|दोस्त)[,.!?\s]*$/i;
 
 export function containsWakePhrase(text: string): boolean {
   const n = text.toLowerCase().trim();
   if (!n) return false;
   if (STANDALONE_WAKE_RE.test(n)) return true;
   if (WAKE_PHRASES.some((p) => n.includes(p))) return true;
-  if (/\b(hey|he|hay|hi|hello|oye)\b/.test(n) && VIDEH_WORD_RE.test(n)) {
+  if (/\b(hey|he|hay|hi|hello|oye)\b/.test(n) && FRIEND_WORD_RE.test(n)) {
     return true;
   }
   return false;
@@ -60,9 +60,9 @@ export function extractCommandAfterWake(text: string): string {
       return raw.slice(idx + phrase.length).replace(/^[,.\\s]+/, "").trim();
     }
   }
-  if (/\b(hey|he|hay|hi|hello|oye)\b/i.test(raw) && VIDEH_WORD_RE.test(raw)) {
+  if (/\b(hey|he|hay|hi|hello|oye)\b/i.test(raw) && FRIEND_WORD_RE.test(raw)) {
     return raw
-      .replace(/^(?:hey|he|hay|hi|hello|helo|oye)\s+(?:videh|vidhe|video|vede|vadeh|wede)\s*/i, "")
+      .replace(/^(?:hey|he|hay|hi|hello|helo|oye)\s+(?:friend|friends|frnd|frend|fren)\s*/i, "")
       .trim();
   }
   return raw;
@@ -89,4 +89,12 @@ export function parseWakeUtterance(text: string): { hasWake: boolean; command: s
   return { hasWake: true, command };
 }
 
-export const WAKE_CONTEXT_STRINGS = ["hey videh", "hi videh", "hello videh", ...WAKE_PHRASES];
+export const WAKE_CONTEXT_STRINGS = [
+  "hey friend",
+  "hi friend",
+  "hello friend",
+  "hey frnd",
+  "हे फ्रेंड",
+  "हे दोस्त",
+  ...WAKE_PHRASES,
+];

@@ -9,12 +9,21 @@ function authHeaders(token?: string | null): Record<string, string> {
   };
 }
 
+export type AssistantPendingAction = {
+  type: "schedule_message" | "send_message";
+  contactName?: string;
+  chatId?: number;
+  messageText?: string;
+  scheduledAt?: string;
+};
+
 export type AssistantCommandResult = {
   speak: string;
   intent?: string;
   langCode?: AssistantLangCode;
   speechLocale?: string;
   actions?: Array<{ type: string; chatId?: string; callType?: string; contactName?: string }>;
+  pendingAction?: AssistantPendingAction;
 };
 
 export async function fetchAssistantPrefs(token?: string | null): Promise<AssistantPrefs | null> {
@@ -81,6 +90,7 @@ export async function runAssistantCommand(
   token: string | null | undefined,
   text: string,
   localeHint?: AssistantLangCode,
+  pendingAction?: AssistantPendingAction,
 ): Promise<AssistantCommandResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12_000);
@@ -89,7 +99,7 @@ export async function runAssistantCommand(
     res = await fetch(`${getApiUrl()}/api/assistant/command`, {
       method: "POST",
       headers: authHeaders(token),
-      body: JSON.stringify({ text, locale: localeHint }),
+      body: JSON.stringify({ text, locale: localeHint, pendingAction }),
       signal: controller.signal,
     });
   } finally {
@@ -102,6 +112,7 @@ export async function runAssistantCommand(
     langCode?: AssistantLangCode;
     speechLocale?: string;
     actions?: Array<{ type: string; chatId?: string; callType?: string; contactName?: string }>;
+    pendingAction?: AssistantPendingAction;
   };
   if (!data.success) throw new Error("Assistant command failed");
   return {
@@ -110,6 +121,7 @@ export async function runAssistantCommand(
     langCode: data.langCode,
     speechLocale: data.speechLocale,
     actions: data.actions,
+    pendingAction: data.pendingAction,
   };
 }
 

@@ -111,6 +111,21 @@ export function chatMessagePushPreview(type: string | undefined, content: string
       if (meta) return callMessagePreview(meta);
       return "Call";
     }
+    case "template": {
+      try {
+        const parsed = JSON.parse(raw) as { kind?: string; body?: string; buttons?: Array<{ text?: string }> };
+        if (parsed?.kind === "business_template") {
+          const body = String(parsed.body ?? "").trim();
+          if (body) return truncate(body, 80);
+          const btn = parsed.buttons?.[0]?.text;
+          if (btn) return truncate(String(btn), 80);
+          return "Business message";
+        }
+      } catch {
+        /* fall through */
+      }
+      return "Business message";
+    }
     case "deleted":
       return "This message was deleted";
     default: {

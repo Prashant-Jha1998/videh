@@ -34,7 +34,7 @@ export function AssistantOverlay() {
         ? "Working on it…"
         : phase === "speaking"
           ? "Videh"
-          : "Hey Videh";
+          : "Videh";
 
   const subtitle =
     phase === "listening"

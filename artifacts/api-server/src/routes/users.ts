@@ -368,6 +368,12 @@ router.get("/:id/business-channel", async (req: Request, res: Response) => {
       res.json({ success: true, isBusiness: false });
       return;
     }
+    if (channel.logoUrl) {
+      await query(
+        `UPDATE users SET avatar_url = $1, updated_at = NOW() WHERE id = $2`,
+        [channel.logoUrl, userId],
+      ).catch(() => null);
+    }
     res.json({
       success: true,
       isBusiness: true,
@@ -377,6 +383,79 @@ router.get("/:id/business-channel", async (req: Request, res: Response) => {
       businessAccountId: channel.businessAccountId,
       businessCategory: channel.businessCategory,
     });
+  } catch {
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:id/business-marketing", async (req: Request, res: Response) => {
+  const userId = Number(req.params.id);
+  const businessUserId = Number(req.query.businessUserId);
+  if (!userId || !businessUserId) {
+    res.status(400).json({ success: false, message: "userId and businessUserId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    const { isBusinessMarketingStopped } = await import("../lib/businessMarketingPrefs");
+    const stopped = await isBusinessMarketingStopped(userId, businessUserId);
+    res.json({ success: true, marketingStopped: stopped });
+  } catch {
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:id/business-marketing/stop", async (req: Request, res: Response) => {
+  const userId = Number(req.params.id);
+  const { businessUserId, chatId, businessName } = req.body as {
+    businessUserId?: number;
+    chatId?: number;
+    businessName?: string;
+  };
+  if (!userId || !businessUserId || !chatId) {
+    res.status(400).json({ success: false, message: "userId, businessUserId, and chatId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    const { setBusinessMarketingStopped } = await import("../lib/businessMarketingPrefs");
+    const { insertChatSystemMessage } = await import("../lib/chatSystemMessages");
+    await setBusinessMarketingStopped(userId, businessUserId, true);
+    const name = String(businessName ?? "this business").trim() || "this business";
+    const { messageId, content } = await insertChatSystemMessage(chatId, userId, {
+      kind: "business_marketing_stopped",
+      businessName: name,
+      businessUserId,
+    });
+    res.json({ success: true, marketingStopped: true, messageId, message: { content, type: "system" } });
+  } catch {
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:id/business-marketing/resume", async (req: Request, res: Response) => {
+  const userId = Number(req.params.id);
+  const { businessUserId, chatId, businessName } = req.body as {
+    businessUserId?: number;
+    chatId?: number;
+    businessName?: string;
+  };
+  if (!userId || !businessUserId || !chatId) {
+    res.status(400).json({ success: false, message: "userId, businessUserId, and chatId required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    const { setBusinessMarketingStopped } = await import("../lib/businessMarketingPrefs");
+    const { insertChatSystemMessage } = await import("../lib/chatSystemMessages");
+    await setBusinessMarketingStopped(userId, businessUserId, false);
+    const name = String(businessName ?? "this business").trim() || "this business";
+    const { messageId, content } = await insertChatSystemMessage(chatId, userId, {
+      kind: "business_marketing_resumed",
+      businessName: name,
+      businessUserId,
+    });
+    res.json({ success: true, marketingStopped: false, messageId, message: { content, type: "system" } });
   } catch {
     res.status(500).json({ success: false });
   }

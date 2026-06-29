@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import React from "react";
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { BusinessLogoAvatar, BusinessVerifiedBadge } from "@/components/BusinessVerifiedBadge";
 
 type BannerProps = {
   onLearnMore?: () => void;
@@ -38,7 +38,8 @@ type CardProps = {
   logoUrl?: string;
   joinedLabel: string;
   isDark?: boolean;
-  onManageMessages: () => void;
+  onStop: () => void;
+  onProfile: () => void;
 };
 
 export function BusinessIntroCard({
@@ -46,35 +47,38 @@ export function BusinessIntroCard({
   logoUrl,
   joinedLabel,
   isDark,
-  onManageMessages,
+  onStop,
+  onProfile,
 }: CardProps) {
-  const initials = displayName.split(/\s+/).map((p) => p[0]).join("").toUpperCase().slice(0, 2) || "B";
-
   return (
     <View style={styles.cardWrap}>
       <View style={[styles.card, isDark && styles.cardDark]}>
         <View style={styles.logoWrap}>
-          {logoUrl ? (
-            <Image source={{ uri: logoUrl }} style={styles.logoImg} contentFit="cover" />
-          ) : (
-            <View style={styles.logoFallback}>
-              <Text style={styles.logoFallbackTxt}>{initials}</Text>
-            </View>
-          )}
+          <BusinessLogoAvatar uri={logoUrl} displayName={displayName} size={88} />
         </View>
 
         <View style={styles.nameRow}>
           <Text style={[styles.businessName, isDark && styles.businessNameDark]} numberOfLines={2}>
             {displayName}
           </Text>
-          <Ionicons name="checkmark-circle" size={18} color="#1DAA61" style={styles.verifiedIcon} />
+          <BusinessVerifiedBadge size={20} />
         </View>
 
         <Text style={styles.accountLine}>Business account • {joinedLabel}</Text>
 
-        <TouchableOpacity style={styles.manageBtn} onPress={onManageMessages} activeOpacity={0.8}>
-          <Text style={styles.manageBtnTxt}>Manage messages</Text>
-        </TouchableOpacity>
+        <Text style={styles.offersLine}>
+          You are getting offers and announcements from this business.
+        </Text>
+
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={styles.actionBtn} onPress={onStop} activeOpacity={0.8}>
+            <Ionicons name="hand-left-outline" size={18} color="#14131F" />
+            <Text style={styles.actionBtnTxt}>Stop</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionBtn} onPress={onProfile} activeOpacity={0.8}>
+            <Text style={styles.actionBtnTxt}>Profile</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -88,6 +92,21 @@ export function formatBusinessJoinedLabel(joinedAt?: string | null): string {
   const month = d.toLocaleDateString("en-IN", { month: "long" });
   const year = d.getFullYear();
   return `Joined in ${month}, ${year}`;
+}
+
+/** Footer info when business marketing is active (WhatsApp-style). */
+export function BusinessOffersInfoBanner({ onLearnMore }: { onLearnMore?: () => void }) {
+  return (
+    <View style={styles.offersBannerWrap}>
+      <Text style={styles.offersBannerText}>
+        <Ionicons name="information-circle-outline" size={14} color="#667781" />{" "}
+        This chat has offers and announcements.{" "}
+        <Text style={styles.bannerLink} onPress={onLearnMore}>
+          Learn more
+        </Text>
+      </Text>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -133,15 +152,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   logoImg: { width: 88, height: 88 },
-  logoFallback: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: "#5B4FE822",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  logoFallbackTxt: { fontSize: 28, fontFamily: "Inter_700Bold", color: "#5B4FE8" },
   nameRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -158,26 +168,53 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   businessNameDark: { color: "#E9EDEF" },
-  verifiedIcon: { marginTop: 2 },
   accountLine: {
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     color: "#667781",
     textAlign: "center",
-    marginBottom: 18,
+    marginBottom: 10,
   },
-  manageBtn: {
+  offersLine: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    color: "#667781",
+    textAlign: "center",
+    marginBottom: 18,
+    paddingHorizontal: 8,
+    lineHeight: 18,
+  },
+  actionRow: {
+    flexDirection: "row",
+    gap: 10,
+    width: "100%",
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.12)",
     borderRadius: 24,
-    paddingHorizontal: 28,
     paddingVertical: 11,
-    minWidth: 200,
-    alignItems: "center",
   },
-  manageBtnTxt: {
+  actionBtnTxt: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
-    color: "#5B4FE8",
+    color: "#14131F",
+  },
+  offersBannerWrap: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  offersBannerText: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: "#667781",
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
   },
 });

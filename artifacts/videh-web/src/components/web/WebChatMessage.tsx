@@ -16,7 +16,9 @@ import { WebDocumentBubble } from "./WebDocumentBubble";
 import { WebCallMessageBubble } from "./WebCallMessageBubble";
 import { WebVoiceMessageBubble } from "./WebVoiceMessageBubble";
 import { WebChatForwardModal } from "./WebChatForwardModal";
+import { WebTemplateMessageCard } from "../WebTemplateMessageCard";
 import { formatMessageBody, isSystemStyleMessage, replyPreviewText } from "../../lib/chatMessageDisplay";
+import { parseBusinessTemplatePayload } from "../../lib/businessTemplateMessage";
 import { isDocumentMessage } from "../../lib/documentMessage";
 import { parseCallMessageMeta } from "../../lib/callMessage";
 import { highlightMatches } from "../../lib/highlightText";
@@ -89,10 +91,14 @@ export function WebChatMessage({
     : null;
   const hasImage = !isDeleted && msg.type === "image" && !!msg.media_url;
   const hasVideo = !isDeleted && msg.type === "video" && !!msg.media_url;
+  const templatePayload = !isDeleted && msg.type === "template"
+    ? parseBusinessTemplatePayload(msg.content)
+    : null;
+  const isTemplate = !!templatePayload;
   const hasDocument = !isDeleted && isDocumentMessage(msg);
   const isVisualMedia = hasImage || hasVideo;
   const bodyText = formatMessageBody(msg);
-  const showBodyText = Boolean(bodyText && !callMeta && !isAudio && !hasImage && !hasVideo && !hasDocument);
+  const showBodyText = Boolean(bodyText && !callMeta && !isAudio && !hasImage && !hasVideo && !hasDocument && !isTemplate);
   const reactionGroups = useMemo(() => groupReactions(msg.reactions, selfId), [msg.reactions, selfId]);
   const showHoverActions = hovered && !selectionMode && !isDeleted;
 
@@ -198,6 +204,7 @@ export function WebChatMessage({
     "vw-msg-bubble",
     isMe ? "vw-msg-bubble--sent" : "vw-msg-bubble--recv",
     isVisualMedia || hasDocument ? "vw-msg-bubble--media" : "",
+    isTemplate ? "vw-msg-bubble--template" : "",
     isAudio ? "vw-msg-bubble--audio" : "",
     isDeleted ? "vw-msg-bubble--deleted" : "",
   ].filter(Boolean).join(" ");
@@ -312,6 +319,23 @@ export function WebChatMessage({
                 />
               ) : null}
               {callMeta ? <WebCallMessageBubble content={msg.content} isMe={isMe} /> : null}
+              {templatePayload ? (
+                <WebTemplateMessageCard
+                  payload={templatePayload}
+                  onQuickReply={async (text) => {
+                    if (busy || isDeleted) return;
+                    setBusy(true);
+                    try {
+                      await webApi.sendMessage(token, chatId, { content: text });
+                      onRefresh();
+                    } catch (err) {
+                      alert(err instanceof Error ? err.message : "Could not send reply.");
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                />
+              ) : null}
               {showBodyText ? (
                 <p className="vw-msg-bubble__text">
                   {chatSearchLower ? highlightMatches(bodyText!, chatSearchQuery!) : bodyText}

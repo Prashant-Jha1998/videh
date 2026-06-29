@@ -121,8 +121,10 @@ import { useWebKeyboardShortcuts } from "@/lib/useWebKeyboardShortcuts";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { DropdownMenu } from "@/components/DropdownMenu";
 import { ThemedHeader } from "@/components/ThemedHeader";
-import { BusinessIntroCard, BusinessSecureBanner, formatBusinessJoinedLabel } from "@/components/BusinessChatIntro";
-import { ManageBusinessMessagesSheet } from "@/components/ManageBusinessMessagesSheet";
+import { BusinessIntroCard, BusinessOffersInfoBanner, BusinessSecureBanner, formatBusinessJoinedLabel } from "@/components/BusinessChatIntro";
+import { BusinessLogoAvatar, BusinessVerifiedBadge } from "@/components/BusinessVerifiedBadge";
+import { StopBusinessMessagesSheet } from "@/components/StopBusinessMessagesSheet";
+import { TemplateMessageCard } from "@/components/TemplateMessageCard";
 import { ChatEncryptionNotice, UnsavedContactCard } from "@/components/UnsavedContactCard";
 import { ChatEmptyState } from "@/components/ChatEmptyState";
 import { dismissGroupWelcome, isGroupWelcomeDismissed } from "@/lib/groupWelcomeDismiss";
@@ -1522,7 +1524,9 @@ export default function ChatScreen() {
     logoUrl?: string;
     joinedAt?: string | null;
   } | null>(null);
-  const [manageBusinessOpen, setManageBusinessOpen] = useState(false);
+  const [stopBusinessOpen, setStopBusinessOpen] = useState(false);
+  const [marketingStopped, setMarketingStopped] = useState(false);
+  const [stopBusinessBusy, setStopBusinessBusy] = useState(false);
   const [groupWelcomeDismissed, setGroupWelcomeDismissed] = useState(false);
   const [groupWelcomePreview, setGroupWelcomePreview] = useState<{
     addedByPhone: string;
@@ -2837,6 +2841,131 @@ export default function ChatScreen() {
     });
   }, [chatId, router]);
 
+  const openBusinessProfile = useCallback(() => {
+    if (!chatId) return;
+    router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: chatContactName } });
+  }, [chatId, chatContactName, router]);
+
+  const handleConfirmStopMarketing = useCallback(async () => {
+    const businessUserId = !chat?.isGroup ? chat?.otherUserId : undefined;
+    if (!user?.dbId || !businessUserId || !chatId || stopBusinessBusy) return;
+    setStopBusinessBusy(true);
+    try {
+      const res = await fetch(`${BASE_URL}/api/users/${user.dbId}/business-marketing/stop`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+        },
+        body: JSON.stringify({
+          businessUserId,
+          chatId: Number(chatId),
+          businessName: businessChannelInfo?.displayName ?? chatContactName,
+        }),
+      });
+      const data = await res.json() as { success?: boolean };
+      if (data.success) {
+        setMarketingStopped(true);
+        setStopBusinessOpen(false);
+        await loadMessages(chatId);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        Alert.alert("Error", "Could not stop offers and announcements.");
+      }
+    } catch {
+      Alert.alert("Error", "Could not stop offers and announcements.");
+    } finally {
+      setStopBusinessBusy(false);
+    }
+  }, [
+    chat?.isGroup,
+    chat?.otherUserId,
+    user?.dbId,
+    user?.sessionToken,
+    chatId,
+    stopBusinessBusy,
+    businessChannelInfo?.displayName,
+    chatContactName,
+    loadMessages,
+  ]);
+
+  const handleResumeMarketing = useCallback(async () => {
+    const businessUserId = !chat?.isGroup ? chat?.otherUserId : undefined;
+    if (!user?.dbId || !businessUserId || !chatId) return;
+    try {
+      const res = await fetch(`${BASE_URL}/api/users/${user.dbId}/business-marketing/resume`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+        },
+        body: JSON.stringify({
+          businessUserId,
+          chatId: Number(chatId),
+          businessName: businessChannelInfo?.displayName ?? chatContactName,
+        }),
+      });
+      const data = await res.json() as { success?: boolean };
+      if (data.success) {
+        setMarketingStopped(false);
+        await loadMessages(chatId);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        Alert.alert("Error", "Could not resume offers and announcements.");
+      }
+    } catch {
+      Alert.alert("Error", "Could not resume offers and announcements.");
+    }
+  }, [
+    chat?.isGroup,
+    chat?.otherUserId,
+    user?.dbId,
+    user?.sessionToken,
+    chatId,
+    businessChannelInfo?.displayName,
+    chatContactName,
+    loadMessages,
+  ]);
+
+  const handleStopBlockInstead = useCallback(() => {
+    setStopBusinessOpen(false);
+    if (!chat?.isGroup && chat?.otherUserId) {
+      const peerLabel = businessChannelInfo?.displayName ?? chatContactName;
+      const action = blockState.iBlockedThem ? "Unblock" : "Block";
+      Alert.alert(
+        `${action} ${peerLabel}?`,
+        blockState.iBlockedThem
+          ? "They will be able to message and call you again."
+          : "Blocked contacts cannot message, call, or see your status updates.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: action,
+            style: blockState.iBlockedThem ? "default" : "destructive",
+            onPress: async () => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+              if (blockState.iBlockedThem) {
+                await unblockUser(chat.otherUserId!);
+                setBlockState((prev) => ({ ...prev, iBlockedThem: false }));
+              } else {
+                await blockUser(chat.otherUserId!);
+                setBlockState((prev) => ({ ...prev, iBlockedThem: true }));
+              }
+            },
+          },
+        ],
+      );
+    }
+  }, [
+    blockState.iBlockedThem,
+    blockUser,
+    businessChannelInfo?.displayName,
+    chat?.isGroup,
+    chat?.otherUserId,
+    chatContactName,
+    unblockUser,
+  ]);
+
   const renderMsg = ({ item }: { item: Message }) => {
     if (item.type === "system") {
       return (
@@ -2845,6 +2974,9 @@ export default function ChatScreen() {
           isDark={colors.isDark}
           viewerUserId={user?.dbId}
           onChangeTimer={openDisappearSettings}
+          onResumeBusinessMarketing={
+            businessChannelInfo && !chat?.isGroup ? handleResumeMarketing : undefined
+          }
         />
       );
     }
@@ -2883,8 +3015,9 @@ export default function ChatScreen() {
     const isLocation = effectiveType === "location";
     const isContact = effectiveType === "contact";
     const isCall = effectiveType === "call";
+    const isTemplate = item.type === "template" && !!item.templatePayload;
     const callMeta = isCall ? parseCallMessageMeta(item.text) : null;
-    const isSpecial = isDocument || isLocation || isContact || isCall;
+    const isSpecial = isDocument || isLocation || isContact || isCall || isTemplate;
     const urls = (!isDeleted && !isImage && !isAudio && !isSpecial) ? extractUrls(item.text) : [];
     const isManyForwarded = (item.forwardCount ?? 0) >= 5;
     const metaTextColor = isImage || isAlbum || isLocation
@@ -2893,7 +3026,7 @@ export default function ChatScreen() {
         ? "rgba(0,0,0,0.55)"
         : colors.mutedForeground;
 
-    const showSvgTail = !isImage && !isVideo && !isAlbum && !isLocation && !isViewOnceOpened && !isViewOncePending;
+    const showSvgTail = !isImage && !isVideo && !isAlbum && !isLocation && !isViewOnceOpened && !isViewOncePending && !isTemplate;
     const isPlainText =
       !isDeleted
       && !isAlbum
@@ -2904,6 +3037,7 @@ export default function ChatScreen() {
       && !isLocation
       && !isContact
       && !isCall
+      && !isTemplate
       && !isViewOnceOpened
       && !isViewOncePending;
     const compactTextBubble =
@@ -2957,7 +3091,9 @@ export default function ChatScreen() {
       && (isImage || isVideo || isAlbum || isDocument);
     const hasMediaFrame =
       !isDeleted && !isViewOnceOpened && !isViewOncePending && (isImage || isVideo || isAlbum || isDocument);
-    const bubbleFill = hasMediaFrame && isMe
+    const bubbleFill = isTemplate
+      ? "transparent"
+      : hasMediaFrame && isMe
       ? colors.primary
       : isMe
         ? colors.chatBubbleSent
@@ -3030,6 +3166,7 @@ export default function ChatScreen() {
               showSvgTail && styles.bubbleWithTailShape,
               { backgroundColor: bubbleFill },
               (isImage || isVideo || isAlbum || isLocation || isViewOnceOpened || isViewOncePending) && styles.bubbleImg,
+              isTemplate && styles.bubbleTemplate,
               hasMediaFrame && styles.bubbleMediaFrame,
               hasMediaFrame && !isMe && {
                 borderWidth: 1,
@@ -3112,6 +3249,32 @@ export default function ChatScreen() {
               kind={item.type === "video" ? "video" : "image"}
               onOpen={() => { void openViewOnceMedia(item); }}
             />
+          ) : isTemplate && item.templatePayload ? (
+            <View style={styles.templateBubbleWrap}>
+              <TemplateMessageCard
+                payload={item.templatePayload}
+                isDark={colors.isDark}
+                sessionToken={user?.sessionToken}
+                onOpenImage={(uri) => {
+                  setMediaPreview({
+                    uri,
+                    type: "image",
+                    caption: item.templatePayload?.body,
+                  });
+                }}
+                onOpenVideo={(uri) => {
+                  void openChatVideoFullScreen(uri, isMe, item.timestamp);
+                }}
+                onQuickReply={(text) => {
+                  if (chatId) void sendMessage(chatId, text);
+                }}
+              />
+              <View style={styles.templateMetaRow}>
+                <Text style={[styles.msgTime, { color: colors.mutedForeground }]}>
+                  {formatChatBubbleTime(item.timestamp)}
+                </Text>
+              </View>
+            </View>
           ) : isAlbum && albumUrls ? (
             <>
               <View style={styles.mediaBubbleWrap}>
@@ -3404,10 +3567,11 @@ export default function ChatScreen() {
           <BusinessSecureBanner />
           <BusinessIntroCard
             displayName={businessChannelInfo.displayName}
-            logoUrl={businessChannelInfo.logoUrl ?? contactAvatar}
+            logoUrl={businessLogoUri}
             joinedLabel={formatBusinessJoinedLabel(businessChannelInfo.joinedAt)}
             isDark={colors.isDark}
-            onManageMessages={() => setManageBusinessOpen(true)}
+            onStop={() => setStopBusinessOpen(true)}
+            onProfile={openBusinessProfile}
           />
         </>
       );
@@ -3469,6 +3633,9 @@ export default function ChatScreen() {
 
   const displayName = name ?? chat?.name ?? "Chat";
   const contactAvatar = resolvePublicAssetUrl(chat?.avatar ?? otherAvatar);
+  const businessLogoUri =
+    resolvePublicAssetUrl(businessChannelInfo?.logoUrl) ?? businessChannelInfo?.logoUrl ?? contactAvatar;
+  const headerAvatarUri = businessChannelInfo ? businessLogoUri : contactAvatar;
   const initials = displayName.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
   const hue = (displayName.charCodeAt(0) * 37) % 360;
   const avatarBg = `hsl(${hue},50%,40%)`;
@@ -3515,6 +3682,14 @@ export default function ChatScreen() {
     !searching
     && !chat?.isGroup
     && !!businessChannelInfo
+    && !marketingStopped
+    && !blockState.iBlockedThem
+    && !blockState.theyBlockedMe;
+  const showBusinessOffersBanner =
+    !searching
+    && !chat?.isGroup
+    && !!businessChannelInfo
+    && !marketingStopped
     && !blockState.iBlockedThem
     && !blockState.theyBlockedMe;
   const showUnsavedContactCard =
@@ -3690,10 +3865,27 @@ export default function ChatScreen() {
     }, [chatId, chat?.isGroup, directContactId]),
   );
 
-  const handleToggleBusinessMute = useCallback((wantMuted: boolean) => {
-    if (!chatId) return;
-    if (Boolean(chat?.isMuted) !== wantMuted) muteChat(chatId);
-  }, [chat?.isMuted, chatId, muteChat]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.dbId || !directContactId || !businessChannelInfo) {
+        setMarketingStopped(false);
+        return;
+      }
+      let cancelled = false;
+      fetch(
+        `${BASE_URL}/api/users/${user.dbId}/business-marketing?businessUserId=${directContactId}`,
+        { headers: user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : undefined },
+      )
+        .then((r) => r.json())
+        .then((data: { success?: boolean; marketingStopped?: boolean }) => {
+          if (!cancelled && data.success) {
+            setMarketingStopped(Boolean(data.marketingStopped));
+          }
+        })
+        .catch(() => {});
+      return () => { cancelled = true; };
+    }, [user?.dbId, user?.sessionToken, directContactId, businessChannelInfo]),
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -3785,11 +3977,6 @@ export default function ChatScreen() {
       ],
     );
   }, [blockState.iBlockedThem, blockUser, directContactId, displayName, unblockUser]);
-
-  const handleBlockBusiness = useCallback(() => {
-    setManageBusinessOpen(false);
-    handleMenuBlockToggle();
-  }, [handleMenuBlockToggle]);
 
   const handleMenuReport = useCallback((blockAfterReport: boolean) => {
     if (!directContactId || !chatId) {
@@ -4263,14 +4450,20 @@ export default function ChatScreen() {
             activeOpacity={0.8}
             onPress={() => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } })}
           >
-            {contactAvatar ? (
-              <Image source={{ uri: contactAvatar }} style={styles.headerAvatarImg} contentFit="cover" />
+            {headerAvatarUri ? (
+              businessChannelInfo ? (
+                <View style={styles.headerAvatarWrap}>
+                  <BusinessLogoAvatar uri={businessLogoUri} displayName={businessChannelInfo.displayName} size={40} />
+                </View>
+              ) : (
+                <Image source={{ uri: headerAvatarUri }} style={styles.headerAvatarImg} contentFit="cover" />
+              )
             ) : (
               <View style={[styles.headerAvatarWrap, { backgroundColor: avatarBg }]}>
                 <Text style={styles.headerAvatarText}>{initials}</Text>
               </View>
             )}
-            {disappearingOn ? <DisappearTimerBadge size={16} variant="header" /> : null}
+            {disappearingOn && !businessChannelInfo ? <DisappearTimerBadge size={16} variant="header" /> : null}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -4283,7 +4476,7 @@ export default function ChatScreen() {
                 {businessChannelInfo?.displayName ?? displayName}
               </Text>
               {businessChannelInfo ? (
-                <Ionicons name="checkmark-circle" size={16} color="#93C5FD" style={{ marginLeft: 4 }} />
+                <BusinessVerifiedBadge size={18} />
               ) : null}
             </View>
             <Text style={[styles.headerStatus, remoteTypingNames.length > 0 && { color: "#a7f3d0" }]}>
@@ -4398,13 +4591,20 @@ export default function ChatScreen() {
           inverted={messageListInverted}
           data={chatListData}
           ListHeaderComponent={
-            !searching && remoteTypingNames.length > 0 ? (
-              <TypingIndicator
-                bubbleColor={colors.chatBubbleReceived}
-                dotColor={colors.mutedForeground}
-                textColor={colors.mutedForeground}
-                label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
-              />
+            !searching ? (
+              <>
+                {showBusinessOffersBanner && messageListInverted ? (
+                  <BusinessOffersInfoBanner />
+                ) : null}
+                {remoteTypingNames.length > 0 ? (
+                  <TypingIndicator
+                    bubbleColor={colors.chatBubbleReceived}
+                    dotColor={colors.mutedForeground}
+                    textColor={colors.mutedForeground}
+                    label={chat?.isGroup ? formatTypingLabel(remoteTypingNames, true) : undefined}
+                  />
+                ) : null}
+              </>
             ) : null
           }
           ListFooterComponent={
@@ -4420,10 +4620,11 @@ export default function ChatScreen() {
                     <BusinessSecureBanner />
                     <BusinessIntroCard
                       displayName={businessChannelInfo.displayName}
-                      logoUrl={businessChannelInfo.logoUrl ?? contactAvatar}
+                      logoUrl={businessLogoUri}
                       joinedLabel={formatBusinessJoinedLabel(businessChannelInfo.joinedAt)}
                       isDark={colors.isDark}
-                      onManageMessages={() => setManageBusinessOpen(true)}
+                      onStop={() => setStopBusinessOpen(true)}
+                      onProfile={openBusinessProfile}
                     />
                   </>
                 ) : null}
@@ -4460,6 +4661,9 @@ export default function ChatScreen() {
                       onReport={() => handleMenuReport(false)}
                     />
                   </>
+                ) : null}
+                {showBusinessOffersBanner && !messageListInverted ? (
+                  <BusinessOffersInfoBanner />
                 ) : null}
               </>
             ) : null
@@ -4729,13 +4933,13 @@ export default function ChatScreen() {
         ) : null}
       </Modal>
 
-      <ManageBusinessMessagesSheet
-        visible={manageBusinessOpen}
+      <StopBusinessMessagesSheet
+        visible={stopBusinessOpen}
         businessName={businessChannelInfo?.displayName ?? displayName}
-        isMuted={!!chat?.isMuted}
-        onClose={() => setManageBusinessOpen(false)}
-        onToggleMute={handleToggleBusinessMute}
-        onBlock={handleBlockBusiness}
+        onClose={() => setStopBusinessOpen(false)}
+        onConfirmStop={() => { void handleConfirmStopMarketing(); }}
+        onBlockInstead={handleStopBlockInstead}
+        busy={stopBusinessBusy}
       />
 
       {/* View received / sent contact (Save, Call) */}
@@ -5129,6 +5333,22 @@ const styles = StyleSheet.create({
   /** WhatsApp-style colored frame around shared media (Videh indigo for sent). */
   bubbleMediaFrame: {
     padding: 3,
+  },
+  bubbleTemplate: {
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    backgroundColor: "transparent",
+    overflow: "visible",
+  },
+  templateBubbleWrap: {
+    padding: 2,
+    maxWidth: 300,
+  },
+  templateMetaRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingTop: 2,
+    paddingRight: 4,
   },
   replyStrip: {
     borderLeftWidth: 4,

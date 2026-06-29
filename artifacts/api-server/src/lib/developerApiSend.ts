@@ -39,8 +39,11 @@ export async function sendBusinessMessage(
   await ensureDeveloperTemplateTables();
 
   const acct = await query(
-    `SELECT videh_phone_number_id, channel_status, display_name, channel_phone, company_name, logo_url
-     FROM developer_api_accounts WHERE id = $1`,
+    `SELECT a.videh_phone_number_id, a.channel_status, a.display_name, a.channel_phone, a.company_name,
+            COALESCE(NULLIF(TRIM(l.logo_url), ''), NULLIF(TRIM(a.logo_url), '')) AS logo_url
+     FROM developer_api_accounts a
+     JOIN developer_leads l ON l.id = a.lead_id
+     WHERE a.id = $1`,
     [accountId],
   );
   const accountRow = acct.rows[0] as {

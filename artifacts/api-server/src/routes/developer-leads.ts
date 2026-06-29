@@ -7,6 +7,7 @@ import multer from "multer";
 import { query } from "../lib/db";
 import { logger } from "../lib/logger";
 import { uploadLocalFileToS3 } from "../lib/s3Storage";
+import { resolveStoredMediaUrlEnv } from "../lib/mediaStorage";
 import {
   createRazorpayOrder,
   ensureRazorpayPaymentCaptured,
@@ -388,7 +389,23 @@ router.post("/:id/logo", logoUpload.single("logo"), async (req: Request, res: Re
     const url = publicUploadUrl(req.file.path);
     await uploadLocalFileToS3(req.file.path, url);
     await query(`UPDATE developer_leads SET logo_url = $1, updated_at = NOW() WHERE id = $2`, [url, id]);
-    res.json({ success: true, logoUrl: url });
+    await query(
+      `UPDATE developer_api_accounts SET logo_url = $1, updated_at = NOW() WHERE lead_id = $2`,
+      [url, id],
+    );
+    const leadRow = await query(`SELECT channel_phone FROM developer_leads WHERE id = $1`, [id]);
+    const channelPhone = String((leadRow.rows[0] as { channel_phone?: string })?.channel_phone ?? "").trim();
+    const publicLogo = resolveStoredMediaUrlEnv(url);
+    if (channelPhone && publicLogo) {
+      const digits = channelPhone.replace(/\D/g, "");
+      await query(
+        `UPDATE users SET avatar_url = $1, updated_at = NOW()
+         WHERE regexp_replace(phone, '\\D', '', 'g') = $2
+            OR phone = $3`,
+        [publicLogo, digits, channelPhone],
+      ).catch(() => null);
+    }
+    res.json({ success: true, logoUrl: publicLogo ?? url });
   } catch (err) {
     req.log.error({ err }, "developer logo upload");
     res.status(500).json({ success: false, message: "Logo upload failed" });

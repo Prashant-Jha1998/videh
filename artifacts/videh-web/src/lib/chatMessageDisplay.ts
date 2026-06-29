@@ -1,4 +1,5 @@
 import { parseCallMessageMeta } from "./callMessage";
+import { businessTemplatePreviewText, parseBusinessTemplatePayload } from "./businessTemplateMessage";
 import { stripWaveformMeta } from "./webVoiceWaveform";
 
 type DisappearSystemPayload = { kind: "disappear_timer"; seconds: number | null };
@@ -68,6 +69,8 @@ export function formatMessageBody(
 
   if (type === "system") return text || "System message";
 
+  if (type === "template") return null;
+
   if (parseCallMessageMeta(text) || type === "call") return null;
 
   if (type === "audio" && msg.media_url) return null;
@@ -98,6 +101,10 @@ export function replyPreviewText(
   const type = (msg.type ?? "text").toLowerCase();
   if (type === "image") return "Photo";
   if (type === "video") return "Video";
+  if (type === "template") {
+    const payload = parseBusinessTemplatePayload(msg.content);
+    return payload ? businessTemplatePreviewText(payload) : "Business message";
+  }
   if (type === "audio") return "Voice message";
   if (type === "call" || parseCallMessageMeta(msg.content)) return "Call";
   return "Message";

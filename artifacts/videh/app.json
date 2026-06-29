@@ -2,7 +2,7 @@
   "expo": {
     "name": "Videh",
     "slug": "videh",
-    "version": "1.0.49",
+    "version": "1.0.50",
     "orientation": "portrait",
     "icon": "./assets/images/videh_icon_foreground.png",
     "scheme": "videh",
@@ -17,15 +17,15 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.videh.app",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Videh needs microphone access for voice calls, Hey Videh assistant, and video calls.",
-        "NSSpeechRecognitionUsageDescription": "Videh uses speech recognition for Hey Videh voice assistant commands.",
+        "NSMicrophoneUsageDescription": "Videh needs microphone access for voice calls, Hey Friend / Videh assistant, and video calls.",
+        "NSSpeechRecognitionUsageDescription": "Videh uses speech recognition when you say Hey Friend to wake the Videh assistant.",
         "NSCameraUsageDescription": "Videh needs camera access for video calls.",
         "NSContactsUsageDescription": "Videh uses your contacts to find friends who are already on Videh.",
         "NSBluetoothAlwaysUsageDescription": "Videh uses Bluetooth for audio routing during calls.",
         "NSPhotoLibraryAddUsageDescription": "Videh saves videos you download from chat to your photo library.",
         "NSLocationWhenInUseUsageDescription": "Videh needs your location to send current location and live location in chats.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Videh uses your location for live location sharing in chats.",
-        "NSSiriUsageDescription": "Videh uses the microphone for Hey Videh voice commands.",
+        "NSSiriUsageDescription": "Videh uses the microphone when you say Hey Friend to wake the Videh assistant.",
         "UIBackgroundModes": [
           "audio",
           "voip",
@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 122,
+      "versionCode": 123,
       "androidStatusBar": {
         "backgroundColor": "#5B4FE8",
         "barStyle": "light-content",
@@ -219,6 +219,7 @@
       ],
       "./plugins/withAndroidAdjustResize.js",
       "./plugins/withIncomingCallAndroid.js",
+      "./plugins/withHeyFriendWakeModule.js",
       "@config-plugins/react-native-callkeep",
       "./plugins/withVidehCallPip.js",
       "./plugins/withVidehPipModule.js",
@@ -230,12 +231,13 @@
             "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
             "NSExtensionActivationSupportsImageWithMaxCount": 5,
             "NSExtensionActivationSupportsMovieWithMaxCount": 1,
-            "NSExtensionActivationSupportsFileWithMaxCount": 1
+            "NSExtensionActivationSupportsFileWithMaxCount": 5
           },
-          "androidIntentFilters": ["text/*", "image/*"],
-          "androidMultiIntentFilters": ["image/*", "video/*", "*/*"]
+          "androidIntentFilters": ["text/*", "image/*", "video/*", "*/*"],
+          "androidMultiIntentFilters": ["image/*", "video/*", "text/*", "*/*"]
         }
       ],
+      "./plugins/withVidehShareIntentFix.js",
       [
         "expo-location",
         {

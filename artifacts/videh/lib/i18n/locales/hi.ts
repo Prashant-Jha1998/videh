@@ -33,7 +33,7 @@ export const hi = locale({
   "settings.row.updatesSub": "v1.0.8 — नवीनतम",
   "settings.logout": "लॉग आउट",
   "settings.heyVideh": "हे विदेह",
-  "settings.heyVidehSub": "वॉइस असिस्टेंट",
+  "settings.heyVidehSub": "हे फ्रेंड बोलें",
   "settings.appTheme": "ऐप थीम",
   "settings.appThemeSub": "20 रंग और 30 ग्रेडिएंट, 1 साल मुफ़्त",
   "settings.advancedTheme": "एडवांस थीम",

@@ -1,5 +1,5 @@
 import { query } from "./db";
-import { toPublicAssetUrl } from "./developerApiDeliver";
+import { resolveStoredMediaUrlEnv } from "./mediaStorage";
 import { ensureDeveloperChannelColumns } from "./developerChannel";
 
 function phoneDigits(column: string): string {
@@ -63,7 +63,7 @@ export async function lookupBusinessChannelByUserId(
     };
     return {
       displayName: row.display_name,
-      logoUrl: toPublicAssetUrl(row.logo_url),
+      logoUrl: resolveStoredMediaUrlEnv(row.logo_url),
       joinedAt: row.joined_at,
       businessAccountId: row.business_account_id,
       businessCategory: row.business_category,
@@ -101,7 +101,7 @@ export async function lookupBusinessChannelByUserId(
 
   return {
     displayName: row.display_name,
-    logoUrl: toPublicAssetUrl(row.logo_url),
+    logoUrl: resolveStoredMediaUrlEnv(row.logo_url),
     joinedAt: row.joined_at,
     businessAccountId: row.business_account_id,
     businessCategory: row.business_category,

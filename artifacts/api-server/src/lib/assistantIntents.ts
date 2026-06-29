@@ -1,6 +1,8 @@
 export type AssistantIntent =
   | { type: "greeting" }
   | { type: "send_message"; contactName: string; messageText: string }
+  | { type: "send_message_prompt"; contactName: string }
+  | { type: "schedule_message"; contactName?: string; messageText?: string; scheduledAtText?: string }
   | { type: "messages_today" }
   | { type: "last_incoming_message" }
   | { type: "messages_from"; contactName: string }
@@ -34,6 +36,17 @@ function normalize(text: string): string {
 function stripWakePrefix(raw: string): string {
   let t = raw.trim();
   const prefixes = [
+    "hey friend",
+    "he friend",
+    "hay friend",
+    "hi friend",
+    "hello friend",
+    "hey frnd",
+    "hey frend",
+    "oye friend",
+    "हे फ्रेंड",
+    "हाय फ्रेंड",
+    "हे दोस्त",
     "hey videh",
     "he videh",
     "hay videh",
@@ -91,6 +104,46 @@ export function parseAssistantIntent(text: string): AssistantIntent {
       if (contactName.length >= 2 && messageText.length >= 2) {
         return { type: "send_message", contactName, messageText };
       }
+    }
+  }
+
+  const sendPromptPatterns = [
+    /^(.+?)\s+ko\s+(?:message|msg|sms|text)\s+(?:bhej|send|kar|karo|likh)(?:o|na| do| dena)?\s*$/i,
+    /^(.+?)\s+ko\s+message\s+karo$/i,
+    /^(?:message|msg)\s+(.+?)(?:\s+ko)?\s*$/i,
+    /^(.+?)\s+se\s+(?:message|chat)\s+karo$/i,
+  ];
+  for (const re of sendPromptPatterns) {
+    const m = raw.match(re);
+    if (m?.[1]) {
+      const contactName = extractContactName(m[1]);
+      if (contactName.length >= 2) return { type: "send_message_prompt", contactName };
+    }
+  }
+
+  const schedulePatterns: Array<{ re: RegExp; contact?: number; msg?: number; time?: number }> = [
+    { re: /^(.+?)\s+ko\s+(.+?)\s+(?:kal|aaj|tomorrow|today|parso|\d{1,2}).+?\s+(?:par|ko|pe)?\s*(?:schedule|schedule\s+kar|time\s+par)\s*(?:karo|kar|kar do|karna)?$/i, contact: 1, msg: 2 },
+    { re: /^(.+?)\s+ko\s+(?:kal|aaj|tomorrow|today|parso|\d{1,2}.+?baje)\s+(.+?)\s+(?:message\s+)?schedule/i, contact: 1, msg: 2 },
+    { re: /^(.+?)\s+ko\s+(.+?)\s+(?:kal|aaj|tomorrow|today).+$/i, contact: 1, msg: 2 },
+    { re: /^(.+?)\s+ko\s+(?:message\s+)?schedule\s+(?:karo|kar|kar do|karna)/i, contact: 1 },
+    { re: /^(?:message\s+)?schedule\s+(?:karo|kar|kar do)\s+(.+?)(?:\s+ko)?$/i, contact: 1 },
+    { re: /^schedule\s+(?:a\s+)?message\s+(?:to|for)\s+(.+?)(?:\s+(?:saying|that|ki))?\s*(.*)$/i, contact: 1, msg: 2 },
+    { re: /^(.+?)\s+ko\s+message\s+(?:baad\s+mein|time\s+par)\s+bhej/i, contact: 1 },
+    { re: /^(?:message\s+)?schedule\s+kar(?:o|na)?$/i },
+  ];
+  for (const { re, contact, msg } of schedulePatterns) {
+    const m = raw.match(re);
+    if (!m) continue;
+    const contactName = contact && m[contact] ? extractContactName(m[contact]) : undefined;
+    const messageText = msg && m[msg] ? m[msg].trim() : undefined;
+    const hasTime = /kal|aaj|tomorrow|today|parso|baje|am|pm|\d{1,2}:\d{2}|\d{1,2}\s*baje/i.test(raw);
+    if (contactName || messageText || hasTime || /schedule/i.test(raw)) {
+      return {
+        type: "schedule_message",
+        contactName: contactName && contactName.length >= 2 ? contactName : undefined,
+        messageText: messageText && messageText.length >= 2 ? messageText : undefined,
+        scheduledAtText: hasTime ? raw : undefined,
+      };
     }
   }
 
@@ -250,6 +303,9 @@ export function parseAssistantIntent(text: string): AssistantIntent {
     /kitne\s+(?:unread|padhe|bache|baaki|pending)\s+message/.test(n)
     || /unread\s+message\s+kitne/.test(n)
     || /message\s+kitne\s+(?:bache|pending)/.test(n)
+    || /(?:padhe|nahi\s+padhe)\s+(?:hue\s+)?message/.test(n)
+    || /unread\s+(?:message|msg)/.test(n)
+    || /message[s]?\s+(?:padhe\s+nahi|unread)/.test(n)
   ) {
     return { type: "unread_count" };
   }
@@ -258,7 +314,19 @@ export function parseAssistantIntent(text: string): AssistantIntent {
     return { type: "important_messages" };
   }
 
-  if (/summary/.test(n) || /overview/.test(n)) {
+  const contactSummary = raw.match(/^(.+?)\s+(?:ke|ka)\s+(?:message|chat|messages)\s+(?:ka\s+)?(?:summary|overview)/i);
+  if (contactSummary?.[1]) {
+    const contactName = extractContactName(contactSummary[1]);
+    if (contactName.length >= 2) return { type: "messages_from", contactName };
+  }
+
+  if (
+    /(?:message|messages|chat)\s+(?:ka\s+)?summary/.test(n)
+    || /summary\s+(?:batao|sunao|dikhao|de|do)/.test(n)
+    || /(?:mere\s+)?message[s]?\s+ka\s+summary/.test(n)
+    || /^summary$/.test(n)
+    || /overview/.test(n)
+  ) {
     return { type: "chat_summary" };
   }
 
@@ -278,6 +346,7 @@ export type PlannedAction = {
   searchQuery?: string;
   amount?: number;
   note?: string;
+  scheduledAtText?: string;
   speak?: string;
 };
 
@@ -285,6 +354,15 @@ export function intentToPlanned(intent: AssistantIntent): PlannedAction {
   switch (intent.type) {
     case "send_message":
       return { intent: intent.type, contactName: intent.contactName, messageText: intent.messageText };
+    case "send_message_prompt":
+      return { intent: intent.type, contactName: intent.contactName };
+    case "schedule_message":
+      return {
+        intent: intent.type,
+        contactName: intent.contactName,
+        messageText: intent.messageText,
+        scheduledAtText: intent.scheduledAtText,
+      };
     case "messages_from":
     case "last_message_from":
     case "call_contact":

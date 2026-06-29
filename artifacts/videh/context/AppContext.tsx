@@ -55,6 +55,11 @@ import {
   resolveAlbumUrls,
 } from "@/lib/chatAlbumMessage";
 import { inferChatListPreview, normalizeMessageType } from "@/lib/normalizeMessage";
+import {
+  parseBusinessTemplatePayload,
+  businessTemplatePreviewText,
+  type BusinessTemplatePayload,
+} from "@/lib/businessTemplateMessage";
 
 function isMediaMessageType(type: Message["type"]): boolean {
   return (
@@ -63,6 +68,7 @@ function isMediaMessageType(type: Message["type"]): boolean {
     || type === "video"
     || type === "audio"
     || type === "document"
+    || type === "template"
   );
 }
 import { globalMessageRetentionCutoffMs } from "@/lib/chatMessageRetention";
@@ -135,7 +141,7 @@ export interface Message {
   timestamp: number;
   senderId: string;
   senderName?: string;
-  type: "text" | "image" | "video" | "audio" | "document" | "location" | "contact" | "deleted" | "call" | "system" | "album";
+  type: "text" | "image" | "video" | "audio" | "document" | "location" | "contact" | "deleted" | "call" | "system" | "album" | "template";
   status: "sent" | "delivered" | "read";
   mediaUrl?: string;
   /** Multiple images in one bubble (Videh album). */
@@ -178,6 +184,8 @@ export interface Message {
   expiresAt?: number;
   /** User chose to keep this message past the disappear timer. */
   isKept?: boolean;
+  /** WhatsApp-style business API template (image, body, footer, buttons). */
+  templatePayload?: BusinessTemplatePayload;
 }
 
 const OLDER_MESSAGES_PAGE = 40;
@@ -264,9 +272,13 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     ? prevLocal.albumLocalUrls
     : undefined;
   const resolvedType = albumUrls && albumUrls.length >= 2 ? "album" : type;
+  const templatePayload =
+    resolvedType === "template" ? (parseBusinessTemplatePayload(content) ?? undefined) : undefined;
   const displayText = resolvedType === "album"
     ? albumMessageDisplayText(content, albumUrls?.length ?? albumParsed?.urls.length)
-    : content;
+    : templatePayload
+      ? businessTemplatePreviewText(templatePayload)
+      : content;
   return coerceAlbumMessageFields({
     id: String(m.id),
     text: displayText,
@@ -305,6 +317,7 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     fileSizeBytes: prevLocal?.fileSizeBytes,
     expiresAt: m.expires_at ? new Date(m.expires_at).getTime() : prevLocal?.expiresAt,
     isKept: m.is_kept ?? prevLocal?.isKept ?? false,
+    templatePayload: templatePayload ?? prevLocal?.templatePayload,
     ...mapStatusReplyFields(m),
   });
 }

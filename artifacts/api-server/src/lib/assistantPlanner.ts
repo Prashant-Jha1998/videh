@@ -7,7 +7,7 @@ import { firstName, INDIAN_LANGUAGE_LABELS } from "./assistantLanguages";
 import { VIDEH_PRODUCT_KNOWLEDGE } from "./assistantKnowledge";
 
 const ACTION_SCHEMA = `{
-  "intent": "send_message|messages_today|messages_from|last_message_from|unread_count|important_messages|chat_summary|list_contacts|mark_read|mark_all_read|call_contact|open_chat|search_messages|recent_calls|missed_calls|group_message_stats|list_broadcasts|send_broadcast|khata_summary|khata_add|project_qa|reply|unknown",
+  "intent": "send_message|send_message_prompt|schedule_message|messages_today|messages_from|last_message_from|unread_count|important_messages|chat_summary|list_contacts|mark_read|mark_all_read|call_contact|open_chat|search_messages|recent_calls|missed_calls|group_message_stats|list_broadcasts|send_broadcast|khata_summary|khata_add|project_qa|reply|unknown",
   "contactName": "ANY contact/group name from user's chat list — not a fixed example name",
   "messageText": "string optional",
   "broadcastListName": "string optional",
@@ -21,13 +21,14 @@ const ACTION_SCHEMA = `{
 function isLikelyProjectQuestion(text: string): boolean {
   const n = text.toLowerCase();
   return (
-    /\b(videh|hey\s+videh|assistant|khata|broadcast|business\s+api|developer\s+portal)\b/i.test(n)
-    || /\b(schedule|scheduled)\s+message/i.test(n)
-    || /\b(features?|feature)\b/i.test(n) && /\b(bare|about|detail|kya|kaise|how|what)\b/i.test(n)
-    || /\b(app|messenger|feature|setting|settings|privacy|notification|theme|status|wallpaper)\b/i.test(n)
-      && /\b(kya|kaise|how|what|kahan|where|kaun|kab|detail|bare)\b/.test(n)
-    || /\b(kaise\s+(?:kare|karu|on|off|enable|change|set)|setting\s+kaise)\b/i.test(n)
-    || /\b(kis\s+setting|kahan\s+se|menu\s+mein)\b/i.test(n)
+    /\b(videh|hey\s+videh|assistant|khata|broadcast|business\s+api|developer\s+portal|reels?|video\s+tab|library)\b/i.test(n)
+    || /\b(how\s+to\s+)?(schedule|scheduled)\s+message/i.test(n)
+    || /\b(features?|feature)\b/i.test(n) && /\b(bare|about|detail|kya|kaise|how|what|list)\b/i.test(n)
+    || /\b(app|messenger|feature|setting|settings|privacy|notification|theme|status|wallpaper|translate|disappear|view\s+once|starred|sos|linked\s+device)\b/i.test(n)
+      && /\b(kya|kaise|how|what|kahan|where|kaun|kab|detail|bare|karna|chalu)\b/.test(n)
+    || /\b(kaise\s+(?:kare|karu|on|off|enable|change|set|use)|setting\s+kaise)\b/i.test(n)
+    || /\b(kis\s+setting|kahan\s+se|menu\s+mein|tab\s+mein)\b/i.test(n)
+    || /\b(kya\s+hai|what\s+is|explain|batao|bataye|tell\s+me)\b/i.test(n)
   );
 }
 

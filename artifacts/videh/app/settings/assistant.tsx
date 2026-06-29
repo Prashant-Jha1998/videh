@@ -18,7 +18,6 @@ import { useApp } from "@/context/AppContext";
 import {
   deleteAssistantVoice,
   enrollAssistantVoice,
-  patchAssistantPrefs,
 } from "@/lib/assistantApi";
 import { getAndroidSpeechEngineLabel } from "@/lib/androidSpeechService";
 import { setAssistantVoiceEnrollmentActive } from "@/lib/assistantPause";
@@ -57,14 +56,9 @@ function AssistantSettingsContent() {
   const [sampleIndex, setSampleIndex] = useState(0);
   const [samples, setSamples] = useState<VoiceEnrollmentSample[]>([]);
   const [meter, setMeter] = useState(0.2);
-  const [listenLocked, setListenLocked] = useState(true);
   const [playingIdx, setPlayingIdx] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [capturingSample, setCapturingSample] = useState(false);
-
-  useEffect(() => {
-    if (prefs) setListenLocked(prefs.listenWhenLocked);
-  }, [prefs]);
 
   useEffect(() => {
     const enrolling = enrollPhase !== "idle";
@@ -166,7 +160,7 @@ function AssistantSettingsContent() {
         setEnrollPhase("idle");
         Alert.alert(
           "Voice saved",
-          "Say \"Hey Videh\" when the app is open (or with Listen when locked on). Keep the phone unlocked first time to confirm it works.",
+          "Say \"Hey Friend\" to wake Videh — works on lock screen and in background. For best results, disable battery optimization for Videh.",
         );
       } else {
         Alert.alert("Error", message ?? "Could not save voice profile. Record again in a quiet place.");
@@ -202,14 +196,6 @@ function AssistantSettingsContent() {
     );
   }, [resetEnrollment, user?.sessionToken, refreshPrefs]);
 
-  const toggleListenLocked = async (value: boolean) => {
-    setListenLocked(value);
-    if (user?.sessionToken) {
-      await patchAssistantPrefs(user.sessionToken, { listenWhenLocked: value });
-      await refreshPrefs();
-    }
-  };
-
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topPad, backgroundColor: colors.headerBg }]}>
@@ -227,7 +213,7 @@ function AssistantSettingsContent() {
           </View>
           <Text style={[styles.heroTitle, { color: colors.foreground }]}>Videh AI voice assistant</Text>
           <Text style={[styles.heroSub, { color: colors.mutedForeground }]}>
-            Boliye &quot;Hey Videh&quot; — phir apni bhasha mein kuch bhi: kisi bhi contact ya group ko call/message, aaj kis ka message aaya, missed calls, group activity, ya app/settings ke baare mein sawal. Har user ki chat list alag hoti hai.
+            Boliye &quot;Hey Friend&quot; — Videh assistant turant activate hoga. Phir call, message, schedule, summary, unread — kisi bhi contact ke liye, apni bhasha mein. Lock screen, screen off, ya app background mein bhi kaam karta hai.
           </Text>
         </View>
 
@@ -247,7 +233,7 @@ function AssistantSettingsContent() {
             />
           ) : null}
           <Row label="Assistant" value={prefs?.enabled ? "On" : "Off"} colors={colors} />
-          <Row label="Listening" value={phase === "idle" && prefs?.enabled ? "Waiting for Hey Videh" : phase} colors={colors} />
+          <Row label="Listening" value={phase === "idle" && prefs?.enabled ? 'Waiting for "Hey Friend"' : phase} colors={colors} />
           {lastError ? (
             <Text style={[styles.hint, { color: "#c62828", marginTop: 8 }]}>{lastError}</Text>
           ) : null}
@@ -264,16 +250,8 @@ function AssistantSettingsContent() {
             />
           </View>
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
-          <View style={styles.switchRow}>
-            <Text style={[styles.rowLabel, { color: colors.foreground }]}>Listen when phone locked</Text>
-            <Switch
-              value={listenLocked}
-              onValueChange={(v) => void toggleListenLocked(v)}
-              trackColor={{ true: "#5B4FE8" }}
-            />
-          </View>
           <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-            The microphone is required to hear &quot;Hey Videh&quot; while the app is open. On the lock screen Android may block the mic — unlock first, then try. In Settings → Languages → Voice input, select a speech-to-text engine (you do not need a separate Google app).
+            Wake word: &quot;Hey Friend&quot; — assistant ka naam Videh hai. Android par app band hone ke baad bhi sunta hai (notification dikhega). Battery optimization se Videh ko exclude karein.
           </Text>
         </View>
 
@@ -302,7 +280,7 @@ function AssistantSettingsContent() {
                 Sample {sampleIndex + 1} of {ENROLLMENT_SAMPLES}
               </Text>
               <Text style={[styles.enrollHint, { color: colors.mutedForeground }]}>
-                Tap Record and say clearly: &quot;Hey Videh&quot;
+                Tap Record and say clearly: &quot;Hey Friend&quot;
               </Text>
               <View style={styles.meterRow}>
                 {Array.from({ length: 12 }).map((_, i) => (
@@ -407,7 +385,7 @@ function AssistantSettingsContent() {
             <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>Test now — speak a command</Text>
           </TouchableOpacity>
           <Text style={[styles.hint, { color: colors.mutedForeground, marginTop: 10 }]}>
-            [name] = a contact or group from your chat list. Examples are not fixed — say what you need. One line: &quot;Hey Videh, call [name]&quot;.
+            [name] = a contact or group from your chat list. Wake: &quot;Hey Friend&quot; — then e.g. call [name] or message [name].
           </Text>
         </View>
       </ScrollView>

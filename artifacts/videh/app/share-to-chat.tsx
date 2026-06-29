@@ -23,7 +23,7 @@ import {
   sharePreviewKind,
   sharePreviewUri,
 } from "@/lib/deliverIncomingShare";
-import { peekIncomingShare, takeIncomingShare, type IncomingSharePayload } from "@/lib/incomingSharePayload";
+import { peekIncomingShare, takeIncomingShare, payloadHasShareableContent, payloadPreviewText, type IncomingSharePayload } from "@/lib/incomingSharePayload";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 
 function ChatAvatar({ chat }: { chat: Chat }) {
@@ -62,7 +62,8 @@ export default function ShareToChatScreen() {
     }
     void (async () => {
       const data = (await takeIncomingShare()) ?? (await peekIncomingShare());
-      if (!data) {
+      if (!data || !payloadHasShareableContent(data)) {
+        Alert.alert("Nothing to share", "Videh could not read what you shared. Try sharing again from the other app.");
         router.back();
         return;
       }
@@ -92,13 +93,21 @@ export default function ShareToChatScreen() {
     });
   };
 
+  const previewText = payloadPreviewText(payload);
+
   const handleSend = useCallback(async () => {
     if (!payload || selected.size === 0 || sending) return;
     setSending(true);
     try {
       const sendFns = { sendMessage, sendPreparedMediaMessage, sendDocumentMessage };
+      let sentAny = false;
       for (const chatId of selected) {
-        await deliverIncomingShareToChat(chatId, payload, sendFns, caption);
+        const ok = await deliverIncomingShareToChat(chatId, payload, sendFns, caption);
+        if (ok) sentAny = true;
+      }
+      if (!sentAny) {
+        Alert.alert("Could not share", "Videh could not send this content. Try sharing text or a photo instead.");
+        return;
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
@@ -173,6 +182,15 @@ export default function ShareToChatScreen() {
       ) : null}
 
       <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>Recent chats</Text>
+
+      {previewText ? (
+        <View style={[styles.previewTextCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.previewTextLabel, { color: colors.mutedForeground }]}>Shared content</Text>
+          <Text style={[styles.previewTextBody, { color: colors.foreground }]} numberOfLines={4}>
+            {previewText}
+          </Text>
+        </View>
+      ) : null}
 
       <FlatList
         data={targets}
@@ -271,6 +289,25 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textTransform: "uppercase",
     letterSpacing: 0.4,
+  },
+  previewTextCard: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  previewTextLabel: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    marginBottom: 4,
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  previewTextBody: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 20,
   },
   row: {
     flexDirection: "row",

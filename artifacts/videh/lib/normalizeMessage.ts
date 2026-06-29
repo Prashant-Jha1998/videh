@@ -4,6 +4,7 @@ import { contactChatPreview } from "@/lib/contactMessage";
 import { documentChatPreview, isDocumentMessagePayload } from "@/lib/documentMessage";
 import { locationChatPreview } from "@/lib/locationMessage";
 import { stripWaveformMeta } from "@/lib/voiceWaveform";
+import { businessTemplatePreviewText, parseBusinessTemplatePayload } from "@/lib/businessTemplateMessage";
 import type { Message } from "@/context/AppContext";
 
 const CONTACT_PREFIX = "__VCONTACT__:";
@@ -64,6 +65,7 @@ export function normalizeMessageType(
   const declaredType = String(declared ?? "text").toLowerCase();
   if (declaredType === "deleted") return "deleted";
   if (declaredType === "system") return "system";
+  if (declaredType === "template") return "template";
 
   const raw = (content ?? "").trim();
 
@@ -125,6 +127,10 @@ export function inferChatListPreview(
       return "This message was deleted";
     case "system":
       return "";
+    case "template": {
+      const payload = parseBusinessTemplatePayload(raw);
+      return payload ? businessTemplatePreviewText(payload) : "Business message";
+    }
     default:
       if (isDocumentMessagePayload(raw)) return documentChatPreview(raw);
       if (looksLikeLocationJson(raw)) return locationChatPreview(raw);

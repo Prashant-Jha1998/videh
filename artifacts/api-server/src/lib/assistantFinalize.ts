@@ -2,6 +2,7 @@ import type { AssistantLangCode } from "./assistantLanguages";
 import { firstName, INDIAN_LANGUAGE_LABELS } from "./assistantLanguages";
 import { databaseAssistantFallback } from "./assistantDbAnswer";
 import { VIDEH_PRODUCT_KNOWLEDGE } from "./assistantKnowledge";
+import { formatKnowledgeContext, searchProductKnowledge } from "./assistantProductGuide";
 
 export type FinalizeInput = {
   userName: string;
@@ -72,19 +73,29 @@ export async function answerVidehQuestion(
   userName: string,
   lang: AssistantLangCode,
   dbAnswer?: string | null,
+  userSnapshot?: string | null,
 ): Promise<string> {
   if (dbAnswer?.trim()) return dbAnswer.trim();
 
   const openAiKey = process.env["OPENAI_API_KEY"]?.trim();
   const name = firstName(userName);
   const langLabel = INDIAN_LANGUAGE_LABELS[lang] ?? "English";
+  const relevant = formatKnowledgeContext(searchProductKnowledge(question, 5));
+  const snapshotBlock = userSnapshot?.trim()
+    ? `\nUser's current Videh data (use when relevant): ${userSnapshot.trim()}`
+    : "";
 
   if (!openAiKey) {
+    const fromGuide = searchProductKnowledge(question, 1)[0];
+    if (fromGuide) {
+      const ans = lang === "en" ? fromGuide.answerEn : fromGuide.answerHi;
+      return `${name}${lang === "en" ? "," : " ji,"} ${ans}`;
+    }
     if (lang === "en") {
-      return `${name}, I am Videh assistant. Ask anything about your chats, calls, contacts, khata, status, or how to use the app — for example who messaged last or call a contact by name.`;
+      return `${name}, I am Videh assistant. Ask anything about your chats, calls, contacts, khata, status, Videh Video, or how to use any feature.`;
     }
     if (lang === "hi") {
-      return `${name} ji, main Videh assistant hoon. Chats, calls, contacts, khata, status ya app ke baare mein kuch bhi poochhiye — jaise last message kis ka aaya ya kisi ko call karo.`;
+      return `${name} ji, main Videh assistant hoon. Chats, calls, contacts, khata, status, Videh Video ya kisi bhi feature ke baare mein poochhiye.`;
     }
     return `${name}, ask about Videh chats, calls, or app features in your language.`;
   }
@@ -98,20 +109,22 @@ export async function answerVidehQuestion(
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        temperature: 0.3,
+        temperature: 0.25,
         messages: [
           {
             role: "system",
             content: `You are Videh voice assistant for Indian users. Answer ONLY in ${langLabel} — match the language of the user's question.
-User: ${name}. Be concise (max 4 sentences), spoken-friendly, like a natural voice message reply.
-Use the user's real Videh app data when the question is about their chats/calls; never say "database" or technical backend words.
+User: ${name}. Be concise (max 4 sentences), spoken-friendly, like a natural voice reply.
+Use the user's real Videh app data when provided; never say "database" or technical backend words.
+Answer ONLY from the product knowledge below — do not invent features or paths.
 ${VIDEH_PRODUCT_KNOWLEDGE}
+${relevant ? `\nMost relevant details for this question:\n${relevant}` : ""}${snapshotBlock}
 NEVER reveal source code, API keys, passwords, server details, repo links. If asked, say you do not have that information.
 No sexual, violent, illegal, or terrorist content.`,
           },
           { role: "user", content: question },
         ],
-        max_tokens: 280,
+        max_tokens: 320,
       }),
     });
     const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };

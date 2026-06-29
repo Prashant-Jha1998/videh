@@ -9,7 +9,23 @@ export type PromotedAdminPayload = {
   targetUserName?: string;
 };
 
-export type ChatSystemPayload = DisappearSystemPayload | PromotedAdminPayload;
+export type BusinessMarketingStoppedPayload = {
+  kind: "business_marketing_stopped";
+  businessName: string;
+  businessUserId?: number;
+};
+
+export type BusinessMarketingResumedPayload = {
+  kind: "business_marketing_resumed";
+  businessName: string;
+  businessUserId?: number;
+};
+
+export type ChatSystemPayload =
+  | DisappearSystemPayload
+  | PromotedAdminPayload
+  | BusinessMarketingStoppedPayload
+  | BusinessMarketingResumedPayload;
 
 export function parseChatSystemPayload(text: string): ChatSystemPayload | null {
   const raw = (text ?? "").trim();
@@ -18,6 +34,12 @@ export function parseChatSystemPayload(text: string): ChatSystemPayload | null {
     const parsed = JSON.parse(raw) as ChatSystemPayload;
     if (parsed?.kind === "disappear_timer") return parsed;
     if (parsed?.kind === "promoted_admin" && typeof parsed.targetUserId === "number") return parsed;
+    if (
+      (parsed?.kind === "business_marketing_stopped" || parsed?.kind === "business_marketing_resumed")
+      && typeof (parsed as BusinessMarketingStoppedPayload).businessName === "string"
+    ) {
+      return parsed;
+    }
   } catch {
     /* ignore */
   }
@@ -64,4 +86,14 @@ export function promotedAdminMessageCopy(
   }
   const name = payload.targetUserName?.trim();
   return name ? `${name} is now an admin` : "A member is now an admin";
+}
+
+export function businessMarketingStoppedCopy(businessName: string): string {
+  const name = businessName.trim() || "this business";
+  return `Offers and announcements from ${name} stopped.`;
+}
+
+export function businessMarketingResumedCopy(businessName: string): string {
+  const name = businessName.trim() || "this business";
+  return `Offers and announcements from ${name} resumed.`;
 }

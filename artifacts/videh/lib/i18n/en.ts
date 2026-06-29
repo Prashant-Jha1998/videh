@@ -33,7 +33,7 @@ export const en: Record<string, string> = {
   "settings.row.updatesSub": "v1.0.39 — Latest version",
   "settings.logout": "Log out",
   "settings.heyVideh": "Hey Videh",
-  "settings.heyVidehSub": "Coming soon",
+  "settings.heyVidehSub": "Say Hey Friend",
   "settings.appTheme": "App Theme",
   "settings.appThemeSub": "20 colors and 30 gradients, free for 1 year",
   "settings.advancedTheme": "Advanced theme",

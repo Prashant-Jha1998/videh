@@ -11,6 +11,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "prebuild": "expo prebuild",
+    "postinstall": "node scripts/patch-share-intent.js",
     "build:apk-release": "eas build --profile apkRelease --platform android"
   },
   "devDependencies": {

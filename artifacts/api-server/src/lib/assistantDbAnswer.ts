@@ -3,10 +3,11 @@ import type { AssistantLangCode } from "./assistantLanguages";
 import { firstName } from "./assistantLanguages";
 import { parseAssistantIntent, intentToPlanned } from "./assistantIntents";
 import { executeAssistantAction } from "./assistantExecutor";
+import { answerFromProductKnowledge, searchProductKnowledge } from "./assistantProductGuide";
 import { query } from "./db";
 
-function isEn(_lang: AssistantLangCode): boolean {
-  return true;
+function isEn(lang: AssistantLangCode): boolean {
+  return lang === "en";
 }
 
 /** Identity & general Videh questions — no OpenAI required. */
@@ -117,12 +118,14 @@ function answerSettingsHelp(question: string, lang: AssistantLangCode, name: str
   return null;
 }
 
-async function buildUserSnapshot(userId: number): Promise<{
+type UserSnapshot = {
   unread: number;
   chats: number;
   missedToday: number;
   messagedToday: number;
-}> {
+};
+
+async function buildUserSnapshot(userId: number): Promise<UserSnapshot> {
   const [unreadR, chatsR, missedR, todayR] = await Promise.all([
     query(
       `SELECT COUNT(*)::int AS cnt FROM messages m
@@ -159,8 +162,14 @@ async function buildUserSnapshot(userId: number): Promise<{
   };
 }
 
+/** Spoken snapshot string for OpenAI QA context. */
+export async function buildUserSnapshotForAssistant(userId: number): Promise<string> {
+  const snap = await buildUserSnapshot(userId);
+  return `${snap.chats} chats, ${snap.unread} unread, ${snap.messagedToday} messaged today, ${snap.missedToday} missed calls today`;
+}
+
 function answerAccountSnapshot(
-  snap: Awaited<ReturnType<typeof buildUserSnapshot>>,
+  snap: UserSnapshot,
   lang: AssistantLangCode,
   name: string,
 ): string {
@@ -188,6 +197,10 @@ export async function answerFromDatabase(
 
   const help = answerSettingsHelp(trimmed, lang, name);
   if (help) return help;
+
+  const langKey = isEn(lang) ? "en" : "hi";
+  const productAnswer = answerFromProductKnowledge(trimmed, langKey, name);
+  if (productAnswer) return productAnswer;
 
   const n = trimmed.toLowerCase();
   if (

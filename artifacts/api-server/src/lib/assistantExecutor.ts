@@ -9,6 +9,8 @@ import {
 } from "./assistantContactMatch";
 import type { AssistantLangCode } from "./assistantLanguages";
 import { firstName } from "./assistantLanguages";
+import type { AssistantPendingAction } from "./assistantPending";
+import { parseScheduleDateTime } from "./assistantScheduleParse";
 import { query } from "./db";
 import { publishChatEvent } from "./realtime";
 
@@ -46,6 +48,7 @@ export type ExecuteResult = {
   success: boolean;
   actions: Array<{ type: string; chatId?: string; callType?: string; contactName?: string }>;
   data?: unknown;
+  pendingAction?: AssistantPendingAction;
 };
 
 export async function loadAssistantUserContext(userId: number): Promise<AssistantUserContext> {
@@ -122,7 +125,7 @@ function chatNotFoundSpeak(
     : `${userFirst} ji, "${needle}" ka chat nahi mila. Contacts sunne ke liye bolein: mere contacts kaun hain.`;
 }
 
-async function sendChatMessage(userId: number, chatId: number, text: string): Promise<number> {
+export async function sendChatMessage(userId: number, chatId: number, text: string): Promise<number> {
   const ins = await query(
     `INSERT INTO messages (chat_id, sender_id, content, type) VALUES ($1, $2, $3, 'text') RETURNING id`,
     [chatId, userId, text],
@@ -206,6 +209,111 @@ export async function executeAssistantAction(
           : `${name} ji, ${chat.displayName} ko message bhej diya: ${messageText}. ${suffix}`,
         actions: [{ type: "open_chat", chatId: String(chat.chatId), contactName: chat.displayName }],
         data: { contact: chat.displayName, messageText },
+      };
+    }
+
+    case "send_message_prompt": {
+      const contactName = plan.contactName ?? "";
+      const chat = matchChatByName(ctx, contactName);
+      if (!chat) {
+        return {
+          intent: "send_message_prompt",
+          success: false,
+          speak: chatNotFoundSpeak(ctx, contactName, lang, name),
+          actions: [],
+        };
+      }
+      return {
+        intent: "send_message_prompt",
+        success: false,
+        speak: isEn(lang)
+          ? `${name}, what message should I send to ${chat.displayName}?`
+          : `${name} ji, ${chat.displayName} ko kya message bhejoon?`,
+        actions: [],
+        pendingAction: {
+          type: "send_message",
+          contactName: chat.displayName,
+          chatId: chat.chatId,
+        },
+      };
+    }
+
+    case "schedule_message": {
+      const contactName = plan.contactName ?? "";
+      const messageText = plan.messageText ?? "";
+      const scheduledAtText = plan.scheduledAtText ?? "";
+      const chat = contactName ? matchChatByName(ctx, contactName) : null;
+      const when = scheduledAtText ? parseScheduleDateTime(scheduledAtText) : null;
+
+      const pending: AssistantPendingAction = {
+        type: "schedule_message",
+        contactName: chat?.displayName ?? (contactName || undefined),
+        chatId: chat?.chatId,
+        messageText: messageText || undefined,
+        scheduledAt: when?.toISOString(),
+      };
+
+      if (!pending.chatId && contactName) {
+        return {
+          intent: "schedule_message",
+          success: false,
+          speak: chatNotFoundSpeak(ctx, contactName, lang, name),
+          actions: [],
+          pendingAction: { type: "schedule_message" },
+        };
+      }
+      if (!pending.chatId) {
+        return {
+          intent: "schedule_message",
+          success: false,
+          speak: isEn(lang)
+            ? `${name}, who should I schedule the message for?`
+            : `${name} ji, kisko message schedule karna hai?`,
+          actions: [],
+          pendingAction: pending,
+        };
+      }
+      if (!pending.scheduledAt) {
+        return {
+          intent: "schedule_message",
+          success: false,
+          speak: isEn(lang)
+            ? `${name}, when should I send it to ${pending.contactName}? Say for example tomorrow 5 PM.`
+            : `${name} ji, ${pending.contactName} ko kab bhejoon? Jaise kal shaam 5 baje.`,
+          actions: [],
+          pendingAction: pending,
+        };
+      }
+      if (!pending.messageText?.trim()) {
+        return {
+          intent: "schedule_message",
+          success: false,
+          speak: isEn(lang)
+            ? `${name}, what message should I schedule for ${pending.contactName}?`
+            : `${name} ji, ${pending.contactName} ko kya message schedule karoon?`,
+          actions: [],
+          pendingAction: pending,
+        };
+      }
+
+      await query(
+        `INSERT INTO scheduled_messages (chat_id, sender_id, content, type, scheduled_at)
+         VALUES ($1, $2, $3, 'text', $4)`,
+        [pending.chatId, userId, pending.messageText, new Date(pending.scheduledAt)],
+      );
+      const timeLabel = new Date(pending.scheduledAt).toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+      return {
+        intent: "schedule_message",
+        success: true,
+        speak: isEn(lang)
+          ? `${name}, message to ${pending.contactName} scheduled for ${timeLabel}: "${pending.messageText}". ${suffix}`
+          : `${name} ji, ${pending.contactName} ko ${timeLabel} par message schedule ho gaya: "${pending.messageText}". ${suffix}`,
+        actions: [{ type: "open_chat", chatId: String(pending.chatId), contactName: pending.contactName }],
+        data: { contact: pending.contactName, messageText: pending.messageText, scheduledAt: pending.scheduledAt },
       };
     }
 
@@ -706,11 +814,44 @@ export async function executeAssistantAction(
         [userId],
       );
       const cnt = Number(r.rows[0]?.cnt ?? 0);
+
+      const breakdown = await query(
+        `SELECT COALESCE(u.name, c.group_name) AS chat_name,
+                COUNT(m.id)::int AS unread
+         FROM messages m
+         JOIN chats c ON c.id = m.chat_id
+         JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1
+         LEFT JOIN users u ON u.id = m.sender_id AND m.sender_id != $1
+         LEFT JOIN message_status ms ON ms.message_id = m.id AND ms.user_id = $1
+         WHERE m.sender_id != $1 AND m.is_deleted = FALSE
+           AND (ms.status IS NULL OR ms.status != 'read')
+         GROUP BY COALESCE(u.name, c.group_name)
+         ORDER BY unread DESC
+         LIMIT 8`,
+        [userId],
+      );
+
+      if (!cnt) {
+        return {
+          intent: "unread_count",
+          success: true,
+          speak: isEn(lang)
+            ? `${name}, you have no unread messages. ${suffix}`
+            : `${name} ji, koi unread message nahi hai. ${suffix}`,
+          data: { count: 0 },
+          actions: [],
+        };
+      }
+
+      const parts = breakdown.rows.map((row: { chat_name: string; unread: number }) =>
+        `${row.chat_name}: ${row.unread}`);
       return {
         intent: "unread_count",
         success: true,
-        speak: isEn(lang) ? `${name}, ${cnt} unread messages. ${suffix}` : `${name} ji, ${cnt} unread messages. ${suffix}`,
-        data: { count: cnt },
+        speak: isEn(lang)
+          ? `${name}, ${cnt} unread messages. ${parts.join(", ")}. ${suffix}`
+          : `${name} ji, ${cnt} unread messages. ${parts.join(", ")}. ${suffix}`,
+        data: { count: cnt, breakdown: breakdown.rows },
         actions: [],
       };
     }

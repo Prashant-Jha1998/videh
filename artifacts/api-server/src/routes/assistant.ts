@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { assertSameUser, requireAuth } from "../lib/auth";
 import { executeAssistantAction, loadAssistantUserContext } from "../lib/assistantExecutor";
-import { answerFromDatabase, databaseAssistantFallback } from "../lib/assistantDbAnswer";
+import { answerFromDatabase, buildUserSnapshotForAssistant, databaseAssistantFallback } from "../lib/assistantDbAnswer";
 import { answerVidehQuestion, finalizeAssistantSpeak } from "../lib/assistantFinalize";
 import { buildActivationGreeting } from "../lib/assistantGreeting";
 import { intentToPlanned, parseAssistantIntent } from "../lib/assistantIntents";
@@ -154,7 +154,7 @@ router.post("/verify-voice", async (req: Request, res: Response) => {
 
 router.post("/command", async (req: Request, res: Response) => {
   const userId = Number((req as any).authUserId);
-  const body = req.body as { text?: string; locale?: string };
+  const body = req.body as { text?: string; locale?: string; pendingAction?: import("../lib/assistantPending").AssistantPendingAction };
   const text = String(body.text ?? "").trim();
   if (!text) {
     res.status(400).json({ success: false, message: "text is required." });
@@ -173,6 +173,20 @@ router.post("/command", async (req: Request, res: Response) => {
         intent: "blocked",
         speak: safetyRefusal(lang, safety.category),
         actions: [],
+      });
+      return;
+    }
+
+    if (body.pendingAction?.type) {
+      const { continuePendingAssistantAction } = await import("../lib/assistantPending");
+      const result = await continuePendingAssistantAction(ctx, body.pendingAction, text, lang);
+      jsonLang(res, lang, {
+        success: true,
+        intent: result.intent,
+        speak: result.speak,
+        actions: result.actions,
+        data: result.data,
+        pendingAction: result.pendingAction,
       });
       return;
     }
@@ -197,6 +211,7 @@ router.post("/command", async (req: Request, res: Response) => {
         speak: result.speak,
         actions: result.actions,
         data: result.data,
+        pendingAction: result.pendingAction,
       });
       return;
     }
@@ -205,9 +220,10 @@ router.post("/command", async (req: Request, res: Response) => {
 
     if (plan.intent === "project_qa") {
       const dbSpeak = await answerFromDatabase(text, ctx, lang);
+      const snapshot = await buildUserSnapshotForAssistant(userId);
       const speak = dbSpeak
         ?? plan.speak
-        ?? await answerVidehQuestion(text, ctx.userName, lang, dbSpeak)
+        ?? await answerVidehQuestion(text, ctx.userName, lang, dbSpeak, snapshot)
         ?? databaseAssistantFallback(lang, ctx.userName);
       jsonLang(res, lang, {
         success: true,
@@ -230,8 +246,9 @@ router.post("/command", async (req: Request, res: Response) => {
 
     if (plan.intent === "unknown") {
       const dbSpeak = await answerFromDatabase(text, ctx, lang);
+      const snapshot = await buildUserSnapshotForAssistant(userId);
       const qaSpeak = dbSpeak
-        ?? await answerVidehQuestion(text, ctx.userName, lang, dbSpeak)
+        ?? await answerVidehQuestion(text, ctx.userName, lang, dbSpeak, snapshot)
         ?? databaseAssistantFallback(lang, ctx.userName);
       jsonLang(res, lang, {
         success: true,
@@ -261,6 +278,7 @@ router.post("/command", async (req: Request, res: Response) => {
       speak,
       actions: result.actions,
       data: result.data,
+      pendingAction: result.pendingAction,
     });
   } catch (err) {
     req.log?.error?.({ err }, "assistant command");
