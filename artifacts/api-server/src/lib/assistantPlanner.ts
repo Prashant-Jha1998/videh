@@ -22,7 +22,7 @@ function isLikelyProjectQuestion(text: string): boolean {
   const n = text.toLowerCase();
   return (
     /\b(videh|hey\s+videh|assistant|khata|broadcast|business\s+api|developer\s+portal|reels?|video\s+tab|library)\b/i.test(n)
-    || /\b(how\s+to\s+)?(schedule|scheduled)\s+message/i.test(n)
+    || (/\b(how\s+to\s+)?(schedule|scheduled)\s+message/i.test(n) && /\b(kaise|how|kahan|where|tutorial)\b/i.test(n))
     || /\b(features?|feature)\b/i.test(n) && /\b(bare|about|detail|kya|kaise|how|what|list)\b/i.test(n)
     || /\b(app|messenger|feature|setting|settings|privacy|notification|theme|status|wallpaper|translate|disappear|view\s+once|starred|sos|linked\s+device)\b/i.test(n)
       && /\b(kya|kaise|how|what|kahan|where|kaun|kab|detail|bare|karna|chalu)\b/.test(n)

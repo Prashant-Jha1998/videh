@@ -30,6 +30,12 @@ export function stopHeyFriendWakeService(): void {
   native?.stopWakeService?.();
 }
 
+/** Fully stop assistant listening and clear persisted wake flag. */
+export function stopHeyFriendWakeFully(): void {
+  if (!isHeyFriendWakeNativeAvailable()) return;
+  native?.setWakeServiceEnabled?.(false);
+}
+
 export async function consumePendingHeyFriendWake(): Promise<string | null> {
   if (!isHeyFriendWakeNativeAvailable() || !native?.getPendingWake) return null;
   try {

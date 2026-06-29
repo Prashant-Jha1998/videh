@@ -903,14 +903,16 @@ export async function executeAssistantAction(
         [userId],
       );
       if (!r.rows.length) {
-        return { intent: "chat_summary", success: true, speak: `${name}, no activity today. ${suffix}`, actions: [] };
+        return { intent: "chat_summary", success: true, speak: isEn(lang) ? `${name}, no activity today. ${suffix}` : `${name} ji, aaj koi message activity nahi. ${suffix}`, actions: [] };
       }
       const parts = r.rows.map((row: { name: string; total: number; unread: number }) =>
         `${row.name}: ${row.total} msgs, ${row.unread} unread`);
       return {
         intent: "chat_summary",
         success: true,
-        speak: `${name}, summary: ${parts.join(". ")}. ${suffix}`,
+        speak: isEn(lang)
+          ? `${name}, summary: ${parts.join(". ")}. ${suffix}`
+          : `${name} ji, aaj ke messages: ${parts.join(". ")}. ${suffix}`,
         actions: [],
       };
     }

@@ -613,6 +613,14 @@ export function formatKnowledgeContext(entries: ProductKnowledgeEntry[]): string
     .join("\n\n");
 }
 
+import { parseAssistantIntent } from "./assistantIntents";
+
+function looksLikeDataOrActionQuery(q: string): boolean {
+  const n = q.toLowerCase();
+  if (/(kaise|how\s+to|kahan\s+se|where\s+to|tutorial|steps|tarika|tareeka)/.test(n)) return false;
+  return /\b(karo|kar\s+do|bhej|send|schedule|sunao|batao|banakar|banao|summary|samri|samjh|count|kitne|kitna|kis[\s-]?ka|kaun|who|call|kholo|open|messaged|aaya|aaye|unread)\b/.test(n);
+}
+
 /** Instant spoken answer from knowledge base if confidence is high enough. */
 export function answerFromProductKnowledge(
   question: string,
@@ -620,6 +628,9 @@ export function answerFromProductKnowledge(
   userName: string,
   minScore = 6,
 ): string | null {
+  if (parseAssistantIntent(question).type !== "unknown") return null;
+  if (looksLikeDataOrActionQuery(question)) return null;
+
   const tokens = tokenizeQuery(question);
   const scored = PRODUCT_KNOWLEDGE_ENTRIES.map((entry) => ({
     entry,

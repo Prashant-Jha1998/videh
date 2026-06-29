@@ -130,8 +130,8 @@ export async function startListening(opts: ListenOpts): Promise<void> {
       iosTaskHint: opts.wakeMode ? "dictation" : "unspecified",
       ...(androidService ? { androidRecognitionServicePackage: androidService } : {}),
       androidIntentOptions: {
-        EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 3500 : 1400,
-        EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 2000 : 900,
+        EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 3500 : 2200,
+        EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: opts.wakeMode ? 2000 : 1200,
       },
       iosCategory: opts.wakeMode
         ? {

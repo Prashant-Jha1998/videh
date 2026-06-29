@@ -23,16 +23,49 @@ function combineTextParts(...parts: Array<string | null | undefined>): string | 
   return merged || undefined;
 }
 
+/** Remove duplicate lines/URLs (common in Google Pay / marketing shares). */
+function dedupeShareText(text: string): string {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of lines) {
+    const key = line.replace(/\s+/g, " ").toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(line);
+  }
+  let result = out.join("\n");
+  const urls = [...result.matchAll(/https?:\/\/[^\s]+/gi)].map((m) => m[0]);
+  const uniqueUrls = [...new Set(urls)];
+  if (uniqueUrls.length === 1 && urls.length > 1) {
+    for (let i = 1; i < urls.length; i++) {
+      result = result.replace(urls[i], "").trim();
+    }
+    result = result.replace(/\n{3,}/g, "\n\n").trim();
+  }
+  return result;
+}
+
+function isWhatsAppMediaPlaceholder(text?: string): boolean {
+  const t = text?.trim() ?? "";
+  if (!t) return false;
+  return /^photo from .+$/i.test(t)
+    || /^video from .+$/i.test(t)
+    || /^document from .+$/i.test(t);
+}
+
 export function shareIntentToPayload(intent: ShareIntent): IncomingSharePayload {
-  const text = combineTextParts(intent.text, intent.meta?.title);
-  const webUrl = intent.webUrl?.trim() || undefined;
+  const rawText = combineTextParts(intent.text, intent.meta?.title);
+  const text = rawText ? dedupeShareText(rawText) : undefined;
+  const webUrlRaw = intent.webUrl?.trim() || undefined;
+  const webUrl = webUrlRaw && text?.includes(webUrlRaw) ? undefined : webUrlRaw;
   return {
     text,
     webUrl,
     files: intent.files?.map((f) => ({
       path: f.path,
-      mimeType: f.mimeType,
-      fileName: f.fileName,
+      mimeType: f.mimeType ?? undefined,
+      fileName: f.fileName ?? undefined,
     })),
     receivedAt: Date.now(),
   };

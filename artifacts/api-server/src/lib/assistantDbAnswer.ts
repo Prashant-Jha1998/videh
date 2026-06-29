@@ -46,6 +46,10 @@ function answerConversationalQuestion(question: string, lang: AssistantLangCode,
   return null;
 }
 
+function isHowToQuestion(n: string): boolean {
+  return /(kaise|how\s+to|how\s+do|kahan\s+se|kahan|where\s+to|where\s+is|tutorial|steps|tarika|tareeka|guide)/.test(n);
+}
+
 /** Pattern-based app help — no external AI, from Videh product docs. */
 function answerSettingsHelp(question: string, lang: AssistantLangCode, name: string): string | null {
   const n = question.toLowerCase();
@@ -85,7 +89,7 @@ function answerSettingsHelp(question: string, lang: AssistantLangCode, name: str
       ? `${name}, open the Status tab and tap to add photo, video, or text status.`
       : `${name} ji, Status tab khol kar photo, video ya text status laga sakte hain.`;
   }
-  if (/(schedule|scheduled)\s+message|message\s+schedule/.test(n)) {
+  if (/(schedule|scheduled)\s+message|message\s+schedule/.test(n) && isHowToQuestion(n)) {
     return isEn(lang)
       ? `${name}, open any chat → menu (⋮) → Schedule Message. Pick date and time, type your message, and Videh will send it automatically. You can view or cancel scheduled messages from the same screen.`
       : `${name} ji, kisi bhi chat mein menu (⋮) → Schedule Message. Date aur time chuniye, message likhiye — Videh us samay khud bhej dega. Wahi screen se scheduled messages dekh ya cancel kar sakte hain.`;
@@ -195,6 +199,13 @@ export async function answerFromDatabase(
   const conversational = answerConversationalQuestion(trimmed, lang, name);
   if (conversational) return conversational;
 
+  const ruleIntent = parseAssistantIntent(trimmed);
+  if (ruleIntent.type !== "unknown") {
+    const plan = intentToPlanned(ruleIntent);
+    const result = await executeAssistantAction(ctx, plan, lang);
+    return result.speak;
+  }
+
   const help = answerSettingsHelp(trimmed, lang, name);
   if (help) return help;
 
@@ -209,13 +220,6 @@ export async function answerFromDatabase(
   ) {
     const snap = await buildUserSnapshot(ctx.userId);
     return answerAccountSnapshot(snap, lang, name);
-  }
-
-  const ruleIntent = parseAssistantIntent(trimmed);
-  if (ruleIntent.type !== "unknown") {
-    const plan = intentToPlanned(ruleIntent);
-    const result = await executeAssistantAction(ctx, plan, lang);
-    return result.speak;
   }
 
   return null;

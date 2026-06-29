@@ -8,6 +8,8 @@ export function startHeyFriendWakeService(): void {}
 
 export function stopHeyFriendWakeService(): void {}
 
+export function stopHeyFriendWakeFully(): void {}
+
 export async function consumePendingHeyFriendWake(): Promise<string | null> {
   return null;
 }

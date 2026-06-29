@@ -122,6 +122,8 @@ export function parseAssistantIntent(text: string): AssistantIntent {
   }
 
   const schedulePatterns: Array<{ re: RegExp; contact?: number; msg?: number; time?: number }> = [
+    { re: /^(.+?)\s+ko\s+schedule\s+message\s+(?:karo|kar|kar do|karna)[\s,]*(?:ki|ke|that|saying)?\s*(.+)$/i, contact: 1, msg: 2 },
+    { re: /^(.+?)\s+ko\s+schedule\s+message\s+(?:karo|kar|kar do|karna)/i, contact: 1 },
     { re: /^(.+?)\s+ko\s+(.+?)\s+(?:kal|aaj|tomorrow|today|parso|\d{1,2}).+?\s+(?:par|ko|pe)?\s*(?:schedule|schedule\s+kar|time\s+par)\s*(?:karo|kar|kar do|karna)?$/i, contact: 1, msg: 2 },
     { re: /^(.+?)\s+ko\s+(?:kal|aaj|tomorrow|today|parso|\d{1,2}.+?baje)\s+(.+?)\s+(?:message\s+)?schedule/i, contact: 1, msg: 2 },
     { re: /^(.+?)\s+ko\s+(.+?)\s+(?:kal|aaj|tomorrow|today).+$/i, contact: 1, msg: 2 },
@@ -293,6 +295,9 @@ export function parseAssistantIntent(text: string): AssistantIntent {
     || /aaj\s+(?:ke|ka)\s+message/.test(n)
     || /kaun\s+kaun\s+ne\s+message/.test(n)
     || /mujhe\s+aaj\s+.*message/.test(n)
+    || /kis[\s-]?kis\s+(?:ka|ke|ne)\s+message\s+aay/.test(n)
+    || /kaun\s+kaun\s+(?:ka|ke|ne)\s+message\s+aay/.test(n)
+    || /kis[\s-]?ne\s+message\s+(?:aaya|aaye|bheja)/.test(n)
     || /today.*message/.test(n)
     || /who\s+messaged\s+(?:me\s+)?today/.test(n)
   ) {
@@ -321,11 +326,15 @@ export function parseAssistantIntent(text: string): AssistantIntent {
   }
 
   if (
-    /(?:message|messages|chat)\s+(?:ka\s+)?summary/.test(n)
-    || /summary\s+(?:batao|sunao|dikhao|de|do)/.test(n)
-    || /(?:mere\s+)?message[s]?\s+ka\s+summary/.test(n)
+    /(?:message|messages|chat)\s+(?:ka\s+)?(?:summary|samri|samjh|overview)/.test(n)
+    || /summary\s+(?:batao|sunao|dikhao|de|do|banakar|bana)/.test(n)
+    || /samri\s+(?:bana|banakar|de|do|sunao|batao)/.test(n)
+    || /(?:mere\s+)?message[s]?\s+ka\s+(?:summary|samri|samjh)/.test(n)
+    || /message[s]?\s+ka\s+(?:summary|samri)\s+/.test(n)
     || /^summary$/.test(n)
     || /overview/.test(n)
+    || /(?:kis|kaun)[\s-]?(?:kis|kaun)?\s+(?:ka|ke|ne)\s+message/.test(n)
+    || /mujhe\s+.*message.*\s+(?:samri|summary)\s+/.test(n)
   ) {
     return { type: "chat_summary" };
   }

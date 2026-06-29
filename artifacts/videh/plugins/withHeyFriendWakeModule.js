@@ -366,9 +366,7 @@ class HeyFriendWakeModule(private val reactContext: ReactApplicationContext) :
   @ReactMethod
   fun setWakeServiceEnabled(enabled: Boolean) {
     HeyFriendWakeHolder.setEnabled(reactContext, enabled)
-    if (enabled) {
-      HeyFriendWakeService.start(reactContext)
-    } else {
+    if (!enabled) {
       HeyFriendWakeService.stop(reactContext)
       HeyFriendWakeHolder.setPendingCommand(reactContext, null)
     }
@@ -376,7 +374,7 @@ class HeyFriendWakeModule(private val reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun startWakeService() {
-    HeyFriendWakeHolder.setEnabled(reactContext, true)
+    if (!HeyFriendWakeHolder.isEnabled(reactContext)) return
     HeyFriendWakeService.start(reactContext)
   }
 

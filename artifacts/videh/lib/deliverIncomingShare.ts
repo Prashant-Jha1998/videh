@@ -1,5 +1,6 @@
 import * as FileSystem from "expo-file-system/legacy";
 import type { IncomingSharePayload } from "@/lib/incomingSharePayload";
+import { guessMimeFromFilename } from "@/lib/prepareFileUpload";
 
 type SendFns = {
   sendMessage: (chatId: string, text: string) => void;
@@ -21,6 +22,12 @@ type SendFns = {
   ) => void;
 };
 
+function fileMime(file: { path: string; mimeType?: string; fileName?: string }): string | undefined {
+  if (file.mimeType) return file.mimeType;
+  const guessed = guessMimeFromFilename(file.fileName ?? file.path.split("/").pop() ?? "");
+  return guessed === "application/octet-stream" ? undefined : guessed;
+}
+
 function isImageMime(mime?: string): boolean {
   return Boolean(mime?.startsWith("image/"));
 }
@@ -40,8 +47,19 @@ function isDocumentMime(mime?: string): boolean {
 }
 
 function defaultCaption(payload: IncomingSharePayload, extra?: string): string {
-  const parts = [extra?.trim(), payload.text?.trim(), payload.webUrl?.trim()].filter(Boolean);
+  const skipText = payload.files?.length && isWhatsAppMediaPlaceholder(payload.text);
+  const textPart = skipText ? undefined : payload.text?.trim();
+  const urlPart = payload.webUrl?.trim();
+  const parts = [extra?.trim(), textPart, urlPart].filter(Boolean);
   return parts.join("\n").trim();
+}
+
+function isWhatsAppMediaPlaceholder(text?: string): boolean {
+  const t = text?.trim() ?? "";
+  if (!t) return false;
+  return /^photo from .+$/i.test(t)
+    || /^video from .+$/i.test(t)
+    || /^document from .+$/i.test(t);
 }
 
 async function readTextFile(path: string): Promise<string | null> {
@@ -61,17 +79,22 @@ export async function deliverIncomingShareToChat(
 ): Promise<boolean> {
   const caption = defaultCaption(payload, extraCaption);
   const files = payload.files ?? [];
-  const mediaFiles = files.filter((f) => isImageMime(f.mimeType) || isVideoMime(f.mimeType));
-  const textFiles = files.filter((f) => isTextMime(f.mimeType));
-  const docFiles = files.filter((f) => isDocumentMime(f.mimeType));
+  const mediaFiles = files.filter((f) => {
+    const mime = fileMime(f);
+    return isImageMime(mime) || isVideoMime(mime);
+  });
+  const textFiles = files.filter((f) => isTextMime(fileMime(f)));
+  const docFiles = files.filter((f) => isDocumentMime(fileMime(f)));
 
   if (mediaFiles.length > 0) {
+    const mediaCaption = caption && !isWhatsAppMediaPlaceholder(caption) ? caption : extraCaption?.trim();
     mediaFiles.forEach((file, index) => {
-      const kind = isVideoMime(file.mimeType) ? "video" : "image";
+      const mime = fileMime(file);
+      const kind = isVideoMime(mime) ? "video" : "image";
       send.sendPreparedMediaMessage(chatId, {
         localUri: file.path,
         kind,
-        caption: index === 0 ? caption : undefined,
+        caption: index === 0 ? (mediaCaption || undefined) : undefined,
       });
     });
     return true;
@@ -117,9 +140,10 @@ export function sharePreviewKind(payload: IncomingSharePayload | null): "image" 
   if (!payload) return null;
   const file = payload.files?.[0];
   if (file) {
-    if (isVideoMime(file.mimeType)) return "video";
-    if (isImageMime(file.mimeType)) return "image";
-    if (isTextMime(file.mimeType)) return "text";
+    const mime = fileMime(file);
+    if (isVideoMime(mime)) return "video";
+    if (isImageMime(mime)) return "image";
+    if (isTextMime(mime)) return "text";
     return "file";
   }
   if (payload.text || payload.webUrl) return "text";
@@ -129,6 +153,7 @@ export function sharePreviewKind(payload: IncomingSharePayload | null): "image" 
 export function sharePreviewUri(payload: IncomingSharePayload | null): string | undefined {
   const file = payload?.files?.[0];
   if (!file) return undefined;
-  if (isImageMime(file.mimeType) || isVideoMime(file.mimeType)) return file.path;
+  const mime = fileMime(file);
+  if (isImageMime(mime) || isVideoMime(mime)) return file.path;
   return undefined;
 }

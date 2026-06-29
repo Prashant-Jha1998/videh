@@ -22,7 +22,7 @@ import { tryLocalAssistantCommand } from "@/lib/assistantLocal";
 import { shouldPauseAssistantListening, setAssistantChatInputFocused, setAssistantKeyboardVisible } from "@/lib/assistantPause";
 import { wakeListenPrompt } from "@/lib/assistantGreeting";
 import { WAKE_PHRASE_LABEL } from "@/lib/assistantWake";
-import { startWakeKeepAlive, stopWakeKeepAlive } from "@/lib/assistantWakeKeepAlive";
+import { startWakeKeepAlive, stopWakeKeepAlive, dismissStaleWakeNotifications, startAndroidBackgroundWake, stopAndroidBackgroundWake } from "@/lib/assistantWakeKeepAlive";
 import { wakeScreenForIncomingCall } from "@/lib/inCallAudio";
 import {
   detectLocaleFromTranscript,
@@ -49,8 +49,7 @@ import {
   consumePendingHeyFriendWake,
   isHeyFriendWakeNativeAvailable,
   setHeyFriendWakePersisted,
-  startHeyFriendWakeService,
-  stopHeyFriendWakeService,
+  stopHeyFriendWakeFully,
   subscribeHeyFriendWake,
 } from "@/lib/heyFriendWakeService";
 
@@ -126,19 +125,15 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     let p = await fetchAssistantPrefs(user.sessionToken);
     if (!p) {
       p = {
-        enabled: local.enabled ?? true,
+        enabled: local.enabled === true,
         voiceEnrolled: false,
         listenWhenLocked: local.listenWhenLocked ?? true,
         userName: user.name ?? "User",
         lastLangCode: local.lastLangCode ?? "en",
       };
     }
-    // Default ON unless user explicitly turned off in Settings (local.enabled === false).
-    const enabled = local.enabled === false ? false : true;
-    if (enabled && !p.enabled && user.sessionToken) {
-      void patchAssistantPrefs(user.sessionToken, { enabled: true });
-      p = { ...p, enabled: true };
-    }
+    // Default OFF — user must enable Hey Videh in Settings.
+    const enabled = local.enabled === true;
     const finalPrefs: AssistantPrefs = {
       ...p,
       enabled,
@@ -154,6 +149,10 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isAuthenticated && user?.sessionToken) void refreshPrefs();
   }, [isAuthenticated, user?.sessionToken, refreshPrefs]);
+
+  useEffect(() => {
+    void dismissStaleWakeNotifications();
+  }, []);
 
   const dismiss = useCallback(() => {
     commandBufferRef.current = "";
@@ -220,14 +219,14 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         commandBufferRef.current = t;
         listenLocaleRef.current = detectLocaleFromTranscript(t);
         if (commandSubmitTimerRef.current) clearTimeout(commandSubmitTimerRef.current);
-        commandSubmitTimerRef.current = setTimeout(() => submitBufferedCommandRef.current(), 650);
+        commandSubmitTimerRef.current = setTimeout(() => submitBufferedCommandRef.current(), 450);
       },
       onError: (msg) => {
         setLastError(msg);
       },
       onEnd: () => {
         if (commandSubmitTimerRef.current) clearTimeout(commandSubmitTimerRef.current);
-        commandSubmitTimerRef.current = setTimeout(() => submitBufferedCommandRef.current(), 320);
+        commandSubmitTimerRef.current = setTimeout(() => submitBufferedCommandRef.current(), 280);
       },
     });
 
@@ -363,7 +362,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
   submitBufferedCommandRef.current = submitBufferedCommand;
 
-  const activateAssistant = useCallback(async (inlineCommand?: string) => {
+  const activateAssistant = useCallback(async (inlineCommand?: string, skipAck = false) => {
     if (!HEY_VIDeh_ENABLED) return;
     if (!user?.sessionToken) {
       setLastError("Please sign in again to use Hey Videh.");
@@ -385,10 +384,15 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const ack = wakeListenPrompt(lang);
-    setLastResponse(ack);
-    setPhaseSafe("speaking");
-    await speakAssistant(ack, lang);
+    if (!skipAck) {
+      const ack = wakeListenPrompt(lang);
+      setLastResponse(ack);
+      setPhaseSafe("speaking");
+      await speakAssistant(ack, lang);
+    } else {
+      setLastResponse("");
+      setPhaseSafe("listening");
+    }
 
     await beginCommandListening();
   }, [
@@ -454,7 +458,6 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
   const startWakeListening = useCallback(async () => {
     if (!HEY_VIDeh_ENABLED) return;
-    if (USE_NATIVE_ANDROID_WAKE && isHeyFriendWakeNativeAvailable()) return;
     const p = prefsRef.current;
     if (!p?.enabled || !isSpeechRecognitionAvailable()) return;
     if (phaseRef.current !== "idle") return;
@@ -512,13 +515,23 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     if (!HEY_VIDeh_ENABLED || !USE_NATIVE_ANDROID_WAKE) return;
 
     if (!isAuthenticated || !prefs?.enabled) {
-      setHeyFriendWakePersisted(false);
-      stopHeyFriendWakeService();
+      stopHeyFriendWakeFully();
+      void stopWakeKeepAlive();
       return;
     }
 
     setHeyFriendWakePersisted(true);
-    startHeyFriendWakeService();
+
+    const syncBackgroundWake = (state: string) => {
+      if (state === "active") {
+        stopAndroidBackgroundWake();
+        void dismissStaleWakeNotifications();
+      } else {
+        startAndroidBackgroundWake();
+      }
+    };
+
+    syncBackgroundWake(AppState.currentState);
 
     const unsub = subscribeHeyFriendWake(handleNativeWake);
 
@@ -527,6 +540,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     });
 
     const appSub = AppState.addEventListener("change", (state) => {
+      syncBackgroundWake(state);
       if (state === "active") {
         void consumePendingHeyFriendWake().then((cmd) => {
           if (cmd) handleNativeWake(cmd);
@@ -537,6 +551,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     return () => {
       unsub();
       appSub.remove();
+      stopAndroidBackgroundWake();
     };
   }, [isAuthenticated, prefs?.enabled, handleNativeWake]);
 
@@ -544,7 +559,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     if (!HEY_VIDeh_ENABLED) {
       void stopListening();
       void stopWakeKeepAlive();
-      if (USE_NATIVE_ANDROID_WAKE) stopHeyFriendWakeService();
+      if (USE_NATIVE_ANDROID_WAKE) stopHeyFriendWakeFully();
       listeningRef.current = false;
       if (wakeRestartTimerRef.current) clearTimeout(wakeRestartTimerRef.current);
       return;
@@ -552,20 +567,18 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     if (!isAuthenticated || !prefs?.enabled) {
       void stopListening();
       void stopWakeKeepAlive();
-      if (USE_NATIVE_ANDROID_WAKE) {
-        setHeyFriendWakePersisted(false);
-        stopHeyFriendWakeService();
-      }
+      if (USE_NATIVE_ANDROID_WAKE) stopHeyFriendWakeFully();
       listeningRef.current = false;
       if (wakeRestartTimerRef.current) clearTimeout(wakeRestartTimerRef.current);
       return;
     }
     if (Platform.OS === "web") return;
-    if (USE_NATIVE_ANDROID_WAKE && isHeyFriendWakeNativeAvailable()) return;
+
+    const nativeAndroidWake = USE_NATIVE_ANDROID_WAKE && isHeyFriendWakeNativeAvailable();
 
     const shouldListenInAppState = (state: string) => {
       if (!prefsRef.current?.enabled) return false;
-      // active, inactive (screen off / lock), and background (recent apps) — keep listening
+      if (nativeAndroidWake) return state === "active";
       return state === "active" || state === "inactive" || state === "background";
     };
 
@@ -621,22 +634,26 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     await patchAssistantPrefs(user.sessionToken, { enabled });
     await setLocalAssistantPrefs({ enabled: enabled ? true : false });
     if (USE_NATIVE_ANDROID_WAKE) {
-      setHeyFriendWakePersisted(enabled);
       if (enabled) {
-        startHeyFriendWakeService();
+        setHeyFriendWakePersisted(true);
+        if (AppState.currentState !== "active") {
+          startAndroidBackgroundWake();
+        }
         void maybePromptDisableBatteryOptimization();
       } else {
-        stopHeyFriendWakeService();
+        stopHeyFriendWakeFully();
+        void stopWakeKeepAlive();
+        void dismissStaleWakeNotifications();
       }
     }
     await refreshPrefs();
-    if (enabled && Platform.OS !== "web" && !(USE_NATIVE_ANDROID_WAKE && isHeyFriendWakeNativeAvailable())) {
+    if (enabled && Platform.OS !== "web" && AppState.currentState === "active") {
       setTimeout(() => void startWakeListeningRef.current(), 400);
     }
   }, [user?.sessionToken, refreshPrefs]);
 
   const activateManually = useCallback(async () => {
-    await activateAssistant();
+    await activateAssistant(undefined, true);
   }, [activateAssistant]);
 
   return (
