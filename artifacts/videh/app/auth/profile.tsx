@@ -17,6 +17,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useColors } from "@/hooks/useColors";
+import { replaceAfterAuth } from "@/lib/incomingShareRoute";
 import { useApp } from "@/context/AppContext";
 import { registerPushTokenWithServer } from "@/lib/pushNotifications";
 import {
@@ -200,7 +201,7 @@ export default function ProfileSetupScreen() {
       }
     }
     setLoading(false);
-    router.replace("/(tabs)/chats");
+    await replaceAfterAuth(router, "/(tabs)/chats" as import("expo-router").Href);
   };
 
   const initials = name.trim()

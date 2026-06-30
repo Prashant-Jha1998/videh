@@ -17,6 +17,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { replaceAfterAuth } from "@/lib/incomingShareRoute";
 import { getApiUrl } from "@/lib/api";
 
 export default function OtpScreen() {
@@ -153,8 +154,10 @@ export default function OtpScreen() {
           avatar: data.avatarUrl ?? undefined,
           sessionToken: data.sessionToken,
         });
-        // Returning user with a name → go straight to main app
-        router.replace(isReturning ? "/(tabs)/chats" : "/auth/profile");
+        await replaceAfterAuth(
+          router,
+          (isReturning ? "/(tabs)/chats" : "/auth/profile") as import("expo-router").Href,
+        );
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         setError(data.message ?? "Incorrect OTP. Please try again.");

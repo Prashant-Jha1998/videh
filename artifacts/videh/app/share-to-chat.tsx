@@ -66,7 +66,7 @@ export default function ShareToChatScreen() {
     if (Platform.OS === "web" || !isInitialized) return;
     void (async () => {
       setLoadingShare(true);
-      const data = await waitForIncomingShare(15_000);
+      const data = await waitForIncomingShare(20_000);
       if (!data || !payloadHasShareableContent(data)) {
         if (!isAuthenticated) {
           router.replace("/auth/phone");

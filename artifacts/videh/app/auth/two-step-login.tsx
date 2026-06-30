@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { replaceAfterAuth } from "@/lib/incomingShareRoute";
 import { getApiUrl } from "@/lib/api";
 
 export default function TwoStepLoginScreen() {
@@ -83,7 +84,10 @@ export default function TwoStepLoginScreen() {
             avatar: data.avatarUrl ?? undefined,
             sessionToken: data.sessionToken ?? sessionToken,
           });
-          router.replace(isReturning ? "/(tabs)/chats" : "/auth/profile");
+          await replaceAfterAuth(
+            router,
+            (isReturning ? "/(tabs)/chats" : "/auth/profile") as import("expo-router").Href,
+          );
         } else {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           setError(data.message ?? t("auth.twoStepWrong"));

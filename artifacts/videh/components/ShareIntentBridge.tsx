@@ -4,10 +4,12 @@ import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import { useApp } from "@/context/AppContext";
 import {
-  stashIncomingShare,
+  stashIncomingShareQuick,
   peekIncomingShare,
   payloadHasShareableContent,
+  hasPendingIncomingShare,
 } from "@/lib/incomingSharePayload";
+import { incomingShareRoute } from "@/lib/incomingShareRoute";
 
 /** Routes Android/iOS share sheet opens into Videh chat picker. */
 export function ShareIntentBridge() {
@@ -17,13 +19,21 @@ export function ShareIntentBridge() {
   const handlingRef = useRef(false);
   const navigatedRef = useRef(false);
 
-  const goToSharePicker = () => {
-    if (navigatedRef.current) return;
+  const goToShareFlow = () => {
+    if (navigatedRef.current || !isInitialized) return;
     navigatedRef.current = true;
-    router.push("/share-to-chat");
+    router.replace(incomingShareRoute(isAuthenticated));
     setTimeout(() => {
       navigatedRef.current = false;
-    }, 1500);
+    }, 2500);
+  };
+
+  const tryNavigateToShare = async () => {
+    if (!isInitialized) return;
+    const pending = await peekIncomingShare();
+    if (pending && payloadHasShareableContent(pending)) {
+      goToShareFlow();
+    }
   };
 
   useEffect(() => {
@@ -32,25 +42,49 @@ export function ShareIntentBridge() {
     handlingRef.current = true;
     void (async () => {
       try {
-        await stashIncomingShare(shareIntent);
+        await stashIncomingShareQuick(shareIntent);
         resetShareIntent();
-        const pending = await peekIncomingShare();
-        if (!pending || !payloadHasShareableContent(pending)) return;
-        if (isInitialized && isAuthenticated) {
-          goToSharePicker();
-        }
+        await tryNavigateToShare();
       } finally {
         handlingRef.current = false;
       }
     })();
-  }, [hasShareIntent, shareIntent, isAuthenticated, isInitialized, isReady, resetShareIntent, router]);
+  }, [hasShareIntent, shareIntent, isAuthenticated, isInitialized, isReady, resetShareIntent]);
 
   useEffect(() => {
-    if (Platform.OS === "web" || !isInitialized || !isAuthenticated) return;
-    void peekIncomingShare().then((pending) => {
-      if (pending && payloadHasShareableContent(pending)) goToSharePicker();
-    });
-  }, [isAuthenticated, isInitialized, router]);
+    if (Platform.OS === "web" || !isInitialized) return;
+    void tryNavigateToShare();
+  }, [isAuthenticated, isInitialized]);
+
+  // Cold start: share intent can arrive after first paint — keep checking briefly.
+  useEffect(() => {
+    if (Platform.OS === "web" || !isReady) return;
+    let cancelled = false;
+    const poll = async () => {
+      for (let i = 0; i < 40 && !cancelled; i++) {
+        if (await hasPendingIncomingShare()) {
+          goToShareFlow();
+          return;
+        }
+        if (hasShareIntent && shareIntent && !handlingRef.current) {
+          handlingRef.current = true;
+          try {
+            await stashIncomingShareQuick(shareIntent);
+            resetShareIntent();
+            goToShareFlow();
+            return;
+          } finally {
+            handlingRef.current = false;
+          }
+        }
+        await new Promise((r) => setTimeout(r, 150));
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [isReady, isInitialized, isAuthenticated, hasShareIntent, shareIntent, resetShareIntent]);
 
   useEffect(() => {
     if (error && __DEV__) {

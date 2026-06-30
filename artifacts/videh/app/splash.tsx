@@ -7,16 +7,19 @@ export default function SplashAnimScreen({ onDone }: { onDone?: () => void }) {
   const textOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    const fallback = setTimeout(() => onDone?.(), 4000);
     Animated.sequence([
       Animated.parallel([
-        Animated.spring(scale, { toValue: 1, useNativeDriver: false, tension: 60, friction: 8 }),
-        Animated.timing(opacity, { toValue: 1, duration: 500, useNativeDriver: false }),
+        Animated.spring(scale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8 }),
+        Animated.timing(opacity, { toValue: 1, duration: 500, useNativeDriver: true }),
       ]),
-      Animated.timing(textOpacity, { toValue: 1, duration: 400, useNativeDriver: false, delay: 100 }),
+      Animated.timing(textOpacity, { toValue: 1, duration: 400, useNativeDriver: true, delay: 100 }),
     ]).start(() => {
-      setTimeout(() => onDone?.(), 800);
+      clearTimeout(fallback);
+      setTimeout(() => onDone?.(), 400);
     });
-  }, []);
+    return () => clearTimeout(fallback);
+  }, [onDone, opacity, scale, textOpacity]);
 
   return (
     <View style={styles.container}>

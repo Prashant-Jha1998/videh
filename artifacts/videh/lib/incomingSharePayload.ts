@@ -102,13 +102,37 @@ async function stabilizeShareFiles(files: IncomingShareFile[]): Promise<Incoming
   return stable;
 }
 
-export async function stashIncomingShare(intent: ShareIntent): Promise<void> {
+export async function stashIncomingShare(
+  intent: ShareIntent,
+  options?: { copyFiles?: boolean },
+): Promise<void> {
   const payload = shareIntentToPayload(intent);
-  if (payload.files?.length) {
+  const shouldCopy = options?.copyFiles !== false;
+  if (shouldCopy && payload.files?.length) {
     payload.files = await stabilizeShareFiles(payload.files);
     payload.files = payload.files.filter((f) => f.path?.trim());
   }
   await AsyncStorage.setItem(KEY, JSON.stringify(payload));
+}
+
+/** Store share immediately (copy files later on share-to-chat screen). */
+export async function stashIncomingShareQuick(intent: ShareIntent): Promise<void> {
+  await stashIncomingShare(intent, { copyFiles: false });
+}
+
+export async function hasPendingIncomingShare(): Promise<boolean> {
+  const peek = await peekIncomingShare();
+  return payloadHasShareableContent(peek);
+}
+
+/** Wait until ShareIntentBridge stashes payload (cold start can take a few seconds). */
+export async function waitForPendingIncomingShare(maxMs = 20_000): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < maxMs) {
+    if (await hasPendingIncomingShare()) return true;
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  return false;
 }
 
 export async function clearIncomingShare(): Promise<void> {
