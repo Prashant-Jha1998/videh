@@ -11,7 +11,9 @@ import {
   MESSAGE_HINT_API_DELAY_MS,
   MESSAGE_HINT_API_RETRY_MS,
   MESSAGE_HINT_MEDIA_RETRY_MS,
+  TEXT_OUTBOX_RETRY_MS,
 } from "@/lib/chatRealtimePoll";
+import { enqueueChatTextSend } from "@/lib/chatTextSendQueue";
 import { emitChatMessageSignal, onChatMessageSignal, type ChatMessageSignal } from "@/lib/chatMessageEvents";
 import {
   deliverPremiumChatMessageNotification,
@@ -635,18 +637,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }, 20_000);
         data = await res.json();
       } catch {
-        setChats((prev) =>
-          prev.map((c) =>
-            c.id === entry.chatId
-              ? {
-                  ...c,
-                  messages: c.messages.map((m) =>
-                    m.id === entry.tempId ? { ...m, uploadFailed: true } : m,
-                  ),
-                }
-              : c,
-          ),
-        );
         continue;
       }
 
@@ -663,6 +653,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (!data?.success) {
+        if (res.status >= 500 || res.status === 429) continue;
+        await removeFromMessageOutbox(userId, entry.tempId);
         setChats((prev) =>
           prev.map((c) =>
             c.id === entry.chatId
@@ -1326,6 +1318,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
     }
   }, [loadChats, loadStatuses, reloadChatListDeleteState]);
+
+  useEffect(() => {
+    const uid = user?.dbId;
+    if (!isAuthenticated || !uid) return;
+    const tick = () => {
+      const hasPending = chatsForPersistRef.current.some((c) =>
+        c.messages.some((m) => m.senderId === "me" && m.id.startsWith("tmp_") && !m.uploadFailed),
+      );
+      if (hasPending) void retryPendingTextOutbox(uid);
+    };
+    const timer = setInterval(tick, TEXT_OUTBOX_RETRY_MS);
+    return () => clearInterval(timer);
+  }, [isAuthenticated, user?.dbId, retryPendingTextOutbox]);
 
   const refreshChats = useCallback(async () => {
     const u = userRef.current;
@@ -2133,6 +2138,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           emitChatMessageSignal(signal);
           if (activeChatIdRef.current === cid) {
             scheduleLoadMessagesAfterHint(cid, { media: isMediaMessageType(messageType) });
+            if (!isMediaMessageType(messageType)) {
+              void loadMessages(cid);
+            }
           }
         }
         if (cid) {
@@ -2304,7 +2312,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         replyType: replyQuote?.replyType,
         statusReplyId: statusReply?.statusId,
       };
-      void (async () => {
+      void enqueueChatTextSend(chatId, async () => {
         await addTextToMessageOutbox(u.dbId!, outboxEntry);
         const listSnapshot = chatsForPersistRef.current.map((c) =>
           c.id === chatId
@@ -2339,18 +2347,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         try {
           ({ res, data } = await postOnce());
         } catch {
-          setChats((prev) =>
-            prev.map((c) =>
-              c.id === chatId
-                ? {
-                    ...c,
-                    messages: c.messages.map((m) =>
-                      m.id === tempId ? { ...m, uploadFailed: true } : m,
-                    ),
-                  }
-                : c,
-            ),
-          );
           return;
         }
 
@@ -2366,6 +2362,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         if (!data?.success) {
+          if (res.status >= 500 || res.status === 429) return;
+          await removeFromMessageOutbox(u.dbId!, tempId);
           setChats((prev) =>
             prev.map((c) =>
               c.id === chatId
@@ -2409,7 +2407,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             void flushChatMessageCache();
           }
         }
-      })();
+      });
     }
   }, [persistChatMessagesForUser]);
 
