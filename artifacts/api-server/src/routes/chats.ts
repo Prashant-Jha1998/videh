@@ -39,6 +39,15 @@ import {
   ensureGroupInviteTables,
 } from "../lib/groupInviteLinks";
 import {
+  getGroupPermissions,
+  getMemberGroupRole,
+  memberMayAddMembers,
+  memberMayEditGroupInfo,
+  memberMayInviteViaLink,
+  shouldHidePreJoinHistory,
+  updateGroupPermissions,
+} from "../lib/groupPermissions";
+import {
   deleteChatMediaFile,
   ensureStatusReplyColumn,
   ensureViewOnceColumns,
@@ -179,6 +188,7 @@ async function evaluateGroupSendPermission(chatId: string | string[], userId: nu
   const id = Array.isArray(chatId) ? chatId[0] : chatId;
   await ensureGroupMetadataColumns();
   await ensureGroupInviteTables();
+  const r = await query(
     `SELECT c.is_group,
             COALESCE(NULLIF(TRIM(c.group_messaging_policy), ''), 'everyone') AS policy,
             cm.is_admin,
@@ -1584,9 +1594,10 @@ router.post("/:chatId/members", async (req: Request, res: Response) => {
   if (!userId) { res.status(400).json({ success: false }); return; }
   if (!assertSameUser(req, res, requesterId)) return;
   try {
-    // Check requester is admin
-    const adminCheck = await query("SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2", [chatId, requesterId]);
-    if (!adminCheck.rows[0]?.is_admin) { res.status(403).json({ success: false, message: "Not admin" }); return; }
+    if (!(await memberMayAddMembers(chatId, Number(requesterId)))) {
+      res.status(403).json({ success: false, message: "You cannot add members in this group." });
+      return;
+    }
     const allowed = await canAddUserToGroup(Number(requesterId), userId);
     if (!allowed) {
       res.status(403).json({
@@ -1602,13 +1613,14 @@ router.post("/:chatId/members", async (req: Request, res: Response) => {
     await ensureChatMemberHistoryClearedColumn();
     const policy = String(pol.rows[0]?.policy || "everyone");
     const canSendDefault = memberCanSendOnJoin(policy);
-    // Re-join resets send access and hides messages from before this join (WhatsApp-style).
+    const perms = await getGroupPermissions(chatId);
+    const hideHistory = perms ? shouldHidePreJoinHistory(perms) : true;
     await query(
       `INSERT INTO chat_members (chat_id, user_id, can_send_messages, history_cleared_at, joined_at)
-       VALUES ($1, $2, $3, NOW(), NOW())
+       VALUES ($1, $2, $3, ${hideHistory ? "NOW()" : "NULL"}, NOW())
        ON CONFLICT (chat_id, user_id) DO UPDATE SET
          can_send_messages = EXCLUDED.can_send_messages,
-         history_cleared_at = NOW(),
+         history_cleared_at = ${hideHistory ? "NOW()" : "NULL"},
          joined_at = NOW()`,
       [chatId, userId, canSendDefault],
     );
@@ -1622,12 +1634,8 @@ router.post("/:chatId/invite-link", async (req: Request, res: Response) => {
   const { requesterId } = req.body as { requesterId?: number };
   if (!requesterId || !assertSameUser(req, res, requesterId)) return;
   try {
-    const adminCheck = await query(
-      "SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2",
-      [chatId, requesterId],
-    );
-    if (!adminCheck.rows[0]?.is_admin) {
-      res.status(403).json({ success: false, message: "Only admins can share invite links." });
+    if (!(await memberMayInviteViaLink(chatId, requesterId))) {
+      res.status(403).json({ success: false, message: "Only admins can share invite links in this group." });
       return;
     }
     const group = await query("SELECT is_group, group_name FROM chats WHERE id = $1", [chatId]);
@@ -1789,6 +1797,72 @@ router.put("/:chatId/members/:memberId/admin", async (req: Request, res: Respons
 });
 
 // Set group messaging policy (admin only)
+router.get("/:chatId/group-permissions", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const requesterId = Number(req.query.requesterId);
+  if (!requesterId || !assertSameUser(req, res, requesterId)) return;
+  try {
+    const role = await getMemberGroupRole(chatId, requesterId);
+    if (!role.isMember) {
+      res.status(403).json({ success: false });
+      return;
+    }
+    const perms = await getGroupPermissions(chatId);
+    if (!perms) {
+      res.status(404).json({ success: false });
+      return;
+    }
+    res.json({
+      success: true,
+      groupName: perms.groupName,
+      isAdmin: role.isAdmin,
+      permissions: {
+        membersCanEditInfo: perms.membersCanEditInfo,
+        membersCanSendMessages: perms.membersCanSendMessages,
+        membersCanAddMembers: perms.membersCanAddMembers,
+        membersCanShareHistory: perms.membersCanShareHistory,
+        membersCanInviteViaLink: perms.membersCanInviteViaLink,
+        approveNewMembers: perms.approveNewMembers,
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "get group-permissions");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.put("/:chatId/group-permissions", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { requesterId, permissions } = req.body as {
+    requesterId?: number;
+    permissions?: Partial<{
+      membersCanEditInfo: boolean;
+      membersCanSendMessages: boolean;
+      membersCanAddMembers: boolean;
+      membersCanShareHistory: boolean;
+      membersCanInviteViaLink: boolean;
+      approveNewMembers: boolean;
+    }>;
+  };
+  if (!requesterId || !permissions || !assertSameUser(req, res, requesterId)) return;
+  try {
+    const role = await getMemberGroupRole(chatId, requesterId);
+    if (!role.isAdmin) {
+      res.status(403).json({ success: false, message: "Only a group admin can change permissions." });
+      return;
+    }
+    const next = await updateGroupPermissions(chatId, permissions);
+    if (!next) {
+      res.status(404).json({ success: false });
+      return;
+    }
+    res.json({ success: true, permissions: next });
+  } catch (err) {
+    req.log.error({ err }, "put group-permissions");
+    res.status(500).json({ success: false });
+  }
+});
+
 router.put("/:chatId/group-messaging-policy", async (req: Request, res: Response) => {
   const { chatId } = req.params;
   const { requesterId, policy, resetAllowlist } = req.body as {
@@ -1916,8 +1990,8 @@ router.put("/:chatId/group-avatar", async (req: Request, res: Response) => {
       res.status(400).json({ success: false, message: "Profile photos are only available for groups." });
       return;
     }
-    if (!member.rows[0].is_admin) {
-      res.status(403).json({ success: false, message: "Only group admins can change the group photo." });
+    if (!(await memberMayEditGroupInfo(chatId, userId))) {
+      res.status(403).json({ success: false, message: "You cannot edit group settings in this group." });
       return;
     }
     const dataUrl = `data:${mimeType ?? "image/jpeg"};base64,${base64}`;
@@ -1964,8 +2038,8 @@ router.put("/:chatId/description", async (req: Request, res: Response) => {
       res.status(400).json({ success: false, message: "Descriptions are only available for groups." });
       return;
     }
-    if (!member.rows[0].is_admin) {
-      res.status(403).json({ success: false, message: "Only group admins can edit the group description." });
+    if (!(await memberMayEditGroupInfo(chatId, userId))) {
+      res.status(403).json({ success: false, message: "You cannot edit group settings in this group." });
       return;
     }
     const result = await query(
@@ -1992,11 +2066,18 @@ router.put("/:chatId/disappear", async (req: Request, res: Response) => {
     seconds == null || seconds <= 0 ? null : Math.floor(Number(seconds));
   try {
     const member = await query(
-      "SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      `SELECT c.is_group, cm.is_admin
+       FROM chat_members cm
+       JOIN chats c ON c.id = cm.chat_id
+       WHERE cm.chat_id = $1 AND cm.user_id = $2`,
       [chatId, authUserId],
     );
     if (member.rows.length === 0) {
       res.status(403).json({ success: false, message: "Not a member of this chat" });
+      return;
+    }
+    if (member.rows[0].is_group && !(await memberMayEditGroupInfo(chatId, authUserId))) {
+      res.status(403).json({ success: false, message: "You cannot edit group settings in this group." });
       return;
     }
 
@@ -2079,15 +2160,15 @@ router.put("/:chatId/auto-translate", async (req: Request, res: Response) => {
   try {
     await ensureTranslationTables();
     const adminCheck = await query(
-      "SELECT cm.is_admin, c.is_group FROM chat_members cm JOIN chats c ON c.id = cm.chat_id WHERE cm.chat_id = $1 AND cm.user_id = $2",
+      "SELECT c.is_group FROM chat_members cm JOIN chats c ON c.id = cm.chat_id WHERE cm.chat_id = $1 AND cm.user_id = $2",
       [chatId, authUserId],
     );
     if (!adminCheck.rows[0]?.is_group) {
       res.status(400).json({ success: false, message: "Not a group chat" });
       return;
     }
-    if (!adminCheck.rows[0]?.is_admin) {
-      res.status(403).json({ success: false, message: "Only a group admin can change this setting." });
+    if (!(await memberMayEditGroupInfo(chatId, authUserId))) {
+      res.status(403).json({ success: false, message: "You cannot edit group settings in this group." });
       return;
     }
     await query("UPDATE chats SET auto_translate_enabled = $1 WHERE id = $2", [enabled, chatId]);

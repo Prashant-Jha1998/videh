@@ -9,6 +9,10 @@ import {
   ensureGroupInviteTables,
   resolveGroupInviteToken,
 } from "../lib/groupInviteLinks";
+import {
+  getGroupPermissions,
+  shouldHidePreJoinHistory,
+} from "../lib/groupPermissions";
 
 const router = Router();
 
@@ -82,42 +86,66 @@ router.post("/:token/join", requireAuth, async (req: Request, res: Response) => 
       return;
     }
 
+    const perms = await getGroupPermissions(info.chatId);
+    const needsApproval = Boolean(perms?.approveNewMembers);
+    const hideHistory = perms ? shouldHidePreJoinHistory(perms) : true;
+
+    const pol = await query(
+      `SELECT COALESCE(NULLIF(TRIM(group_messaging_policy), ''), 'everyone') AS policy FROM chats WHERE id = $1`,
+      [info.chatId],
+    );
+    const policy = String(pol.rows[0]?.policy || "everyone");
+    const canSendOnJoin = policy !== "allowlist" && policy !== "admins_only";
+
     await query(
       `INSERT INTO chat_members (
          chat_id, user_id, is_admin, can_send_messages, join_pending_approval, history_cleared_at, joined_at
-       ) VALUES ($1, $2, FALSE, FALSE, TRUE, NOW(), NOW())`,
-      [info.chatId, joinerId],
+       ) VALUES ($1, $2, FALSE, $3, $4, ${hideHistory ? "NOW()" : "NULL"}, NOW())`,
+      [info.chatId, joinerId, needsApproval ? false : canSendOnJoin, needsApproval],
     );
 
     const joiner = await query("SELECT name FROM users WHERE id = $1", [joinerId]);
     const joinerName = String(joiner.rows[0]?.name ?? "Someone");
 
-    const admins = await query(
-      `SELECT user_id FROM chat_members WHERE chat_id = $1 AND is_admin = TRUE`,
-      [info.chatId],
-    );
-    const adminIds = admins.rows.map((r: { user_id: number }) => Number(r.user_id));
+    if (needsApproval) {
+      const admins = await query(
+        `SELECT user_id FROM chat_members WHERE chat_id = $1 AND is_admin = TRUE`,
+        [info.chatId],
+      );
+      const adminIds = admins.rows.map((r: { user_id: number }) => Number(r.user_id));
 
-    publishChatEvent({
-      type: "group_join_request",
-      chatId: String(info.chatId),
-      userIds: [...adminIds, joinerId],
-      payload: {
+      publishChatEvent({
+        type: "group_join_request",
+        chatId: String(info.chatId),
+        userIds: [...adminIds, joinerId],
+        payload: {
+          chatId: info.chatId,
+          userId: joinerId,
+          userName: joinerName,
+          groupName: info.groupName,
+        },
+      });
+
+      res.json({
+        success: true,
         chatId: info.chatId,
-        userId: joinerId,
-        userName: joinerName,
         groupName: info.groupName,
-      },
-    });
+        pendingApproval: true,
+        canSendMessages: false,
+        alreadyMember: false,
+        message: "You joined the group. An admin must approve you before you can send messages.",
+      });
+      return;
+    }
 
     res.json({
       success: true,
       chatId: info.chatId,
       groupName: info.groupName,
-      pendingApproval: true,
-      canSendMessages: false,
+      pendingApproval: false,
+      canSendMessages: canSendOnJoin,
       alreadyMember: false,
-      message: "You joined the group. An admin must approve you before you can send messages.",
+      message: "You joined the group.",
     });
   } catch (err) {
     req.log.error({ err }, "join group invite");

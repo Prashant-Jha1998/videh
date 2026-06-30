@@ -47,6 +47,7 @@ import {
 import { normalizeRouteParam } from "@/lib/routeParams";
 import { getGroupInfoCache, patchGroupInfoCache } from "@/lib/groupInfoCache";
 import { readLocalGroupTranslateLang, writeLocalGroupTranslateLang } from "@/lib/groupTranslationPrefs";
+import { fetchGroupPermissions, type GroupPermissions } from "@/lib/groupPermissions";
 
 const BASE_URL = getApiUrl();
 const SCREEN_H = Dimensions.get("window").height;
@@ -208,6 +209,11 @@ export default function ChatInfoScreen() {
     bootCache?.effectiveLangLabel ?? "English",
   );
   const [groupLangPickerOpen, setGroupLangPickerOpen] = useState(false);
+  const [groupPerms, setGroupPerms] = useState<GroupPermissions | null>(null);
+
+  const canEditGroupInfo = isAdmin || Boolean(groupPerms?.membersCanEditInfo);
+  const canAddMembers = isAdmin || Boolean(groupPerms?.membersCanAddMembers);
+  const canInviteViaLink = isAdmin || Boolean(groupPerms?.membersCanInviteViaLink);
 
   const chatOtherUserId = useRef<number | null>(null);
   const lastRefreshAtRef = useRef(0);
@@ -283,6 +289,12 @@ export default function ChatInfoScreen() {
       }
     } catch { }
     setLoadingMembers(false);
+  }, [id, user?.dbId, user?.sessionToken]);
+
+  const fetchGroupPerms = useCallback(async () => {
+    if (!id || !user?.dbId) return;
+    const data = await fetchGroupPermissions(id, user.dbId, user.sessionToken);
+    if (data?.permissions) setGroupPerms(data.permissions);
   }, [id, user?.dbId, user?.sessionToken]);
 
   const fetchMedia = useCallback(async () => {
@@ -389,6 +401,7 @@ export default function ChatInfoScreen() {
         fetchChatDetails(),
         likelyGroup ? fetchMembers() : Promise.resolve(),
         likelyGroup && user?.dbId ? fetchTranslationSettings() : fetchContactInfo(),
+        likelyGroup && user?.dbId ? fetchGroupPerms() : Promise.resolve(),
       ]);
       void fetchMedia();
     })();
@@ -400,6 +413,7 @@ export default function ChatInfoScreen() {
     fetchChatDetails,
     fetchMembers,
     fetchTranslationSettings,
+    fetchGroupPerms,
     fetchMedia,
     fetchContactInfo,
   ]);
@@ -588,39 +602,9 @@ export default function ChatInfoScreen() {
 
   const disappearLabel = disappearTimerLabel(disappearing);
 
-  const groupMessagingLabel =
-    groupMessagingPolicy === "everyone"
-      ? "All members"
-      : groupMessagingPolicy === "admins_only"
-        ? "Admins only"
-        : "Selected members";
-
-  const persistGroupMessagingPolicy = async (policy: "everyone" | "admins_only" | "allowlist", resetAllowlist?: boolean) => {
-    try {
-      const res = await fetch(`${BASE_URL}/api/chats/${id}/group-messaging-policy`, {
-        method: "PUT",
-        headers: authedJsonHeaders(),
-        body: JSON.stringify({
-          requesterId: user?.dbId,
-          policy,
-          resetAllowlist,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setGroupMessagingPolicy(policy);
-        void fetchMembers();
-      } else {
-        Alert.alert("Could not update", data.message ?? "Only admins can change this setting.");
-      }
-    } catch {
-      Alert.alert("Error", "Could not update group messaging settings.");
-    }
-  };
-
   const toggleGroupAutoTranslate = async (enabled: boolean) => {
-    if (!isAdmin) {
-      Alert.alert("Admin only", "Only a group admin can turn auto-translate on or off.");
+    if (!canEditGroupInfo) {
+      Alert.alert("Not allowed", "You cannot edit group settings in this group.");
       return;
     }
     if (!user?.sessionToken) {
@@ -718,7 +702,7 @@ export default function ChatInfoScreen() {
   };
 
   const pickGroupPhoto = async () => {
-    if (!isGroup || !isAdmin || !id || groupAvatarUploading) return;
+    if (!isGroup || !canEditGroupInfo || !id || groupAvatarUploading) return;
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (permission.status !== "granted") {
       Alert.alert("Permission required", "Photo library access is required to set a group photo.");
@@ -741,32 +725,6 @@ export default function ChatInfoScreen() {
     } finally {
       setGroupAvatarUploading(false);
     }
-  };
-
-  const openGroupMessagingPicker = () => {
-    if (!isAdmin) return;
-    Alert.alert(
-      "Who can send messages",
-      "Choose who is allowed to send messages in this group.",
-      [
-        { text: "All members", onPress: () => { void persistGroupMessagingPolicy("everyone"); } },
-        { text: "Only admins", onPress: () => { void persistGroupMessagingPolicy("admins_only"); } },
-        {
-          text: "Selected members",
-          onPress: () => {
-            Alert.alert(
-              "Selected members mode",
-              "Members who are not admins will not be able to send messages until you allow them individually.",
-              [
-                { text: "Cancel", style: "cancel" },
-                { text: "Continue", onPress: () => { void persistGroupMessagingPolicy("allowlist", true); } },
-              ],
-            );
-          },
-        },
-        { text: "Cancel", style: "cancel" },
-      ],
-    );
   };
 
   const toggleMemberSendPermission = async (member: GroupMember, allow: boolean) => {
@@ -821,7 +779,7 @@ export default function ChatInfoScreen() {
     if (!id || !user?.dbId) return;
     const invite = await createGroupInviteLink(id, user.dbId, user.sessionToken);
     if (!invite) {
-      Alert.alert("Could not create link", isAdmin ? "Please try again." : "Only admins can share invite links.");
+      Alert.alert("Could not create link", canInviteViaLink ? "Please try again." : "You cannot share invite links in this group.");
       return;
     }
     await Share.share({
@@ -1014,7 +972,7 @@ export default function ChatInfoScreen() {
         <View style={[styles.profileBlock, { backgroundColor: colors.card }]}>
           <TouchableOpacity
             onPress={() => {
-              if (isGroup && isAdmin) void pickGroupPhoto();
+              if (isGroup && canEditGroupInfo) void pickGroupPhoto();
               else setPhotoVisible(true);
             }}
             activeOpacity={0.85}
@@ -1032,7 +990,7 @@ export default function ChatInfoScreen() {
                 <ActivityIndicator color="#fff" />
               </View>
             ) : null}
-            {isGroup && isAdmin ? (
+            {isGroup && canEditGroupInfo ? (
               <View style={[styles.avatarEditBadge, { backgroundColor: colors.primary }]}>
                 <Ionicons name="camera" size={16} color="#fff" />
               </View>
@@ -1097,7 +1055,7 @@ export default function ChatInfoScreen() {
           <View style={[styles.section, { backgroundColor: colors.card }]}>
             <View style={styles.descHeader}>
               <Text style={[styles.sectionLabel, { color: colors.primary }]}>Description</Text>
-              {isAdmin && !editingDesc && (
+              {canEditGroupInfo && !editingDesc && (
                 <TouchableOpacity onPress={() => setEditingDesc(true)}>
                   <Ionicons name="pencil" size={16} color={colors.primary} />
                 </TouchableOpacity>
@@ -1141,10 +1099,10 @@ export default function ChatInfoScreen() {
               </View>
             ) : (
               <Text style={[styles.sectionValue, { color: groupDesc ? colors.foreground : colors.mutedForeground }]}>
-                {groupDesc || (isAdmin ? "Add group description" : "No description")}
+                {groupDesc || (canEditGroupInfo ? "Add group description" : "No description")}
               </Text>
             )}
-            {isAdmin && (
+            {canInviteViaLink && (
               <TouchableOpacity style={styles.inviteLinkRow} onPress={shareGroupInviteLink}>
                 <Ionicons name="link-outline" size={16} color={colors.primary} />
                 <Text style={[styles.inviteLinkText, { color: colors.primary }]}>Invite via link</Text>
@@ -1236,21 +1194,30 @@ export default function ChatInfoScreen() {
             label="Disappearing messages"
             value={disappearLabel}
             colors={colors}
-            onPress={() =>
+            onPress={() => {
+              if (isGroup && !canEditGroupInfo) {
+                Alert.alert("Not allowed", "You cannot edit group settings in this group.");
+                return;
+              }
               router.push({
                 pathname: "/disappearing-messages/[id]",
                 params: { id: id! },
-              })
-            }
+              });
+            }}
           />
           {isGroup && (
             <InfoRow
-              icon="chatbubbles-outline"
-              iconBg="#00897B"
-              label="Who can send messages"
-              value={groupMessagingLabel}
+              icon="shield-checkmark-outline"
+              iconBg="#43A047"
+              label="Group permissions"
+              value="Edit info, messages, invites & more"
               colors={colors}
-              onPress={isAdmin ? openGroupMessagingPicker : undefined}
+              onPress={() =>
+                router.push({
+                  pathname: "/group-permissions/[id]",
+                  params: { id: id! },
+                } as unknown as Href)
+              }
             />
           )}
           {isGroup && (
@@ -1261,7 +1228,7 @@ export default function ChatInfoScreen() {
               value={autoTranslateEnabled ? "On — each member, their language" : "Off"}
               colors={colors}
               right={
-                isAdmin ? (
+                canEditGroupInfo ? (
                   <Switch
                     value={autoTranslateEnabled}
                     onValueChange={(v) => { void toggleGroupAutoTranslate(v); }}
@@ -1331,7 +1298,7 @@ export default function ChatInfoScreen() {
               <Text style={[styles.sectionLabel, { color: colors.primary }]}>
                 {members.length} participants
               </Text>
-              {isAdmin && (
+              {canAddMembers && (
                 <TouchableOpacity
                   style={[styles.addMemberBtn, { backgroundColor: colors.primary + "18" }]}
                   onPress={() => setAddMemberModal(true)}
