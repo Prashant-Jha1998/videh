@@ -460,7 +460,7 @@ router.post("/group", async (req: Request, res: Response) => {
     }
 
     const chat = await query(
-      "INSERT INTO chats (is_group, group_name, group_avatar_url, group_description, created_by) VALUES (TRUE, $1, $2, $3, $4) RETURNING id",
+      "INSERT INTO chats (is_group, group_name, group_avatar_url, group_description, created_by, auto_translate_enabled) VALUES (TRUE, $1, $2, $3, $4, TRUE) RETURNING id",
       [trimmedName, groupAvatarUrl ?? null, description ?? null, creatorId]
     );
     const chatId = chat.rows[0].id;

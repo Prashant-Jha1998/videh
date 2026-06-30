@@ -1215,8 +1215,8 @@ export default function ChatInfoScreen() {
             <InfoRow
               icon="language-outline"
               iconBg="#7E57C2"
-              label="Auto-translate messages"
-              value={autoTranslateEnabled ? "On for everyone" : "Off"}
+              label="Translation in group"
+              value={autoTranslateEnabled ? "On — each member, their language" : "Off"}
               colors={colors}
               right={
                 isAdmin ? (
@@ -1234,13 +1234,13 @@ export default function ChatInfoScreen() {
             <InfoRow
               icon="globe-outline"
               iconBg="#5C6BC0"
-              label="Your language in this group"
+              label="Your reading language"
               value={memberTranslateLang ? languageNativeLabel(memberTranslateLang) : `App default (${effectiveLangLabel})`}
               colors={colors}
               onPress={openGroupLanguagePicker}
             />
           )}
-          {isGroup && autoTranslateEnabled && (
+          {isGroup && (
             <InfoRow
               icon="text-outline"
               iconBg="#26A69A"

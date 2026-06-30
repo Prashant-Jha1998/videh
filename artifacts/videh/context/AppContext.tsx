@@ -96,6 +96,7 @@ import {
   fetchGroupAutoTranslations,
   messagesNeedingGroupTranslation,
   resolveGroupTranslationPrefs,
+  translateIncomingGroupMessages,
 } from "@/lib/groupAutoTranslate";
 import {
   addTextToMessageOutbox,
@@ -535,6 +536,8 @@ interface AppContextType {
   reportRemoteTyping: (chatId: string, names: string[]) => void;
   patchChatMessage: (chatId: string, messageId: string, patch: Partial<Message>) => void;
   patchChatInList: (chatId: string, patch: Partial<Chat>) => void;
+  /** Fetch + apply group auto-translations for visible messages. */
+  refreshGroupTranslations: (chatId: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -691,7 +694,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const u = userRef.current;
     const chat = chatsForPersistRef.current.find((c) => String(c.id) === String(chatId));
     if (!u?.dbId || !chat) return;
-    const prefs = await resolveGroupTranslationPrefs(chat, chatId);
+    const prefs = await resolveGroupTranslationPrefs(chat, chatId, u.dbId, authSessionToken);
     if (!prefs) return;
     const needs = messagesNeedingGroupTranslation(messages, prefs);
     if (!needs.length) return;
@@ -725,6 +728,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       /* backup translate is best-effort */
     }
   }, [persistChatMessagesForUser]);
+
+  const supplementGroupMessageTranslationsRef = useRef(supplementGroupMessageTranslations);
+  supplementGroupMessageTranslationsRef.current = supplementGroupMessageTranslations;
+
+  const refreshGroupTranslations = useCallback(async (chatId: string) => {
+    const chat = chatsForPersistRef.current.find((c) => String(c.id) === String(chatId));
+    if (!chat?.isGroup || !chat.messages?.length) return;
+    await supplementGroupMessageTranslations(chatId, chat.messages);
+  }, [supplementGroupMessageTranslations]);
+
+  const patchChatMessageRef = useRef<(chatId: string, messageId: string, patch: Partial<Message>) => void>(() => {});
 
   useEffect(() => {
     void AsyncStorage.getItem("chatHistoryClearedAt").then((v) => {
@@ -1683,6 +1697,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setTimeout(() => void loadMessagesRef.current?.(chatId), MESSAGE_HINT_API_DELAY_MS);
       setTimeout(() => void loadMessagesRef.current?.(chatId), MESSAGE_HINT_API_RETRY_MS);
     }
+
+    const hintedChat = chatsForPersistRef.current.find((c) => String(c.id) === chatId);
+    if (hintedChat?.isGroup && resolvedHintType === "text" && u?.dbId) {
+      void (async () => {
+        const latest = chatsForPersistRef.current.find((c) => String(c.id) === chatId);
+        if (!latest?.messages?.length) return;
+        const rows = await translateIncomingGroupMessages({
+          chatId,
+          userId: u.dbId!,
+          sessionToken: authSessionToken,
+          chat: latest,
+          messages: latest.messages,
+        });
+        for (const row of rows) {
+          patchChatMessageRef.current(chatId, row.messageId, {
+            translatedText: row.translated,
+            translationSourceLang: row.sourceLang,
+            translationTargetLang: row.targetLang,
+          });
+        }
+        void supplementGroupMessageTranslationsRef.current(chatId, latest.messages);
+      })();
+    }
   }, [restoreHiddenChatsWithNewActivity]);
 
   const patchChatMessage = useCallback((chatId: string, messageId: string, patch: Partial<Message>) => {
@@ -1694,6 +1731,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ),
     );
   }, []);
+  patchChatMessageRef.current = patchChatMessage;
 
   const patchChatInList = useCallback((chatId: string, patch: Partial<Chat>) => {
     setChats((prev) =>
@@ -1705,7 +1743,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const u = userRef.current;
       const data = await api(
-        `/chats/${chatId}/messages?limit=80&userId=${u?.dbId ?? 0}&skipTranslate=1`,
+        `/chats/${chatId}/messages?limit=80&userId=${u?.dbId ?? 0}`,
       ) as { success: boolean; messages: any[] };
       if (!data.success || !data.messages) return;
 
@@ -3735,7 +3773,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, reportUser, setChatDisappear,
       updateLocationOnServer, startLiveLocationSession, stopLiveLocationSession,
-      setActiveChatId, refreshCallLogs, clearCallLogs, typingByChatId, reportRemoteTyping, patchChatMessage, patchChatInList,
+      setActiveChatId, refreshCallLogs, clearCallLogs, typingByChatId, reportRemoteTyping, patchChatMessage, patchChatInList, refreshGroupTranslations,
     }}>
       {children}
     </AppContext.Provider>

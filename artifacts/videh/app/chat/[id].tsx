@@ -16,6 +16,7 @@ import {
 } from "react-native-keyboard-controller";
 import { useChatKeyboard } from "@/hooks/useChatKeyboard";
 import { OPEN_CHAT_MESSAGE_POLL_MS } from "@/lib/chatRealtimePoll";
+import { fetchGroupTranslationSettings } from "@/lib/groupAutoTranslate";
 import { runOnJS } from "react-native-reanimated";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -1226,7 +1227,7 @@ export default function ChatScreen() {
     editMessage, reactToMessage, starMessage, keepMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
     loadMessages, loadOlderMessages, updateLocationOnServer, stopLiveLocationSession, setActiveChatId,
-    typingByChatId, reportRemoteTyping, patchChatMessage, getChatClearCutoff,
+    typingByChatId, reportRemoteTyping, patchChatMessage, getChatClearCutoff, refreshGroupTranslations,
   } = useApp();
 
   const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
@@ -1331,6 +1332,13 @@ export default function ChatScreen() {
     markAsRead(chatId);
     void loadMessages(chatId).finally(() => setMessagesReady(true));
   }, [chatId, markAsRead, loadMessages]);
+
+  useEffect(() => {
+    if (!chatId || !user?.dbId) return;
+    const c = chats.find((x) => x.id === chatId);
+    if (!c?.isGroup) return;
+    void fetchGroupTranslationSettings(chatId, user.dbId, user.sessionToken);
+  }, [chatId, chats, user?.dbId, user?.sessionToken]);
 
   useEffect(() => {
     if (!chatId || messagesReady) return;
@@ -1480,6 +1488,14 @@ export default function ChatScreen() {
     const base = filterMessagesAfterClearCutoff(chat?.messages ?? [], cutoff);
     return base.filter((m) => !isDisappearingMessageExpired(m));
   }, [chat?.messages, chatId, getChatClearCutoff]);
+
+  useEffect(() => {
+    if (!chatId || !chat?.isGroup || allMessages.length === 0) return;
+    const timer = setTimeout(() => {
+      void refreshGroupTranslations(chatId);
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [chatId, chat?.isGroup, allMessages, refreshGroupTranslations]);
   const selectionActive = selectedIds.length > 0;
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
@@ -3685,7 +3701,7 @@ export default function ChatScreen() {
                   <Text style={styles.translatedLabel}>
                     {showingOriginal
                       ? "Tap to show translation"
-                      : `Translated from ${languageDisplayName(item.translationSourceLang)} · Tap for original`}
+                      : `In ${languageDisplayName(item.translationTargetLang ?? "en")}${item.translationSourceLang ? ` · from ${languageDisplayName(item.translationSourceLang)}` : ""} · Tap for original`}
                   </Text>
                   {showingOriginal ? (
                     <Text style={[styles.msgText, { color: colors.mutedForeground, fontSize: 14 * chatFontScale, lineHeight: 20 * chatFontScale }]}>

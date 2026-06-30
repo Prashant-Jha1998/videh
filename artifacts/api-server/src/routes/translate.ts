@@ -65,7 +65,7 @@ router.post("/batch", async (req: Request, res: Response) => {
     return;
   }
   if (!assertSameUser(req, res, userId)) return;
-  if (items.length > 30) {
+  if (items.length > 50) {
     res.status(400).json({ success: false, message: "Too many items" });
     return;
   }

@@ -230,6 +230,29 @@ function shouldAttachTranslation(
   return isRomanizedIndicInput(content, target) && containsIndicScript(translated);
 }
 
+/** Google treats Hinglish as `hi`; only Hindi needs forced English source. */
+function romanizedSourceOrder(target: TranslateLang): string[] {
+  return target === "hi" ? ["en", "auto"] : ["auto", "en"];
+}
+
+async function translateRomanizedHinglish(
+  protectedText: string,
+  tokens: string[],
+  to: TranslateLang,
+  originalText: string,
+): Promise<{ text: string; detected: string }> {
+  let fallback = { text: originalText, detected: "unknown" };
+  for (const src of romanizedSourceOrder(to)) {
+    const r = await translateProtectedText(protectedText, to, src);
+    const restored = restoreTranslationTokens(r.text, tokens).trim();
+    if (!restored) continue;
+    fallback = { text: restored, detected: r.detected };
+    if (restored !== originalText) return fallback;
+    if (containsIndicScript(restored)) return fallback;
+  }
+  return fallback;
+}
+
 /** Romanized Hinglish (Latin letters) should still convert to native script. */
 function needsNativeScriptConversion(
   originalText: string,
@@ -323,22 +346,26 @@ export async function translateText(
   const { text: protectedText, tokens } = protectTranslationTokens(text);
   const from = options?.from && options.from !== "auto" ? normalizeLangCode(options.from) : "auto";
   const romanizedIndic = isRomanizedIndicInput(text, to);
-  const apiFrom = romanizedIndic
-    ? "en"
-    : from === "auto" && needsNativeScriptConversion(text, "en", to)
-      ? "en"
-      : from;
 
   try {
-    let { text: translatedRaw, detected } = await translateProtectedText(protectedText, to, apiFrom);
-    if (
-      (needsNativeScriptConversion(text, detected, to) || romanizedIndic)
-      && apiFrom !== "en"
-    ) {
-      const retry = await translateProtectedText(protectedText, to, "en");
-      translatedRaw = retry.text;
-      detected = retry.detected;
+    let translatedRaw: string;
+    let detected: string;
+
+    if (romanizedIndic) {
+      const romanized = await translateRomanizedHinglish(protectedText, tokens, to, text);
+      translatedRaw = romanized.text;
+      detected = romanized.detected;
+    } else {
+      const apiFrom =
+        from === "auto" && needsNativeScriptConversion(text, "en", to) ? "en" : from;
+      ({ text: translatedRaw, detected } = await translateProtectedText(protectedText, to, apiFrom));
+      if (needsNativeScriptConversion(text, detected, to) && apiFrom !== "en") {
+        const retry = await translateProtectedText(protectedText, to, "en");
+        translatedRaw = retry.text;
+        detected = retry.detected;
+      }
     }
+
     if (
       !romanizedIndic
       && languagesMatch(detected, to)
@@ -349,15 +376,16 @@ export async function translateText(
     }
     let restored = restoreTranslationTokens(translatedRaw, tokens).trim();
 
-    if (romanizedIndic && !containsIndicScript(restored)) {
-      const retry = await translateProtectedText(protectedText, to, "en");
+    if (romanizedIndic && !containsIndicScript(restored) && restored === text) {
+      const alt = to === "hi" ? "auto" : "en";
+      const retry = await translateProtectedText(protectedText, to, alt);
       translatedRaw = retry.text;
       detected = retry.detected;
       restored = restoreTranslationTokens(translatedRaw, tokens).trim();
     }
 
     // Retry sentence-by-sentence if middle paragraphs stayed in English
-    const chunkFrom = romanizedIndic ? "en" : from;
+    const chunkFrom = romanizedIndic ? romanizedSourceOrder(to)[0]! : from;
     if (looksIncompleteTranslation(restored, to)) {
       const sentences = splitTranslationChunks(protectedText, 220);
       const retryParts: string[] = [];
@@ -399,6 +427,7 @@ export async function invalidateMessageTranslations(messageId: number): Promise<
 }
 
 export type ViewerTranslationPrefs = {
+  isGroup: boolean;
   groupEnabled: boolean;
   personalEnabled: boolean;
   targetLang: TranslateLang;
@@ -429,6 +458,7 @@ export async function getViewerTranslationPrefs(
   const memberLangExplicit = memberLang.length > 0;
   if (!row.is_group) {
     return {
+      isGroup: false,
       groupEnabled: false,
       personalEnabled: true,
       targetLang: normalizeLangCode(memberLang || row.user_lang),
@@ -436,11 +466,21 @@ export async function getViewerTranslationPrefs(
     };
   }
   return {
+    isGroup: true,
     groupEnabled: Boolean(row.group_enabled),
     personalEnabled: Boolean(row.personal_enabled),
     targetLang: normalizeLangCode(memberLang || row.user_lang),
     memberLangExplicit,
   };
+}
+
+/** Whether this viewer should receive auto-translated incoming messages. */
+export function viewerWantsIncomingTranslation(prefs: ViewerTranslationPrefs): boolean {
+  if (!prefs.personalEnabled) return false;
+  if (!prefs.isGroup) return prefs.memberLangExplicit;
+  // Groups: each member reads in their own language (cached per message_id + target_lang).
+  if (prefs.groupEnabled) return true;
+  return prefs.memberLangExplicit;
 }
 
 type MessageRow = Record<string, unknown> & {
@@ -459,8 +499,7 @@ export async function attachTranslationsForViewer(
 ): Promise<MessageRow[]> {
   const chatIdNum = Number(Array.isArray(chatId) ? chatId[0] : chatId);
   const prefs = await getViewerTranslationPrefs(chatIdNum, viewerId);
-  if (!prefs?.personalEnabled) return rows;
-  if (!prefs.groupEnabled && !prefs.memberLangExplicit) return rows;
+  if (!prefs || !viewerWantsIncomingTranslation(prefs)) return rows;
 
   const targetLang = prefs.targetLang;
   const out: MessageRow[] = [];
@@ -472,7 +511,7 @@ export async function attachTranslationsForViewer(
       && String(m.content ?? "").trim(),
   );
   // Translate only the newest slice so message GET stays fast (delivery must not wait on MT).
-  const recentTextRows = textRows.slice(-20);
+  const recentTextRows = textRows.slice(-50);
 
   const concurrency = 4;
   const queue = [...recentTextRows];
