@@ -1704,7 +1704,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const loadMessages = useCallback(async (chatId: string) => {
     try {
       const u = userRef.current;
-      const data = await api(`/chats/${chatId}/messages?limit=80&userId=${u?.dbId ?? 0}`) as { success: boolean; messages: any[] };
+      const data = await api(
+        `/chats/${chatId}/messages?limit=80&userId=${u?.dbId ?? 0}&skipTranslate=1`,
+      ) as { success: boolean; messages: any[] };
       if (!data.success || !data.messages) return;
 
       const clearedAt = getClearCutoff(chatId);

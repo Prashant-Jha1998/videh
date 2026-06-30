@@ -471,9 +471,11 @@ export async function attachTranslationsForViewer(
       && Number(m.sender_id) !== viewerId
       && String(m.content ?? "").trim(),
   );
+  // Translate only the newest slice so message GET stays fast (delivery must not wait on MT).
+  const recentTextRows = textRows.slice(-20);
 
   const concurrency = 4;
-  const queue = [...textRows];
+  const queue = [...recentTextRows];
   const translationMap = new Map<number, { text: string; sourceLang: string; skipped: boolean }>();
 
   async function worker() {
@@ -494,7 +496,14 @@ export async function attachTranslationsForViewer(
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, textRows.length || 1) }, () => worker()));
+  const workers = Array.from(
+    { length: Math.min(concurrency, recentTextRows.length || 1) },
+    () => worker(),
+  );
+  await Promise.race([
+    Promise.all(workers),
+    new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
+  ]);
 
   for (const row of rows) {
     const hit = translationMap.get(Number(row.id));

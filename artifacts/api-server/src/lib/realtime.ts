@@ -36,12 +36,11 @@ export async function initRealtimeBus(): Promise<void> {
 }
 
 export function publishChatEvent(event: ChatEvent): void {
-  if (redisBusActive) {
-    // Redis pub/sub delivers to every worker (including the publisher's subscriber).
-    publishRedisBus(JSON.stringify(event));
-    return;
-  }
+  // Always notify SSE clients on this process immediately (do not rely on Redis loopback).
   bus.emit("chat", event);
+  if (redisBusActive) {
+    publishRedisBus(JSON.stringify(event));
+  }
 }
 
 export function attachChatEventStream(userId: number, res: Response): () => void {
@@ -54,6 +53,14 @@ export function attachChatEventStream(userId: number, res: Response): () => void
 
   const onEvent = (event: ChatEvent) => {
     if (!event.userIds.map(Number).includes(userId)) return;
+    const payload = event.payload as { messageId?: number | string } | undefined;
+    const dedupeKey = `${event.type}:${event.chatId}:${payload?.messageId ?? ""}`;
+    const seen = (onEvent as { _seen?: Set<string> })._seen ??= new Set<string>();
+    if (dedupeKey && seen.has(dedupeKey)) return;
+    if (dedupeKey) {
+      seen.add(dedupeKey);
+      setTimeout(() => seen.delete(dedupeKey), 2500);
+    }
     res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
     (res as { flush?: () => void }).flush?.();
   };

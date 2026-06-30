@@ -670,12 +670,17 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
 
     const messages = result.rows
       .reverse();
+    const skipTranslate =
+      req.query.skipTranslate === "1"
+      || req.query.fast === "1";
     await ensureTranslationTables();
-    const withTranslations = await attachTranslationsForViewer(
-      chatId,
-      viewerId,
-      messages as Array<Record<string, unknown> & { id: number }>,
-    );
+    const withTranslations = skipTranslate
+      ? messages
+      : await attachTranslationsForViewer(
+        chatId,
+        viewerId,
+        messages as Array<Record<string, unknown> & { id: number }>,
+      );
     res.json({
       success: true,
       messages: withTranslations.map((row) => resolveChatMessageRowForClient(req, row as Record<string, unknown>)),

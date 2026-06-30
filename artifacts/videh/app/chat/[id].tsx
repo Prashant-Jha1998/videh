@@ -1414,10 +1414,7 @@ export default function ChatScreen() {
         }
       };
       const pollMessages = (force = false) => {
-        if (messagePollInFlightRef.current) {
-          if (!force) return;
-          return;
-        }
+        if (messagePollInFlightRef.current && !force) return;
         messagePollInFlightRef.current = true;
         const safety = setTimeout(() => {
           messagePollInFlightRef.current = false;
