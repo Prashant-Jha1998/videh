@@ -66,6 +66,7 @@ import { CHAT_EMOJI_PANEL_HEIGHT, ChatEmojiPanel } from "@/components/ChatEmojiP
 import type { GifMediaItem } from "@/lib/chatGifApi";
 import { uploadRemoteGifOrSticker } from "@/lib/sendChatGifSticker";
 import { ChatMessageText, renderChatMentionParts } from "@/components/ChatMessageText";
+import { ChatComposerField } from "@/components/ChatComposerField";
 import { DocumentMessageBubble } from "@/components/DocumentMessageBubble";
 import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/chatMessageText";
 import { ContactMessageBubble } from "@/components/ContactMessageBubble";
@@ -146,6 +147,16 @@ import {
 } from "@/lib/locationMessage";
 import { loadEnterIsSend, loadMediaVisibilityEnabled } from "@/lib/chatSettings";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
+import {
+  buildGroupSenderHeaderMap,
+  filterGroupMentionMembers,
+  groupSenderAccentColor,
+  memberDisplayLabel,
+  memberInitials,
+  MENTION_ALL_TOKEN,
+  showMentionAllOption,
+  type GroupMentionMember,
+} from "@/lib/groupChatUi";
 import { safeJsonParse } from "@/lib/safeJson";
 import { formatCallMessageLabel, parseCallMessageMeta } from "@/lib/callMessage";
 import { useCallSession } from "@/context/CallSessionContext";
@@ -170,6 +181,44 @@ const BASE_URL = getApiUrl();
 const { width: W } = Dimensions.get("window");
 const REACTION_EMOJIS = ["\u2764\uFE0F", "\uD83D\uDC4D", "\uD83D\uDE02", "\uD83D\uDE2E", "\uD83D\uDE22", "\uD83D\uDE4F"];
 const REPLY_SWIPE_ACTION_W = 56;
+const GROUP_MSG_AVATAR_SIZE = 36;
+
+function GroupMemberAvatar({
+  label,
+  avatarUrl,
+  size = GROUP_MSG_AVATAR_SIZE,
+}: {
+  label: string;
+  avatarUrl?: string;
+  size?: number;
+}) {
+  const hue = (label.charCodeAt(0) * 37) % 360;
+  if (avatarUrl) {
+    return (
+      <Image
+        source={{ uri: avatarUrl }}
+        style={{ width: size, height: size, borderRadius: size / 2 }}
+        contentFit="cover"
+      />
+    );
+  }
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: `hsl(${hue},50%,40%)`,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Text style={{ color: "#fff", fontSize: Math.round(size * 0.34), fontFamily: "Inter_700Bold" }}>
+        {memberInitials(label)}
+      </Text>
+    </View>
+  );
+}
 
 type ChatListRow =
   | { rowType: "date"; id: string; label: string }
@@ -1404,6 +1453,35 @@ export default function ChatScreen() {
     setSelectionMenuOpen(false);
   }, []);
 
+  const getCopyableMessageText = useCallback((msg: Message): string | null => {
+    if (msg.type === "deleted" || msg.isViewOnce) return null;
+    const text = msg.text?.trim();
+    return text || null;
+  }, []);
+
+  const copySelectedMessages = useCallback(() => {
+    const parts = selectedIds
+      .map((id) => allMessages.find((m) => m.id === id))
+      .filter((m): m is Message => !!m)
+      .map(getCopyableMessageText)
+      .filter((t): t is string => Boolean(t));
+    if (parts.length === 0) {
+      Alert.alert("Copy", "Nothing to copy from the selected messages.");
+      return;
+    }
+    Clipboard.setString(parts.join("\n\n"));
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    clearSelection();
+  }, [allMessages, clearSelection, getCopyableMessageText, selectedIds]);
+
+  const canCopySelection = useMemo(
+    () => selectedIds.some((id) => {
+      const m = allMessages.find((x) => x.id === id);
+      return m ? Boolean(getCopyableMessageText(m)) : false;
+    }),
+    [allMessages, getCopyableMessageText, selectedIds],
+  );
+
   /** Close reaction bar only — keep message selected for delete / forward / etc. */
   const dismissReactionPicker = useCallback(() => {
     setReactionTarget(null);
@@ -2237,7 +2315,7 @@ export default function ChatScreen() {
   }, [remoteTypingNames.length, searching, scrollToLatestIfFollowing, blocksAutoScroll]);
 
   // @mentions state
-  const [groupMembers, setGroupMembers] = useState<{ id: number; name: string }[]>([]);
+  const [groupMembers, setGroupMembers] = useState<GroupMentionMember[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null = not in mention mode
 
   // Wallpaper
@@ -2246,11 +2324,24 @@ export default function ChatScreen() {
   // Fetch group members for @mentions
   useEffect(() => {
     if (!chatId || !chat?.isGroup) return;
-    fetch(`${BASE_URL}/api/chats/${chatId}/members`)
+    const headers: Record<string, string> = {};
+    if (user?.sessionToken) headers.Authorization = `Bearer ${user.sessionToken}`;
+    fetch(`${BASE_URL}/api/chats/${chatId}/members${user?.dbId ? `?userId=${user.dbId}` : ""}`, { headers })
       .then((r) => r.json())
-      .then((d) => { if (d.success) setGroupMembers(d.members.map((m: any) => ({ id: m.id, name: m.name || m.phone }))); })
+      .then((d) => {
+        if (!d.success) return;
+        setGroupMembers(
+          d.members.map((m: { id: number; name?: string; phone?: string; avatar_url?: string; is_admin?: boolean }) => ({
+            id: m.id,
+            name: m.name?.trim() || m.phone?.trim() || `Member ${m.id}`,
+            phone: m.phone ?? undefined,
+            avatarUrl: resolvePublicAssetUrl(m.avatar_url) ?? undefined,
+            isAdmin: Boolean(m.is_admin),
+          })),
+        );
+      })
       .catch(() => {});
-  }, [chatId, chat?.isGroup]);
+  }, [chatId, chat?.isGroup, user?.dbId, user?.sessionToken]);
 
   // Fetch wallpaper for this chat
   useEffect(() => {
@@ -2336,7 +2427,8 @@ export default function ChatScreen() {
   const insertMention = useCallback((memberName: string) => {
     const currentText = editTarget ? editText : text;
     const atIdx = currentText.lastIndexOf("@");
-    const newText = currentText.slice(0, atIdx) + `@${memberName} `;
+    const token = memberName === MENTION_ALL_TOKEN ? MENTION_ALL_TOKEN : memberName;
+    const newText = currentText.slice(0, atIdx) + `@${token} `;
     if (editTarget) setEditText(newText);
     else setText(newText);
     setMentionQuery(null);
@@ -2982,6 +3074,14 @@ export default function ChatScreen() {
     }
 
     const isMe = item.senderId === "me";
+    const isGroupIncoming = !isMe && !!chat?.isGroup;
+    const showGroupSenderHeader = isGroupIncoming && (groupSenderHeaderById.get(item.id) ?? true);
+    const senderMember = isGroupIncoming ? groupMemberById.get(Number(item.senderId)) : undefined;
+    const senderLabel = item.senderName?.trim()
+      || (senderMember ? memberDisplayLabel(senderMember) : "Member");
+    const senderAvatarUri = item.senderAvatar || senderMember?.avatarUrl;
+    const senderNameColor = groupSenderAccentColor(item.senderId);
+    const bubbleMentionColor = isMe ? colors.primary : "#1FA855";
     const isDeleted = item.type === "deleted";
     const isViewOnceOpened = (item.type === "image" || item.type === "video") && item.isViewOnce && (item.viewOnceOpened || !item.mediaUrl);
     const isViewOncePending = (item.type === "image" || item.type === "video") && item.isViewOnce && !!item.mediaUrl && !item.viewOnceOpened && !isMe;
@@ -3021,7 +3121,6 @@ export default function ChatScreen() {
     const urls = (!isDeleted && !isImage && !isAudio && !isSpecial) ? extractUrls(item.text) : [];
     const autoTranslationActive =
       chat?.isGroup
-      && chat?.autoTranslateEnabled
       && item.senderId !== "me"
       && Boolean(item.translatedText?.trim())
       && item.translatedText !== item.text;
@@ -3123,10 +3222,27 @@ export default function ChatScreen() {
         {isSelected ? (
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: selectionRowTint }]} pointerEvents="none" />
         ) : null}
+        <View style={isGroupIncoming ? styles.groupIncomingRow : undefined}>
+          {isGroupIncoming ? (
+            <View style={styles.groupAvatarCol}>
+              {showGroupSenderHeader ? (
+                <GroupMemberAvatar label={senderLabel} avatarUrl={senderAvatarUri} />
+              ) : null}
+            </View>
+          ) : null}
+          <View style={isGroupIncoming ? styles.groupIncomingCol : styles.groupIncomingColFull}>
+            {isGroupIncoming && showGroupSenderHeader ? (
+              <Text style={[styles.groupSenderName, { color: senderNameColor }]} numberOfLines={1}>
+                {senderLabel}
+                {senderMember?.isAdmin ? (
+                  <Text style={[styles.groupSenderAdmin, { color: colors.mutedForeground }]}> · admin</Text>
+                ) : null}
+              </Text>
+            ) : null}
         <View
           style={
             canQuickForward
-              ? [styles.msgRowInner, isMe ? styles.msgRowInnerRight : styles.msgRowInnerLeft]
+              ? [styles.msgRowInner, styles.msgRowInnerCenter, isMe ? styles.msgRowInnerRight : styles.msgRowInnerLeft]
               : styles.msgRowSingle
           }
         >
@@ -3458,7 +3574,7 @@ export default function ChatScreen() {
                   { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 20 * chatFontScale },
                 ]}
               >
-                {renderChatMentionParts(item.text)}
+                {renderChatMentionParts(bubblePrimaryText, bubbleMentionColor)}
                 <Text style={[styles.msgTime, styles.msgTimeInline, { color: metaTextColor }]}>
                   {item.isEdited ? " edited" : ""}
                   {"\u00A0\u00A0"}
@@ -3476,6 +3592,7 @@ export default function ChatScreen() {
               <ChatMessageText
                 text={bubblePrimaryText}
                 linkColor={readMoreLinkColor}
+                mentionColor={bubbleMentionColor}
                 style={[styles.msgText, { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}
               />
               {urlsForBubble.length > 0 && (
@@ -3551,6 +3668,8 @@ export default function ChatScreen() {
         {canQuickForward && !isMe ? (
           <MediaForwardButton onPress={() => openForwardScreen([item.id])} />
         ) : null}
+        </View>
+          </View>
         </View>
       </View>
     );
@@ -4108,10 +4227,22 @@ export default function ChatScreen() {
 
   const inputVal = editTarget ? editText : text;
 
+  const groupMemberById = useMemo(() => {
+    const map = new Map<number, GroupMentionMember>();
+    for (const m of groupMembers) map.set(m.id, m);
+    return map;
+  }, [groupMembers]);
+
+  const groupSenderHeaderById = useMemo(
+    () => buildGroupSenderHeaderMap(messagesForDisplay, !!chat?.isGroup),
+    [messagesForDisplay, chat?.isGroup],
+  );
+
   // Filter members for mention autocomplete
   const mentionResults = mentionQuery !== null
-    ? groupMembers.filter((m) => m.name.toLowerCase().startsWith(mentionQuery.toLowerCase()) && m.id !== user?.dbId)
+    ? filterGroupMentionMembers(groupMembers, mentionQuery, user?.dbId)
     : [];
+  const mentionAllVisible = mentionQuery !== null && showMentionAllOption(mentionQuery);
   const selectedMessage = selectedIds.length === 1 ? allMessages.find((m) => m.id === selectedIds[0]) : null;
   const selectionMenuItems = useMemo(() => {
     if (!selectedMessage || selectedMessage.type === "deleted") return [];
@@ -4159,25 +4290,59 @@ export default function ChatScreen() {
 
   const composerFooter = (
     <>
-      {!selectionActive && mentionResults.length > 0 && mentionQuery !== null && (
-        <View style={[styles.mentionList, { backgroundColor: colors.card }]}>
-          {mentionResults.slice(0, 6).map((m) => {
-            const mInitials = m.name.slice(0, 2).toUpperCase();
-            const mHue = (m.name.charCodeAt(0) * 37) % 360;
+      {!selectionActive && mentionQuery !== null && (mentionAllVisible || mentionResults.length > 0) && (
+        <ScrollView
+          style={[styles.mentionList, { backgroundColor: colors.card }]}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
+          {mentionAllVisible ? (
+            <TouchableOpacity
+              style={[styles.mentionRow, { borderBottomColor: colors.border }]}
+              onPress={() => insertMention(MENTION_ALL_TOKEN)}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.mentionAvatar, { backgroundColor: colors.primary }]}>
+                <Ionicons name="people" size={18} color="#fff" />
+              </View>
+              <View style={styles.mentionTextCol}>
+                <Text style={[styles.mentionName, { color: colors.foreground }]}>all</Text>
+                <Text style={[styles.mentionSub, { color: colors.mutedForeground }]}>
+                  Mention all members in this chat
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ) : null}
+          {mentionResults.map((m, i) => {
+            const label = memberDisplayLabel(m);
             return (
               <TouchableOpacity
                 key={m.id}
-                style={[styles.mentionRow, { borderBottomColor: colors.border }]}
+                style={[
+                  styles.mentionRow,
+                  i < mentionResults.length - 1 && { borderBottomWidth: 0.5, borderBottomColor: colors.border },
+                ]}
                 onPress={() => insertMention(m.name)}
+                activeOpacity={0.7}
               >
-                <View style={[styles.mentionAvatar, { backgroundColor: `hsl(${mHue},50%,40%)` }]}>
-                  <Text style={styles.mentionAvatarText}>{mInitials}</Text>
+                <GroupMemberAvatar label={label} avatarUrl={m.avatarUrl} size={40} />
+                <View style={styles.mentionTextCol}>
+                  <Text style={[styles.mentionName, { color: colors.foreground }]} numberOfLines={1}>
+                    {label}
+                    {m.isAdmin ? (
+                      <Text style={[styles.mentionAdminBadge, { color: colors.primary }]}> · admin</Text>
+                    ) : null}
+                  </Text>
+                  {m.phone && m.name !== m.phone ? (
+                    <Text style={[styles.mentionSub, { color: colors.mutedForeground }]} numberOfLines={1}>
+                      {m.phone}
+                    </Text>
+                  ) : null}
                 </View>
-                <Text style={[styles.mentionName, { color: colors.foreground }]}>@{m.name}</Text>
               </TouchableOpacity>
             );
           })}
-        </View>
+        </ScrollView>
       )}
 
       {!selectionActive && editTarget && (
@@ -4288,12 +4453,12 @@ export default function ChatScreen() {
               {voiceRecPhase === "holding" ? (
                 <View style={styles.inputHoldingHint} />
               ) : (
-                <TextInput
+                <ChatComposerField
                   ref={inputRef}
-                  style={[
-                    styles.inputField,
-                    { color: colors.foreground },
-                  ]}
+                  style={styles.inputField}
+                  baseStyle={styles.inputField}
+                  foregroundColor={colors.foreground}
+                  mentionColor={colors.primary}
                   placeholder={editTarget ? t("chat.editPlaceholder") : t("chat.placeholder")}
                   placeholderTextColor={colors.mutedForeground}
                   value={inputVal}
@@ -4401,19 +4566,25 @@ export default function ChatScreen() {
       {/* Header */}
       {selectionActive ? (
         <ThemedHeader accentColors={headerAccent} style={[styles.header, styles.selectionHeader, { paddingTop: topPad }]}>
-          <TouchableOpacity style={styles.backBtn} onPress={clearSelection}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+          <TouchableOpacity style={styles.selectionHeaderBtn} onPress={clearSelection} hitSlop={8}>
+            <Ionicons name="arrow-back" size={26} color="#fff" />
           </TouchableOpacity>
-          <View style={{ flex: 1, minWidth: 0, justifyContent: "center", paddingHorizontal: 6 }}>
+          <View style={{ flex: 1, minWidth: 0, justifyContent: "center", paddingHorizontal: 4 }}>
             <Text style={styles.headerName} numberOfLines={1}>
               {selectedIds.length} selected
             </Text>
           </View>
-          <View style={[styles.headerActions, styles.selectionHeaderActions]}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.selectionHeaderActionsScroll}
+            contentContainerStyle={styles.selectionHeaderActions}
+          >
             {selectedIds.length === 1 ? (
               <>
                 <TouchableOpacity
-                  style={styles.headerBtn}
+                  style={styles.selectionHeaderBtn}
+                  hitSlop={6}
                   onPress={() => {
                     const m = allMessages.find((x) => x.id === selectedIds[0]);
                     if (!m || m.type === "deleted") return;
@@ -4422,30 +4593,50 @@ export default function ChatScreen() {
                     inputRef.current?.focus();
                   }}
                 >
-                  <Ionicons name="arrow-undo-outline" size={21} color="#fff" />
+                  <Ionicons name="arrow-undo-outline" size={26} color="#fff" />
                 </TouchableOpacity>
+                {canCopySelection ? (
+                  <TouchableOpacity
+                    style={styles.selectionHeaderBtn}
+                    hitSlop={6}
+                    onPress={copySelectedMessages}
+                  >
+                    <Ionicons name="copy-outline" size={25} color="#fff" />
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity
-                  style={styles.headerBtn}
+                  style={styles.selectionHeaderBtn}
+                  hitSlop={6}
                   onPress={() => {
                     const m = allMessages.find((x) => x.id === selectedIds[0]);
                     if (!m || !chatId || m.type === "deleted") return;
                     starMessage(chatId, m.id);
                   }}
                 >
-                  <Ionicons name="star-outline" size={21} color="#fff" />
+                  <Ionicons name="star-outline" size={26} color="#fff" />
                 </TouchableOpacity>
                 {canOpenMessageInfo ? (
                   <TouchableOpacity
-                    style={styles.headerBtn}
+                    style={styles.selectionHeaderBtn}
+                    hitSlop={6}
                     onPress={openSelectedMessageInfo}
                   >
-                    <Ionicons name="information-circle-outline" size={22} color="#fff" />
+                    <Ionicons name="information-circle-outline" size={27} color="#fff" />
                   </TouchableOpacity>
                 ) : null}
               </>
+            ) : canCopySelection ? (
+              <TouchableOpacity
+                style={styles.selectionHeaderBtn}
+                hitSlop={6}
+                onPress={copySelectedMessages}
+              >
+                <Ionicons name="copy-outline" size={25} color="#fff" />
+              </TouchableOpacity>
             ) : null}
             <TouchableOpacity
-              style={styles.headerBtn}
+              style={styles.selectionHeaderBtn}
+              hitSlop={6}
               onPress={() => {
                 const ids = selectedIds.filter((id) => {
                   const m = allMessages.find((x) => x.id === id);
@@ -4456,20 +4647,25 @@ export default function ChatScreen() {
                 openForwardScreen(ids);
               }}
             >
-              <Ionicons name="arrow-redo-outline" size={21} color="#fff" />
+              <Ionicons name="arrow-redo-outline" size={26} color="#fff" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setBulkDeleteOpen(true)}>
-              <Ionicons name="trash-outline" size={22} color="#fff" />
+            <TouchableOpacity
+              style={styles.selectionHeaderBtn}
+              hitSlop={6}
+              onPress={() => setBulkDeleteOpen(true)}
+            >
+              <Ionicons name="trash-outline" size={26} color="#fff" />
             </TouchableOpacity>
             {selectedIds.length === 1 && selectionMenuItems.length > 0 ? (
               <TouchableOpacity
-                style={styles.headerBtn}
+                style={styles.selectionHeaderBtn}
+                hitSlop={6}
                 onPress={() => setSelectionMenuOpen(true)}
               >
-                <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+                <Ionicons name="ellipsis-vertical" size={26} color="#fff" />
               </TouchableOpacity>
             ) : null}
-          </View>
+          </ScrollView>
         </ThemedHeader>
       ) : (
         <ThemedHeader accentColors={headerAccent} style={[styles.header, { paddingTop: topPad }]}>
@@ -5249,14 +5445,36 @@ const styles = StyleSheet.create({
   newMessagesFabText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   olderLoader: { paddingVertical: 12, alignItems: "center" },
   // @mention autocomplete
-  mentionList: { borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)", maxHeight: 220, elevation: 4, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4 },
-  mentionRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, gap: 12, borderBottomWidth: 0.5 },
-  mentionAvatar: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  mentionList: { borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)", maxHeight: 280, elevation: 4, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4 },
+  mentionRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 11, gap: 12 },
+  mentionTextCol: { flex: 1, minWidth: 0 },
+  mentionAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   mentionAvatarText: { color: "#fff", fontSize: 12, fontFamily: "Inter_700Bold" },
-  mentionName: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  mentionName: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  mentionSub: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
+  mentionAdminBadge: { fontSize: 12, fontFamily: "Inter_500Medium" },
+  groupIncomingRow: { flexDirection: "row", alignItems: "flex-end", width: "100%", paddingLeft: 4, gap: 6 },
+  groupAvatarCol: { width: GROUP_MSG_AVATAR_SIZE + 2, alignItems: "center", justifyContent: "flex-end", paddingBottom: 2 },
+  groupIncomingCol: { flex: 1, minWidth: 0, maxWidth: "88%" },
+  groupIncomingColFull: { flex: 1, minWidth: 0 },
+  groupSenderName: { fontSize: 13, fontFamily: "Inter_600SemiBold", marginBottom: 2, marginLeft: 2, paddingRight: 8 },
+  groupSenderAdmin: { fontSize: 12, fontFamily: "Inter_400Regular" },
   header: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 8, paddingBottom: 10, gap: 6 },
-  selectionHeader: {},
-  selectionHeaderActions: { flexWrap: "wrap", justifyContent: "flex-end", flexShrink: 0 },
+  selectionHeader: { paddingBottom: 8 },
+  selectionHeaderActionsScroll: { flexGrow: 0, flexShrink: 1, maxWidth: "62%" },
+  selectionHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 2,
+    paddingRight: 2,
+  },
+  selectionHeaderBtn: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   backBtn: { padding: 6 },
   headerAvatarShell: { width: 38, height: 38, position: "relative", overflow: "visible" },
   headerAvatarWrap: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", overflow: "hidden" },
@@ -5290,6 +5508,7 @@ const styles = StyleSheet.create({
     gap: 6,
     maxWidth: "100%",
   },
+  msgRowInnerCenter: { alignItems: "center" },
   msgRowInnerLeft: { alignSelf: "flex-start" },
   msgRowInnerRight: { alignSelf: "flex-end" },
   msgRowSingle: { width: "100%" },
@@ -5301,7 +5520,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(232,234,237,0.95)",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 4,
+    alignSelf: "center",
   },
   swipeReplyRail: { justifyContent: "center", alignItems: "center" },
   msgWrap: { marginVertical: 2 },

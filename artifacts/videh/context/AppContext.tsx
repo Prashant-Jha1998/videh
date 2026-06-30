@@ -141,6 +141,7 @@ export interface Message {
   timestamp: number;
   senderId: string;
   senderName?: string;
+  senderAvatar?: string;
   type: "text" | "image" | "video" | "audio" | "document" | "location" | "contact" | "deleted" | "call" | "system" | "album" | "template";
   status: "sent" | "delivered" | "read";
   mediaUrl?: string;
@@ -240,6 +241,7 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
       timestamp: new Date(m.created_at).getTime(),
       senderId: isMe ? "me" : String(m.sender_id),
       senderName: m.sender_name ?? undefined,
+      senderAvatar: m.sender_avatar ? resolvePublicAssetUrl(m.sender_avatar) ?? m.sender_avatar : prevLocal?.senderAvatar,
       type: "deleted",
       status,
       isStarred: m.is_starred,
@@ -289,6 +291,9 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     timestamp: new Date(m.created_at).getTime(),
     senderId: isMe ? "me" : String(m.sender_id),
     senderName: m.sender_name ?? undefined,
+    senderAvatar: m.sender_avatar
+      ? resolvePublicAssetUrl(m.sender_avatar) ?? m.sender_avatar
+      : prevLocal?.senderAvatar,
     type: resolvedType,
     status,
     mediaUrl: resolvedType === "album" ? (albumUrls?.[0] ?? mediaUrl) : mediaUrl,
@@ -322,7 +327,7 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     expiresAt: m.expires_at ? new Date(m.expires_at).getTime() : prevLocal?.expiresAt,
     isKept: m.is_kept ?? prevLocal?.isKept ?? false,
     templatePayload: templatePayload ?? prevLocal?.templatePayload,
-    translatedText: m.translated_content ?? prevLocal?.translatedText,
+    translatedText: m.translated_content != null ? m.translated_content : prevLocal?.translatedText,
     translationSourceLang: m.translation_source_lang ?? prevLocal?.translationSourceLang,
     translationTargetLang: m.translation_target_lang ?? prevLocal?.translationTargetLang,
     ...mapStatusReplyFields(m),
@@ -508,6 +513,7 @@ interface AppContextType {
   typingByChatId: Record<string, string[]>;
   reportRemoteTyping: (chatId: string, names: string[]) => void;
   patchChatMessage: (chatId: string, messageId: string, patch: Partial<Message>) => void;
+  patchChatInList: (chatId: string, patch: Partial<Chat>) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -1432,6 +1438,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  const patchChatInList = useCallback((chatId: string, patch: Partial<Chat>) => {
+    setChats((prev) =>
+      prev.map((c) => (String(c.id) === String(chatId) ? { ...c, ...patch } : c)),
+    );
+  }, []);
+
   const loadMessages = useCallback(async (chatId: string) => {
     try {
       const u = userRef.current;
@@ -1466,7 +1478,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             && a.type === b.type
             && a.mediaUrl === b.mediaUrl
             && (a.albumUrls?.length ?? 0) === (b.albumUrls?.length ?? 0)
-            && (a.reactions?.length ?? 0) === (b.reactions?.length ?? 0);
+            && (a.reactions?.length ?? 0) === (b.reactions?.length ?? 0)
+            && (a.translatedText ?? "") === (b.translatedText ?? "");
           if (
             !hasPendingHints
             && serverWindowMatchesLocalTail(prevStable, msgs, sameServerWindow)
@@ -3425,7 +3438,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       deleteForEveryone, editMessage, reactToMessage, markStatusViewedLocally, deleteStatus,
       blockUser, unblockUser, reportUser, setChatDisappear,
       updateLocationOnServer, startLiveLocationSession, stopLiveLocationSession,
-      setActiveChatId, refreshCallLogs, clearCallLogs, typingByChatId, reportRemoteTyping, patchChatMessage,
+      setActiveChatId, refreshCallLogs, clearCallLogs, typingByChatId, reportRemoteTyping, patchChatMessage, patchChatInList,
     }}>
       {children}
     </AppContext.Provider>

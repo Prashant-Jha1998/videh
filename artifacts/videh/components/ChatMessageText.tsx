@@ -4,29 +4,24 @@ import {
   getCollapsedChatMessagePreview,
   shouldCollapseChatMessage,
 } from "@/lib/chatMessageText";
+import { renderFormattedChatText } from "@/lib/chatTextFormatting";
 
 type Props = {
   text: string;
   style?: TextStyle | TextStyle[];
   linkColor?: string;
+  mentionColor?: string;
 };
 
 export function renderChatMentionParts(text: string, mentionColor = "#5B4FE8") {
-  const parts = text.split(/(@\w[\w\s]*)/g);
-  if (parts.length === 1) return text;
-  return parts.map((part, i) =>
-    /^@\w/.test(part) ? (
-      <Text key={i} style={{ color: mentionColor, fontFamily: "Inter_600SemiBold" }}>
-        {part}
-      </Text>
-    ) : (
-      part
-    ),
-  );
+  const rendered = renderFormattedChatText(text, { mentionColor });
+  if (typeof rendered === "string") return rendered;
+  return rendered;
 }
 
 /** Videh long message text with @mentions and Read more / Read less. */
-export function ChatMessageText({ text, style, linkColor = "#027EB5" }: Props) {
+export function ChatMessageText({ text, style, linkColor = "#027EB5", mentionColor }: Props) {
+  const resolvedMentionColor = mentionColor ?? "#1FA855";
   const [expanded, setExpanded] = useState(false);
   const collapsible = useMemo(() => shouldCollapseChatMessage(text), [text]);
   const preview = useMemo(() => getCollapsedChatMessagePreview(text), [text]);
@@ -39,7 +34,7 @@ export function ChatMessageText({ text, style, linkColor = "#027EB5" }: Props) {
   if (!collapsible || expanded) {
     return (
       <Text style={style}>
-        {renderChatMentionParts(text)}
+        {renderChatMentionParts(text, resolvedMentionColor)}
         {collapsible && expanded ? (
           <Text style={linkStyle} onPress={() => setExpanded(false)}>
             {" "}
@@ -52,7 +47,7 @@ export function ChatMessageText({ text, style, linkColor = "#027EB5" }: Props) {
 
   return (
     <Text style={style}>
-      {renderChatMentionParts(preview)}
+      {renderChatMentionParts(preview, resolvedMentionColor)}
       <Text style={linkStyle} onPress={() => setExpanded(true)}>
         {" "}
         Read more

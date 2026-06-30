@@ -137,7 +137,7 @@ export default function ChatInfoScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
-  const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, reportUser, createDirectChat, updateGroupAvatar } = useApp();
+  const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, reportUser, createDirectChat, updateGroupAvatar, patchChatInList, loadMessages } = useApp();
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
   const authedJsonHeaders = useCallback(() => ({
@@ -489,6 +489,8 @@ export default function ChatInfoScreen() {
       const data = await res.json();
       if (data.success) {
         setAutoTranslateEnabled(enabled);
+        patchChatInList(id!, { autoTranslateEnabled: enabled });
+        void loadMessages(id!);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } else {
         Alert.alert("Could not update", data.message ?? "Only admins can change this setting.");
@@ -514,6 +516,7 @@ export default function ChatInfoScreen() {
         if (patch.translateLang !== undefined) setMemberTranslateLang(patch.translateLang);
         if (patch.personalEnabled !== undefined) setMemberAutoTranslate(patch.personalEnabled);
         setEffectiveLangLabel(data.effectiveLangName ?? languageNativeLabel(data.effectiveLang));
+        void loadMessages(id!);
       } else {
         Alert.alert("Could not save", data.message ?? "Try again.");
       }

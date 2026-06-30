@@ -191,6 +191,21 @@ function languagesMatch(a: string | null | undefined, b: string | null | undefin
   return false;
 }
 
+/** True when text uses an Indic script (not Latin). */
+function containsIndicScript(text: string): boolean {
+  return /[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]/.test(text);
+}
+
+function shouldForceTranslateDespiteDetection(
+  originalText: string,
+  detected: string,
+  target: TranslateLang,
+): boolean {
+  if (target !== "en") return false;
+  if (!containsIndicScript(originalText)) return false;
+  return languagesMatch(detected, "en");
+}
+
 export type TranslationResult = {
   translated: string;
   sourceLang: string;
@@ -231,10 +246,14 @@ export async function translateText(
       content_hash: string;
     } | undefined;
     if (row && row.content_hash === hash) {
+      const sourceLang = row.source_lang ?? "unknown";
+      const skipped =
+        languagesMatch(sourceLang, to)
+        && !shouldForceTranslateDespiteDetection(text, sourceLang, to);
       return {
         translated: row.translated_text,
-        sourceLang: row.source_lang ?? "unknown",
-        skipped: languagesMatch(row.source_lang, to),
+        sourceLang,
+        skipped,
       };
     }
   }
@@ -244,7 +263,10 @@ export async function translateText(
 
   try {
     let { text: translatedRaw, detected } = await translateProtectedText(protectedText, to, from);
-    if (languagesMatch(detected, to)) {
+    if (
+      languagesMatch(detected, to)
+      && !shouldForceTranslateDespiteDetection(text, detected, to)
+    ) {
       return { translated: text, sourceLang: detected, skipped: true, reason: "same_language" };
     }
     let restored = restoreTranslationTokens(translatedRaw, tokens).trim();
@@ -294,6 +316,8 @@ export type ViewerTranslationPrefs = {
   groupEnabled: boolean;
   personalEnabled: boolean;
   targetLang: TranslateLang;
+  /** Member picked a language in group settings (not app default). */
+  memberLangExplicit: boolean;
 };
 
 export async function getViewerTranslationPrefs(
@@ -315,17 +339,21 @@ export async function getViewerTranslationPrefs(
   );
   if (!r.rows[0]) return null;
   const row = r.rows[0];
+  const memberLang = row.member_lang != null ? String(row.member_lang).trim() : "";
+  const memberLangExplicit = memberLang.length > 0;
   if (!row.is_group) {
     return {
       groupEnabled: false,
       personalEnabled: true,
-      targetLang: normalizeLangCode(row.member_lang ?? row.user_lang),
+      targetLang: normalizeLangCode(memberLang || row.user_lang),
+      memberLangExplicit,
     };
   }
   return {
     groupEnabled: Boolean(row.group_enabled),
     personalEnabled: Boolean(row.personal_enabled),
-    targetLang: normalizeLangCode(row.member_lang ?? row.user_lang),
+    targetLang: normalizeLangCode(memberLang || row.user_lang),
+    memberLangExplicit,
   };
 }
 
@@ -345,7 +373,8 @@ export async function attachTranslationsForViewer(
 ): Promise<MessageRow[]> {
   const chatIdNum = Number(Array.isArray(chatId) ? chatId[0] : chatId);
   const prefs = await getViewerTranslationPrefs(chatIdNum, viewerId);
-  if (!prefs?.groupEnabled || !prefs.personalEnabled) return rows;
+  if (!prefs?.personalEnabled) return rows;
+  if (!prefs.groupEnabled && !prefs.memberLangExplicit) return rows;
 
   const targetLang = prefs.targetLang;
   const out: MessageRow[] = [];
