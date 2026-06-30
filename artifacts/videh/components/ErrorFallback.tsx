@@ -28,8 +28,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
   const handleRestart = async () => {
     try {
       await reloadAppAsync();
-    } catch (restartError) {
-      console.error("Failed to restart app:", restartError);
+    } catch {
       resetError();
     }
   };

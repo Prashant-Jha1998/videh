@@ -48,6 +48,7 @@ import { normalizeRouteParam } from "@/lib/routeParams";
 import { getGroupInfoCache, patchGroupInfoCache } from "@/lib/groupInfoCache";
 import { readLocalGroupTranslateLang, writeLocalGroupTranslateLang } from "@/lib/groupTranslationPrefs";
 import { fetchGroupPermissions, type GroupPermissions } from "@/lib/groupPermissions";
+import { INDIAN_LANGUAGE_OPTIONS, languageNativeLabel } from "@/lib/indianLanguages";
 
 const BASE_URL = getApiUrl();
 const SCREEN_H = Dimensions.get("window").height;
