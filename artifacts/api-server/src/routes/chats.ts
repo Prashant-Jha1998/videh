@@ -914,6 +914,30 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
       );
     }
 
+    const messageType = type ?? "text";
+    const recentDuplicate = await query(
+      `SELECT *
+       FROM messages
+       WHERE chat_id = $1
+         AND sender_id = $2
+         AND content = $3
+         AND COALESCE(type, 'text') = $4
+         AND COALESCE(is_deleted, FALSE) = FALSE
+         AND created_at > NOW() - INTERVAL '45 seconds'
+       ORDER BY id DESC
+       LIMIT 1`,
+      [chatId, senderId, content, messageType],
+    );
+    if (recentDuplicate.rows[0]) {
+      const existing = recentDuplicate.rows[0];
+      res.json({
+        success: true,
+        message: resolveChatMessageRowForClient(req, existing as Record<string, unknown>),
+        deduplicated: true,
+      });
+      return;
+    }
+
     const result = await query(`
       INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once, expires_at, status_reply_id)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)

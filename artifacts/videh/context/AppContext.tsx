@@ -74,6 +74,7 @@ function isMediaMessageType(type: Message["type"]): boolean {
 import { globalMessageRetentionCutoffMs } from "@/lib/chatMessageRetention";
 import {
   collectPendingLocalMessages,
+  dedupeChatMessages,
   mergeServerWithPending,
   preserveHistoricallyLoadedMessages,
   serverWindowMatchesLocalTail,
@@ -593,6 +594,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!outbox.length) return;
 
     for (const entry of outbox) {
+      const chatSnapshot = chatsForPersistRef.current.find((c) => String(c.id) === String(entry.chatId));
+      const alreadyOnServer = chatSnapshot?.messages.some(
+        (m) =>
+          m.senderId === "me"
+          && m.text.trim() === entry.text.trim()
+          && !m.id.startsWith("tmp_")
+          && !m.uploadFailed
+          && Math.abs(m.timestamp - entry.timestamp) < 180_000,
+      );
+      if (alreadyOnServer) {
+        await removeFromMessageOutbox(userId, entry.tempId);
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === entry.chatId
+              ? { ...c, messages: c.messages.filter((m) => m.id !== entry.tempId) }
+              : c,
+          ),
+        );
+        continue;
+      }
+
       const payload = {
         senderId: userId,
         content: entry.text,
@@ -1623,7 +1645,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (String(c.id) !== chatId) return c;
         const msgs = c.messages ?? [];
 
-        if (serverMessageId && msgs.some((m) => m.id === serverMessageId)) {
+        if (serverMessageId && msgs.some((m) => m.id === serverMessageId || m.id === `hint_${serverMessageId}`)) {
           return c;
         }
 
@@ -1655,7 +1677,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (
           text
           && msgs.some(
-            (m) => m.senderId !== "me" && m.text === text && Date.now() - m.timestamp < 30_000,
+            (m) =>
+              m.senderId === senderId
+              && m.text.trim() === text.trim()
+              && Date.now() - m.timestamp < 120_000,
           )
         ) {
           return c;
@@ -1786,7 +1811,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           const serverWithHistory = preserveHistoricallyLoadedMessages(prevStable, msgs, clearedAt);
           const pendingLocal = collectPendingLocalMessages(prevMsgs, serverWithHistory);
           let merged = mergeServerWithPending(serverWithHistory, pendingLocal);
-          merged = filterMessagesAfterClearCutoff(merged, clearedAt);
+          merged = dedupeChatMessages(filterMessagesAfterClearCutoff(merged, clearedAt));
           mergedMessages = merged;
           const last = merged.length > 0 ? merged[merged.length - 1] : undefined;
           return {
@@ -1842,12 +1867,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
         }
       }
-      const cacheUserId = userRef.current?.dbId;
-      if (cacheUserId && mergedMessages.length > 0) {
-        persistChatMessagesForUser(chatId, mergedMessages);
-      }
       if (mergedMessages.length > 0) {
         void supplementGroupMessageTranslations(chatId, mergedMessages);
+      }
+      const cacheUserId = userRef.current?.dbId;
+      if (cacheUserId) {
+        const toPersist = mergedMessages.length > 0
+          ? mergedMessages
+          : dedupeChatMessages(
+              (chatsForPersistRef.current.find((c) => String(c.id) === String(chatId))?.messages ?? [])
+                .filter((m) => !m.id.startsWith("tmp_") && !m.id.startsWith("hint_")),
+            );
+        if (toPersist.length > 0) {
+          persistChatMessagesForUser(chatId, toPersist);
+          void flushChatMessageCache();
+        }
       }
     } catch {}
   }, [patchChatMessage, persistChatMessagesForUser, supplementGroupMessageTranslations]);
@@ -2305,23 +2339,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         try {
           ({ res, data } = await postOnce());
         } catch {
-          try {
-            ({ res, data } = await postOnce());
-          } catch {
-            setChats((prev) =>
-              prev.map((c) =>
-                c.id === chatId
-                  ? {
-                      ...c,
-                      messages: c.messages.map((m) =>
-                        m.id === tempId ? { ...m, uploadFailed: true } : m,
-                      ),
-                    }
-                  : c,
-              ),
-            );
-            return;
-          }
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === chatId
+                ? {
+                    ...c,
+                    messages: c.messages.map((m) =>
+                      m.id === tempId ? { ...m, uploadFailed: true } : m,
+                    ),
+                  }
+                : c,
+            ),
+          );
+          return;
         }
 
         if (res.status === 403) {

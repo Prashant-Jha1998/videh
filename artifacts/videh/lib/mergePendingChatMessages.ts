@@ -179,13 +179,51 @@ export function collectPendingLocalMessages(
   });
 }
 
+function messageIdRank(id: string): number {
+  if (id.startsWith("hint_")) return 0;
+  if (id.startsWith("tmp_")) return 1;
+  return 2;
+}
+
+function isLikelyDuplicateMessage(a: Message, b: Message): boolean {
+  if (a.id === b.id) return true;
+  if (a.id === `hint_${b.id}` || b.id === `hint_${a.id}`) return true;
+  if (a.senderId !== b.senderId) return false;
+  if (a.type !== b.type && a.type !== "text" && b.type !== "text") return false;
+  const aText = a.text.trim();
+  const bText = b.text.trim();
+  if (!aText || !bText || aText !== bText) return false;
+  return Math.abs(a.timestamp - b.timestamp) < 120_000;
+}
+
+function preferCanonicalDuplicate(existing: Message, incoming: Message): Message {
+  const existingRank = messageIdRank(existing.id);
+  const incomingRank = messageIdRank(incoming.id);
+  if (incomingRank > existingRank) return incoming;
+  if (incomingRank < existingRank) return existing;
+  return incoming.timestamp >= existing.timestamp ? incoming : existing;
+}
+
+/** Collapse hint/server twins and accidental double-delivery rows. */
+export function dedupeChatMessages(messages: Message[]): Message[] {
+  const out: Message[] = [];
+  for (const m of messages) {
+    const dupIdx = out.findIndex((existing) => isLikelyDuplicateMessage(existing, m));
+    if (dupIdx >= 0) {
+      out[dupIdx] = preferCanonicalDuplicate(out[dupIdx]!, m);
+    } else {
+      out.push(m);
+    }
+  }
+  return out.sort((a, b) => a.timestamp - b.timestamp);
+}
+
 export function mergeServerWithPending(serverMessages: Message[], pendingLocal: Message[]): Message[] {
   const merged = [...serverMessages];
   for (const p of pendingLocal) {
     if (!merged.some((m) => m.id === p.id)) merged.push(p);
   }
-  merged.sort((a, b) => a.timestamp - b.timestamp);
-  return merged;
+  return dedupeChatMessages(merged);
 }
 
 /** Keep paginated older rows when refresh only fetches the latest server window. */
