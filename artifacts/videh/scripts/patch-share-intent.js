@@ -159,6 +159,93 @@ function patchKotlin() {
   }
 }
 
+function patchKotlinNullType() {
+  const kotlinPath = path.join(
+    root,
+    "node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt",
+  );
+  if (!fs.existsSync(kotlinPath)) return;
+  let content = fs.readFileSync(kotlinPath, "utf8");
+  if (content.includes("VIDEH_SHARE_NULL_TYPE")) {
+    console.log("kotlin null-type already patched");
+    return;
+  }
+  const needle = "            if (intent.type == null) return";
+  const replacement = `            // VIDEH_SHARE_NULL_TYPE — Google Pay often omits MIME type
+            if (intent.type == null) {
+                val uris = extractShareUris(intent)
+                val sharedText = extractShareText(intent)
+                if (uris.isNotEmpty()) {
+                    notifyShareIntent(mapOf(
+                        "files" to uris.map { getFileInfo(it) },
+                        "type" to "file",
+                        "text" to sharedText,
+                        "meta" to mapOf(
+                            "title" to intent.getCharSequenceExtra(Intent.EXTRA_TITLE),
+                        )
+                    ))
+                    return
+                }
+                if (!sharedText.isNullOrEmpty() && intent.action == Intent.ACTION_SEND) {
+                    notifyShareIntent(mapOf(
+                        "text" to sharedText,
+                        "type" to "text",
+                        "meta" to mapOf(
+                            "title" to intent.getCharSequenceExtra(Intent.EXTRA_TITLE),
+                        )
+                    ))
+                    return
+                }
+                return
+            }`;
+  if (!content.includes(needle)) {
+    console.log("kotlin null-type anchor missing");
+    return;
+  }
+  content = content.replace(needle, replacement);
+  fs.writeFileSync(kotlinPath, content);
+  console.log("kotlin null-type patched");
+}
+
+function patchLifecycle() {
+  const lifecyclePath = path.join(
+    root,
+    "node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt",
+  );
+  if (!fs.existsSync(lifecyclePath)) {
+    console.log("lifecycle not found, skip");
+    return;
+  }
+  let content = fs.readFileSync(lifecyclePath, "utf8");
+  if (content.includes("VIDEH_SHARE_LIFECYCLE")) {
+    console.log("lifecycle already patched");
+    return;
+  }
+  content = content.replace(
+    `    override fun onCreate(activity: Activity?, savedInstanceState: Bundle?) {
+        // only store when the new intent is not empty
+        if (activity?.intent?.type != null) {
+            ExpoShareIntentSingleton.intent = activity?.intent
+            ExpoShareIntentSingleton.isPending = true
+        }
+    }`,
+    `    override fun onCreate(activity: Activity?, savedInstanceState: Bundle?) {
+        // VIDEH_SHARE_LIFECYCLE — store ACTION_SEND even when MIME type is missing (Google Pay)
+        val intent = activity?.intent
+        if (intent != null && (
+            intent.type != null ||
+            intent.action == Intent.ACTION_SEND ||
+            intent.action == Intent.ACTION_SEND_MULTIPLE
+        )) {
+            ExpoShareIntentSingleton.intent = intent
+            ExpoShareIntentSingleton.isPending = true
+        }
+    }`,
+  );
+  fs.writeFileSync(lifecyclePath, content);
+  console.log("lifecycle patched");
+}
+
 function patchUtils() {
   const utilsPath = path.join(root, "node_modules/expo-share-intent/build/utils.js");
   if (!fs.existsSync(utilsPath)) {
@@ -318,4 +405,6 @@ function patchUtils() {
 }
 
 patchKotlin();
+patchKotlinNullType();
+patchLifecycle();
 patchUtils();

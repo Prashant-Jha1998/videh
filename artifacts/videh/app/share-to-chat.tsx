@@ -4,6 +4,7 @@ import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Platform,
@@ -23,7 +24,14 @@ import {
   sharePreviewKind,
   sharePreviewUri,
 } from "@/lib/deliverIncomingShare";
-import { peekIncomingShare, takeIncomingShare, payloadHasShareableContent, payloadPreviewText, type IncomingSharePayload } from "@/lib/incomingSharePayload";
+import {
+  clearIncomingShare,
+  payloadHasShareableContent,
+  payloadPreviewText,
+  waitForIncomingShare,
+  ensureSharePayloadFiles,
+  type IncomingSharePayload,
+} from "@/lib/incomingSharePayload";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 
 function ChatAvatar({ chat }: { chat: Chat }) {
@@ -44,14 +52,13 @@ export default function ShareToChatScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t } = useUiPreferences();
-  const { chats, user, isAuthenticated, sendMessage, sendPreparedMediaMessage, sendDocumentMessage } = useApp();
+  const { chats, user, isAuthenticated, isInitialized, sendMessage, sendPreparedMediaMessage, sendDocumentMessage } = useApp();
 
   const [payload, setPayload] = useState<IncomingSharePayload | null>(null);
+  const [loadingShare, setLoadingShare] = useState(true);
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [caption, setCaption] = useState("");
-  const [sending, setSending] = useState(false);
+  const [sendingTo, setSendingTo] = useState<string | null>(null);
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
@@ -61,13 +68,19 @@ export default function ShareToChatScreen() {
       return;
     }
     void (async () => {
-      const data = (await takeIncomingShare()) ?? (await peekIncomingShare());
+      setLoadingShare(true);
+      const data = await waitForIncomingShare(12_000);
       if (!data || !payloadHasShareableContent(data)) {
-        Alert.alert("Nothing to share", "Videh could not read what you shared. Try sharing again from the other app.");
+        Alert.alert(
+          "Nothing to share",
+          "Videh could not read what you shared. Open Google Pay → Share again → pick Videh.",
+        );
         router.back();
         return;
       }
-      setPayload(data);
+      const ready = await ensureSharePayloadFiles(data);
+      setPayload(ready);
+      setLoadingShare(false);
     })();
   }, [isAuthenticated, router]);
 
@@ -82,56 +95,48 @@ export default function ShareToChatScreen() {
   const previewUri = sharePreviewUri(payload);
   const previewKind = sharePreviewKind(payload);
   const resolvedPreview = previewUri ? (resolvePublicAssetUrl(previewUri) ?? previewUri) : undefined;
-
-  const toggleTarget = (id: string) => {
-    Haptics.selectionAsync();
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   const previewText = payloadPreviewText(payload);
 
-  const handleSend = useCallback(async () => {
-    if (!payload || selected.size === 0 || sending) return;
-    setSending(true);
+  const sendToChat = useCallback(async (chatId: string) => {
+    if (!payload || sendingTo) return;
+    setSendingTo(chatId);
     try {
+      const ready = await ensureSharePayloadFiles(payload);
       const sendFns = { sendMessage, sendPreparedMediaMessage, sendDocumentMessage };
-      let sentAny = false;
-      for (const chatId of selected) {
-        const ok = await deliverIncomingShareToChat(chatId, payload, sendFns, caption);
-        if (ok) sentAny = true;
-      }
-      if (!sentAny) {
-        Alert.alert("Could not share", "Videh could not send this content. Try sharing text or a photo instead.");
+      const ok = await deliverIncomingShareToChat(chatId, ready, sendFns);
+      if (!ok) {
+        Alert.alert("Could not share", "Videh could not send this content. Try sharing again from Google Pay.");
         return;
       }
+      await clearIncomingShare();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const name = chats.find((c) => c.id === chatId)?.name ?? "chat";
       router.back();
-      const names = [...selected]
-        .map((id) => chats.find((c) => c.id === id)?.name)
-        .filter(Boolean)
-        .join(", ");
-      Alert.alert("Sent", `Shared to ${names}`);
+      Alert.alert("Sent", `Shared to ${name}`);
     } finally {
-      setSending(false);
+      setSendingTo(null);
     }
-  }, [payload, selected, sending, sendMessage, sendPreparedMediaMessage, sendDocumentMessage, caption, router, chats]);
+  }, [payload, sendingTo, sendMessage, sendPreparedMediaMessage, sendDocumentMessage, router, chats]);
 
-  if (!payload) {
-    return <View style={[styles.screen, { backgroundColor: colors.background }]} />;
+  if (loadingShare || !payload) {
+    return (
+      <View style={[styles.screen, styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={[styles.loadingText, { color: colors.mutedForeground }]}>
+          Reading shared content…
+        </Text>
+      </View>
+    );
   }
 
   const renderRow = ({ item }: { item: Chat }) => {
-    const checked = selected.has(item.id);
+    const busy = sendingTo === item.id;
     return (
       <TouchableOpacity
-        style={[styles.row, { borderBottomColor: colors.border }]}
-        onPress={() => toggleTarget(item.id)}
+        style={[styles.row, { borderBottomColor: colors.border, opacity: sendingTo && !busy ? 0.5 : 1 }]}
+        onPress={() => { void sendToChat(item.id); }}
         activeOpacity={0.7}
+        disabled={Boolean(sendingTo)}
       >
         <ChatAvatar chat={item} />
         <View style={styles.rowText}>
@@ -139,18 +144,14 @@ export default function ShareToChatScreen() {
             {item.name}
           </Text>
           <Text style={[styles.rowSub, { color: colors.mutedForeground }]} numberOfLines={1}>
-            {item.isGroup ? "Group" : "Videh contact"}
+            {item.isGroup ? "Group" : "Tap to send"}
           </Text>
         </View>
-        <View
-          style={[
-            styles.radio,
-            { borderColor: checked ? colors.primary : colors.mutedForeground },
-            checked && { backgroundColor: colors.primary },
-          ]}
-        >
-          {checked ? <Ionicons name="checkmark" size={14} color="#fff" /> : null}
-        </View>
+        {busy ? (
+          <ActivityIndicator size="small" color={colors.primary} />
+        ) : (
+          <Ionicons name="send" size={20} color={colors.primary} />
+        )}
       </TouchableOpacity>
     );
   };
@@ -158,7 +159,7 @@ export default function ShareToChatScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topPad, borderBottomColor: colors.border }]}>
-        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} hitSlop={12}>
+        <TouchableOpacity style={styles.headerBtn} onPress={() => { void clearIncomingShare(); router.back(); }} hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>Send to…</Text>
@@ -181,86 +182,64 @@ export default function ShareToChatScreen() {
         </View>
       ) : null}
 
-      <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>Recent chats</Text>
+      <Text style={[styles.hint, { color: colors.mutedForeground }]}>
+        Tap a chat to send instantly
+      </Text>
 
-      {previewText ? (
-        <View style={[styles.previewTextCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.previewTextLabel, { color: colors.mutedForeground }]}>Shared content</Text>
-          <Text style={[styles.previewTextBody, { color: colors.foreground }]} numberOfLines={4}>
-            {previewText}
-          </Text>
-        </View>
-      ) : null}
-
-      <FlatList
-        data={targets}
-        keyExtractor={(item) => item.id}
-        renderItem={renderRow}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ paddingBottom: selected.size > 0 ? 110 : 24 }}
-        ListEmptyComponent={
-          <Text style={[styles.empty, { color: colors.mutedForeground }]}>No Videh chats found.</Text>
-        }
-      />
-
-      {selected.size > 0 ? (
-        <View
-          style={[
-            styles.bottomBar,
-            {
-              backgroundColor: colors.card,
-              borderTopColor: colors.border,
-              paddingBottom: Math.max(insets.bottom, 10),
-            },
-          ]}
-        >
+      {(previewText || resolvedPreview) ? (
+        <View style={[styles.previewCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           {resolvedPreview ? (
             <Image
               source={{
                 uri: resolvedPreview,
                 ...(user?.sessionToken ? { headers: authFetchHeaders(user.sessionToken) } : {}),
               }}
-              style={styles.previewThumb}
+              style={styles.previewImage}
               contentFit="cover"
             />
           ) : (
-            <View style={[styles.previewThumb, styles.previewThumbPlaceholder, { backgroundColor: colors.muted }]}>
+            <View style={[styles.previewImage, styles.previewImagePlaceholder, { backgroundColor: colors.muted }]}>
               <Ionicons
-                name={
-                  previewKind === "file"
-                    ? "document-outline"
-                    : previewKind === "video"
-                      ? "videocam-outline"
-                      : "chatbubble-outline"
-                }
-                size={20}
+                name={previewKind === "video" ? "videocam-outline" : previewKind === "file" ? "document-outline" : "chatbubble-outline"}
+                size={22}
                 color={colors.mutedForeground}
               />
             </View>
           )}
-          <TextInput
-            value={caption}
-            onChangeText={setCaption}
-            placeholder="Add a message…"
-            placeholderTextColor={colors.mutedForeground}
-            style={[styles.captionInput, { color: colors.foreground, backgroundColor: colors.background }]}
-            multiline
-          />
-          <TouchableOpacity
-            style={[styles.sendBtn, { backgroundColor: colors.primary, opacity: sending ? 0.6 : 1 }]}
-            onPress={() => { void handleSend(); }}
-            disabled={sending}
-          >
-            <Ionicons name="send" size={20} color="#fff" />
-          </TouchableOpacity>
+          {previewText ? (
+            <Text style={[styles.previewTextBody, { color: colors.foreground }]} numberOfLines={3}>
+              {previewText}
+            </Text>
+          ) : null}
         </View>
       ) : null}
+
+      {!isInitialized ? (
+        <View style={styles.centered}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : (
+        <FlatList
+          data={targets}
+          keyExtractor={(item) => item.id}
+          renderItem={renderRow}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: 24 }}
+          ListEmptyComponent={
+            <Text style={[styles.empty, { color: colors.mutedForeground }]}>
+              {chats.length === 0 ? "Loading chats…" : "No Videh chats found."}
+            </Text>
+          }
+        />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
+  loadingText: { fontSize: 15, fontFamily: "Inter_400Regular", marginTop: 8 },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -281,34 +260,26 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   searchInput: { flex: 1, fontSize: 16, fontFamily: "Inter_400Regular", paddingVertical: 4 },
-  sectionLabel: {
-    fontSize: 13,
-    fontFamily: "Inter_600SemiBold",
+  hint: {
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
     marginHorizontal: 16,
-    marginTop: 14,
-    marginBottom: 6,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
+    marginTop: 12,
+    marginBottom: 8,
   },
-  previewTextCard: {
+  previewCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
     marginHorizontal: 16,
     marginBottom: 8,
-    padding: 12,
+    padding: 10,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  previewTextLabel: {
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-    marginBottom: 4,
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
-  },
-  previewTextBody: {
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    lineHeight: 20,
-  },
+  previewImage: { width: 56, height: 56, borderRadius: 8 },
+  previewImagePlaceholder: { alignItems: "center", justifyContent: "center" },
+  previewTextBody: { flex: 1, fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18 },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -322,44 +293,5 @@ const styles = StyleSheet.create({
   rowSub: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
   avatar: { width: 48, height: 48, borderRadius: 24, overflow: "hidden" },
   avatarText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 16, textAlign: "center", lineHeight: 48 },
-  radio: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   empty: { textAlign: "center", paddingVertical: 40, fontFamily: "Inter_400Regular", fontSize: 15 },
-  bottomBar: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  previewThumb: { width: 44, height: 44, borderRadius: 6 },
-  previewThumbPlaceholder: { alignItems: "center", justifyContent: "center" },
-  captionInput: {
-    flex: 1,
-    minHeight: 40,
-    maxHeight: 100,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-  },
-  sendBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
 });

@@ -1,5 +1,6 @@
 import * as FileSystem from "expo-file-system/legacy";
 import type { IncomingSharePayload } from "@/lib/incomingSharePayload";
+import { ensureSharePayloadFiles } from "@/lib/incomingSharePayload";
 import { guessMimeFromFilename } from "@/lib/prepareFileUpload";
 
 type SendFns = {
@@ -77,8 +78,9 @@ export async function deliverIncomingShareToChat(
   send: SendFns,
   extraCaption?: string,
 ): Promise<boolean> {
-  const caption = defaultCaption(payload, extraCaption);
-  const files = payload.files ?? [];
+  const ready = await ensureSharePayloadFiles(payload);
+  const caption = defaultCaption(ready, extraCaption);
+  const files = ready.files ?? [];
   const mediaFiles = files.filter((f) => {
     const mime = fileMime(f);
     return isImageMime(mime) || isVideoMime(mime);

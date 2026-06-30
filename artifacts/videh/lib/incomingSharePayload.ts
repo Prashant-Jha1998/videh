@@ -62,11 +62,13 @@ export function shareIntentToPayload(intent: ShareIntent): IncomingSharePayload 
   return {
     text,
     webUrl,
-    files: intent.files?.map((f) => ({
-      path: f.path,
-      mimeType: f.mimeType ?? undefined,
-      fileName: f.fileName ?? undefined,
-    })),
+    files: intent.files
+      ?.map((f) => ({
+        path: (f.path || (f as { contentUri?: string }).contentUri || "").trim(),
+        mimeType: f.mimeType ?? undefined,
+        fileName: f.fileName ?? undefined,
+      }))
+      .filter((f) => f.path),
     receivedAt: Date.now(),
   };
 }
@@ -104,8 +106,30 @@ export async function stashIncomingShare(intent: ShareIntent): Promise<void> {
   const payload = shareIntentToPayload(intent);
   if (payload.files?.length) {
     payload.files = await stabilizeShareFiles(payload.files);
+    payload.files = payload.files.filter((f) => f.path?.trim());
   }
   await AsyncStorage.setItem(KEY, JSON.stringify(payload));
+}
+
+export async function clearIncomingShare(): Promise<void> {
+  await AsyncStorage.removeItem(KEY);
+}
+
+/** Wait for ShareIntentBridge to finish stashing (cold start / GPay can be slow). */
+export async function waitForIncomingShare(maxMs = 10_000): Promise<IncomingSharePayload | null> {
+  const started = Date.now();
+  while (Date.now() - started < maxMs) {
+    const peek = await peekIncomingShare();
+    if (peek && payloadHasShareableContent(peek)) return peek;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return null;
+}
+
+export async function ensureSharePayloadFiles(payload: IncomingSharePayload): Promise<IncomingSharePayload> {
+  if (!payload.files?.length) return payload;
+  const files = await stabilizeShareFiles(payload.files);
+  return { ...payload, files: files.filter((f) => f.path?.trim()) };
 }
 
 export async function takeIncomingShare(): Promise<IncomingSharePayload | null> {
