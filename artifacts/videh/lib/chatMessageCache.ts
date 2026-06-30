@@ -21,6 +21,9 @@ export type CachedChatMessage = {
   replyQuotedSenderId?: string;
   replyType?: string;
   reactions?: { emoji: string; userId: string }[];
+  translatedText?: string;
+  translationSourceLang?: string;
+  translationTargetLang?: string;
 };
 
 export type ChatMessageCacheStore = Record<string, CachedChatMessage[]>;
@@ -56,6 +59,9 @@ export function slimMessageForCache(m: CachedChatMessage & Record<string, unknow
     replyQuotedSenderId: m.replyQuotedSenderId ? String(m.replyQuotedSenderId) : undefined,
     replyType: m.replyType ? String(m.replyType) : undefined,
     reactions: Array.isArray(m.reactions) ? m.reactions : undefined,
+    translatedText: m.translatedText ? String(m.translatedText) : undefined,
+    translationSourceLang: m.translationSourceLang ? String(m.translationSourceLang) : undefined,
+    translationTargetLang: m.translationTargetLang ? String(m.translationTargetLang) : undefined,
   };
 }
 

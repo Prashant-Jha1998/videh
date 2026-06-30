@@ -68,6 +68,9 @@ function cachedMessageToMessage(m: CachedChatMessage): Message {
     replyQuotedSenderId: m.replyQuotedSenderId,
     replyType: m.replyType,
     reactions: m.reactions?.map((r) => ({ emoji: r.emoji, userId: Number(r.userId) })),
+    translatedText: m.translatedText,
+    translationSourceLang: m.translationSourceLang,
+    translationTargetLang: m.translationTargetLang,
   };
 }
 

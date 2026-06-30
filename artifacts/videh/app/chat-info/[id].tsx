@@ -348,7 +348,16 @@ export default function ChatInfoScreen() {
         let lang = data.memberTranslateLang ?? null;
         if (!lang && id) {
           const localLang = await readLocalGroupTranslateLang(id);
-          if (localLang) lang = localLang;
+          if (localLang) {
+            lang = localLang;
+            if (data.memberTranslateLang == null && user?.dbId) {
+              void fetch(`${BASE_URL}/api/chats/${id}/translation-settings`, {
+                method: "PUT",
+                headers: authedJsonHeaders(),
+                body: JSON.stringify({ userId: user.dbId, translateLang: localLang }),
+              }).catch(() => {});
+            }
+          }
         }
         setAutoTranslateEnabled(Boolean(data.groupAutoTranslateEnabled));
         setMemberAutoTranslate(data.memberAutoTranslateEnabled !== false);

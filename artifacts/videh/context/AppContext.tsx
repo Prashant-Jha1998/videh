@@ -93,6 +93,18 @@ import {
   type ChatMessageCacheStore,
 } from "@/lib/chatMessageCache";
 import {
+  fetchGroupAutoTranslations,
+  messagesNeedingGroupTranslation,
+  resolveGroupTranslationPrefs,
+} from "@/lib/groupAutoTranslate";
+import {
+  addTextToMessageOutbox,
+  loadMessageOutbox,
+  mergeOutboxIntoChats,
+  removeFromMessageOutbox,
+  type TextOutboxEntry,
+} from "@/lib/messageOutbox";
+import {
   chatClearCutoff,
   filterMessagesAfterClearCutoff,
   loadChatDeletedAtMap,
@@ -568,6 +580,152 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     schedulePersistChatMessageCache(dbId, messageCacheStoreRef.current);
   }, []);
 
+  const applyOutboxToChats = useCallback((outbox: TextOutboxEntry[]) => {
+    if (!outbox.length) return;
+    setChats((prev) => mergeOutboxIntoChats(prev, outbox));
+  }, []);
+
+  const retryPendingTextOutbox = useCallback(async (userId: number) => {
+    const outbox = await loadMessageOutbox(userId);
+    if (!outbox.length) return;
+
+    for (const entry of outbox) {
+      const payload = {
+        senderId: userId,
+        content: entry.text,
+        type: "text",
+        replyToId: entry.replyToId && !entry.replyToId.startsWith("tmp_")
+          ? Number(entry.replyToId)
+          : undefined,
+        statusReplyId: entry.statusReplyId ? Number(entry.statusReplyId) : undefined,
+      };
+
+      let res: Response;
+      let data: { success?: boolean; message?: { id: number; expires_at?: string; is_kept?: boolean } | string; code?: string };
+      try {
+        res = await fetchWithTimeout(`${BASE_URL}/api/chats/${entry.chatId}/messages`, {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(payload),
+        }, 20_000);
+        data = await res.json();
+      } catch {
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === entry.chatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) =>
+                    m.id === entry.tempId ? { ...m, uploadFailed: true } : m,
+                  ),
+                }
+              : c,
+          ),
+        );
+        continue;
+      }
+
+      if (res.status === 403) {
+        await removeFromMessageOutbox(userId, entry.tempId);
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === entry.chatId
+              ? { ...c, messages: c.messages.filter((m) => m.id !== entry.tempId) }
+              : c,
+          ),
+        );
+        continue;
+      }
+
+      if (!data?.success) {
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === entry.chatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) =>
+                    m.id === entry.tempId ? { ...m, uploadFailed: true } : m,
+                  ),
+                }
+              : c,
+          ),
+        );
+        continue;
+      }
+
+      await removeFromMessageOutbox(userId, entry.tempId);
+      if (data.message && typeof data.message === "object" && "id" in data.message) {
+        const mid = data.message.id;
+        const row = data.message;
+        let confirmedMessages: Message[] = [];
+        setChats((prev) =>
+          prev.map((c) => {
+            if (c.id !== entry.chatId) return c;
+            const messages = c.messages.map((m) =>
+              m.id === entry.tempId
+                ? {
+                    ...m,
+                    id: String(mid),
+                    status: "delivered" as const,
+                    uploadFailed: false,
+                    expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
+                    isKept: row.is_kept ?? m.isKept,
+                  }
+                : m,
+            );
+            confirmedMessages = messages;
+            return { ...c, messages };
+          }),
+        );
+        if (confirmedMessages.length > 0) {
+          persistChatMessagesForUser(entry.chatId, confirmedMessages);
+        }
+      }
+    }
+  }, [persistChatMessagesForUser]);
+
+  const supplementGroupMessageTranslations = useCallback(async (
+    chatId: string,
+    messages: Message[],
+  ) => {
+    const u = userRef.current;
+    const chat = chatsForPersistRef.current.find((c) => String(c.id) === String(chatId));
+    if (!u?.dbId || !chat) return;
+    const prefs = await resolveGroupTranslationPrefs(chat, chatId);
+    if (!prefs) return;
+    const needs = messagesNeedingGroupTranslation(messages, prefs);
+    if (!needs.length) return;
+    try {
+      const results = await fetchGroupAutoTranslations({
+        userId: u.dbId,
+        sessionToken: authSessionToken,
+        targetLang: prefs.targetLang,
+        messages: needs,
+      });
+      if (!results.length) return;
+      setChats((prev) =>
+        prev.map((c) => {
+          if (String(c.id) !== String(chatId)) return c;
+          const byId = new Map(results.map((r) => [r.messageId, r]));
+          const nextMessages = c.messages.map((m) => {
+            const hit = byId.get(m.id);
+            if (!hit) return m;
+            return {
+              ...m,
+              translatedText: hit.translated,
+              translationSourceLang: hit.sourceLang,
+              translationTargetLang: prefs.targetLang,
+            };
+          });
+          persistChatMessagesForUser(chatId, nextMessages);
+          return { ...c, messages: nextMessages };
+        }),
+      );
+    } catch {
+      /* backup translate is best-effort */
+    }
+  }, [persistChatMessagesForUser]);
+
   useEffect(() => {
     void AsyncStorage.getItem("chatHistoryClearedAt").then((v) => {
       const n = v ? Number(v) : 0;
@@ -996,17 +1154,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setUserState(parsed);
           setIsAuthenticated(true);
           if (parsed.dbId) {
-            const [msgCache, listRows] = await Promise.all([
+            const [msgCache, listRows, outbox] = await Promise.all([
               loadChatMessageCache(parsed.dbId),
               loadChatListCache(parsed.dbId),
+              loadMessageOutbox(parsed.dbId),
             ]);
             messageCacheStoreRef.current = filterCachedMessageStore(msgCache);
             await reloadChatListDeleteState(parsed.dbId);
             if (listRows.length > 0) {
-              setChats(buildChatsFromCache(listRows, messageCacheStoreRef.current));
+              setChats(mergeOutboxIntoChats(
+                buildChatsFromCache(listRows, messageCacheStoreRef.current),
+                outbox,
+              ));
               setChatsListReady(true);
+            } else if (outbox.length > 0) {
+              applyOutboxToChats(outbox);
             }
             schedulePersistChatMessageCache(parsed.dbId, messageCacheStoreRef.current);
+            void retryPendingTextOutbox(parsed.dbId);
             void loadChats(parsed.dbId);
             loadCallLogs(parsed.dbId);
             loadStatuses(parsed.dbId);
@@ -1053,6 +1218,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (Platform.OS !== "web") {
           registerPushTokenWithServer(activeUid).catch(() => {});
         }
+        void retryPendingTextOutbox(activeUid);
       } else if (nextState === "background" || nextState === "inactive") {
         api(`/users/${activeUid}/offline`, { method: "POST" }).catch(() => {});
         const uid = userRef.current?.dbId;
@@ -1078,16 +1244,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.setItem("videh_user", JSON.stringify(u));
 
     if (u.dbId) {
-      const [msgCache, listRows] = await Promise.all([
+      const [msgCache, listRows, outbox] = await Promise.all([
         loadChatMessageCache(u.dbId),
         loadChatListCache(u.dbId),
+        loadMessageOutbox(u.dbId),
       ]);
       messageCacheStoreRef.current = filterCachedMessageStore(msgCache);
       if (listRows.length > 0) {
-        setChats(buildChatsFromCache(listRows, messageCacheStoreRef.current));
+        setChats(mergeOutboxIntoChats(
+          buildChatsFromCache(listRows, messageCacheStoreRef.current),
+          outbox,
+        ));
         setChatsListReady(true);
+      } else if (outbox.length > 0) {
+        applyOutboxToChats(outbox);
       }
       await reloadChatListDeleteState(u.dbId);
+      void retryPendingTextOutbox(u.dbId);
       void loadChats(u.dbId);
       loadCallLogs(u.dbId);
       loadStatuses(u.dbId);
@@ -1633,8 +1806,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (cacheUserId && mergedMessages.length > 0) {
         persistChatMessagesForUser(chatId, mergedMessages);
       }
+      if (mergedMessages.length > 0) {
+        void supplementGroupMessageTranslations(chatId, mergedMessages);
+      }
     } catch {}
-  }, [patchChatMessage, persistChatMessagesForUser]);
+  }, [patchChatMessage, persistChatMessagesForUser, supplementGroupMessageTranslations]);
 
   loadMessagesRef.current = loadMessages;
 
@@ -2042,7 +2218,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (u?.dbId) {
+      const outboxEntry: TextOutboxEntry = {
+        tempId,
+        chatId,
+        text,
+        timestamp: sentAt,
+        replyToId,
+        replyText: replyQuote?.replyText,
+        replySenderName: replyQuote?.replySenderName,
+        replyQuotedSenderId: replyQuote?.replyQuotedSenderId,
+        replyType: replyQuote?.replyType,
+        statusReplyId: statusReply?.statusId,
+      };
       void (async () => {
+        await addTextToMessageOutbox(u.dbId!, outboxEntry);
+        const listSnapshot = chatsForPersistRef.current.map((c) =>
+          c.id === chatId
+            ? { ...c, lastMessage: chatListPreview, lastMessageTime: sentAt }
+            : c,
+        );
+        schedulePersistChatListCache(u.dbId!, listSnapshot);
+        void flushChatListCache();
+
         const payload = {
           senderId: u.dbId,
           content: text,
@@ -2071,13 +2268,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           try {
             ({ res, data } = await postOnce());
           } catch {
-            Alert.alert(
-              "Message not sent",
-              "Could not reach the server. Check your internet and try again.",
-            );
             setChats((prev) =>
               prev.map((c) =>
-                c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c,
+                c.id === chatId
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === tempId ? { ...m, uploadFailed: true } : m,
+                      ),
+                    }
+                  : c,
               ),
             );
             return;
@@ -2086,6 +2286,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (res.status === 403) {
           const msg = typeof data.message === "string" ? data.message : "You are not allowed to send messages in this chat.";
+          await removeFromMessageOutbox(u.dbId!, tempId);
           Alert.alert("Cannot send message", msg);
           setChats((prev) =>
             prev.map((c) =>
@@ -2095,7 +2296,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         if (!data?.success) {
-          Alert.alert("Message not sent", "Please try sending again.");
           setChats((prev) =>
             prev.map((c) =>
               c.id === chatId
@@ -2110,6 +2310,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           );
           return;
         }
+        await removeFromMessageOutbox(u.dbId!, tempId);
         if (data.message && typeof data.message === "object" && "id" in data.message) {
           const mid = data.message.id;
           const row = data.message as { expires_at?: string; is_kept?: boolean };
@@ -2123,6 +2324,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                       ...m,
                       id: String(mid),
                       status: "delivered" as const,
+                      uploadFailed: false,
                       expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
                       isKept: row.is_kept ?? m.isKept,
                     }
@@ -2134,6 +2336,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           );
           if (confirmedMessages.length > 0) {
             persistChatMessagesForUser(chatId, confirmedMessages);
+            void flushChatMessageCache();
           }
         }
       })();
