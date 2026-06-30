@@ -100,10 +100,22 @@ export function schedulePersistChatMessageCache(userId: number, store: ChatMessa
   pendingPersist = { userId, store };
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
-    const job = pendingPersist;
-    pendingPersist = null;
+    void flushChatMessageCache();
+  }, 150);
+}
+
+/** Write pending cache immediately (call on app background / before kill). */
+export async function flushChatMessageCache(): Promise<void> {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
     persistTimer = null;
-    if (!job) return;
-    void AsyncStorage.setItem(cacheKey(job.userId), JSON.stringify(job.store)).catch(() => {});
-  }, 400);
+  }
+  const job = pendingPersist;
+  pendingPersist = null;
+  if (!job) return;
+  try {
+    await AsyncStorage.setItem(cacheKey(job.userId), JSON.stringify(job.store));
+  } catch {
+    /* ignore */
+  }
 }

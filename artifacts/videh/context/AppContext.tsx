@@ -79,6 +79,13 @@ import {
   serverWindowMatchesLocalTail,
 } from "@/lib/mergePendingChatMessages";
 import {
+  buildChatsFromCache,
+  flushChatListCache,
+  loadChatListCache,
+  schedulePersistChatListCache,
+} from "@/lib/chatListCache";
+import {
+  flushChatMessageCache,
   loadChatMessageCache,
   rememberChatMessagesInStore,
   schedulePersistChatMessageCache,
@@ -421,6 +428,8 @@ interface AppContextType {
   user: UserProfile | null;
   isAuthenticated: boolean;
   isInitialized: boolean;
+  /** False until cache hydrate or first chat-list API sync (avoids empty flash on cold start). */
+  chatsListReady: boolean;
   chats: Chat[];
   statuses: Status[];
   contacts: Contact[];
@@ -523,6 +532,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<UserProfile | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [chatsListReady, setChatsListReady] = useState(false);
   const [chats, setChats] = useState<Chat[]>([]);
   const [statuses, setStatuses] = useState<Status[]>([]);
   const [contacts] = useState<Contact[]>([]);
@@ -541,6 +551,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [hiddenChatIds, setHiddenChatIds] = useState<string[]>([]);
   const messageCacheStoreRef = useRef<ChatMessageCacheStore>({});
   const loadMessagesRef = useRef<(chatId: string) => Promise<void>>(async () => {});
+  const chatsForPersistRef = useRef<Chat[]>([]);
+
+  useEffect(() => {
+    chatsForPersistRef.current = chats;
+  }, [chats]);
+
+  const persistChatMessagesForUser = useCallback((chatId: string, messages: Message[]) => {
+    const dbId = userRef.current?.dbId;
+    if (!dbId || messages.length === 0) return;
+    messageCacheStoreRef.current = rememberChatMessagesInStore(
+      messageCacheStoreRef.current,
+      chatId,
+      messages as CachedChatMessage[],
+    );
+    schedulePersistChatMessageCache(dbId, messageCacheStoreRef.current);
+  }, []);
 
   useEffect(() => {
     void AsyncStorage.getItem("chatHistoryClearedAt").then((v) => {
@@ -834,6 +860,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           .filter((c) => typeof c.lastMessageTime === "number" && c.lastMessageTime > 0)
           .map((c) => ({ id: c.id, lastMessageTime: c.lastMessageTime })),
       );
+      let mergedList: Chat[] = [];
       setChats((prev) => {
         const mergedFromServer = mapped.map((newChat) => {
           const old = prev.find((c) => c.id === newChat.id);
@@ -848,9 +875,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           const messages = cutoff > 0
             ? rawMessages.filter((m) => m.timestamp > cutoff)
             : rawMessages;
+          const lastFromCache = messages.length > 0 ? messages[messages.length - 1] : undefined;
+          const cachePreview = messagePreviewText(lastFromCache);
+          const cacheTime = lastFromCache?.timestamp ?? 0;
+          const serverTime = newChat.lastMessageTime ?? 0;
+          const useCachePreview = cacheTime > serverTime + 500;
           return maskListFieldsIfCleared({
             ...newChat,
             messages,
+            lastMessage: useCachePreview ? (cachePreview ?? newChat.lastMessage) : newChat.lastMessage,
+            lastMessageTime: Math.max(cacheTime, serverTime) || newChat.lastMessageTime,
             isPinned: newChat.isPinned ?? old?.isPinned,
             isMuted: newChat.isMuted ?? old?.isMuted,
             isArchived: newChat.isArchived ?? old?.isArchived,
@@ -858,22 +892,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
         const serverIds = new Set(mergedFromServer.map((c) => c.id));
         const pendingGroups = prev.filter((c) => c.isGroup && !serverIds.has(c.id));
-        return [...pendingGroups, ...mergedFromServer].sort(
+        mergedList = [...pendingGroups, ...mergedFromServer].sort(
           (a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0),
         );
+        return mergedList;
       });
+      schedulePersistChatListCache(userRef.current?.dbId ?? dbUserId, mergedList);
       const prefetchIds = mapped
         .slice()
         .sort((a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0))
-        .slice(0, 5)
+        .slice(0, 8)
         .map((c) => c.id)
-        .filter((id) => !(messageCacheStoreRef.current[id]?.length));
+        .filter((id) => {
+          const cached = messageCacheStoreRef.current[id];
+          if (!cached?.length) return true;
+          const cacheLast = cached[cached.length - 1]?.timestamp ?? 0;
+          const chatRow = mapped.find((c) => c.id === id);
+          return (chatRow?.lastMessageTime ?? 0) > cacheLast + 500;
+        });
       if (prefetchIds.length > 0) {
         setTimeout(() => {
           for (const id of prefetchIds) void loadMessagesRef.current(id);
         }, 0);
       }
-    } catch {}
+    } catch {
+      /* keep cached list */
+    } finally {
+      setChatsListReady(true);
+    }
   }, [restoreHiddenChatsWithNewActivity]);
 
   const loadCallLogs = useCallback(async (dbUserId: number) => {
@@ -950,11 +996,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setUserState(parsed);
           setIsAuthenticated(true);
           if (parsed.dbId) {
-            messageCacheStoreRef.current = await loadChatMessageCache(parsed.dbId);
+            const [msgCache, listRows] = await Promise.all([
+              loadChatMessageCache(parsed.dbId),
+              loadChatListCache(parsed.dbId),
+            ]);
+            messageCacheStoreRef.current = filterCachedMessageStore(msgCache);
             await reloadChatListDeleteState(parsed.dbId);
-            messageCacheStoreRef.current = filterCachedMessageStore(messageCacheStoreRef.current);
+            if (listRows.length > 0) {
+              setChats(buildChatsFromCache(listRows, messageCacheStoreRef.current));
+              setChatsListReady(true);
+            }
             schedulePersistChatMessageCache(parsed.dbId, messageCacheStoreRef.current);
-            loadChats(parsed.dbId);
+            void loadChats(parsed.dbId);
             loadCallLogs(parsed.dbId);
             loadStatuses(parsed.dbId);
             void import("@/lib/privacySettings").then(({ fetchPrivacySettings, cachePrivacyFlags }) =>
@@ -1002,11 +1055,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       } else if (nextState === "background" || nextState === "inactive") {
         api(`/users/${activeUid}/offline`, { method: "POST" }).catch(() => {});
+        const uid = userRef.current?.dbId;
+        if (uid) schedulePersistChatListCache(uid, chatsForPersistRef.current);
+        void flushChatMessageCache();
+        void flushChatListCache();
       }
     };
     const sub = AppState.addEventListener("change", handleAppStateChange);
     return () => sub.remove();
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    const uid = user?.dbId;
+    if (!uid || chats.length === 0) return;
+    schedulePersistChatListCache(uid, chats);
+  }, [chats, user?.dbId]);
 
   const setUser = useCallback(async (u: UserProfile) => {
     authSessionToken = u.sessionToken ?? null;
@@ -1015,8 +1078,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.setItem("videh_user", JSON.stringify(u));
 
     if (u.dbId) {
+      const [msgCache, listRows] = await Promise.all([
+        loadChatMessageCache(u.dbId),
+        loadChatListCache(u.dbId),
+      ]);
+      messageCacheStoreRef.current = filterCachedMessageStore(msgCache);
+      if (listRows.length > 0) {
+        setChats(buildChatsFromCache(listRows, messageCacheStoreRef.current));
+        setChatsListReady(true);
+      }
       await reloadChatListDeleteState(u.dbId);
-      loadChats(u.dbId);
+      void loadChats(u.dbId);
       loadCallLogs(u.dbId);
       loadStatuses(u.dbId);
       void import("@/lib/privacySettings").then(({ fetchPrivacySettings, cachePrivacyFlags }) =>
@@ -1182,6 +1254,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     authSessionToken = null;
     setIsAuthenticated(false);
     setChats([]);
+    setChatsListReady(false);
     hiddenChatIdsRef.current = [];
     setHiddenChatIds([]);
     chatDeletedAtRef.current = {};
@@ -1340,10 +1413,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       && !hasRenderableImageVideo
       && !(resolvedHintType === "audio" && text);
 
-    const buildHintMsg = (): Message =>
-      coerceAlbumMessageFields({
+    const buildHintMsg = (): Message => {
+      const hintBodyText =
+        resolvedHintType === "text" && text?.trim()
+          ? text.trim()
+          : hintPreviewText;
+      return coerceAlbumMessageFields({
         id: serverMessageId ? `hint_${serverMessageId}` : `hint_t${Date.now()}`,
-        text: hintPreviewText,
+        text: hintBodyText,
         timestamp: Date.now(),
         senderId,
         senderName: signal.senderName,
@@ -1352,6 +1429,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         albumUrls,
         status: "delivered",
       });
+    };
 
     setChats((prev) =>
       prev.map((c) => {
@@ -1427,6 +1505,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (isMediaType) {
       void loadMessagesRef.current?.(chatId);
+    } else {
+      void loadMessagesRef.current?.(chatId);
+      setTimeout(() => void loadMessagesRef.current?.(chatId), MESSAGE_HINT_API_DELAY_MS);
+      setTimeout(() => void loadMessagesRef.current?.(chatId), MESSAGE_HINT_API_RETRY_MS);
     }
   }, [restoreHiddenChatsWithNewActivity]);
 
@@ -1493,7 +1575,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           let merged = mergeServerWithPending(serverWithHistory, pendingLocal);
           merged = filterMessagesAfterClearCutoff(merged, clearedAt);
           mergedMessages = merged;
-          return { ...c, messages: merged };
+          const last = merged.length > 0 ? merged[merged.length - 1] : undefined;
+          return {
+            ...c,
+            messages: merged,
+            lastMessage: messagePreviewText(last) ?? c.lastMessage,
+            lastMessageTime: last?.timestamp ?? c.lastMessageTime,
+          };
         });
       });
 
@@ -1543,15 +1631,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       const cacheUserId = userRef.current?.dbId;
       if (cacheUserId && mergedMessages.length > 0) {
-        messageCacheStoreRef.current = rememberChatMessagesInStore(
-          messageCacheStoreRef.current,
-          chatId,
-          mergedMessages as CachedChatMessage[],
-        );
-        schedulePersistChatMessageCache(cacheUserId, messageCacheStoreRef.current);
+        persistChatMessagesForUser(chatId, mergedMessages);
       }
     } catch {}
-  }, [patchChatMessage]);
+  }, [patchChatMessage, persistChatMessagesForUser]);
 
   loadMessagesRef.current = loadMessages;
 
@@ -2030,30 +2113,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (data.message && typeof data.message === "object" && "id" in data.message) {
           const mid = data.message.id;
           const row = data.message as { expires_at?: string; is_kept?: boolean };
+          let confirmedMessages: Message[] = [];
           setChats((prev) =>
-            prev.map((c) =>
-              c.id === chatId
-                ? {
-                    ...c,
-                    messages: c.messages.map((m) =>
-                      m.id === tempId
-                        ? {
-                            ...m,
-                            id: String(mid),
-                            status: "delivered",
-                            expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
-                            isKept: row.is_kept ?? m.isKept,
-                          }
-                        : m,
-                    ),
-                  }
-                : c,
-            ),
+            prev.map((c) => {
+              if (c.id !== chatId) return c;
+              const messages = c.messages.map((m) =>
+                m.id === tempId
+                  ? {
+                      ...m,
+                      id: String(mid),
+                      status: "delivered" as const,
+                      expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
+                      isKept: row.is_kept ?? m.isKept,
+                    }
+                  : m,
+              );
+              confirmedMessages = messages;
+              return { ...c, messages };
+            }),
           );
+          if (confirmedMessages.length > 0) {
+            persistChatMessagesForUser(chatId, confirmedMessages);
+          }
         }
       })();
     }
-  }, []);
+  }, [persistChatMessagesForUser]);
 
   const markAsRead = useCallback((chatId: string) => {
     setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, unreadCount: 0 } : c));
@@ -3434,7 +3519,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      user, isAuthenticated, isInitialized, chats, statuses, contacts, callLogs,
+      user, isAuthenticated, isInitialized, chatsListReady, chats, statuses, contacts, callLogs,
       setUser, logout, sendMessage, createGroup, markAsRead, markAllAsRead,
       addStatus, deleteMessage, pinChat, muteChat, archiveChat,
       starMessage, keepMessage, forwardMessage, starredMessages, updateAvatar, updateGroupAvatar,

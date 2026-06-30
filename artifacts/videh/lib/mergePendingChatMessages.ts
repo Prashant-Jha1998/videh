@@ -103,6 +103,27 @@ export function collectPendingLocalMessages(
     if (m.id.startsWith("hint_")) {
       const hintedServerId = m.id.startsWith("hint_t") ? null : m.id.slice(5);
       if (hintedServerId && serverMessages.some((s) => s.id === hintedServerId)) return false;
+
+      const incomingAfterHint = serverMessages.filter(
+        (s) => s.senderId !== "me" && s.timestamp >= m.timestamp - 120_000,
+      );
+      if (incomingAfterHint.length > 0) {
+        const hintText = m.text.trim().toLowerCase();
+        const matched = incomingAfterHint.some((s) => {
+          if (hintedServerId != null && s.id === hintedServerId) return true;
+          const serverText = s.text.trim();
+          if (!hintText || !serverText) return false;
+          if (serverText === m.text) return true;
+          if (serverText.toLowerCase().includes(hintText) || hintText.includes(serverText.toLowerCase())) {
+            return true;
+          }
+          return false;
+        });
+        if (matched || incomingAfterHint.some((s) => s.timestamp >= m.timestamp - 15_000)) {
+          return false;
+        }
+      }
+
       if (isPlaceholderHintText(m.text)) {
         if (
           serverMessages.some(
@@ -194,6 +215,8 @@ export function serverWindowMatchesLocalTail(
 ): boolean {
   if (!serverMessages.length) return prevMessages.length === 0;
   const stable = prevMessages.filter((m) => !m.id.startsWith("hint_") && !m.id.startsWith("tmp_"));
+  const newestServer = serverMessages[serverMessages.length - 1]!;
+  if (!stable.some((m) => m.id === newestServer.id)) return false;
   if (stable.length < serverMessages.length) return false;
   const tail = stable.slice(-serverMessages.length);
   return tail.every((m, i) => isSameMessage(m, serverMessages[i]!));

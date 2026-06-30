@@ -49,7 +49,9 @@ import { AnimatedChatWallpaper } from "@/components/AnimatedChatWallpaper";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { interpolate } from "@/lib/i18n";
 import { useApp, type Message } from "@/context/AppContext";
+import { setGroupInfoMembers } from "@/lib/groupInfoCache";
 import { getApiUrl } from "@/lib/api";
+import { loadChatScrollSnapshot, saveChatScrollSnapshot } from "@/lib/chatScrollMemory";
 import { INDIAN_LANGUAGE_OPTIONS, languageDisplayName } from "@/lib/indianLanguages";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
 import { downloadPlayableAudioSource, usePlayableAudioUri } from "@/lib/usePlayableAudioUri";
@@ -1324,10 +1326,17 @@ export default function ChatScreen() {
       setMessagesReady(false);
       return;
     }
-    setMessagesReady(false);
+    const cachedCount = chats.find((c) => c.id === chatId)?.messages?.length ?? 0;
+    setMessagesReady(cachedCount > 0);
     markAsRead(chatId);
     void loadMessages(chatId).finally(() => setMessagesReady(true));
-  }, [chatId]);
+  }, [chatId, markAsRead, loadMessages]);
+
+  useEffect(() => {
+    if (!chatId || messagesReady) return;
+    const cachedCount = chats.find((c) => c.id === chatId)?.messages?.length ?? 0;
+    if (cachedCount > 0) setMessagesReady(true);
+  }, [chatId, chats, messagesReady]);
 
   useEffect(() => {
     const c = chats.find((x) => x.id === chatId);
@@ -1353,6 +1362,24 @@ export default function ChatScreen() {
       lastNearBottomRef.current = !wasReadingHistory;
       setShowJumpToLatest(wasReadingHistory);
       setUnreadBelowCount((p) => (wasReadingHistory ? p : 0));
+      void loadChatScrollSnapshot(user?.dbId, chatId).then((snap) => {
+        if (!snap) return;
+        chatScrollMemoryRef.current.set(chatId, snap.readingHistory);
+        lastScrollOffsetRef.current = snap.scrollOffset;
+        if (!snap.readingHistory && snap.scrollOffset <= CHAT_NEAR_BOTTOM_PX) return;
+        pendingScrollToEndRef.current = !snap.readingHistory;
+        openChatPinDoneRef.current = snap.readingHistory;
+        userScrolledUpRef.current = snap.readingHistory;
+        readingHistoryRef.current = snap.readingHistory;
+        setReadingHistory(snap.readingHistory);
+        lastNearBottomRef.current = !snap.readingHistory;
+        setShowJumpToLatest(snap.readingHistory);
+        if (snap.readingHistory && snap.scrollOffset > CHAT_NEAR_BOTTOM_PX) {
+          requestAnimationFrame(() => {
+            listRef.current?.scrollToOffset({ offset: snap.scrollOffset, animated: false });
+          });
+        }
+      });
       setActiveChatId(chatId);
       void loadMessages(chatId);
       const syncDisappearTimer = async () => {
@@ -1436,6 +1463,10 @@ export default function ChatScreen() {
         clearInterval(msgTimer);
         clearInterval(typingTimer);
         if (presenceTimer) clearInterval(presenceTimer);
+        void saveChatScrollSnapshot(user?.dbId, chatId, {
+          readingHistory: readingHistoryRef.current,
+          scrollOffset: lastScrollOffsetRef.current,
+        });
       };
     }, [chatId, user?.dbId, user?.sessionToken, setActiveChatId, loadMessages, clearTyping, reportRemoteTyping])
   );
@@ -2341,14 +2372,28 @@ export default function ChatScreen() {
       .then((r) => r.json())
       .then((d) => {
         if (!d.success) return;
-        setGroupMembers(
-          d.members.map((m: { id: number; name?: string; phone?: string; avatar_url?: string; is_admin?: boolean }) => ({
+        const mapped = d.members.map((m: { id: number; name?: string; phone?: string; avatar_url?: string; is_admin?: boolean; about?: string; is_online?: boolean; last_seen?: string; can_send_messages?: boolean }) => ({
+          id: m.id,
+          name: m.name?.trim() || m.phone?.trim() || `Member ${m.id}`,
+          phone: m.phone ?? undefined,
+          avatarUrl: resolvePublicAssetUrl(m.avatar_url) ?? undefined,
+          isAdmin: Boolean(m.is_admin),
+        }));
+        setGroupMembers(mapped);
+        setGroupInfoMembers(
+          chatId,
+          d.members.map((m: { id: number; name?: string; phone?: string; avatar_url?: string; about?: string; is_online?: boolean; last_seen?: string; is_admin?: boolean; can_send_messages?: boolean }) => ({
             id: m.id,
             name: m.name?.trim() || m.phone?.trim() || `Member ${m.id}`,
-            phone: m.phone ?? undefined,
-            avatarUrl: resolvePublicAssetUrl(m.avatar_url) ?? undefined,
-            isAdmin: Boolean(m.is_admin),
+            phone: m.phone ?? "",
+            avatar_url: m.avatar_url,
+            about: m.about,
+            is_online: Boolean(m.is_online),
+            last_seen: m.last_seen,
+            is_admin: Boolean(m.is_admin),
+            can_send_messages: m.can_send_messages,
           })),
+          user?.dbId,
         );
       })
       .catch(() => {});

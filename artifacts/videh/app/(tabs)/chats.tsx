@@ -6,6 +6,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  ActivityIndicator,
   FlatList,
   Modal,
   Platform,
@@ -111,7 +112,7 @@ export default function ChatsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const {
-    chats, statuses, pinChat, muteChat, archiveChat, refreshChats, blockUser, markAsRead, markAllAsRead, user,
+    chats, chatsListReady, statuses, pinChat, muteChat, archiveChat, refreshChats, blockUser, markAsRead, markAllAsRead, user,
     hideChatsInList, hiddenChatIds,
   } = useApp();
   const { t } = useUiPreferences();
@@ -603,7 +604,11 @@ export default function ChatsScreen() {
           />
         )}
         ListEmptyComponent={
-          search ? (
+          !chatsListReady && !search ? (
+            <View style={styles.empty}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          ) : search ? (
             <View style={styles.empty}>
               <Ionicons name="search-outline" size={60} color={colors.mutedForeground} />
               <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>

@@ -41,6 +41,8 @@ import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { getApiUrl } from "@/lib/api";
 import { INDIAN_LANGUAGE_OPTIONS, languageNativeLabel } from "@/lib/indianLanguages";
 import { normalizeRouteParam } from "@/lib/routeParams";
+import { getGroupInfoCache, patchGroupInfoCache } from "@/lib/groupInfoCache";
+import { readLocalGroupTranslateLang, writeLocalGroupTranslateLang } from "@/lib/groupTranslationPrefs";
 
 const BASE_URL = getApiUrl();
 const SCREEN_H = Dimensions.get("window").height;
@@ -149,17 +151,22 @@ export default function ChatInfoScreen() {
   }), [user?.sessionToken]);
 
   const chat = chats.find((c) => c.id === id);
-  const [serverIsGroup, setServerIsGroup] = useState<boolean | null>(null);
+  const bootCache = id ? getGroupInfoCache(id) : null;
+  const [serverIsGroup, setServerIsGroup] = useState<boolean | null>(
+    bootCache?.isGroup ?? (chat?.isGroup ? true : null),
+  );
   const isGroup = serverIsGroup ?? chat?.isGroup ?? false;
 
   const [muted, setMuted] = useState(chat?.isMuted ?? false);
-  const [disappearing, setDisappearing] = useState<number | null>(chat?.disappearAfterSeconds ?? null);
+  const [disappearing, setDisappearing] = useState<number | null>(
+    bootCache?.disappearing ?? chat?.disappearAfterSeconds ?? null,
+  );
   const [aboutText, setAboutText] = useState<string>("Hey there! I am using Videh.");
-  const [groupDesc, setGroupDesc] = useState<string>("");
+  const [groupDesc, setGroupDesc] = useState<string>(bootCache?.groupDesc ?? "");
   const [editingDesc, setEditingDesc] = useState(false);
-  const [descInput, setDescInput] = useState("");
+  const [descInput, setDescInput] = useState(bootCache?.groupDesc ?? "");
   const [descSaving, setDescSaving] = useState(false);
-  const [members, setMembers] = useState<GroupMember[]>([]);
+  const [members, setMembers] = useState<GroupMember[]>(bootCache?.members ?? []);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
   const [photoVisible, setPhotoVisible] = useState(false);
@@ -167,7 +174,7 @@ export default function ChatInfoScreen() {
   const [addMemberModal, setAddMemberModal] = useState(false);
   const [searchPhone, setSearchPhone] = useState("");
   const [searchResult, setSearchResult] = useState<any>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(bootCache?.isAdmin ?? false);
   const [memberMenuVisible, setMemberMenuVisible] = useState(false);
   const [selectedMember, setSelectedMember] = useState<GroupMember | null>(null);
   const [profileMember, setProfileMember] = useState<GroupMember | null>(null);
@@ -179,15 +186,26 @@ export default function ChatInfoScreen() {
   const [mediaMessages, setMediaMessages] = useState<Array<{ id: string; type: string; media_url: string; content: string }>>([]);
   const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false);
   const [mediaTotalCount, setMediaTotalCount] = useState(0);
-  const [groupMessagingPolicy, setGroupMessagingPolicy] = useState<"everyone" | "admins_only" | "allowlist">("everyone");
+  const [groupMessagingPolicy, setGroupMessagingPolicy] = useState<"everyone" | "admins_only" | "allowlist">(
+    bootCache?.groupMessagingPolicy ?? "everyone",
+  );
   const [groupAvatarUploading, setGroupAvatarUploading] = useState(false);
-  const [autoTranslateEnabled, setAutoTranslateEnabled] = useState(false);
-  const [memberAutoTranslate, setMemberAutoTranslate] = useState(true);
-  const [memberTranslateLang, setMemberTranslateLang] = useState<string | null>(null);
-  const [effectiveLangLabel, setEffectiveLangLabel] = useState("English");
+  const [autoTranslateEnabled, setAutoTranslateEnabled] = useState(
+    bootCache?.autoTranslateEnabled ?? chat?.autoTranslateEnabled ?? false,
+  );
+  const [memberAutoTranslate, setMemberAutoTranslate] = useState(
+    bootCache?.memberAutoTranslate ?? true,
+  );
+  const [memberTranslateLang, setMemberTranslateLang] = useState<string | null>(
+    bootCache?.memberTranslateLang ?? null,
+  );
+  const [effectiveLangLabel, setEffectiveLangLabel] = useState(
+    bootCache?.effectiveLangLabel ?? "English",
+  );
   const [groupLangPickerOpen, setGroupLangPickerOpen] = useState(false);
 
   const chatOtherUserId = useRef<number | null>(null);
+  const lastRefreshAtRef = useRef(0);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const initials = (name ?? "?").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
@@ -250,7 +268,13 @@ export default function ChatInfoScreen() {
       if (data.success && Array.isArray(data.members)) {
         setMembers(data.members);
         const me = data.members.find((m: GroupMember) => Number(m.id) === Number(user?.dbId));
-        if (me) setIsAdmin(Boolean(me.is_admin));
+        const admin = me ? Boolean(me.is_admin) : isAdmin;
+        if (me) setIsAdmin(admin);
+        patchGroupInfoCache(id, {
+          members: data.members,
+          isAdmin: admin,
+          isGroup: true,
+        });
       }
     } catch { }
     setLoadingMembers(false);
@@ -294,6 +318,18 @@ export default function ChatInfoScreen() {
         if (data.chat.viewer_is_admin !== undefined) {
           setIsAdmin(Boolean(data.chat.viewer_is_admin));
         }
+        patchGroupInfoCache(id, {
+          isGroup: group,
+          groupDesc: data.chat.group_description ?? "",
+          disappearing: data.chat.disappear_after_seconds ?? null,
+          groupMessagingPolicy:
+            p === "admins_only" || p === "allowlist" || p === "everyone" ? p : "everyone",
+          autoTranslateEnabled: Boolean(data.chat.auto_translate_enabled),
+          isAdmin:
+            data.chat.viewer_is_admin !== undefined
+              ? Boolean(data.chat.viewer_is_admin)
+              : undefined,
+        });
         return group;
       }
     } catch { }
@@ -309,24 +345,76 @@ export default function ChatInfoScreen() {
       );
       const data = await res.json();
       if (data.success) {
+        let lang = data.memberTranslateLang ?? null;
+        if (!lang && id) {
+          const localLang = await readLocalGroupTranslateLang(id);
+          if (localLang) lang = localLang;
+        }
         setAutoTranslateEnabled(Boolean(data.groupAutoTranslateEnabled));
         setMemberAutoTranslate(data.memberAutoTranslateEnabled !== false);
-        setMemberTranslateLang(data.memberTranslateLang ?? null);
-        setEffectiveLangLabel(data.effectiveLangName ?? languageNativeLabel(data.effectiveLang));
+        setMemberTranslateLang(lang);
+        const label = data.effectiveLangName ?? languageNativeLabel(data.effectiveLang ?? lang ?? "en");
+        setEffectiveLangLabel(label);
+        patchGroupInfoCache(id, {
+          autoTranslateEnabled: Boolean(data.groupAutoTranslateEnabled),
+          memberAutoTranslate: data.memberAutoTranslateEnabled !== false,
+          memberTranslateLang: lang,
+          effectiveLangLabel: label,
+        });
+        if (lang) void writeLocalGroupTranslateLang(id, lang);
       }
     } catch { }
   }, [id, user?.dbId, user?.sessionToken]);
 
   const refreshScreenData = useCallback(() => {
     if (!id) return;
+    lastRefreshAtRef.current = Date.now();
+    const likelyGroup = chat?.isGroup ?? getGroupInfoCache(id)?.isGroup ?? serverIsGroup ?? false;
     void (async () => {
-      const group = await fetchChatDetails();
-      void fetchMembers();
+      await Promise.all([
+        fetchChatDetails(),
+        likelyGroup ? fetchMembers() : Promise.resolve(),
+        likelyGroup && user?.dbId ? fetchTranslationSettings() : fetchContactInfo(),
+      ]);
       void fetchMedia();
-      if (group) void fetchTranslationSettings();
-      else void fetchContactInfo();
     })();
-  }, [id, fetchChatDetails, fetchMembers, fetchTranslationSettings, fetchMedia, fetchContactInfo]);
+  }, [
+    id,
+    chat?.isGroup,
+    serverIsGroup,
+    user?.dbId,
+    fetchChatDetails,
+    fetchMembers,
+    fetchTranslationSettings,
+    fetchMedia,
+    fetchContactInfo,
+  ]);
+
+  useEffect(() => {
+    if (!id) return;
+    const cached = getGroupInfoCache(id);
+    if (cached) {
+      setMembers(cached.members);
+      setIsAdmin(cached.isAdmin);
+      setServerIsGroup(cached.isGroup);
+      setGroupDesc(cached.groupDesc);
+      setDescInput(cached.groupDesc);
+      setDisappearing(cached.disappearing);
+      setGroupMessagingPolicy(cached.groupMessagingPolicy);
+      setAutoTranslateEnabled(cached.autoTranslateEnabled);
+      setMemberAutoTranslate(cached.memberAutoTranslate);
+      setMemberTranslateLang(cached.memberTranslateLang);
+      setEffectiveLangLabel(cached.effectiveLangLabel);
+    } else if (chat?.isGroup) {
+      setServerIsGroup(true);
+      setAutoTranslateEnabled(chat.autoTranslateEnabled ?? false);
+    }
+    void readLocalGroupTranslateLang(id).then((localLang) => {
+      if (!localLang) return;
+      setMemberTranslateLang(localLang);
+      setEffectiveLangLabel(languageNativeLabel(localLang));
+    });
+  }, [id, chat?.isGroup, chat?.autoTranslateEnabled]);
 
   useEffect(() => {
     if (chat?.disappearAfterSeconds !== undefined) {
@@ -334,14 +422,23 @@ export default function ChatInfoScreen() {
     }
   }, [chat?.disappearAfterSeconds]);
 
-  useEffect(() => {
-    refreshScreenData();
-  }, [refreshScreenData]);
-
   useFocusEffect(
     useCallback(() => {
-      refreshScreenData();
-    }, [refreshScreenData]),
+      const cached = id ? getGroupInfoCache(id) : null;
+      const stale = Date.now() - lastRefreshAtRef.current > 12_000;
+      if (!cached || stale) {
+        refreshScreenData();
+      } else {
+        void (async () => {
+          const likelyGroup = chat?.isGroup ?? cached.isGroup;
+          await Promise.all([
+            fetchChatDetails(),
+            likelyGroup ? fetchMembers() : Promise.resolve(),
+            likelyGroup && user?.dbId ? fetchTranslationSettings() : Promise.resolve(),
+          ]);
+        })();
+      }
+    }, [id, chat?.isGroup, user?.dbId, refreshScreenData, fetchChatDetails, fetchMembers, fetchTranslationSettings]),
   );
 
   const toggleMute = () => {
@@ -541,6 +638,24 @@ export default function ChatInfoScreen() {
       Alert.alert("Sign in required", "Please sign in again to save language settings.");
       return;
     }
+    if (patch.translateLang !== undefined) {
+      setMemberTranslateLang(patch.translateLang);
+      const label =
+        patch.translateLang
+          ? languageNativeLabel(patch.translateLang)
+          : `App default (${effectiveLangLabel})`;
+      setEffectiveLangLabel(label);
+      if (id) {
+        void writeLocalGroupTranslateLang(id, patch.translateLang);
+        patchGroupInfoCache(id, {
+          memberTranslateLang: patch.translateLang,
+          effectiveLangLabel: label,
+        });
+      }
+    }
+    if (patch.personalEnabled !== undefined) {
+      setMemberAutoTranslate(patch.personalEnabled);
+    }
     try {
       const res = await fetch(`${BASE_URL}/api/chats/${id}/translation-settings`, {
         method: "PUT",
@@ -553,9 +668,21 @@ export default function ChatInfoScreen() {
       });
       const data = await res.json();
       if (data.success) {
-        if (patch.translateLang !== undefined) setMemberTranslateLang(patch.translateLang);
+        if (patch.translateLang !== undefined) {
+          setMemberTranslateLang(patch.translateLang);
+          if (id) void writeLocalGroupTranslateLang(id, patch.translateLang);
+        }
         if (patch.personalEnabled !== undefined) setMemberAutoTranslate(patch.personalEnabled);
-        setEffectiveLangLabel(data.effectiveLangName ?? languageNativeLabel(data.effectiveLang));
+        const label = data.effectiveLangName ?? languageNativeLabel(data.effectiveLang);
+        setEffectiveLangLabel(label);
+        if (id) {
+          patchGroupInfoCache(id, {
+            memberTranslateLang: patch.translateLang !== undefined ? patch.translateLang : undefined,
+            memberAutoTranslate:
+              patch.personalEnabled !== undefined ? patch.personalEnabled : undefined,
+            effectiveLangLabel: label,
+          });
+        }
         void loadMessages(id!);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } else {

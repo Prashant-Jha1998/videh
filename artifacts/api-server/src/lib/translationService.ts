@@ -196,11 +196,29 @@ function containsIndicScript(text: string): boolean {
   return /[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]/.test(text);
 }
 
+/** Romanized Hinglish (Latin letters) should still convert to native script. */
+function needsNativeScriptConversion(
+  originalText: string,
+  detected: string,
+  target: TranslateLang,
+): boolean {
+  if (target === "en") return false;
+  if (containsIndicScript(originalText)) return false;
+  const indicTargets = new Set<TranslateLang>([
+    "hi", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "or", "as",
+  ]);
+  if (!indicTargets.has(target)) return false;
+  if (languagesMatch(detected, target)) return true;
+  if (detected === "en" && target === "hi") return true;
+  return false;
+}
+
 function shouldForceTranslateDespiteDetection(
   originalText: string,
   detected: string,
   target: TranslateLang,
 ): boolean {
+  if (needsNativeScriptConversion(originalText, detected, target)) return true;
   if (target !== "en") return false;
   if (!containsIndicScript(originalText)) return false;
   return languagesMatch(detected, "en");
@@ -247,25 +265,39 @@ export async function translateText(
     } | undefined;
     if (row && row.content_hash === hash) {
       const sourceLang = row.source_lang ?? "unknown";
-      const skipped =
-        languagesMatch(sourceLang, to)
-        && !shouldForceTranslateDespiteDetection(text, sourceLang, to);
-      return {
-        translated: row.translated_text,
-        sourceLang,
-        skipped,
-      };
+      const staleSameLangCache =
+        row.translated_text === text
+        && needsNativeScriptConversion(text, sourceLang, to);
+      if (!staleSameLangCache) {
+        const skipped =
+          languagesMatch(sourceLang, to)
+          && !shouldForceTranslateDespiteDetection(text, sourceLang, to)
+          && !needsNativeScriptConversion(text, sourceLang, to);
+        return {
+          translated: row.translated_text,
+          sourceLang,
+          skipped,
+        };
+      }
     }
   }
 
   const { text: protectedText, tokens } = protectTranslationTokens(text);
   const from = options?.from && options.from !== "auto" ? normalizeLangCode(options.from) : "auto";
+  const apiFrom =
+    from === "auto" && needsNativeScriptConversion(text, "en", to) ? "en" : from;
 
   try {
-    let { text: translatedRaw, detected } = await translateProtectedText(protectedText, to, from);
+    let { text: translatedRaw, detected } = await translateProtectedText(protectedText, to, apiFrom);
+    if (needsNativeScriptConversion(text, detected, to) && apiFrom !== "en") {
+      const retry = await translateProtectedText(protectedText, to, "en");
+      translatedRaw = retry.text;
+      detected = retry.detected;
+    }
     if (
       languagesMatch(detected, to)
       && !shouldForceTranslateDespiteDetection(text, detected, to)
+      && !needsNativeScriptConversion(text, detected, to)
     ) {
       return { translated: text, sourceLang: detected, skipped: true, reason: "same_language" };
     }
@@ -385,9 +417,11 @@ export async function attachTranslationsForViewer(
       && Number(m.sender_id) !== viewerId
       && String(m.content ?? "").trim(),
   );
+  // Translate only the newest slice so message GET stays fast for large history.
+  const recentTextRows = textRows.slice(-24);
 
   const concurrency = 4;
-  const queue = [...textRows];
+  const queue = [...recentTextRows];
   const translationMap = new Map<number, { text: string; sourceLang: string; skipped: boolean }>();
 
   async function worker() {
@@ -408,7 +442,7 @@ export async function attachTranslationsForViewer(
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, textRows.length || 1) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(concurrency, recentTextRows.length || 1) }, () => worker()));
 
   for (const row of rows) {
     const hit = translationMap.get(Number(row.id));
