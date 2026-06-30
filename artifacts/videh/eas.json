@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v125-gpay-share-fix"
+        "key": "apk-release-v127-group-translate-share"
       }
     },
     "production": {

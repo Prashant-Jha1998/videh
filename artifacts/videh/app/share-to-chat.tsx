@@ -63,26 +63,31 @@ export default function ShareToChatScreen() {
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.replace("/auth/phone");
-      return;
-    }
+    if (Platform.OS === "web" || !isInitialized) return;
     void (async () => {
       setLoadingShare(true);
-      const data = await waitForIncomingShare(12_000);
+      const data = await waitForIncomingShare(15_000);
       if (!data || !payloadHasShareableContent(data)) {
+        if (!isAuthenticated) {
+          router.replace("/auth/phone");
+          return;
+        }
         Alert.alert(
           "Nothing to share",
-          "Videh could not read what you shared. Open Google Pay → Share again → pick Videh.",
+          "Videh could not read what you shared. Try Share again from the other app and pick Videh.",
         );
         router.back();
+        return;
+      }
+      if (!isAuthenticated) {
+        router.replace("/auth/phone");
         return;
       }
       const ready = await ensureSharePayloadFiles(data);
       setPayload(ready);
       setLoadingShare(false);
     })();
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, isInitialized, router]);
 
   const targets = useMemo(() => {
     const q = search.trim().toLowerCase();

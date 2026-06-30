@@ -18,18 +18,7 @@ import { interpolate } from "@/lib/i18n";
 import { getApiUrl } from "@/lib/api";
 const API_URL = `${getApiUrl()}/api`;
 
-const LANGUAGES = [
-  { code: "en", name: "English", native: "English", flag: "🇬🇧" },
-  { code: "hi", name: "Hindi", native: "हिन्दी", flag: "🇮🇳" },
-  { code: "bn", name: "Bengali", native: "বাংলা", flag: "🇮🇳" },
-  { code: "te", name: "Telugu", native: "తెలుగు", flag: "🇮🇳" },
-  { code: "mr", name: "Marathi", native: "मराठी", flag: "🇮🇳" },
-  { code: "ta", name: "Tamil", native: "தமிழ்", flag: "🇮🇳" },
-  { code: "gu", name: "Gujarati", native: "ગુજરાતી", flag: "🇮🇳" },
-  { code: "kn", name: "Kannada", native: "ಕನ್ನಡ", flag: "🇮🇳" },
-  { code: "pa", name: "Punjabi", native: "ਪੰਜਾਬੀ", flag: "🇮🇳" },
-  { code: "ur", name: "Urdu", native: "اردو", flag: "🇵🇰" },
-];
+import { INDIAN_LANGUAGE_OPTIONS } from "@/lib/indianLanguages";
 
 export default function LanguageScreen() {
   const colors = useColors();
@@ -56,7 +45,7 @@ export default function LanguageScreen() {
         });
       } catch {}
     }
-    const lang = LANGUAGES.find((l) => l.code === code);
+    const lang = INDIAN_LANGUAGE_OPTIONS.find((l) => l.code === code);
     const body = interpolate(t("language.savedBody"), {
       name: lang?.name ?? code,
       native: lang?.native ?? "",
@@ -81,17 +70,17 @@ export default function LanguageScreen() {
         </View>
 
         <View style={[styles.section, { backgroundColor: colors.card }]}>
-          {LANGUAGES.map((lang, i) => (
+          {INDIAN_LANGUAGE_OPTIONS.map((lang, i) => (
             <TouchableOpacity
               key={lang.code}
               style={[
                 styles.langRow,
-                i < LANGUAGES.length - 1 && { borderBottomWidth: 0.5, borderBottomColor: colors.border },
+                i < INDIAN_LANGUAGE_OPTIONS.length - 1 && { borderBottomWidth: 0.5, borderBottomColor: colors.border },
               ]}
               onPress={() => selectLanguage(lang.code)}
               activeOpacity={0.7}
             >
-              <Text style={styles.flag}>{lang.flag}</Text>
+              <Text style={styles.flag}>{lang.code === "en" ? "🇬🇧" : "🇮🇳"}</Text>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.langName, { color: colors.foreground }]}>{lang.name}</Text>
                 <Text style={[styles.langNative, { color: colors.mutedForeground }]}>{lang.native}</Text>

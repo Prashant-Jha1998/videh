@@ -1,29 +1,93 @@
 import { Router, type Request, type Response } from "express";
+import { assertSameUser, getAuthUserId } from "../lib/auth";
+import {
+  LANG_DISPLAY_NAMES,
+  SUPPORTED_TRANSLATE_LANGS,
+  normalizeLangCode,
+  translateText,
+} from "../lib/translationService";
 
 const router = Router();
 
-// Translate text using Google Translate (unofficial free API)
+router.get("/languages", (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    languages: SUPPORTED_TRANSLATE_LANGS.map((code) => ({
+      code,
+      name: LANG_DISPLAY_NAMES[code] ?? code,
+    })),
+  });
+});
+
 router.post("/", async (req: Request, res: Response) => {
-  const { text, to, from = "auto" } = req.body as { text?: string; to?: string; from?: string };
-  if (!text || !to) {
+  const authUserId = getAuthUserId(req);
+  const { text, to, from = "auto", messageId } = req.body as {
+    text?: string;
+    to?: string;
+    from?: string;
+    messageId?: number;
+  };
+  if (!text?.trim() || !to) {
     res.status(400).json({ success: false, message: "text and to are required" });
     return;
   }
+  if (text.length > 8000) {
+    res.status(400).json({ success: false, message: "Text too long to translate" });
+    return;
+  }
   try {
-    // Use Google Translate free endpoint
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
-    const response = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0" },
+    const result = await translateText(text.trim(), to, {
+      from,
+      messageId: messageId && authUserId ? Number(messageId) : undefined,
     });
-    if (!response.ok) throw new Error(`Translate API returned ${response.status}`);
-    const data = await response.json() as any;
-    // Google returns array of arrays — flatten to get translated text
-    const translated = (data[0] as any[][]).map((part: any[]) => part[0]).join("");
-    const detectedLang = data[2] as string;
-    res.json({ success: true, translated, detectedLang });
+    res.json({
+      success: true,
+      translated: result.translated,
+      detectedLang: result.sourceLang,
+      skipped: result.skipped,
+      reason: result.reason,
+    });
   } catch (err) {
     req.log.error({ err }, "translate error");
     res.status(500).json({ success: false, message: "Translation failed" });
+  }
+});
+
+/** Batch translate (authenticated) — used for realtime message hints. */
+router.post("/batch", async (req: Request, res: Response) => {
+  const { userId, targetLang, items } = req.body as {
+    userId?: number;
+    targetLang?: string;
+    items?: Array<{ messageId?: number; text: string }>;
+  };
+  if (!userId || !targetLang || !items?.length) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  if (items.length > 30) {
+    res.status(400).json({ success: false, message: "Too many items" });
+    return;
+  }
+  try {
+    const lang = normalizeLangCode(targetLang);
+    const results: Array<{ index: number; translated: string; sourceLang: string; skipped: boolean }> = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!;
+      const r = await translateText(item.text.trim(), lang, {
+        messageId: item.messageId,
+      });
+      results.push({
+        index: i,
+        translated: r.translated,
+        sourceLang: r.sourceLang,
+        skipped: r.skipped,
+      });
+    }
+    res.json({ success: true, results, targetLang: lang });
+  } catch (err) {
+    req.log.error({ err }, "translate batch error");
+    res.status(500).json({ success: false });
   }
 });
 

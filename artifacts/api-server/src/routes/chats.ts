@@ -21,6 +21,14 @@ import {
   ensureChatMemberHistoryClearedColumn,
   messageAfterHistoryClearedSql,
 } from "../lib/chatMemberHistory";
+import {
+  attachTranslationsForViewer,
+  ensureTranslationTables,
+  getViewerTranslationPrefs,
+  invalidateMessageTranslations,
+  LANG_DISPLAY_NAMES,
+  normalizeLangCode,
+} from "../lib/translationService";
 import { messageWithinRetentionSql } from "../lib/messageRetention";
 import { ensureMessageUserHidesTable, hideMessageForUser, messageVisibleToUserSql } from "../lib/messageUserHides";
 import { getPresenceForViewer } from "../lib/presencePrivacy";
@@ -196,6 +204,11 @@ async function evaluateGroupSendPermission(chatId: string | string[], userId: nu
   return { ok: true, policy, isGroup: true, isAdmin };
 }
 
+/** Whether a newly added member may send (allowlist requires admin approval). */
+function memberCanSendOnJoin(policy: string): boolean {
+  return policy !== "allowlist";
+}
+
 // Get all chats for a user
 router.get("/user/:userId", async (req: Request, res: Response) => {
   const { userId } = req.params;
@@ -214,6 +227,7 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
         c.group_avatar_url,
         c.group_description,
         c.disappear_after_seconds,
+        COALESCE(c.auto_translate_enabled, FALSE) AS auto_translate_enabled,
         cm.is_muted,
         cm.is_pinned,
         cm.is_archived,
@@ -655,9 +669,17 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
     `, before ? [chatId, limit, before, viewerId] : [chatId, limit, viewerId]);
 
     const messages = result.rows
-      .reverse()
-      .map((row) => resolveChatMessageRowForClient(req, row as Record<string, unknown>));
-    res.json({ success: true, messages });
+      .reverse();
+    await ensureTranslationTables();
+    const withTranslations = await attachTranslationsForViewer(
+      chatId,
+      viewerId,
+      messages as Array<Record<string, unknown> & { id: number }>,
+    );
+    res.json({
+      success: true,
+      messages: withTranslations.map((row) => resolveChatMessageRowForClient(req, row as Record<string, unknown>)),
+    });
   } catch (err) {
     req.log.error({ err }, "get messages error");
     res.status(500).json({ success: false });
@@ -1233,6 +1255,7 @@ router.put("/:chatId/messages/:messageId", async (req: Request, res: Response) =
         "UPDATE messages SET content = $1, media_url = $2, edited_at = NOW() WHERE id = $3 AND sender_id = $4 AND is_deleted = FALSE",
         [content, mediaUrl, messageId, userId]
       );
+      if (hasContent) await invalidateMessageTranslations(Number(messageId));
     } else if (hasContent) {
       const trimmed = content.trim();
       if (!trimmed) {
@@ -1243,6 +1266,7 @@ router.put("/:chatId/messages/:messageId", async (req: Request, res: Response) =
         "UPDATE messages SET content = $1, edited_at = NOW() WHERE id = $2 AND sender_id = $3 AND is_deleted = FALSE",
         [trimmed, messageId, userId]
       );
+      await invalidateMessageTranslations(Number(messageId));
     } else if (hasMedia) {
       await query(
         "UPDATE messages SET media_url = $1, edited_at = NOW() WHERE id = $2 AND sender_id = $3 AND is_deleted = FALSE",
@@ -1469,6 +1493,7 @@ router.get("/:chatId/details", async (req: Request, res: Response) => {
     const result = await query(`
       SELECT id, is_group, group_name, group_avatar_url, group_description, disappear_after_seconds,
              COALESCE(NULLIF(TRIM(group_messaging_policy), ''), 'everyone') AS group_messaging_policy,
+             COALESCE(auto_translate_enabled, FALSE) AS auto_translate_enabled,
              created_by, created_at
       FROM chats WHERE id = $1
     `, [chatId]);
@@ -1524,10 +1549,17 @@ router.post("/:chatId/members", async (req: Request, res: Response) => {
       `SELECT COALESCE(NULLIF(TRIM(group_messaging_policy), ''), 'everyone') AS policy FROM chats WHERE id = $1`,
       [chatId],
     );
+    await ensureChatMemberHistoryClearedColumn();
     const policy = String(pol.rows[0]?.policy || "everyone");
-    const canSendDefault = policy !== "allowlist";
+    const canSendDefault = memberCanSendOnJoin(policy);
+    // Re-join resets send access and hides messages from before this join (WhatsApp-style).
     await query(
-      "INSERT INTO chat_members (chat_id, user_id, can_send_messages) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+      `INSERT INTO chat_members (chat_id, user_id, can_send_messages, history_cleared_at, joined_at)
+       VALUES ($1, $2, $3, NOW(), NOW())
+       ON CONFLICT (chat_id, user_id) DO UPDATE SET
+         can_send_messages = EXCLUDED.can_send_messages,
+         history_cleared_at = NOW(),
+         joined_at = NOW()`,
       [chatId, userId, canSendDefault],
     );
     res.json({ success: true });
@@ -1845,6 +1877,117 @@ router.get("/:chatId/messages/:messageId/info", async (req: Request, res: Respon
     res.json({ success: true, receipts: result.rows });
   } catch (err) {
     req.log.error({ err }, "message info");
+    res.status(500).json({ success: false });
+  }
+});
+
+// Group auto-translate toggle (admin only)
+router.put("/:chatId/auto-translate", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const authUserId = getAuthUserId(req);
+  if (!authUserId) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return;
+  }
+  const { enabled } = req.body as { enabled?: boolean };
+  if (typeof enabled !== "boolean") {
+    res.status(400).json({ success: false, message: "enabled must be a boolean" });
+    return;
+  }
+  try {
+    await ensureTranslationTables();
+    const adminCheck = await query(
+      "SELECT cm.is_admin, c.is_group FROM chat_members cm JOIN chats c ON c.id = cm.chat_id WHERE cm.chat_id = $1 AND cm.user_id = $2",
+      [chatId, authUserId],
+    );
+    if (!adminCheck.rows[0]?.is_group) {
+      res.status(400).json({ success: false, message: "Not a group chat" });
+      return;
+    }
+    if (!adminCheck.rows[0]?.is_admin) {
+      res.status(403).json({ success: false, message: "Only a group admin can change this setting." });
+      return;
+    }
+    await query("UPDATE chats SET auto_translate_enabled = $1 WHERE id = $2", [enabled, chatId]);
+    res.json({ success: true, autoTranslateEnabled: enabled });
+  } catch (err) {
+    req.log.error({ err }, "auto-translate toggle");
+    res.status(500).json({ success: false });
+  }
+});
+
+// Per-member translation preferences in a group
+router.get("/:chatId/translation-settings", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const userId = Number(req.query.userId);
+  if (!userId || !assertSameUser(req, res, userId)) return;
+  try {
+    await ensureTranslationTables();
+    const prefs = await getViewerTranslationPrefs(chatId, userId);
+    if (!prefs) {
+      res.status(404).json({ success: false });
+      return;
+    }
+    const member = await query(
+      `SELECT translate_lang, auto_translate_personal FROM chat_members WHERE chat_id = $1 AND user_id = $2`,
+      [chatId, userId],
+    );
+    const row = member.rows[0] as { translate_lang: string | null; auto_translate_personal: boolean } | undefined;
+    res.json({
+      success: true,
+      groupAutoTranslateEnabled: prefs.groupEnabled,
+      memberTranslateLang: row?.translate_lang ? normalizeLangCode(row.translate_lang) : null,
+      memberAutoTranslateEnabled: row?.auto_translate_personal ?? true,
+      effectiveLang: prefs.targetLang,
+      effectiveLangName: LANG_DISPLAY_NAMES[prefs.targetLang] ?? prefs.targetLang,
+    });
+  } catch (err) {
+    req.log.error({ err }, "translation-settings get");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.put("/:chatId/translation-settings", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { userId, translateLang, personalEnabled } = req.body as {
+    userId?: number;
+    translateLang?: string | null;
+    personalEnabled?: boolean;
+  };
+  if (!userId || !assertSameUser(req, res, userId)) return;
+  try {
+    await ensureTranslationTables();
+    const member = await query(
+      "SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, userId],
+    );
+    if (!member.rows[0]) {
+      res.status(403).json({ success: false, message: "Not a member of this chat" });
+      return;
+    }
+    if (translateLang !== undefined) {
+      const normalized = translateLang == null || translateLang === ""
+        ? null
+        : normalizeLangCode(translateLang);
+      await query(
+        "UPDATE chat_members SET translate_lang = $1 WHERE chat_id = $2 AND user_id = $3",
+        [normalized, chatId, userId],
+      );
+    }
+    if (typeof personalEnabled === "boolean") {
+      await query(
+        "UPDATE chat_members SET auto_translate_personal = $1 WHERE chat_id = $2 AND user_id = $3",
+        [personalEnabled, chatId, userId],
+      );
+    }
+    const prefs = await getViewerTranslationPrefs(chatId, userId);
+    res.json({
+      success: true,
+      effectiveLang: prefs?.targetLang ?? "en",
+      effectiveLangName: LANG_DISPLAY_NAMES[prefs?.targetLang ?? "en"] ?? "en",
+    });
+  } catch (err) {
+    req.log.error({ err }, "translation-settings put");
     res.status(500).json({ success: false });
   }
 });

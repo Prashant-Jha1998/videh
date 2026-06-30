@@ -27,14 +27,7 @@ export function ShareIntentBridge() {
   };
 
   useEffect(() => {
-    if (Platform.OS === "web" || !isInitialized || !isAuthenticated) return;
-    void peekIncomingShare().then((pending) => {
-      if (pending && payloadHasShareableContent(pending)) goToSharePicker();
-    });
-  }, [isAuthenticated, isInitialized, router]);
-
-  useEffect(() => {
-    if (Platform.OS === "web" || !isReady || !isInitialized) return;
+    if (Platform.OS === "web" || !isReady) return;
     if (!hasShareIntent || !shareIntent || handlingRef.current) return;
     handlingRef.current = true;
     void (async () => {
@@ -43,16 +36,21 @@ export function ShareIntentBridge() {
         resetShareIntent();
         const pending = await peekIncomingShare();
         if (!pending || !payloadHasShareableContent(pending)) return;
-        if (isAuthenticated) {
+        if (isInitialized && isAuthenticated) {
           goToSharePicker();
-        } else {
-          router.replace("/auth/phone");
         }
       } finally {
         handlingRef.current = false;
       }
     })();
   }, [hasShareIntent, shareIntent, isAuthenticated, isInitialized, isReady, resetShareIntent, router]);
+
+  useEffect(() => {
+    if (Platform.OS === "web" || !isInitialized || !isAuthenticated) return;
+    void peekIncomingShare().then((pending) => {
+      if (pending && payloadHasShareableContent(pending)) goToSharePicker();
+    });
+  }, [isAuthenticated, isInitialized, router]);
 
   useEffect(() => {
     if (error && __DEV__) {

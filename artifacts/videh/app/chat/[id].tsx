@@ -50,6 +50,7 @@ import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { interpolate } from "@/lib/i18n";
 import { useApp, type Message } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+import { INDIAN_LANGUAGE_OPTIONS, languageDisplayName } from "@/lib/indianLanguages";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
 import { downloadPlayableAudioSource, usePlayableAudioUri } from "@/lib/usePlayableAudioUri";
 import {
@@ -1200,6 +1201,7 @@ export default function ChatScreen() {
 
   // Translation
   const [translatedMsgs, setTranslatedMsgs] = useState<Record<string, string>>({});
+  const [showOriginalMsgs, setShowOriginalMsgs] = useState<Record<string, boolean>>({});
 
   // Forward screen opens via /chat/forward route (full screen, WhatsApp-style).
 
@@ -2812,12 +2814,10 @@ export default function ChatScreen() {
   const openTranslatePicker = useCallback((msg: Message) => {
     if (!msg.text?.trim()) return;
     Alert.alert("Translate to:", "", [
-      { text: "हिंदी (Hindi)", onPress: () => translateMsg(msg, "hi") },
-      { text: "English", onPress: () => translateMsg(msg, "en") },
-      { text: "বাংলা (Bengali)", onPress: () => translateMsg(msg, "bn") },
-      { text: "தமிழ் (Tamil)", onPress: () => translateMsg(msg, "ta") },
-      { text: "తెలుగు (Telugu)", onPress: () => translateMsg(msg, "te") },
-      { text: "मराठी (Marathi)", onPress: () => translateMsg(msg, "mr") },
+      ...INDIAN_LANGUAGE_OPTIONS.map((lang) => ({
+        text: `${lang.native} (${lang.name})`,
+        onPress: () => translateMsg(msg, lang.code),
+      })),
       { text: "Cancel", style: "cancel" },
     ]);
   }, [translateMsg]);
@@ -3019,6 +3019,19 @@ export default function ChatScreen() {
     const callMeta = isCall ? parseCallMessageMeta(item.text) : null;
     const isSpecial = isDocument || isLocation || isContact || isCall || isTemplate;
     const urls = (!isDeleted && !isImage && !isAudio && !isSpecial) ? extractUrls(item.text) : [];
+    const autoTranslationActive =
+      chat?.isGroup
+      && chat?.autoTranslateEnabled
+      && item.senderId !== "me"
+      && Boolean(item.translatedText?.trim())
+      && item.translatedText !== item.text;
+    const showingOriginal = Boolean(showOriginalMsgs[item.id]);
+    const manualTranslation = translatedMsgs[item.id];
+    const bubblePrimaryText = manualTranslation
+      ?? (autoTranslationActive && !showingOriginal ? item.translatedText! : item.text);
+    const urlsForBubble = (!isDeleted && !isImage && !isAudio && !isSpecial)
+      ? extractUrls(bubblePrimaryText)
+      : [];
     const isManyForwarded = (item.forwardCount ?? 0) >= 5;
     const metaTextColor = isImage || isAlbum || isLocation
       ? "rgba(255,255,255,0.92)"
@@ -3043,9 +3056,10 @@ export default function ChatScreen() {
     const compactTextBubble =
       isPlainText
       && !item.replyToId
-      && !translatedMsgs[item.id]
-      && urls.length === 0
-      && isCompactChatText(item.text);
+      && !manualTranslation
+      && !autoTranslationActive
+      && urlsForBubble.length === 0
+      && isCompactChatText(bubblePrimaryText);
 
     // Group reactions by emoji
     const reactionGroups: Record<string, { count: number; mine: boolean }> = {};
@@ -3460,20 +3474,38 @@ export default function ChatScreen() {
           ) : (
             <>
               <ChatMessageText
-                text={item.text}
+                text={bubblePrimaryText}
                 linkColor={readMoreLinkColor}
                 style={[styles.msgText, { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}
               />
-              {urls.length > 0 && (
-                <TouchableOpacity onPress={() => Linking.openURL(urls[0])} style={styles.linkPreview}>
+              {urlsForBubble.length > 0 && (
+                <TouchableOpacity onPress={() => Linking.openURL(urlsForBubble[0])} style={styles.linkPreview}>
                   <Ionicons name="link-outline" size={13} color={colors.primary} />
-                  <Text style={[styles.linkText, { color: colors.primary }]} numberOfLines={1}>{urls[0]}</Text>
+                  <Text style={[styles.linkText, { color: colors.primary }]} numberOfLines={1}>{urlsForBubble[0]}</Text>
                 </TouchableOpacity>
               )}
-              {translatedMsgs[item.id] && (
+              {autoTranslationActive && (
+                <TouchableOpacity
+                  style={styles.translatedBox}
+                  onPress={() => setShowOriginalMsgs((prev) => ({ ...prev, [item.id]: !prev[item.id] }))}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.translatedLabel}>
+                    {showingOriginal
+                      ? "Tap to show translation"
+                      : `Translated from ${languageDisplayName(item.translationSourceLang)} · Tap for original`}
+                  </Text>
+                  {showingOriginal ? (
+                    <Text style={[styles.msgText, { color: colors.mutedForeground, fontSize: 14 * chatFontScale, lineHeight: 20 * chatFontScale }]}>
+                      {item.translatedText}
+                    </Text>
+                  ) : null}
+                </TouchableOpacity>
+              )}
+              {manualTranslation && !autoTranslationActive && (
                 <View style={styles.translatedBox}>
                   <Text style={styles.translatedLabel}>Translated</Text>
-                  <Text style={[styles.msgText, { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{translatedMsgs[item.id]}</Text>
+                  <Text style={[styles.msgText, { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{manualTranslation}</Text>
                 </View>
               )}
             </>

@@ -39,6 +39,7 @@ import { ChatMediaGalleryModal } from "@/components/web/ChatMediaGalleryModal";
 import { fetchChatSharedMedia } from "@/lib/chatSharedMedia";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { getApiUrl } from "@/lib/api";
+import { INDIAN_LANGUAGE_OPTIONS, languageNativeLabel } from "@/lib/indianLanguages";
 
 const BASE_URL = getApiUrl();
 const SCREEN_H = Dimensions.get("window").height;
@@ -176,6 +177,10 @@ export default function ChatInfoScreen() {
   const [mediaTotalCount, setMediaTotalCount] = useState(0);
   const [groupMessagingPolicy, setGroupMessagingPolicy] = useState<"everyone" | "admins_only" | "allowlist">("everyone");
   const [groupAvatarUploading, setGroupAvatarUploading] = useState(false);
+  const [autoTranslateEnabled, setAutoTranslateEnabled] = useState(false);
+  const [memberAutoTranslate, setMemberAutoTranslate] = useState(true);
+  const [memberTranslateLang, setMemberTranslateLang] = useState<string | null>(null);
+  const [effectiveLangLabel, setEffectiveLangLabel] = useState("English");
 
   const chatOtherUserId = useRef<number | null>(null);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
@@ -273,9 +278,27 @@ export default function ChatInfoScreen() {
         } else {
           setGroupMessagingPolicy("everyone");
         }
+        setAutoTranslateEnabled(Boolean(data.chat.auto_translate_enabled));
       }
     } catch { }
   }, [id]);
+
+  const fetchTranslationSettings = useCallback(async () => {
+    if (!id || !user?.dbId || !isGroup) return;
+    try {
+      const res = await fetch(
+        `${BASE_URL}/api/chats/${id}/translation-settings?userId=${user.dbId}`,
+        { headers: user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : undefined },
+      );
+      const data = await res.json();
+      if (data.success) {
+        setAutoTranslateEnabled(Boolean(data.groupAutoTranslateEnabled));
+        setMemberAutoTranslate(data.memberAutoTranslateEnabled !== false);
+        setMemberTranslateLang(data.memberTranslateLang ?? null);
+        setEffectiveLangLabel(data.effectiveLangName ?? languageNativeLabel(data.effectiveLang));
+      }
+    } catch { }
+  }, [id, isGroup, user?.dbId, user?.sessionToken]);
 
   useEffect(() => {
     if (chat?.disappearAfterSeconds !== undefined) {
@@ -287,8 +310,9 @@ export default function ChatInfoScreen() {
     fetchContactInfo();
     fetchMembers();
     fetchChatDetails();
+    fetchTranslationSettings();
     fetchMedia();
-  }, [fetchContactInfo, fetchMembers, fetchChatDetails, fetchMedia]);
+  }, [fetchContactInfo, fetchMembers, fetchChatDetails, fetchTranslationSettings, fetchMedia]);
 
   const toggleMute = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -451,6 +475,68 @@ export default function ChatInfoScreen() {
     } catch {
       Alert.alert("Error", "Could not update group messaging settings.");
     }
+  };
+
+  const toggleGroupAutoTranslate = async (enabled: boolean) => {
+    if (!isAdmin) return;
+    try {
+      const res = await fetch(`${BASE_URL}/api/chats/${id}/auto-translate`, {
+        method: "PUT",
+        headers: authedJsonHeaders(),
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAutoTranslateEnabled(enabled);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        Alert.alert("Could not update", data.message ?? "Only admins can change this setting.");
+      }
+    } catch {
+      Alert.alert("Error", "Could not update auto-translate setting.");
+    }
+  };
+
+  const persistMemberTranslation = async (patch: { translateLang?: string | null; personalEnabled?: boolean }) => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/chats/${id}/translation-settings`, {
+        method: "PUT",
+        headers: authedJsonHeaders(),
+        body: JSON.stringify({
+          userId: user?.dbId,
+          translateLang: patch.translateLang,
+          personalEnabled: patch.personalEnabled,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (patch.translateLang !== undefined) setMemberTranslateLang(patch.translateLang);
+        if (patch.personalEnabled !== undefined) setMemberAutoTranslate(patch.personalEnabled);
+        setEffectiveLangLabel(data.effectiveLangName ?? languageNativeLabel(data.effectiveLang));
+      } else {
+        Alert.alert("Could not save", data.message ?? "Try again.");
+      }
+    } catch {
+      Alert.alert("Error", "Could not save your language preference.");
+    }
+  };
+
+  const openGroupLanguagePicker = () => {
+    Alert.alert(
+      "Your language in this group",
+      "Messages from others will appear in this language when auto-translate is on.",
+      [
+        ...INDIAN_LANGUAGE_OPTIONS.map((lang) => ({
+          text: `${lang.native} (${lang.name})`,
+          onPress: () => { void persistMemberTranslation({ translateLang: lang.code }); },
+        })),
+        {
+          text: "Use app default",
+          onPress: () => { void persistMemberTranslation({ translateLang: null }); },
+        },
+        { text: "Cancel", style: "cancel" as const },
+      ],
+    );
   };
 
   const pickGroupPhoto = async () => {
@@ -950,6 +1036,52 @@ export default function ChatInfoScreen() {
               value={groupMessagingLabel}
               colors={colors}
               onPress={isAdmin ? openGroupMessagingPicker : undefined}
+            />
+          )}
+          {isGroup && (
+            <InfoRow
+              icon="language-outline"
+              iconBg="#7E57C2"
+              label="Auto-translate messages"
+              value={autoTranslateEnabled ? "On for everyone" : "Off"}
+              colors={colors}
+              right={
+                isAdmin ? (
+                  <Switch
+                    value={autoTranslateEnabled}
+                    onValueChange={(v) => { void toggleGroupAutoTranslate(v); }}
+                    thumbColor={autoTranslateEnabled ? colors.primary : "#f4f3f4"}
+                    trackColor={{ true: colors.primary + "80", false: colors.border }}
+                  />
+                ) : undefined
+              }
+            />
+          )}
+          {isGroup && (
+            <InfoRow
+              icon="globe-outline"
+              iconBg="#5C6BC0"
+              label="Your language in this group"
+              value={memberTranslateLang ? languageNativeLabel(memberTranslateLang) : `App default (${effectiveLangLabel})`}
+              colors={colors}
+              onPress={openGroupLanguagePicker}
+            />
+          )}
+          {isGroup && autoTranslateEnabled && (
+            <InfoRow
+              icon="text-outline"
+              iconBg="#26A69A"
+              label="Show translated messages"
+              value={memberAutoTranslate ? "On" : "Original only"}
+              colors={colors}
+              right={
+                <Switch
+                  value={memberAutoTranslate}
+                  onValueChange={(v) => { void persistMemberTranslation({ personalEnabled: v }); }}
+                  thumbColor={memberAutoTranslate ? colors.primary : "#f4f3f4"}
+                  trackColor={{ true: colors.primary + "80", false: colors.border }}
+                />
+              }
             />
           )}
           <InfoRow

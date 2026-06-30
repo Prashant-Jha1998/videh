@@ -186,6 +186,10 @@ export interface Message {
   isKept?: boolean;
   /** WhatsApp-style business API template (image, body, footer, buttons). */
   templatePayload?: BusinessTemplatePayload;
+  /** Server auto-translated text for this viewer (group chats). */
+  translatedText?: string;
+  translationSourceLang?: string;
+  translationTargetLang?: string;
 }
 
 const OLDER_MESSAGES_PAGE = 40;
@@ -318,6 +322,9 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     expiresAt: m.expires_at ? new Date(m.expires_at).getTime() : prevLocal?.expiresAt,
     isKept: m.is_kept ?? prevLocal?.isKept ?? false,
     templatePayload: templatePayload ?? prevLocal?.templatePayload,
+    translatedText: m.translated_content ?? prevLocal?.translatedText,
+    translationSourceLang: m.translation_source_lang ?? prevLocal?.translationSourceLang,
+    translationTargetLang: m.translation_target_lang ?? prevLocal?.translationTargetLang,
     ...mapStatusReplyFields(m),
   });
 }
@@ -340,6 +347,8 @@ export interface Chat {
   isKhataNotebook?: boolean;
   /** Seconds until new messages disappear; null/undefined = off */
   disappearAfterSeconds?: number | null;
+  /** Group: auto-translate incoming messages to each member's language */
+  autoTranslateEnabled?: boolean;
 }
 
 export interface Status {
@@ -671,6 +680,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           c.disappear_after_seconds != null && Number(c.disappear_after_seconds) > 0
             ? Number(c.disappear_after_seconds)
             : null,
+        autoTranslateEnabled: Boolean(c.auto_translate_enabled),
       };
     });
 

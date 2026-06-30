@@ -218,7 +218,33 @@ function patchLifecycle() {
   }
   let content = fs.readFileSync(lifecyclePath, "utf8");
   if (content.includes("VIDEH_SHARE_LIFECYCLE")) {
-    console.log("lifecycle already patched");
+    if (!content.includes("VIDEH_SHARE_NEW_INTENT")) {
+      const onCreateClose = `        }
+    }
+}`;
+      const withNewIntent = `        }
+    }
+
+    override fun onNewIntent(intent: Intent): Boolean {
+        // VIDEH_SHARE_NEW_INTENT — capture share when app is already open
+        if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
+            ExpoShareIntentSingleton.intent = intent
+            ExpoShareIntentSingleton.isPending = true
+            return true
+        }
+        return false
+    }
+}`;
+      if (content.endsWith(onCreateClose)) {
+        content = content.slice(0, -onCreateClose.length) + withNewIntent;
+        fs.writeFileSync(lifecyclePath, content);
+        console.log("lifecycle onNewIntent patched");
+      } else {
+        console.log("lifecycle onNewIntent anchor missing");
+      }
+    } else {
+      console.log("lifecycle already patched");
+    }
     return;
   }
   content = content.replace(
@@ -240,10 +266,61 @@ function patchLifecycle() {
             ExpoShareIntentSingleton.intent = intent
             ExpoShareIntentSingleton.isPending = true
         }
+    }
+
+    override fun onNewIntent(intent: Intent): Boolean {
+        // VIDEH_SHARE_NEW_INTENT — capture share when app is already open
+        if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
+            ExpoShareIntentSingleton.intent = intent
+            ExpoShareIntentSingleton.isPending = true
+            return true
+        }
+        return false
     }`,
   );
   fs.writeFileSync(lifecyclePath, content);
   console.log("lifecycle patched");
+}
+
+function patchGetShareIntent() {
+  const kotlinPath = path.join(
+    root,
+    "node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt",
+  );
+  if (!fs.existsSync(kotlinPath)) return;
+  let content = fs.readFileSync(kotlinPath, "utf8");
+  if (content.includes("VIDEH_SHARE_GET_INTENT")) {
+    console.log("getShareIntent already patched");
+    return;
+  }
+  const needle = `        AsyncFunction("getShareIntent") { _: String ->
+            // get the Intent from onCreate activity (app not running in background)
+            ExpoShareIntentSingleton.isPending = false
+            if (ExpoShareIntentSingleton.intent?.type != null) {
+                handleShareIntent(ExpoShareIntentSingleton.intent!!);
+                ExpoShareIntentSingleton.intent = null
+            }
+        }`;
+  const replacement = `        AsyncFunction("getShareIntent") { _: String ->
+            // VIDEH_SHARE_GET_INTENT — cold start: handle SEND even without MIME type
+            ExpoShareIntentSingleton.isPending = false
+            val pending = ExpoShareIntentSingleton.intent
+            if (pending != null && (
+                pending.type != null ||
+                pending.action == Intent.ACTION_SEND ||
+                pending.action == Intent.ACTION_SEND_MULTIPLE
+            )) {
+                handleShareIntent(pending);
+                ExpoShareIntentSingleton.intent = null
+            }
+        }`;
+  if (!content.includes(needle)) {
+    console.log("getShareIntent anchor missing");
+    return;
+  }
+  content = content.replace(needle, replacement);
+  fs.writeFileSync(kotlinPath, content);
+  console.log("getShareIntent patched");
 }
 
 function patchUtils() {
@@ -407,4 +484,5 @@ function patchUtils() {
 patchKotlin();
 patchKotlinNullType();
 patchLifecycle();
+patchGetShareIntent();
 patchUtils();

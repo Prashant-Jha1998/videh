@@ -12,4 +12,4 @@ const withVidehShareIntentFix = (config) => {
   ]);
 };
 
-module.exports = createRunOncePlugin(withVidehShareIntentFix, "with-videh-share-intent-fix", "1.0.0");
+module.exports = createRunOncePlugin(withVidehShareIntentFix, "with-videh-share-intent-fix", "1.0.1");
