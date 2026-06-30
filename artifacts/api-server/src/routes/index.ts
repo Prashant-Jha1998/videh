@@ -19,6 +19,7 @@ import developerLeadsRouter from "./developer-leads";
 import developerBillingRouter from "./developer-billing";
 import developerAuthRouter from "./developer-auth";
 import assistantRouter from "./assistant";
+import gifsRouter from "./gifs";
 import groupInvitesRouter from "./groupInvites";
 import linkPreviewRouter from "./linkPreview";
 import reelsRouter from "./reels";
