@@ -24,6 +24,18 @@ export async function ensureStatusReplyColumn(): Promise<void> {
   statusReplyColReady = true;
 }
 
+let clientMessageIdColReady = false;
+export async function ensureClientMessageIdColumn(): Promise<void> {
+  if (clientMessageIdColReady) return;
+  await query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS client_message_id TEXT`);
+  await query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_msg_id
+      ON messages (chat_id, sender_id, client_message_id)
+      WHERE client_message_id IS NOT NULL
+  `);
+  clientMessageIdColReady = true;
+}
+
 /** Only chat members with a message referencing this file may stream it. */
 export async function userCanAccessChatMedia(userId: number, filename: string): Promise<boolean> {
   if (!userId || !filename) return false;

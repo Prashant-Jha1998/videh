@@ -57,7 +57,7 @@ export function outboxEntryToMessage(entry: TextOutboxEntry, uploadFailed = fals
     timestamp: entry.timestamp,
     senderId: "me",
     type: "text",
-    status: "sent",
+    status: "delivered",
     replyToId: entry.replyToId,
     replyText: entry.replyText,
     replySenderName: entry.replySenderName,

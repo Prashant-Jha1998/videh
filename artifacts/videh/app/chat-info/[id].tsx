@@ -47,6 +47,7 @@ import {
 import { normalizeRouteParam } from "@/lib/routeParams";
 import { getGroupInfoCache, patchGroupInfoCache } from "@/lib/groupInfoCache";
 import { readLocalGroupTranslateLang, writeLocalGroupTranslateLang } from "@/lib/groupTranslationPrefs";
+import { fetchGroupTranslationSettings, invalidateGroupTranslationSettingsCache } from "@/lib/groupAutoTranslate";
 import { fetchGroupPermissions, type GroupPermissions } from "@/lib/groupPermissions";
 import { INDIAN_LANGUAGE_OPTIONS, languageNativeLabel } from "@/lib/indianLanguages";
 
@@ -369,14 +370,21 @@ export default function ChatInfoScreen() {
           if (localLang) {
             lang = localLang;
             if (data.memberTranslateLang == null && user?.dbId) {
-              void fetch(`${BASE_URL}/api/chats/${id}/translation-settings`, {
-                method: "PUT",
-                headers: authedJsonHeaders(),
-                body: JSON.stringify({ userId: user.dbId, translateLang: localLang }),
-              }).catch(() => {});
+              try {
+                const syncRes = await fetch(`${BASE_URL}/api/chats/${id}/translation-settings`, {
+                  method: "PUT",
+                  headers: authedJsonHeaders(),
+                  body: JSON.stringify({ userId: user.dbId, translateLang: localLang }),
+                });
+                const syncData = await syncRes.json();
+                if (syncData.success) {
+                  invalidateGroupTranslationSettingsCache(id);
+                }
+              } catch { /* retry on next open */ }
             }
           }
         }
+        invalidateGroupTranslationSettingsCache(id);
         setAutoTranslateEnabled(Boolean(data.groupAutoTranslateEnabled));
         setMemberAutoTranslate(data.memberAutoTranslateEnabled !== false);
         setMemberTranslateLang(lang);
@@ -672,6 +680,7 @@ export default function ChatInfoScreen() {
           if (id) void writeLocalGroupTranslateLang(id, patch.translateLang);
         }
         if (patch.personalEnabled !== undefined) setMemberAutoTranslate(patch.personalEnabled);
+        if (id) invalidateGroupTranslationSettingsCache(id);
         const label = data.effectiveLangName ?? languageNativeLabel(data.effectiveLang);
         setEffectiveLangLabel(label);
         if (id) {

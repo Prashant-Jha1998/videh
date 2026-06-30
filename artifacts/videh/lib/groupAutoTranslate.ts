@@ -42,9 +42,9 @@ type ServerTranslationSettings = {
 const settingsCache = new Map<string, { at: number; data: ServerTranslationSettings }>();
 const SETTINGS_TTL_MS = 60_000;
 
-/** True when text uses Devanagari or other Indic scripts. */
+/** True when text uses Devanagari, other Indic scripts, or Arabic (Urdu). */
 function containsIndicScript(text: string): boolean {
-  return /[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]/.test(text);
+  return /[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F\u0600-\u06FF]/.test(text);
 }
 
 function isUsefulTranslation(original: string, translated: string, targetLang: string): boolean {
@@ -52,9 +52,17 @@ function isUsefulTranslation(original: string, translated: string, targetLang: s
   const out = translated.trim();
   if (!out) return false;
   if (out !== src) return true;
-  const indicTargets = new Set(["hi", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "or", "as"]);
+  const indicTargets = new Set(["hi", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "or", "as", "ur"]);
   if (!indicTargets.has(targetLang)) return false;
   return containsIndicScript(out) && !containsIndicScript(src);
+}
+
+export function invalidateGroupTranslationSettingsCache(chatId?: string): void {
+  if (chatId) {
+    settingsCache.delete(String(chatId));
+    return;
+  }
+  settingsCache.clear();
 }
 
 export async function fetchGroupTranslationSettings(
@@ -82,13 +90,13 @@ export async function fetchGroupTranslationSettings(
       memberTranslateLang?: string | null;
       effectiveLang?: string;
     };
-    if (!data.success || !data.effectiveLang) return null;
+    if (!data.success) return null;
 
     const settings: ServerTranslationSettings = {
       groupAutoTranslateEnabled: Boolean(data.groupAutoTranslateEnabled),
       memberAutoTranslateEnabled: data.memberAutoTranslateEnabled !== false,
       memberTranslateLang: data.memberTranslateLang ?? null,
-      effectiveLang: String(data.effectiveLang),
+      effectiveLang: normalizeTranslateLang(data.effectiveLang ?? data.memberTranslateLang ?? "en"),
     };
     settingsCache.set(key, { at: Date.now(), data: settings });
     patchGroupInfoCache(chatId, {
@@ -105,6 +113,7 @@ export async function fetchGroupTranslationSettings(
   }
 }
 
+/** Resolve this member's reading language for a group (per-member, not sender language). */
 export async function resolveGroupTranslationPrefs(
   chat: Chat | undefined,
   chatId: string,
@@ -126,6 +135,7 @@ export async function resolveGroupTranslationPrefs(
     ?? true,
   );
   const personalOn = settings?.memberAutoTranslateEnabled ?? cached?.memberAutoTranslate ?? true;
+
   const explicitLang =
     settings?.memberTranslateLang
     ?? cached?.memberTranslateLang
@@ -134,13 +144,13 @@ export async function resolveGroupTranslationPrefs(
 
   if (!personalOn) return null;
 
+  // Per-group language choice wins over server effectiveLang (which may fall back to app default en).
   const targetLang = normalizeTranslateLang(
-    settings?.effectiveLang
-    ?? explicitLang
-    ?? (await readAppDefaultLang()),
+    memberLangExplicit
+      ? explicitLang!
+      : (settings?.effectiveLang ?? (await readAppDefaultLang())),
   );
 
-  // Each member reads in their own language; group toggle only gates app-default viewers.
   if (!groupOn && !memberLangExplicit) return null;
 
   return { enabled: true, targetLang };
@@ -165,7 +175,11 @@ export function messagesNeedingGroupTranslation(
     if (m.type && m.type !== "text") return false;
     if (!m.text?.trim()) return false;
     if (m.id.startsWith("tmp_")) return false;
-    if (m.translatedText?.trim() && isUsefulTranslation(m.text, m.translatedText, prefs.targetLang)) {
+    if (
+      m.translatedText?.trim()
+      && m.translationTargetLang === prefs.targetLang
+      && isUsefulTranslation(m.text, m.translatedText, prefs.targetLang)
+    ) {
       return false;
     }
     return true;
@@ -213,6 +227,7 @@ export async function fetchGroupAutoTranslations(args: {
   for (const row of data.results) {
     const src = items[row.index];
     if (!src) continue;
+    if (row.skipped) continue;
     const translated = row.translated?.trim();
     if (!translated || !isUsefulTranslation(src.text, translated, args.targetLang)) continue;
     const keys = new Set<string>([String(src.rowId)]);

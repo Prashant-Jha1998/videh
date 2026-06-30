@@ -252,7 +252,7 @@ function mapStatusReplyFields(m: any): Partial<Message> {
 
 function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal?: Message): Message {
   const isMe = String(m.sender_id) === String(viewerDbId);
-  let status: "sent" | "delivered" | "read" = "sent";
+  let status: "sent" | "delivered" | "read" = isMe ? "delivered" : "sent";
   if (isMe) {
     if (m.delivery_status === "read") status = "read";
     else if (m.delivery_status === "delivered") status = "delivered";
@@ -350,9 +350,11 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     expiresAt: m.expires_at ? new Date(m.expires_at).getTime() : prevLocal?.expiresAt,
     isKept: m.is_kept ?? prevLocal?.isKept ?? false,
     templatePayload: templatePayload ?? prevLocal?.templatePayload,
-    translatedText: m.translated_content != null ? m.translated_content : prevLocal?.translatedText,
-    translationSourceLang: m.translation_source_lang ?? prevLocal?.translationSourceLang,
-    translationTargetLang: m.translation_target_lang ?? prevLocal?.translationTargetLang,
+    translatedText: m.translated_content != null && String(m.translated_content).trim()
+      ? String(m.translated_content)
+      : undefined,
+    translationSourceLang: m.translation_source_lang ?? undefined,
+    translationTargetLang: m.translation_target_lang ?? undefined,
     ...mapStatusReplyFields(m),
   });
 }
@@ -597,23 +599,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     for (const entry of outbox) {
       const chatSnapshot = chatsForPersistRef.current.find((c) => String(c.id) === String(entry.chatId));
-      const alreadyOnServer = chatSnapshot?.messages.some(
-        (m) =>
-          m.senderId === "me"
-          && m.text.trim() === entry.text.trim()
-          && !m.id.startsWith("tmp_")
-          && !m.uploadFailed
-          && Math.abs(m.timestamp - entry.timestamp) < 180_000,
-      );
-      if (alreadyOnServer) {
+      const tempStillPending = chatSnapshot?.messages.some((m) => m.id === entry.tempId);
+      if (!tempStillPending) {
         await removeFromMessageOutbox(userId, entry.tempId);
-        setChats((prev) =>
-          prev.map((c) =>
-            c.id === entry.chatId
-              ? { ...c, messages: c.messages.filter((m) => m.id !== entry.tempId) }
-              : c,
-          ),
-        );
         continue;
       }
 
@@ -621,6 +609,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         senderId: userId,
         content: entry.text,
         type: "text",
+        clientMessageId: entry.tempId,
         replyToId: entry.replyToId && !entry.replyToId.startsWith("tmp_")
           ? Number(entry.replyToId)
           : undefined,
@@ -672,24 +661,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       await removeFromMessageOutbox(userId, entry.tempId);
       if (data.message && typeof data.message === "object" && "id" in data.message) {
-        const mid = data.message.id;
+        const mid = String(data.message.id);
         const row = data.message;
         let confirmedMessages: Message[] = [];
         setChats((prev) =>
           prev.map((c) => {
             if (c.id !== entry.chatId) return c;
-            const messages = c.messages.map((m) =>
-              m.id === entry.tempId
-                ? {
-                    ...m,
-                    id: String(mid),
-                    status: "delivered" as const,
-                    uploadFailed: false,
-                    expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
-                    isKept: row.is_kept ?? m.isKept,
-                  }
-                : m,
-            );
+            let replaced = false;
+            const mapped = c.messages.map((m) => {
+              if (m.id === entry.tempId) {
+                replaced = true;
+                return {
+                  ...m,
+                  id: mid,
+                  status: "delivered" as const,
+                  uploadFailed: false,
+                  expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
+                  isKept: row.is_kept ?? m.isKept,
+                };
+              }
+              return m;
+            });
+            const withoutOrphanTemp = replaced ? mapped : mapped.filter((m) => m.id !== entry.tempId);
+            const byId = new Map<string, Message>();
+            for (const m of withoutOrphanTemp) {
+              const prevMsg = byId.get(m.id);
+              if (!prevMsg || (m.status === "delivered" || m.status === "read")) byId.set(m.id, m);
+            }
+            const messages = [...byId.values()].sort((a, b) => a.timestamp - b.timestamp);
             confirmedMessages = messages;
             return { ...c, messages };
           }),
@@ -1772,6 +1771,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const loadMessages = useCallback(async (chatId: string) => {
     try {
       const u = userRef.current;
+      const prevChat = chatsForPersistRef.current.find((c) => String(c.id) === String(chatId));
+      const translationPrefs = prevChat?.isGroup && u?.dbId
+        ? await resolveGroupTranslationPrefs(prevChat, chatId, u.dbId, authSessionToken)
+        : null;
+
       const data = await api(
         `/chats/${chatId}/messages?limit=80&userId=${u?.dbId ?? 0}`,
       ) as { success: boolean; messages: any[] };
@@ -1790,7 +1794,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         const msgs: Message[] = rawMessages.map((m: any) => {
           const prevLocal = prevById.get(String(m.id));
-          return mapServerRowToMessage(m, u?.dbId, prevLocal);
+          let mapped = mapServerRowToMessage(m, u?.dbId, prevLocal);
+          if (
+            translationPrefs
+            && mapped.translatedText
+            && mapped.translationTargetLang
+            && mapped.translationTargetLang !== translationPrefs.targetLang
+          ) {
+            mapped = {
+              ...mapped,
+              translatedText: undefined,
+              translationSourceLang: undefined,
+              translationTargetLang: undefined,
+            };
+          }
+          return mapped;
         });
 
         return prev.map((c) => {
@@ -2270,7 +2288,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       timestamp: Date.now(),
       senderId: "me",
       type: "text",
-      status: "sent",
+      status: "delivered",
       replyToId,
       replyText: replyQuote?.replyText,
       replySenderName: replyQuote?.replySenderName,
@@ -2326,6 +2344,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           senderId: u.dbId,
           content: text,
           type: "text",
+          clientMessageId: tempId,
           replyToId: replyToId && !replyToId.startsWith("tmp_") ? Number(replyToId) : undefined,
           statusReplyId: statusReply?.statusId ? Number(statusReply.statusId) : undefined,
         };
@@ -2380,24 +2399,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         await removeFromMessageOutbox(u.dbId!, tempId);
         if (data.message && typeof data.message === "object" && "id" in data.message) {
-          const mid = data.message.id;
+          const mid = String(data.message.id);
           const row = data.message as { expires_at?: string; is_kept?: boolean };
           let confirmedMessages: Message[] = [];
           setChats((prev) =>
             prev.map((c) => {
               if (c.id !== chatId) return c;
-              const messages = c.messages.map((m) =>
-                m.id === tempId
-                  ? {
-                      ...m,
-                      id: String(mid),
-                      status: "delivered" as const,
-                      uploadFailed: false,
-                      expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
-                      isKept: row.is_kept ?? m.isKept,
-                    }
-                  : m,
-              );
+              let replaced = false;
+              const mapped = c.messages.map((m) => {
+                if (m.id === tempId) {
+                  replaced = true;
+                  return {
+                    ...m,
+                    id: mid,
+                    status: "delivered" as const,
+                    uploadFailed: false,
+                    expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
+                    isKept: row.is_kept ?? m.isKept,
+                  };
+                }
+                return m;
+              });
+              const withoutOrphanTemp = replaced ? mapped : mapped.filter((m) => m.id !== tempId);
+              const byId = new Map<string, Message>();
+              for (const m of withoutOrphanTemp) {
+                const prev = byId.get(m.id);
+                if (!prev || (m.status === "delivered" || m.status === "read")) byId.set(m.id, m);
+              }
+              const messages = [...byId.values()].sort((a, b) => a.timestamp - b.timestamp);
               confirmedMessages = messages;
               return { ...c, messages };
             }),

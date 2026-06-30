@@ -3,6 +3,7 @@ import { albumSendLog } from "@/lib/albumSendLog";
 import { parseAlbumMessageContent, parseAlbumPhotoCountLabel } from "@/lib/chatAlbumMessage";
 
 const TEMP_MATCH_WINDOW_MS = 60_000;
+const TEMP_TEXT_MATCH_WINDOW_MS = 15_000;
 /** Keep optimistic/patched outgoing rows until the messages API returns them. */
 const RECENT_OUTGOING_KEEP_MS = 300_000;
 
@@ -32,7 +33,8 @@ function albumUrlsLikelyMatch(tmp: Message, server: Message): boolean {
 
 function tempMatchesServer(tmp: Message, server: Message): boolean {
   if (server.senderId !== "me") return false;
-  if (Math.abs(server.timestamp - tmp.timestamp) > TEMP_MATCH_WINDOW_MS) return false;
+  const matchWindow = tmp.type === "text" || !tmp.type ? TEMP_TEXT_MATCH_WINDOW_MS : TEMP_MATCH_WINDOW_MS;
+  if (Math.abs(server.timestamp - tmp.timestamp) > matchWindow) return false;
   if ((tmp.replyToId ?? "") !== (server.replyToId ?? "")) return false;
 
   if (tmp.type === "text" || !tmp.type) {
@@ -185,15 +187,21 @@ function messageIdRank(id: string): number {
   return 2;
 }
 
+function isNumericServerId(id: string): boolean {
+  return /^\d+$/.test(id);
+}
+
 function isLikelyDuplicateMessage(a: Message, b: Message): boolean {
   if (a.id === b.id) return true;
   if (a.id === `hint_${b.id}` || b.id === `hint_${a.id}`) return true;
+  // Intentional duplicate text must stay as separate server rows.
+  if (isNumericServerId(a.id) && isNumericServerId(b.id)) return false;
   if (a.senderId !== b.senderId) return false;
   if (a.type !== b.type && a.type !== "text" && b.type !== "text") return false;
   const aText = a.text.trim();
   const bText = b.text.trim();
   if (!aText || !bText || aText !== bText) return false;
-  return Math.abs(a.timestamp - b.timestamp) < 120_000;
+  return Math.abs(a.timestamp - b.timestamp) < 15_000;
 }
 
 function preferCanonicalDuplicate(existing: Message, incoming: Message): Message {

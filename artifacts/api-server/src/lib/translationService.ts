@@ -193,11 +193,11 @@ function languagesMatch(a: string | null | undefined, b: string | null | undefin
 
 /** True when text uses an Indic script (not Latin). */
 export function containsIndicScript(text: string): boolean {
-  return /[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]/.test(text);
+  return /[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F\u0600-\u06FF]/.test(text);
 }
 
 const INDIC_TRANSLATE_TARGETS = new Set<TranslateLang>([
-  "hi", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "or", "as",
+  "hi", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "or", "as", "ur",
 ]);
 
 /** Romanized Hinglish (Latin letters) that should render in native Indic script. */
@@ -226,9 +226,12 @@ function shouldAttachTranslation(
 ): boolean {
   const translated = result.translated.trim();
   if (!translated) return false;
-  if (translated !== content) return true;
+  if (result.skipped && translated === content.trim()) return false;
+  if (translated !== content.trim()) return true;
   return isRomanizedIndicInput(content, target) && containsIndicScript(translated);
 }
+
+export { shouldAttachTranslation as shouldDisplayGroupTranslation };
 
 /** Google treats Hinglish as `hi`; only Hindi needs forced English source. */
 function romanizedSourceOrder(target: TranslateLang): string[] {
@@ -262,11 +265,12 @@ function needsNativeScriptConversion(
   if (target === "en") return false;
   if (containsIndicScript(originalText)) return false;
   const indicTargets = new Set<TranslateLang>([
-    "hi", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "or", "as",
+    "hi", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "or", "as", "ur",
   ]);
   if (!indicTargets.has(target)) return false;
   if (languagesMatch(detected, target)) return true;
-  if (detected === "en" && target === "hi") return true;
+  // Latin/English source → any Indic target still needs translation.
+  if (detected === "en" && indicTargets.has(target)) return true;
   return false;
 }
 
@@ -491,6 +495,43 @@ type MessageRow = Record<string, unknown> & {
   is_deleted?: boolean;
 };
 
+async function loadCachedTranslationsForMessages(
+  rows: MessageRow[],
+  targetLang: TranslateLang,
+): Promise<Map<number, { text: string; sourceLang: string }>> {
+  const ids = rows.map((m) => Number(m.id)).filter((id) => Number.isFinite(id) && id > 0);
+  if (!ids.length) return new Map();
+
+  const r = await query(
+    `SELECT mt.message_id, mt.translated_text, mt.source_lang, mt.content_hash, m.content
+     FROM message_translations mt
+     JOIN messages m ON m.id = mt.message_id
+     WHERE mt.target_lang = $1
+       AND mt.message_id = ANY($2::int[])`,
+    [targetLang, ids],
+  );
+
+  const out = new Map<number, { text: string; sourceLang: string }>();
+  for (const row of r.rows as Array<{
+    message_id: number;
+    translated_text: string;
+    source_lang: string | null;
+    content_hash: string;
+    content: string;
+  }>) {
+    const content = String(row.content ?? "").trim();
+    if (!content || row.content_hash !== contentHash(content)) continue;
+    const cached = {
+      text: row.translated_text,
+      sourceLang: row.source_lang ?? "unknown",
+    };
+    if (shouldAttachTranslation(content, { translated: cached.text, sourceLang: cached.sourceLang, skipped: false }, targetLang)) {
+      out.set(Number(row.message_id), cached);
+    }
+  }
+  return out;
+}
+
 /** Attach translated_content + translation_source_lang for group auto-translate. */
 export async function attachTranslationsForViewer(
   chatId: string | number,
@@ -502,20 +543,19 @@ export async function attachTranslationsForViewer(
   if (!prefs || !viewerWantsIncomingTranslation(prefs)) return rows;
 
   const targetLang = prefs.targetLang;
-  const out: MessageRow[] = [];
-
   const textRows = rows.filter(
     (m) => !m.is_deleted
       && String(m.type ?? "text") === "text"
       && Number(m.sender_id) !== viewerId
       && String(m.content ?? "").trim(),
   );
-  // Translate only the newest slice so message GET stays fast (delivery must not wait on MT).
-  const recentTextRows = textRows.slice(-50);
+  if (!textRows.length) return rows;
 
-  const concurrency = 4;
-  const queue = [...recentTextRows];
-  const translationMap = new Map<number, { text: string; sourceLang: string; skipped: boolean }>();
+  const translationMap = await loadCachedTranslationsForMessages(textRows, targetLang);
+  const needsApi = textRows.filter((m) => !translationMap.has(Number(m.id)));
+
+  const concurrency = 6;
+  const queue = [...needsApi];
 
   async function worker() {
     while (queue.length > 0) {
@@ -529,33 +569,30 @@ export async function attachTranslationsForViewer(
         translationMap.set(Number(m.id), {
           text: result.translated,
           sourceLang: result.sourceLang,
-          skipped: result.skipped,
         });
       }
     }
   }
 
-  const workers = Array.from(
-    { length: Math.min(concurrency, recentTextRows.length || 1) },
-    () => worker(),
-  );
-  await Promise.race([
-    Promise.all(workers),
-    new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
-  ]);
-
-  for (const row of rows) {
-    const hit = translationMap.get(Number(row.id));
-    if (hit) {
-      out.push({
-        ...row,
-        translated_content: hit.text,
-        translation_source_lang: hit.sourceLang,
-        translation_target_lang: targetLang,
-      });
-    } else {
-      out.push(row);
-    }
+  if (needsApi.length > 0) {
+    const workers = Array.from(
+      { length: Math.min(concurrency, needsApi.length) },
+      () => worker(),
+    );
+    await Promise.race([
+      Promise.all(workers),
+      new Promise<void>((resolve) => setTimeout(resolve, 25_000)),
+    ]);
   }
-  return out;
+
+  return rows.map((row) => {
+    const hit = translationMap.get(Number(row.id));
+    if (!hit) return row;
+    return {
+      ...row,
+      translated_content: hit.text,
+      translation_source_lang: hit.sourceLang,
+      translation_target_lang: targetLang,
+    };
+  });
 }

@@ -49,6 +49,7 @@ import {
 } from "../lib/groupPermissions";
 import {
   deleteChatMediaFile,
+  ensureClientMessageIdColumn,
   ensureStatusReplyColumn,
   ensureViewOnceColumns,
   mediaFilenameFromUrl,
@@ -861,10 +862,10 @@ router.get("/:chatId/messaging-permission", async (req: Request, res: Response) 
 // Send message
 router.post("/:chatId/messages", async (req: Request, res: Response) => {
   const { chatId } = req.params;
-  const { senderId, content, type, replyToId, mediaUrl, isForwarded, forwardCount, isViewOnce, statusReplyId } = req.body as {
+  const { senderId, content, type, replyToId, mediaUrl, isForwarded, forwardCount, isViewOnce, statusReplyId, clientMessageId } = req.body as {
     senderId?: number; content?: string; type?: string; replyToId?: number;
     mediaUrl?: string; isForwarded?: boolean; forwardCount?: number; isViewOnce?: boolean;
-    statusReplyId?: number;
+    statusReplyId?: number; clientMessageId?: string;
   };
   if (!senderId || !content) { res.status(400).json({ success: false }); return; }
   if (!assertSameUser(req, res, senderId)) return;
@@ -878,6 +879,7 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
   try {
     await ensureDisappearingMessageColumns();
     await ensureStatusReplyColumn();
+    await ensureClientMessageIdColumn();
     const activityType = type === "video" ? "video_share" : type === "contact" ? "contact_share" : "chat_message";
     const mod = await enforceModerationForActivity(senderId, activityType, {
       content,
@@ -935,37 +937,36 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     }
 
     const messageType = type ?? "text";
-    const recentDuplicate = await query(
-      `SELECT *
-       FROM messages
-       WHERE chat_id = $1
-         AND sender_id = $2
-         AND content = $3
-         AND COALESCE(type, 'text') = $4
-         AND COALESCE(is_deleted, FALSE) = FALSE
-         AND created_at > NOW() - INTERVAL '45 seconds'
-       ORDER BY id DESC
-       LIMIT 1`,
-      [chatId, senderId, content, messageType],
-    );
-    if (recentDuplicate.rows[0]) {
-      const existing = recentDuplicate.rows[0];
-      res.json({
-        success: true,
-        message: resolveChatMessageRowForClient(req, existing as Record<string, unknown>),
-        deduplicated: true,
-      });
-      return;
+    const clientMsgKey = clientMessageId ? String(clientMessageId).trim() : "";
+    if (clientMsgKey) {
+      const idempotent = await query(
+        `SELECT *
+         FROM messages
+         WHERE chat_id = $1
+           AND sender_id = $2
+           AND client_message_id = $3
+           AND COALESCE(is_deleted, FALSE) = FALSE
+         LIMIT 1`,
+        [chatId, senderId, clientMsgKey],
+      );
+      if (idempotent.rows[0]) {
+        res.json({
+          success: true,
+          message: resolveChatMessageRowForClient(req, idempotent.rows[0] as Record<string, unknown>),
+          deduplicated: true,
+        });
+        return;
+      }
     }
 
     const result = await query(`
-      INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once, expires_at, status_reply_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      INSERT INTO messages (chat_id, sender_id, content, type, reply_to_id, media_url, is_forwarded, forward_count, is_view_once, expires_at, status_reply_id, client_message_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *
     `, [chatId, senderId, content, type ?? "text", replyToId ?? null, mediaUrl ?? null,
         isForwarded ?? false, forwardCount ?? 0, isViewOnce ?? false,
         computeMessageExpiresAt(await fetchChatDisappearSeconds(chatId), type ?? "text"),
-        statusReplyId ?? null]);
+        statusReplyId ?? null, clientMsgKey || null]);
 
     // Mark as delivered for all other members + gather push tokens
     const members = await query(

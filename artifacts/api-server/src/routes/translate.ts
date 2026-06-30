@@ -4,6 +4,7 @@ import {
   LANG_DISPLAY_NAMES,
   SUPPORTED_TRANSLATE_LANGS,
   normalizeLangCode,
+  shouldDisplayGroupTranslation,
   translateText,
 } from "../lib/translationService";
 
@@ -74,14 +75,16 @@ router.post("/batch", async (req: Request, res: Response) => {
     const results: Array<{ index: number; translated: string; sourceLang: string; skipped: boolean }> = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i]!;
-      const r = await translateText(item.text.trim(), lang, {
+      const source = item.text.trim();
+      const r = await translateText(source, lang, {
         messageId: item.messageId,
       });
+      const display = shouldDisplayGroupTranslation(source, r, lang);
       results.push({
         index: i,
-        translated: r.translated,
+        translated: display ? r.translated : source,
         sourceLang: r.sourceLang,
-        skipped: r.skipped,
+        skipped: !display,
       });
     }
     res.json({ success: true, results, targetLang: lang });
