@@ -34,6 +34,11 @@ import { ensureMessageUserHidesTable, hideMessageForUser, messageVisibleToUserSq
 import { getPresenceForViewer } from "../lib/presencePrivacy";
 import { canAddUserToGroup, getExtendedPrivacy } from "../lib/userPrivacySettings";
 import {
+  canSendAfterInviteApproval,
+  createGroupInviteLink,
+  ensureGroupInviteTables,
+} from "../lib/groupInviteLinks";
+import {
   deleteChatMediaFile,
   ensureStatusReplyColumn,
   ensureViewOnceColumns,
@@ -146,7 +151,7 @@ async function ensureGroupMetadataColumns(): Promise<void> {
 
 type GroupSendEval = {
   ok: boolean;
-  code?: "not_member" | "admins_only" | "allowlist";
+  code?: "not_member" | "admins_only" | "allowlist" | "pending_approval";
   policy: string;
   isGroup: boolean;
   isAdmin: boolean;
@@ -173,11 +178,12 @@ async function directChatBlocked(chatId: string | string[], senderId: number): P
 async function evaluateGroupSendPermission(chatId: string | string[], userId: number): Promise<GroupSendEval | null> {
   const id = Array.isArray(chatId) ? chatId[0] : chatId;
   await ensureGroupMetadataColumns();
-  const r = await query(
+  await ensureGroupInviteTables();
     `SELECT c.is_group,
             COALESCE(NULLIF(TRIM(c.group_messaging_policy), ''), 'everyone') AS policy,
             cm.is_admin,
-            COALESCE(cm.can_send_messages, TRUE) AS can_send_messages
+            COALESCE(cm.can_send_messages, TRUE) AS can_send_messages,
+            COALESCE(cm.join_pending_approval, FALSE) AS join_pending_approval
      FROM chats c
      INNER JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $2
      WHERE c.id = $1`,
@@ -189,7 +195,11 @@ async function evaluateGroupSendPermission(chatId: string | string[], userId: nu
   const isGroup = !!row.is_group;
   const isAdmin = !!row.is_admin;
   const canSendFlag = !!row.can_send_messages;
+  const pendingApproval = !!row.join_pending_approval;
   if (!isGroup) return { ok: true, policy: "everyone", isGroup: false, isAdmin: false };
+  if (pendingApproval && !isAdmin) {
+    return { ok: false, code: "pending_approval", policy, isGroup: true, isAdmin };
+  }
   if (policy === "everyone") return { ok: true, policy, isGroup: true, isAdmin };
   if (policy === "admins_only") {
     return isAdmin
@@ -828,7 +838,7 @@ router.get("/:chatId/messaging-permission", async (req: Request, res: Response) 
     }
     res.json({
       success: true,
-      policy: perm.policy,
+      policy: perm.code === "pending_approval" ? "pending_approval" : perm.policy,
       canSendMessages: perm.ok,
       isAdmin: perm.isAdmin,
     });
@@ -1548,7 +1558,8 @@ router.get("/:chatId/members", async (req: Request, res: Response) => {
   try {
     const result = await query(`
       SELECT u.id, u.name, u.phone, u.avatar_url, u.about, u.is_online, u.last_seen,
-             cm.is_admin, cm.joined_at, COALESCE(cm.can_send_messages, TRUE) AS can_send_messages
+             cm.is_admin, cm.joined_at, COALESCE(cm.can_send_messages, TRUE) AS can_send_messages,
+             COALESCE(cm.join_pending_approval, FALSE) AS join_pending_approval
       FROM chat_members cm JOIN users u ON u.id = cm.user_id
       WHERE cm.chat_id = $1
       ORDER BY cm.is_admin DESC, u.name ASC
@@ -1603,6 +1614,138 @@ router.post("/:chatId/members", async (req: Request, res: Response) => {
     );
     res.json({ success: true });
   } catch { res.status(500).json({ success: false }); }
+});
+
+// Create or refresh secure group invite link (admin only; opaque token, not numeric id).
+router.post("/:chatId/invite-link", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { requesterId } = req.body as { requesterId?: number };
+  if (!requesterId || !assertSameUser(req, res, requesterId)) return;
+  try {
+    const adminCheck = await query(
+      "SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, requesterId],
+    );
+    if (!adminCheck.rows[0]?.is_admin) {
+      res.status(403).json({ success: false, message: "Only admins can share invite links." });
+      return;
+    }
+    const group = await query("SELECT is_group, group_name FROM chats WHERE id = $1", [chatId]);
+    if (!group.rows[0]?.is_group) {
+      res.status(400).json({ success: false, message: "Not a group chat." });
+      return;
+    }
+    const link = await createGroupInviteLink(Number(chatId), requesterId);
+    res.json({
+      success: true,
+      invite: {
+        token: link.token,
+        publicUrl: link.publicUrl,
+        deepLink: link.deepLink,
+        groupName: group.rows[0]?.group_name ?? "Group",
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "create group invite link");
+    res.status(500).json({ success: false });
+  }
+});
+
+// Pending members who joined via invite link (admin only).
+router.get("/:chatId/pending-joins", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const requesterId = Number(req.query.requesterId);
+  if (!requesterId || !assertSameUser(req, res, requesterId)) return;
+  try {
+    const adminCheck = await query(
+      "SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, requesterId],
+    );
+    if (!adminCheck.rows[0]?.is_admin) {
+      res.status(403).json({ success: false });
+      return;
+    }
+    await ensureGroupInviteTables();
+    const r = await query(
+      `SELECT u.id, u.name, u.phone, u.avatar_url, cm.joined_at
+       FROM chat_members cm
+       JOIN users u ON u.id = cm.user_id
+       WHERE cm.chat_id = $1 AND COALESCE(cm.join_pending_approval, FALSE) = TRUE
+       ORDER BY cm.joined_at ASC`,
+      [chatId],
+    );
+    res.json({ success: true, pending: r.rows });
+  } catch (err) {
+    req.log.error({ err }, "pending joins list");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:chatId/pending-joins/:memberId/approve", async (req: Request, res: Response) => {
+  const { chatId, memberId } = req.params;
+  const { requesterId } = req.body as { requesterId?: number };
+  if (!requesterId || !assertSameUser(req, res, requesterId)) return;
+  try {
+    const adminCheck = await query(
+      "SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, requesterId],
+    );
+    if (!adminCheck.rows[0]?.is_admin) {
+      res.status(403).json({ success: false, message: "Not admin" });
+      return;
+    }
+    const pol = await query(
+      `SELECT COALESCE(NULLIF(TRIM(group_messaging_policy), ''), 'everyone') AS policy FROM chats WHERE id = $1`,
+      [chatId],
+    );
+    const policy = String(pol.rows[0]?.policy || "everyone");
+    const canSend = canSendAfterInviteApproval(policy, false);
+    const updated = await query(
+      `UPDATE chat_members
+       SET join_pending_approval = FALSE, can_send_messages = $3
+       WHERE chat_id = $1 AND user_id = $2 AND COALESCE(join_pending_approval, FALSE) = TRUE
+       RETURNING user_id`,
+      [chatId, memberId, canSend],
+    );
+    if (!updated.rows[0]) {
+      res.status(404).json({ success: false, message: "No pending request for this member." });
+      return;
+    }
+    res.json({ success: true, canSendMessages: canSend });
+  } catch (err) {
+    req.log.error({ err }, "approve pending join");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.post("/:chatId/pending-joins/:memberId/reject", async (req: Request, res: Response) => {
+  const { chatId, memberId } = req.params;
+  const { requesterId } = req.body as { requesterId?: number };
+  if (!requesterId || !assertSameUser(req, res, requesterId)) return;
+  try {
+    const adminCheck = await query(
+      "SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, requesterId],
+    );
+    if (!adminCheck.rows[0]?.is_admin) {
+      res.status(403).json({ success: false, message: "Not admin" });
+      return;
+    }
+    const deleted = await query(
+      `DELETE FROM chat_members
+       WHERE chat_id = $1 AND user_id = $2 AND COALESCE(join_pending_approval, FALSE) = TRUE
+       RETURNING user_id`,
+      [chatId, memberId],
+    );
+    if (!deleted.rows[0]) {
+      res.status(404).json({ success: false, message: "No pending request for this member." });
+      return;
+    }
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "reject pending join");
+    res.status(500).json({ success: false });
+  }
 });
 
 // Remove member from group

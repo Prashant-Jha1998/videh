@@ -39,7 +39,11 @@ import { ChatMediaGalleryModal } from "@/components/web/ChatMediaGalleryModal";
 import { fetchChatSharedMedia } from "@/lib/chatSharedMedia";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { getApiUrl } from "@/lib/api";
-import { INDIAN_LANGUAGE_OPTIONS, languageNativeLabel } from "@/lib/indianLanguages";
+import {
+  approvePendingGroupJoin,
+  createGroupInviteLink,
+  rejectPendingGroupJoin,
+} from "@/lib/groupInviteLinks";
 import { normalizeRouteParam } from "@/lib/routeParams";
 import { getGroupInfoCache, patchGroupInfoCache } from "@/lib/groupInfoCache";
 import { readLocalGroupTranslateLang, writeLocalGroupTranslateLang } from "@/lib/groupTranslationPrefs";
@@ -96,6 +100,7 @@ type GroupMember = {
   last_seen?: string;
   is_admin: boolean;
   can_send_messages?: boolean;
+  join_pending_approval?: boolean;
 };
 
 function isPhoneAlreadyInGroup(phone: string, groupMembers: GroupMember[]): boolean {
@@ -813,13 +818,50 @@ export default function ChatInfoScreen() {
   };
 
   const shareGroupInviteLink = async () => {
-    if (!id) return;
-    const inviteLink = `videh://join-group?id=${id}`;
+    if (!id || !user?.dbId) return;
+    const invite = await createGroupInviteLink(id, user.dbId, user.sessionToken);
+    if (!invite) {
+      Alert.alert("Could not create link", isAdmin ? "Please try again." : "Only admins can share invite links.");
+      return;
+    }
     await Share.share({
-      message: `Join our group on Videh: ${inviteLink}`,
-      url: inviteLink,
+      message: `Join "${invite.groupName}" on Videh:\n${invite.publicUrl}`,
+      url: invite.publicUrl,
       title: "Group invite link",
     }).catch(() => {});
+  };
+
+  const pendingJoinMembers = useMemo(
+    () => members.filter((m) => m.join_pending_approval),
+    [members],
+  );
+
+  const approveJoinMember = async (memberId: number) => {
+    if (!id || !user?.dbId) return;
+    const ok = await approvePendingGroupJoin(id, memberId, user.dbId, user.sessionToken);
+    if (!ok) {
+      Alert.alert("Could not approve", "Try again.");
+      return;
+    }
+    void fetchMembers();
+  };
+
+  const rejectJoinMember = async (memberId: number) => {
+    if (!id || !user?.dbId) return;
+    Alert.alert("Decline request?", "This person will be removed from the group.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Decline",
+        style: "destructive",
+        onPress: () => {
+          void (async () => {
+            const ok = await rejectPendingGroupJoin(id, memberId, user.dbId!, user.sessionToken);
+            if (!ok) Alert.alert("Could not decline", "Try again.");
+            else void fetchMembers();
+          })();
+        },
+      },
+    ]);
   };
 
   const searchUser = async () => {
@@ -1304,7 +1346,35 @@ export default function ChatInfoScreen() {
                 <ActivityIndicator color={colors.primary} />
               </View>
             ) : null}
-            {members.map((m) => {
+            {isAdmin && pendingJoinMembers.length > 0 ? (
+              <View style={[styles.pendingJoinBox, { borderColor: colors.border, backgroundColor: colors.muted + "40" }]}>
+                <Text style={[styles.pendingJoinTitle, { color: colors.foreground }]}>
+                  Pending approval ({pendingJoinMembers.length})
+                </Text>
+                {pendingJoinMembers.map((m) => (
+                  <View key={`pending-${m.id}`} style={styles.pendingJoinRow}>
+                    <Text style={[styles.pendingJoinName, { color: colors.foreground }]} numberOfLines={1}>
+                      {m.name || m.phone}
+                    </Text>
+                    <View style={styles.pendingJoinActions}>
+                      <TouchableOpacity
+                        style={[styles.pendingJoinBtn, { backgroundColor: colors.primary }]}
+                        onPress={() => { void approveJoinMember(m.id); }}
+                      >
+                        <Text style={styles.pendingJoinBtnText}>Approve</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.pendingJoinBtn, { backgroundColor: colors.border }]}
+                        onPress={() => { void rejectJoinMember(m.id); }}
+                      >
+                        <Text style={[styles.pendingJoinBtnText, { color: colors.foreground }]}>Decline</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {members.filter((m) => !m.join_pending_approval).map((m) => {
               const mInitials = (m.name || "?").slice(0, 2).toUpperCase();
               const mHue = ((m.name ?? "?").charCodeAt(0) * 37) % 360;
               const isMe = Number(m.id) === Number(user?.dbId);
@@ -1744,6 +1814,13 @@ const styles = StyleSheet.create({
   descBtns: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 8, marginTop: 8 },
   descCounter: { marginRight: "auto", fontSize: 11 },
   inviteLinkRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, alignSelf: "flex-start" },
+  pendingJoinBox: { marginTop: 12, marginBottom: 8, padding: 12, borderRadius: 12, borderWidth: 1 },
+  pendingJoinTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold", marginBottom: 8 },
+  pendingJoinRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 },
+  pendingJoinName: { flex: 1, fontSize: 14, fontFamily: "Inter_500Medium" },
+  pendingJoinActions: { flexDirection: "row", gap: 6 },
+  pendingJoinBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  pendingJoinBtnText: { color: "#fff", fontSize: 12, fontFamily: "Inter_600SemiBold" },
   inviteLinkText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   descBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
 

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Join group on Videh</title>
+    <meta name="description" content="Open this group invite in the Videh Messenger app." />
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 420px; margin: 48px auto; padding: 0 20px; color: #1a1630; }
+      a.btn { display: inline-block; margin-top: 16px; padding: 12px 20px; background: #5b4fe8; color: #fff; text-decoration: none; border-radius: 999px; font-weight: 600; }
+      .muted { color: #5c5678; font-size: 14px; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <h1>Join group on Videh</h1>
+    <p class="muted">Opening the Videh app… If nothing happens, install Videh Messenger and open this link again.</p>
+    <p><a class="btn" id="openApp" href="#">Open in Videh</a></p>
+    <p class="muted"><a href="https://videh.co.in/download.html">Download Videh</a></p>
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var token = params.get("t") || params.get("token") || "";
+        if (!token) {
+          var parts = location.pathname.split("/").filter(Boolean);
+          if (parts[0] === "join" && parts[1]) token = parts[1];
+        }
+        if (!token) {
+          document.querySelector("h1").textContent = "Invalid invite link";
+          return;
+        }
+        var deep = "videh://join-group?token=" + encodeURIComponent(token);
+        var open = document.getElementById("openApp");
+        open.href = deep;
+        location.replace(deep);
+        setTimeout(function () {
+          open.focus();
+        }, 1200);
+      })();
+    </script>
+  </body>
+</html>

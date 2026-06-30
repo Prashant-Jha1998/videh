@@ -19,6 +19,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AssistantOverlay } from "@/components/AssistantOverlay";
 import { callDebug } from "@/lib/callDebug";
 import { getApiUrl } from "@/lib/api";
+import { parseGroupInviteTokenFromUrl } from "@/lib/groupInviteLinks";
 import { parseReelsChannelHandleFromUrl, parseReelsWatchIdFromUrl } from "@/lib/reelsShare";
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
 import { shouldPresentIncomingCall, isCallCaller } from "@/lib/callRole";
@@ -916,6 +917,17 @@ function RootLayoutNav() {
         router.push({ pathname: "/join-call", params: { token: String(token) } } as unknown as Href);
         return;
       }
+      if (host === "join-group") {
+        const token = parsed.queryParams?.token;
+        if (!token) return;
+        router.push({ pathname: "/join-group", params: { token: String(token) } } as unknown as Href);
+        return;
+      }
+      const groupInviteToken = parseGroupInviteTokenFromUrl(url);
+      if (groupInviteToken) {
+        router.push({ pathname: "/join-group", params: { token: groupInviteToken } } as unknown as Href);
+        return;
+      }
       if (host !== "call") return;
       const qp = parsed.queryParams ?? {};
       const callId = qp.callId ? String(qp.callId) : "";
@@ -973,6 +985,7 @@ function RootLayoutNav() {
         <Stack.Screen name="disappearing-messages/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="call" options={{ headerShown: false, presentation: "fullScreenModal" }} />
         <Stack.Screen name="join-call" options={{ headerShown: false, presentation: "modal" }} />
+        <Stack.Screen name="join-group" options={{ headerShown: false, presentation: "modal" }} />
         <Stack.Screen name="contacts" options={{ headerShown: false }} />
         <Stack.Screen name="share-to-chat" options={{ headerShown: false, presentation: "card" }} />
         <Stack.Screen name="status/view" options={{ headerShown: false, presentation: "fullScreenModal" }} />

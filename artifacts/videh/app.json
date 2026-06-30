@@ -55,7 +55,7 @@
             {
               "scheme": "https",
               "host": "videh.co.in",
-              "pathPrefix": "/api/reels/go"
+              "pathPrefix": "/join.html"
             },
             {
               "scheme": "https",

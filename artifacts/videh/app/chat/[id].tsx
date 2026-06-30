@@ -4496,7 +4496,9 @@ export default function ChatScreen() {
         <View style={[styles.groupLockBanner, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
           <Ionicons name="lock-closed-outline" size={18} color={colors.mutedForeground} />
           <Text style={[styles.groupLockBannerText, { color: colors.foreground }]}>
-            {groupSendPermission.policy === "admins_only"
+            {groupSendPermission.policy === "pending_approval"
+              ? "Waiting for admin approval. You can read messages but cannot send until an admin approves you in Group info."
+              : groupSendPermission.policy === "admins_only"
               ? "Only admins can send messages here. Admins can change this in Group info."
               : "You cannot send messages until a group admin allows you. Admins can change this in Group info."}
           </Text>
