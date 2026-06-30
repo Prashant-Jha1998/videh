@@ -1,76 +1,36 @@
 import React, { forwardRef } from "react";
-import {
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  type TextInputProps,
-  type TextStyle,
-} from "react-native";
-import { renderFormattedChatText } from "@/lib/chatTextFormatting";
+import { Platform, TextInput, type TextInputProps, type TextStyle } from "react-native";
 
 type Props = TextInputProps & {
   value: string;
   baseStyle: TextStyle;
   foregroundColor: string;
-  mentionColor?: string;
 };
 
-/** TextInput with WhatsApp-style live *bold* preview overlay. */
+/** Chat composer — plain multiline input (no formatting overlay). */
 export const ChatComposerField = forwardRef<TextInput, Props>(function ChatComposerField(
-  {
-    value,
-    baseStyle,
-    foregroundColor,
-    mentionColor,
-    style,
-    ...rest
-  },
+  { value, baseStyle, foregroundColor, style, multiline, scrollEnabled, ...rest },
   ref,
 ) {
-  const hasText = Boolean(value);
-  const fieldStyle = StyleSheet.flatten([baseStyle, style]);
+  const isMultiline = multiline !== false;
   return (
-    <View style={styles.wrap}>
-      {hasText ? (
-        <Text
-          style={[fieldStyle, styles.overlay]}
-          pointerEvents="none"
-          accessible={false}
-          importantForAccessibility="no-hide-descendants"
-        >
-          {renderFormattedChatText(value, { mentionColor, baseStyle: fieldStyle })}
-        </Text>
-      ) : null}
-      <TextInput
-        {...rest}
-        ref={ref}
-        value={value}
-        style={[
-          fieldStyle,
-          hasText ? styles.transparentInput : null,
-          { color: hasText ? "transparent" : foregroundColor },
-        ]}
-        selectionColor={foregroundColor}
-      />
-    </View>
+    <TextInput
+      {...rest}
+      ref={ref}
+      value={value}
+      multiline={isMultiline}
+      scrollEnabled={scrollEnabled ?? isMultiline}
+      style={[
+        baseStyle,
+        style,
+        { color: foregroundColor },
+        Platform.OS === "android"
+          ? {
+              textAlignVertical: isMultiline ? "top" : "center",
+              includeFontPadding: false,
+            }
+          : null,
+      ]}
+    />
   );
-});
-
-const styles = StyleSheet.create({
-  wrap: {
-    flex: 1,
-    justifyContent: "center",
-  },
-  overlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    ...(Platform.OS === "android" ? { textAlignVertical: "center" as const } : {}),
-  },
-  transparentInput: {
-    backgroundColor: "transparent",
-  },
 });

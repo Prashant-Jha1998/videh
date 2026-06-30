@@ -10,8 +10,23 @@ export type GroupMentionMember = {
   isAdmin?: boolean;
 };
 
-const MENTION_BODY = `[A-Za-z0-9\u0900-\u0D7F][A-Za-z0-9\u0900-\u0D7F\\s._-]*`;
-const MENTION_SPLIT_RE = new RegExp(`(@(?:${MENTION_ALL_TOKEN}|${MENTION_BODY}))`, "gu");
+const MENTION_BODY = `[A-Za-z0-9\u0900-\u0D7F][A-Za-z0-9\u0900-\u0D7F._-]*`;
+const SINGLE_MENTION_RE = new RegExp(`^@(?:${MENTION_ALL_TOKEN}|${MENTION_BODY})`, "u");
+
+export function memberDisplayLabel(member: GroupMentionMember): string {
+  return member.name?.trim() || member.phone?.trim() || `Member ${member.id}`;
+}
+
+export function memberInitials(label: string): string {
+  const parts = label.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
+  return label.slice(0, 2).toUpperCase();
+}
+
+export function groupMemberMentionNames(members: GroupMentionMember[]): string[] {
+  const names = members.map((m) => memberDisplayLabel(m).trim()).filter(Boolean);
+  return [...new Set(names)].sort((a, b) => b.length - a.length);
+}
 
 export function filterGroupMentionMembers(
   members: GroupMentionMember[],
@@ -56,20 +71,73 @@ export function groupSenderAccentColor(senderId: string): string {
 }
 
 /** Split message text into plain + @mention segments for styled rendering. */
-export function splitChatMentionSegments(text: string): { mention: boolean; value: string }[] {
+export function splitChatMentionSegments(
+  text: string,
+  knownMentionNames: string[] = [],
+): { mention: boolean; value: string }[] {
+  if (!text.includes("@")) {
+    return [{ mention: false, value: text }];
+  }
+
+  const names = [...knownMentionNames]
+    .map((n) => n.trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+
   const segments: { mention: boolean; value: string }[] = [];
-  let last = 0;
-  for (const match of text.matchAll(MENTION_SPLIT_RE)) {
-    const idx = match.index ?? 0;
-    if (idx > last) {
-      segments.push({ mention: false, value: text.slice(last, idx) });
+  let i = 0;
+
+  while (i < text.length) {
+    const at = text.indexOf("@", i);
+    if (at === -1) {
+      segments.push({ mention: false, value: text.slice(i) });
+      break;
     }
-    segments.push({ mention: true, value: match[0] });
-    last = idx + match[0].length;
+    if (at > i) {
+      segments.push({ mention: false, value: text.slice(i, at) });
+    }
+
+    const rest = text.slice(at);
+    let matched = false;
+
+    if (rest.toLowerCase().startsWith(`@${MENTION_ALL_TOKEN}`)) {
+      const token = `@${MENTION_ALL_TOKEN}`;
+      const next = rest[token.length];
+      if (next === undefined || /\s/.test(next)) {
+        segments.push({ mention: true, value: token });
+        i = at + token.length;
+        matched = true;
+      }
+    }
+
+    if (!matched) {
+      for (const name of names) {
+        const token = `@${name}`;
+        if (!rest.startsWith(token)) continue;
+        const next = rest[token.length];
+        if (next !== undefined && !/\s/.test(next)) continue;
+        segments.push({ mention: true, value: token });
+        i = at + token.length;
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched) {
+      const single = rest.match(SINGLE_MENTION_RE);
+      if (single?.[0]) {
+        segments.push({ mention: true, value: single[0] });
+        i = at + single[0].length;
+        matched = true;
+      }
+    }
+
+    if (!matched) {
+      segments.push({ mention: false, value: "@" });
+      i = at + 1;
+    }
   }
-  if (last < text.length) {
-    segments.push({ mention: false, value: text.slice(last) });
-  }
+
   if (segments.length === 0) {
     segments.push({ mention: false, value: text });
   }
@@ -94,14 +162,4 @@ export function buildGroupSenderHeaderMap(
     prevSender = m.senderId;
   }
   return map;
-}
-
-export function memberDisplayLabel(member: GroupMentionMember): string {
-  return member.name?.trim() || member.phone?.trim() || `Member ${member.id}`;
-}
-
-export function memberInitials(label: string): string {
-  const parts = label.trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
-  return label.slice(0, 2).toUpperCase();
 }

@@ -4,7 +4,7 @@ import * as Contacts from "expo-contacts";
 import type { ExistingContact } from "expo-contacts";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
-import { useLocalSearchParams, useRouter, type Href } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect, type Href } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -40,6 +40,7 @@ import { fetchChatSharedMedia } from "@/lib/chatSharedMedia";
 import { saveImageUriToLibrary } from "@/lib/saveImageToLibrary";
 import { getApiUrl } from "@/lib/api";
 import { INDIAN_LANGUAGE_OPTIONS, languageNativeLabel } from "@/lib/indianLanguages";
+import { normalizeRouteParam } from "@/lib/routeParams";
 
 const BASE_URL = getApiUrl();
 const SCREEN_H = Dimensions.get("window").height;
@@ -136,7 +137,9 @@ export default function ChatInfoScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
+  const { id: rawId, name: rawName } = useLocalSearchParams<{ id: string; name: string }>();
+  const id = normalizeRouteParam(rawId);
+  const name = normalizeRouteParam(rawName);
   const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, reportUser, createDirectChat, updateGroupAvatar, patchChatInList, loadMessages } = useApp();
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
@@ -146,7 +149,8 @@ export default function ChatInfoScreen() {
   }), [user?.sessionToken]);
 
   const chat = chats.find((c) => c.id === id);
-  const isGroup = chat?.isGroup ?? false;
+  const [serverIsGroup, setServerIsGroup] = useState<boolean | null>(null);
+  const isGroup = serverIsGroup ?? chat?.isGroup ?? false;
 
   const [muted, setMuted] = useState(chat?.isMuted ?? false);
   const [disappearing, setDisappearing] = useState<number | null>(chat?.disappearAfterSeconds ?? null);
@@ -235,19 +239,22 @@ export default function ChatInfoScreen() {
   }, [id, isGroup, user?.dbId]);
 
   const fetchMembers = useCallback(async () => {
-    if (!id || !isGroup) return;
+    if (!id) return;
     setLoadingMembers(true);
     try {
-      const res = await fetch(`${BASE_URL}/api/chats/${id}/members`);
+      const headers: Record<string, string> = {};
+      if (user?.sessionToken) headers.Authorization = `Bearer ${user.sessionToken}`;
+      const q = user?.dbId ? `?userId=${user.dbId}` : "";
+      const res = await fetch(`${BASE_URL}/api/chats/${id}/members${q}`, { headers });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && Array.isArray(data.members)) {
         setMembers(data.members);
-        const me = data.members.find((m: GroupMember) => m.id === user?.dbId);
-        setIsAdmin(me?.is_admin ?? false);
+        const me = data.members.find((m: GroupMember) => Number(m.id) === Number(user?.dbId));
+        if (me) setIsAdmin(Boolean(me.is_admin));
       }
     } catch { }
     setLoadingMembers(false);
-  }, [id, isGroup, user?.dbId]);
+  }, [id, user?.dbId, user?.sessionToken]);
 
   const fetchMedia = useCallback(async () => {
     if (!id || !user?.dbId) return;
@@ -264,12 +271,16 @@ export default function ChatInfoScreen() {
     } catch { }
   }, [id, user?.dbId, user?.sessionToken]);
 
-  const fetchChatDetails = useCallback(async () => {
-    if (!id) return;
+  const fetchChatDetails = useCallback(async (): Promise<boolean> => {
+    if (!id) return false;
     try {
-      const res = await fetch(`${BASE_URL}/api/chats/${id}/details`);
+      const headers: Record<string, string> = {};
+      if (user?.sessionToken) headers.Authorization = `Bearer ${user.sessionToken}`;
+      const res = await fetch(`${BASE_URL}/api/chats/${id}/details`, { headers });
       const data = await res.json();
       if (data.success && data.chat) {
+        const group = Boolean(data.chat.is_group);
+        setServerIsGroup(group);
         setDisappearing(data.chat.disappear_after_seconds ?? null);
         setGroupDesc(data.chat.group_description ?? "");
         setDescInput(data.chat.group_description ?? "");
@@ -280,12 +291,17 @@ export default function ChatInfoScreen() {
           setGroupMessagingPolicy("everyone");
         }
         setAutoTranslateEnabled(Boolean(data.chat.auto_translate_enabled));
+        if (data.chat.viewer_is_admin !== undefined) {
+          setIsAdmin(Boolean(data.chat.viewer_is_admin));
+        }
+        return group;
       }
     } catch { }
-  }, [id]);
+    return serverIsGroup ?? chat?.isGroup ?? false;
+  }, [id, user?.sessionToken, serverIsGroup, chat?.isGroup]);
 
   const fetchTranslationSettings = useCallback(async () => {
-    if (!id || !user?.dbId || !isGroup) return;
+    if (!id || !user?.dbId) return;
     try {
       const res = await fetch(
         `${BASE_URL}/api/chats/${id}/translation-settings?userId=${user.dbId}`,
@@ -299,7 +315,18 @@ export default function ChatInfoScreen() {
         setEffectiveLangLabel(data.effectiveLangName ?? languageNativeLabel(data.effectiveLang));
       }
     } catch { }
-  }, [id, isGroup, user?.dbId, user?.sessionToken]);
+  }, [id, user?.dbId, user?.sessionToken]);
+
+  const refreshScreenData = useCallback(() => {
+    if (!id) return;
+    void (async () => {
+      const group = await fetchChatDetails();
+      void fetchMembers();
+      void fetchMedia();
+      if (group) void fetchTranslationSettings();
+      else void fetchContactInfo();
+    })();
+  }, [id, fetchChatDetails, fetchMembers, fetchTranslationSettings, fetchMedia, fetchContactInfo]);
 
   useEffect(() => {
     if (chat?.disappearAfterSeconds !== undefined) {
@@ -308,12 +335,14 @@ export default function ChatInfoScreen() {
   }, [chat?.disappearAfterSeconds]);
 
   useEffect(() => {
-    fetchContactInfo();
-    fetchMembers();
-    fetchChatDetails();
-    fetchTranslationSettings();
-    fetchMedia();
-  }, [fetchContactInfo, fetchMembers, fetchChatDetails, fetchTranslationSettings, fetchMedia]);
+    refreshScreenData();
+  }, [refreshScreenData]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshScreenData();
+    }, [refreshScreenData]),
+  );
 
   const toggleMute = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -479,7 +508,14 @@ export default function ChatInfoScreen() {
   };
 
   const toggleGroupAutoTranslate = async (enabled: boolean) => {
-    if (!isAdmin) return;
+    if (!isAdmin) {
+      Alert.alert("Admin only", "Only a group admin can turn auto-translate on or off.");
+      return;
+    }
+    if (!user?.sessionToken) {
+      Alert.alert("Sign in required", "Please sign in again to change this setting.");
+      return;
+    }
     try {
       const res = await fetch(`${BASE_URL}/api/chats/${id}/auto-translate`, {
         method: "PUT",
@@ -501,12 +537,16 @@ export default function ChatInfoScreen() {
   };
 
   const persistMemberTranslation = async (patch: { translateLang?: string | null; personalEnabled?: boolean }) => {
+    if (!user?.dbId) {
+      Alert.alert("Sign in required", "Please sign in again to save language settings.");
+      return;
+    }
     try {
       const res = await fetch(`${BASE_URL}/api/chats/${id}/translation-settings`, {
         method: "PUT",
         headers: authedJsonHeaders(),
         body: JSON.stringify({
-          userId: user?.dbId,
+          userId: user.dbId,
           translateLang: patch.translateLang,
           personalEnabled: patch.personalEnabled,
         }),
@@ -517,6 +557,7 @@ export default function ChatInfoScreen() {
         if (patch.personalEnabled !== undefined) setMemberAutoTranslate(patch.personalEnabled);
         setEffectiveLangLabel(data.effectiveLangName ?? languageNativeLabel(data.effectiveLang));
         void loadMessages(id!);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } else {
         Alert.alert("Could not save", data.message ?? "Try again.");
       }
@@ -1122,10 +1163,15 @@ export default function ChatInfoScreen() {
                 </TouchableOpacity>
               )}
             </View>
+            {loadingMembers && members.length === 0 ? (
+              <View style={styles.membersLoading}>
+                <ActivityIndicator color={colors.primary} />
+              </View>
+            ) : null}
             {members.map((m) => {
               const mInitials = (m.name || "?").slice(0, 2).toUpperCase();
               const mHue = ((m.name ?? "?").charCodeAt(0) * 37) % 360;
-              const isMe = m.id === user?.dbId;
+              const isMe = Number(m.id) === Number(user?.dbId);
               return (
                 <TouchableOpacity
                   key={m.id}
@@ -1582,6 +1628,7 @@ const styles = StyleSheet.create({
   infoValue: { fontSize: 12, marginTop: 2 },
 
   membersHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
+  membersLoading: { paddingVertical: 20, alignItems: "center" },
   addMemberBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
   addMemberText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   memberRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, borderBottomWidth: 0.5, gap: 12 },

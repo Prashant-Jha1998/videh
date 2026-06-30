@@ -1224,6 +1224,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         isMuted: c.isMuted,
       })),
       activeChatId: chatId,
+      viewerDbId: userRef.current?.dbId ?? null,
     });
   }, [chats]);
 
@@ -1238,8 +1239,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         isMuted: c.isMuted,
       })),
       activeChatId: activeChatIdRef.current,
+      viewerDbId: user?.dbId ?? null,
     });
-  }, [chats]);
+  }, [chats, user?.dbId]);
 
   const loadMessagesAfterHintTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -1802,31 +1804,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         if (cid) {
           const uid = userRef.current?.dbId;
-          void deliverPremiumChatMessageNotification({
-            chatId: cid,
-            messageId,
-            body: notifyBody,
-            senderName,
-            reloadChats: uid
-              ? async () => {
-                  await loadChats(uid);
-                }
-              : undefined,
-          }).then((delivered) => {
-            agentDebugLog(
-              "AppContext.tsx:onChatEvent",
-              "SSE message event",
-              {
-                chatId: cid,
-                messageId,
-                appState: AppState.currentState,
-                activeChatId: activeChatIdRef.current,
-                deliveredPremiumNotify: delivered,
-              },
-              "H1",
-              "post-fix",
-            );
-          });
+          const isOwnMessage =
+            senderId != null && uid != null && String(senderId) === String(uid);
+          if (!isOwnMessage) {
+            void deliverPremiumChatMessageNotification({
+              chatId: cid,
+              messageId,
+              senderId,
+              body: notifyBody,
+              senderName,
+              reloadChats: uid
+                ? async () => {
+                    await loadChats(uid);
+                  }
+                : undefined,
+            }).then((delivered) => {
+              agentDebugLog(
+                "AppContext.tsx:onChatEvent",
+                "SSE message event",
+                {
+                  chatId: cid,
+                  messageId,
+                  appState: AppState.currentState,
+                  activeChatId: activeChatIdRef.current,
+                  deliveredPremiumNotify: delivered,
+                },
+                "H1",
+                "post-fix",
+              );
+            });
+          }
         }
       } catch {
         /* ignore malformed SSE payload */

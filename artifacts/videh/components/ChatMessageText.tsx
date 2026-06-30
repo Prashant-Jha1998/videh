@@ -11,17 +11,35 @@ type Props = {
   style?: TextStyle | TextStyle[];
   linkColor?: string;
   mentionColor?: string;
+  knownMentionNames?: string[];
 };
 
-export function renderChatMentionParts(text: string, mentionColor = "#5B4FE8") {
-  const rendered = renderFormattedChatText(text, { mentionColor });
+export function renderChatMentionParts(
+  text: string,
+  mentionColor = "#5B4FE8",
+  knownMentionNames?: string[],
+  foregroundColor?: string,
+) {
+  const rendered = renderFormattedChatText(text, {
+    mentionColor,
+    knownMentionNames,
+    foregroundColor,
+  });
   if (typeof rendered === "string") return rendered;
   return rendered;
 }
 
 /** Videh long message text with @mentions and Read more / Read less. */
-export function ChatMessageText({ text, style, linkColor = "#027EB5", mentionColor }: Props) {
+export function ChatMessageText({
+  text,
+  style,
+  linkColor = "#027EB5",
+  mentionColor,
+  knownMentionNames,
+}: Props) {
   const resolvedMentionColor = mentionColor ?? "#1FA855";
+  const flatStyle = Array.isArray(style) ? Object.assign({}, ...style) : style;
+  const foregroundColor = typeof flatStyle?.color === "string" ? flatStyle.color : undefined;
   const [expanded, setExpanded] = useState(false);
   const collapsible = useMemo(() => shouldCollapseChatMessage(text), [text]);
   const preview = useMemo(() => getCollapsedChatMessagePreview(text), [text]);
@@ -34,7 +52,7 @@ export function ChatMessageText({ text, style, linkColor = "#027EB5", mentionCol
   if (!collapsible || expanded) {
     return (
       <Text style={style}>
-        {renderChatMentionParts(text, resolvedMentionColor)}
+        {renderChatMentionParts(text, resolvedMentionColor, knownMentionNames, foregroundColor)}
         {collapsible && expanded ? (
           <Text style={linkStyle} onPress={() => setExpanded(false)}>
             {" "}
@@ -47,7 +65,7 @@ export function ChatMessageText({ text, style, linkColor = "#027EB5", mentionCol
 
   return (
     <Text style={style}>
-      {renderChatMentionParts(preview, resolvedMentionColor)}
+      {renderChatMentionParts(preview, resolvedMentionColor, knownMentionNames, foregroundColor)}
       <Text style={linkStyle} onPress={() => setExpanded(true)}>
         {" "}
         Read more

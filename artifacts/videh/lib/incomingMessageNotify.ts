@@ -16,6 +16,7 @@ export type NotificationChatSnapshot = {
 
 let chatsSnapshot: NotificationChatSnapshot[] = [];
 let activeChatId: string | null = null;
+let viewerDbId: number | null = null;
 const recentNotifyAt = new Map<string, number>();
 
 const DEDUPE_MS = 4000;
@@ -23,9 +24,19 @@ const DEDUPE_MS = 4000;
 export function setNotificationRuntimeState(state: {
   chats: NotificationChatSnapshot[];
   activeChatId: string | null;
+  viewerDbId?: number | null;
 }): void {
   chatsSnapshot = state.chats;
   activeChatId = state.activeChatId;
+  if (state.viewerDbId !== undefined) viewerDbId = state.viewerDbId;
+}
+
+export function isOwnOutgoingChatMessage(
+  senderId: string | number | undefined | null,
+  dbId: number | undefined | null = viewerDbId,
+): boolean {
+  if (senderId == null || dbId == null) return false;
+  return String(senderId) === String(dbId);
 }
 
 export function setNotificationActiveChatId(chatId: string | null): void {
@@ -56,6 +67,7 @@ function findChat(chatId: string): NotificationChatSnapshot | undefined {
 export type DeliverIncomingMessageOpts = {
   chatId: string;
   messageId?: string;
+  senderId?: string;
   senderName?: string;
   body?: string;
   avatarUrl?: string | null;
@@ -68,6 +80,17 @@ export type DeliverIncomingMessageOpts = {
 export async function deliverPremiumChatMessageNotification(
   opts: DeliverIncomingMessageOpts,
 ): Promise<boolean> {
+  if (isOwnOutgoingChatMessage(opts.senderId)) {
+    agentDebugLog(
+      "incomingMessageNotify.ts:deliver",
+      "skipped own outgoing message",
+      { chatId: opts.chatId, senderId: opts.senderId },
+      "H1",
+      "post-fix",
+    );
+    return false;
+  }
+
   if (Platform.OS === "web") {
     if (opts.reloadChats) {
       try {
@@ -159,6 +182,7 @@ export async function deliverPremiumChatMessageNotification(
   await showChatMessageNotification({
     chatId: opts.chatId,
     messageId: opts.messageId,
+    senderId: opts.senderId,
     senderName,
     body,
     avatarUrl: opts.avatarUrl ?? chat?.avatar ?? null,

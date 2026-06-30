@@ -46,7 +46,7 @@ import {
 import type { CallKeepHandlerPayload } from "@/lib/callKeepBridge";
 import { emitChatMessageSignal, type ChatMessageSignal } from "@/lib/chatMessageEvents";
 import { extractChatPushBody } from "@/lib/chatPushPayload";
-import { getNotificationActiveChatId } from "@/lib/incomingMessageNotify";
+import { getNotificationActiveChatId, isOwnOutgoingChatMessage } from "@/lib/incomingMessageNotify";
 import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
 import { INCOMING_RING_TIMEOUT_MS, INCOMING_CALL_POLL_ACTIVE_MS, INCOMING_CALL_POLL_BACKGROUND_MS } from "@/lib/callConstants";
 import { maybePromptDisableBatteryOptimization } from "@/lib/incomingCallBattery";
@@ -156,7 +156,13 @@ function RootLayoutNav() {
   const respondToIncomingCallRef = useRef<(action: "accept" | "decline", msg?: string) => void>(() => {});
   const handledLaunchCallNotificationRef = useRef(false);
   const incomingRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewerDbIdRef = useRef<number | null>(null);
   const pathname = usePathname();
+
+  useEffect(() => {
+    viewerDbIdRef.current = user?.dbId ?? null;
+  }, [user?.dbId]);
+
   const onCallRoute = /\/call\//.test(pathname ?? "");
   const activeCallChatRouteMatch = pathname?.match(/\/chat\/([^/?#]+)/);
   const onActiveCallChatRoute =
@@ -633,6 +639,21 @@ function RootLayoutNav() {
         const isChatMessage =
           data?.notificationKind === "chat_message"
           || data?.kind === "message";
+        const isOwnMessage =
+          isChatMessage
+          && isOwnOutgoingChatMessage(
+            data?.senderId != null ? String(data.senderId) : undefined,
+            viewerDbIdRef.current,
+          );
+        if (isOwnMessage) {
+          return {
+            shouldShowAlert: false,
+            shouldPlaySound: false,
+            shouldShowBanner: false,
+            shouldShowList: false,
+            shouldSetBadge: false,
+          };
+        }
         const inOpenChat =
           isChatMessage
           && data?.chatId != null
@@ -690,6 +711,12 @@ function RootLayoutNav() {
         data.notificationKind === "chat_message"
         || data.kind === "message";
       if (isChatMessage && data.chatId) {
+        if (isOwnOutgoingChatMessage(
+          data.senderId != null ? String(data.senderId) : undefined,
+          viewerDbIdRef.current,
+        )) {
+          return;
+        }
         const chatId = String(data.chatId);
         emitChatMessageSignal({
           chatId,

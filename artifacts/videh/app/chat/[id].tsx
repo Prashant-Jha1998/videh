@@ -116,6 +116,11 @@ import {
   CHAT_TYPING_FOOTER_PX,
   CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
 } from "@/lib/chatScrollBehavior";
+import {
+  linkColorForBubbleBackground,
+  mutedTextColorForBubbleBackground,
+  textColorForBubbleBackground,
+} from "@/lib/chatBubbleColors";
 import { extractUrls, primaryUrlFromText } from "@/lib/chatUrls";
 import { ComposerLinkPreview } from "@/components/ComposerLinkPreview";
 import { pickWebFile } from "@/lib/web/webFilePicker";
@@ -151,6 +156,7 @@ import {
   buildGroupSenderHeaderMap,
   filterGroupMentionMembers,
   groupSenderAccentColor,
+  groupMemberMentionNames,
   memberDisplayLabel,
   memberInitials,
   MENTION_ALL_TOKEN,
@@ -1252,6 +1258,9 @@ export default function ChatScreen() {
   const [translatedMsgs, setTranslatedMsgs] = useState<Record<string, string>>({});
   const [showOriginalMsgs, setShowOriginalMsgs] = useState<Record<string, boolean>>({});
 
+  // Group @mentions + header member count
+  const [groupMembers, setGroupMembers] = useState<GroupMentionMember[]>([]);
+
   // Forward screen opens via /chat/forward route (full screen, WhatsApp-style).
 
   // Share contact â€” full-screen picker (Alert.alert only fits ~3 buttons on Android)
@@ -1583,13 +1592,16 @@ export default function ChatScreen() {
     if (remoteTypingNames.length > 0) {
       return formatTypingLabel(remoteTypingNames, chat?.isGroup);
     }
-    if (chat?.isGroup) return `${chat.members?.length ?? ""} members`;
+    if (chat?.isGroup) {
+      const n = groupMembers.length;
+      return n > 0 ? `${n} members` : "Group";
+    }
     if (initializing) return "connecting...";
     const fromPresence = formatPresenceSubtitle(peerPresence ?? undefined);
     if (fromPresence) return fromPresence;
     if (chat?.isOnline) return "online";
     return "";
-  }, [remoteTypingNames, chat?.isGroup, chat?.members?.length, chat?.isOnline, initializing, peerPresence]);
+  }, [remoteTypingNames, chat?.isGroup, groupMembers.length, chat?.isOnline, initializing, peerPresence]);
 
   const [groupSendPermission, setGroupSendPermission] = useState<{ canSend: boolean; policy: string } | null>(null);
   const [blockState, setBlockState] = useState<{ iBlockedThem: boolean; theyBlockedMe: boolean }>({ iBlockedThem: false, theyBlockedMe: false });
@@ -2315,7 +2327,6 @@ export default function ChatScreen() {
   }, [remoteTypingNames.length, searching, scrollToLatestIfFollowing, blocksAutoScroll]);
 
   // @mentions state
-  const [groupMembers, setGroupMembers] = useState<GroupMentionMember[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null = not in mention mode
 
   // Wallpaper
@@ -3132,11 +3143,6 @@ export default function ChatScreen() {
       ? extractUrls(bubblePrimaryText)
       : [];
     const isManyForwarded = (item.forwardCount ?? 0) >= 5;
-    const metaTextColor = isImage || isAlbum || isLocation
-      ? "rgba(255,255,255,0.92)"
-      : isMe
-        ? "rgba(0,0,0,0.55)"
-        : colors.mutedForeground;
 
     const showSvgTail = !isImage && !isVideo && !isAlbum && !isLocation && !isViewOnceOpened && !isViewOncePending && !isTemplate;
     const isPlainText =
@@ -3188,11 +3194,6 @@ export default function ChatScreen() {
       outputRange: ["rgba(255, 193, 7, 0)", "rgba(255, 193, 7, 0.38)"],
     });
     const quoteAccent = colors.primary;
-    const readMoreLinkColor = isMe
-      ? colors.isDark
-        ? "#53BDEB"
-        : "#027EB5"
-      : colors.primary;
     const selectionRowTint = colors.isDark ? "rgba(0, 168, 132, 0.2)" : "rgba(183, 223, 165, 0.55)";
     const deletedMeLabel = colors.isDark ? "rgba(255,255,255,0.72)" : "rgba(0,0,0,0.52)";
     const deletedMeIcon = colors.isDark ? "rgba(255,255,255,0.58)" : "rgba(0,0,0,0.42)";
@@ -3211,6 +3212,24 @@ export default function ChatScreen() {
       : isMe
         ? colors.chatBubbleSent
         : colors.chatBubbleReceived;
+    const bubbleBgHex =
+      typeof bubbleFill === "string" && bubbleFill !== "transparent"
+        ? bubbleFill
+        : isMe
+          ? colors.chatBubbleSent
+          : colors.chatBubbleReceived;
+    const bubbleTextColor = textColorForBubbleBackground(bubbleBgHex, {
+      darkText: colors.foreground,
+      lightText: "#FFFFFF",
+    });
+    const bubbleMutedTextColor = mutedTextColorForBubbleBackground(bubbleBgHex);
+    const readMoreLinkColor = linkColorForBubbleBackground(bubbleBgHex, {
+      lightLink: colors.isDark ? "#53BDEB" : "#93C5FD",
+      darkLink: isMe ? (colors.isDark ? "#027EB5" : "#027EB5") : colors.primary,
+    });
+    const metaTextColor = isImage || isAlbum || isLocation
+      ? "rgba(255,255,255,0.92)"
+      : bubbleMutedTextColor;
     const msgRow = (
       <View style={[styles.msgRowOuter, isSelected && styles.msgRowOuterBleed]}>
         {isFlashing ? (
@@ -3243,7 +3262,9 @@ export default function ChatScreen() {
           style={
             canQuickForward
               ? [styles.msgRowInner, styles.msgRowInnerCenter, isMe ? styles.msgRowInnerRight : styles.msgRowInnerLeft]
-              : styles.msgRowSingle
+              : isGroupIncoming
+                ? styles.msgRowGroupIncoming
+                : styles.msgRowSingle
           }
         >
         {canQuickForward && isMe ? (
@@ -3277,7 +3298,12 @@ export default function ChatScreen() {
             });
           }}
           delayLongPress={400}
-          style={[styles.msgWrap, isMe ? styles.msgRight : styles.msgLeft, canQuickForward ? styles.msgWrapInRow : null]}
+          style={[
+            styles.msgWrap,
+            isMe ? styles.msgRight : styles.msgLeft,
+            isGroupIncoming ? styles.msgWrapGroupIncoming : null,
+            canQuickForward ? styles.msgWrapInRow : null,
+          ]}
         >
         {/* Forwarded label */}
         {item.isForwarded && !isDeleted && (
@@ -3432,7 +3458,7 @@ export default function ChatScreen() {
                 const cap = albumBubbleCaptionText(item.text, albumUrls.length);
                 if (!cap) return null;
                 return (
-                  <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{cap}</Text>
+                  <Text style={[styles.msgText, { color: bubbleTextColor, paddingHorizontal: 8, paddingTop: 4, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{cap}</Text>
                 );
               })()}
             </>
@@ -3475,7 +3501,7 @@ export default function ChatScreen() {
                 </View>
               )}
               {item.text && item.text !== "ðŸ“· Photo" && item.text !== "ðŸŽ¥ Video" && item.text !== "ðŸ” View once" && (
-                <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{item.text}</Text>
+                <Text style={[styles.msgText, { color: bubbleTextColor, paddingHorizontal: 8, paddingTop: 4, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{item.text}</Text>
               )}
             </>
           ) : isVideo && displayMediaUri ? (
@@ -3507,7 +3533,7 @@ export default function ChatScreen() {
                 </View>
               )}
               {item.text && item.text !== "ðŸŽ¥ Video" && item.text !== "ðŸ” View once" && (
-                <Text style={[styles.msgText, { color: colors.foreground, paddingHorizontal: 8, paddingTop: 4, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{item.text}</Text>
+                <Text style={[styles.msgText, { color: bubbleTextColor, paddingHorizontal: 8, paddingTop: 4, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{item.text}</Text>
               )}
             </>
           ) : isCall && callMeta ? (
@@ -3539,6 +3565,7 @@ export default function ChatScreen() {
               item={item}
               isMe={isMe}
               colors={colors}
+              bubbleBackground={bubbleBgHex}
               sessionToken={user?.sessionToken}
               onPress={() => handleDocumentPress(item)}
               onCancelUpload={
@@ -3571,10 +3598,15 @@ export default function ChatScreen() {
                 style={[
                   styles.msgText,
                   styles.compactFlowText,
-                  { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 20 * chatFontScale },
+                  { color: bubbleTextColor, fontSize: 15 * chatFontScale, lineHeight: 20 * chatFontScale },
                 ]}
               >
-                {renderChatMentionParts(bubblePrimaryText, bubbleMentionColor)}
+                {renderChatMentionParts(
+                  bubblePrimaryText,
+                  bubbleMentionColor,
+                  knownMentionNames,
+                  bubbleTextColor,
+                )}
                 <Text style={[styles.msgTime, styles.msgTimeInline, { color: metaTextColor }]}>
                   {item.isEdited ? " edited" : ""}
                   {"\u00A0\u00A0"}
@@ -3593,12 +3625,13 @@ export default function ChatScreen() {
                 text={bubblePrimaryText}
                 linkColor={readMoreLinkColor}
                 mentionColor={bubbleMentionColor}
-                style={[styles.msgText, { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}
+                knownMentionNames={knownMentionNames}
+                style={[styles.msgText, { color: bubbleTextColor, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}
               />
               {urlsForBubble.length > 0 && (
                 <TouchableOpacity onPress={() => Linking.openURL(urlsForBubble[0])} style={styles.linkPreview}>
-                  <Ionicons name="link-outline" size={13} color={colors.primary} />
-                  <Text style={[styles.linkText, { color: colors.primary }]} numberOfLines={1}>{urlsForBubble[0]}</Text>
+                  <Ionicons name="link-outline" size={13} color={readMoreLinkColor} />
+                  <Text style={[styles.linkText, { color: readMoreLinkColor }]} numberOfLines={1}>{urlsForBubble[0]}</Text>
                 </TouchableOpacity>
               )}
               {autoTranslationActive && (
@@ -3622,7 +3655,7 @@ export default function ChatScreen() {
               {manualTranslation && !autoTranslationActive && (
                 <View style={styles.translatedBox}>
                   <Text style={styles.translatedLabel}>Translated</Text>
-                  <Text style={[styles.msgText, { color: colors.foreground, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{manualTranslation}</Text>
+                  <Text style={[styles.msgText, { color: bubbleTextColor, fontSize: 15 * chatFontScale, lineHeight: 21 * chatFontScale }]}>{manualTranslation}</Text>
                 </View>
               )}
             </>
@@ -3631,7 +3664,7 @@ export default function ChatScreen() {
           {/* Footer: time + edited + ticks (compact short text uses inline row above) */}
           {!isDeleted && !compactTextBubble ? (
             <View style={[styles.msgMeta, (isImage || isVideo || isAlbum || isLocation) && styles.msgMetaOnMedia, isCall && styles.msgMetaCall]}>
-              {item.isEdited && <Text style={[styles.editedLabel, { color: colors.mutedForeground }]}>edited </Text>}
+              {item.isEdited && <Text style={[styles.editedLabel, { color: bubbleMutedTextColor }]}>edited </Text>}
               <Text style={[styles.msgTime, { color: metaTextColor }]}>
                 {formatChatBubbleTime(item.timestamp)}
               </Text>
@@ -4233,6 +4266,11 @@ export default function ChatScreen() {
     return map;
   }, [groupMembers]);
 
+  const knownMentionNames = useMemo(
+    () => groupMemberMentionNames(groupMembers),
+    [groupMembers],
+  );
+
   const groupSenderHeaderById = useMemo(
     () => buildGroupSenderHeaderMap(messagesForDisplay, !!chat?.isGroup),
     [messagesForDisplay, chat?.isGroup],
@@ -4322,7 +4360,7 @@ export default function ChatScreen() {
                   styles.mentionRow,
                   i < mentionResults.length - 1 && { borderBottomWidth: 0.5, borderBottomColor: colors.border },
                 ]}
-                onPress={() => insertMention(m.name)}
+                onPress={() => insertMention(memberDisplayLabel(m))}
                 activeOpacity={0.7}
               >
                 <GroupMemberAvatar label={label} avatarUrl={m.avatarUrl} size={40} />
@@ -4455,10 +4493,8 @@ export default function ChatScreen() {
               ) : (
                 <ChatComposerField
                   ref={inputRef}
-                  style={styles.inputField}
                   baseStyle={styles.inputField}
                   foregroundColor={colors.foreground}
-                  mentionColor={colors.primary}
                   placeholder={editTarget ? t("chat.editPlaceholder") : t("chat.placeholder")}
                   placeholderTextColor={colors.mutedForeground}
                   value={inputVal}
@@ -5453,9 +5489,16 @@ const styles = StyleSheet.create({
   mentionName: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
   mentionSub: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
   mentionAdminBadge: { fontSize: 12, fontFamily: "Inter_500Medium" },
-  groupIncomingRow: { flexDirection: "row", alignItems: "flex-end", width: "100%", paddingLeft: 4, gap: 6 },
-  groupAvatarCol: { width: GROUP_MSG_AVATAR_SIZE + 2, alignItems: "center", justifyContent: "flex-end", paddingBottom: 2 },
-  groupIncomingCol: { flex: 1, minWidth: 0, maxWidth: "88%" },
+  groupIncomingRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "flex-start",
+    width: "100%",
+    paddingLeft: 4,
+    gap: 6,
+  },
+  groupAvatarCol: { width: GROUP_MSG_AVATAR_SIZE + 2, alignItems: "center", justifyContent: "flex-start", flexShrink: 0 },
+  groupIncomingCol: { flex: 1, minWidth: 0, alignItems: "flex-start" },
   groupIncomingColFull: { flex: 1, minWidth: 0 },
   groupSenderName: { fontSize: 13, fontFamily: "Inter_600SemiBold", marginBottom: 2, marginLeft: 2, paddingRight: 8 },
   groupSenderAdmin: { fontSize: 12, fontFamily: "Inter_400Regular" },
@@ -5512,6 +5555,8 @@ const styles = StyleSheet.create({
   msgRowInnerLeft: { alignSelf: "flex-start" },
   msgRowInnerRight: { alignSelf: "flex-end" },
   msgRowSingle: { width: "100%" },
+  msgRowGroupIncoming: { alignSelf: "flex-start", maxWidth: "100%" },
+  msgWrapGroupIncoming: { alignSelf: "flex-start", maxWidth: W * 0.82 },
   msgWrapInRow: { flexShrink: 1, maxWidth: W * 0.82 },
   mediaForwardBtn: {
     width: 36,
@@ -5941,15 +5986,17 @@ const styles = StyleSheet.create({
   },
   inputField: {
     flex: 1,
+    alignSelf: "center",
     paddingHorizontal: 4,
-    paddingTop: Platform.OS === "ios" ? 11 : 10,
-    paddingBottom: Platform.OS === "ios" ? 11 : 10,
+    paddingTop: Platform.OS === "ios" ? 11 : 8,
+    paddingBottom: Platform.OS === "ios" ? 11 : 8,
     fontSize: 15,
+    lineHeight: 20,
     fontFamily: "Inter_400Regular",
+    fontWeight: "400",
     minHeight: 44,
     maxHeight: 120,
     backgroundColor: "transparent",
-    ...(Platform.OS === "android" ? { textAlignVertical: "center" as const } : {}),
   },
   sendBtn: {
     width: 44,

@@ -12,6 +12,12 @@ import {
 import type { Message } from "@/context/AppContext";
 import { PdfPagePreview } from "@/components/web/PdfPagePreview";
 import { extensionFromFilename } from "@/lib/normalizeMessage";
+import {
+  isColorDark,
+  linkColorForBubbleBackground,
+  mutedTextColorForBubbleBackground,
+  textColorForBubbleBackground,
+} from "@/lib/chatBubbleColors";
 
 type Colors = {
   foreground: string;
@@ -27,9 +33,10 @@ type Props = {
   onSaveAs?: () => void;
   onCancelUpload?: () => void;
   sessionToken?: string | null;
+  bubbleBackground?: string;
 };
 
-export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, onCancelUpload, sessionToken }: Props) {
+export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, onCancelUpload, sessionToken, bubbleBackground }: Props) {
   const filename = documentFilenameFromText(item.text);
   const caption = documentCaptionFromText(item.text);
   const pageCount = documentPagesFromText(item.text);
@@ -42,8 +49,9 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, o
   const transferPercent = uploading ? (uploadPct ?? 0) : downloading ? (downloadPct ?? 0) : 0;
   const failed = item.uploadFailed === true;
   const ready = !!item.localMediaUri && !transferring && !failed;
-  const titleColor = isMe ? (colors.isDark ? colors.foreground : "#14131F") : colors.foreground;
-  const metaColor = isMe ? (colors.isDark ? "rgba(255,255,255,0.72)" : "rgba(17,27,33,0.55)") : colors.mutedForeground;
+  const bubbleBg = bubbleBackground ?? (isMe ? "#E0DCFF" : "#FFFFFF");
+  const titleColor = textColorForBubbleBackground(bubbleBg, { darkText: colors.foreground });
+  const metaColor = mutedTextColorForBubbleBackground(bubbleBg);
   const ringColor = "#5B4FE8";
 
   let metaLine = richDocumentMetaLine(filename, item.fileSizeBytes, pageCount);
@@ -55,12 +63,10 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, o
   const isPdf = extensionFromFilename(filename) === "pdf";
   const showPdfPreview = isPdf && !!item.mediaUrl && !failed;
 
-  const actionTint = isMe
-    ? colors.isDark ? "#53BDEB" : "#027EB5"
-    : colors.isDark ? "#53BDEB" : "#027EB5";
+  const actionTint = linkColorForBubbleBackground(bubbleBg);
 
-  const ringTrack = isMe
-    ? colors.isDark ? "rgba(255,255,255,0.22)" : "rgba(0,0,0,0.12)"
+  const ringTrack = isColorDark(bubbleBg)
+    ? "rgba(255,255,255,0.22)"
     : "rgba(0,0,0,0.12)";
 
   return (
@@ -135,7 +141,13 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, o
             <Ionicons
               name={failed ? "refresh-outline" : ready ? "document-outline" : "arrow-down-circle-outline"}
               size={24}
-              color={isMe ? (colors.isDark ? "rgba(255,255,255,0.85)" : "rgba(17,27,33,0.45)") : colors.mutedForeground}
+              color={
+                isMe
+                  ? isColorDark(bubbleBg)
+                    ? "rgba(255,255,255,0.85)"
+                    : "rgba(17,27,33,0.45)"
+                  : colors.mutedForeground
+              }
             />
           </View>
         )}

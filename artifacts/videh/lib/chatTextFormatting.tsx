@@ -25,9 +25,12 @@ export function splitBoldSegments(text: string): { bold: boolean; value: string 
 }
 
 /** Mentions first, then bold inside non-mention runs. */
-export function parseChatTextSegments(text: string): ChatTextSegment[] {
+export function parseChatTextSegments(
+  text: string,
+  knownMentionNames: string[] = [],
+): ChatTextSegment[] {
   const segments: ChatTextSegment[] = [];
-  for (const mentionSeg of splitChatMentionSegments(text)) {
+  for (const mentionSeg of splitChatMentionSegments(text, knownMentionNames)) {
     if (mentionSeg.mention) {
       segments.push({ kind: "mention", value: mentionSeg.value });
       continue;
@@ -46,8 +49,10 @@ export function parseChatTextSegments(text: string): ChatTextSegment[] {
 
 export type FormattedChatTextOptions = {
   mentionColor?: string;
+  foregroundColor?: string;
   baseStyle?: TextStyle;
   boldStyle?: TextStyle;
+  knownMentionNames?: string[];
 };
 
 export function renderFormattedChatText(
@@ -56,7 +61,11 @@ export function renderFormattedChatText(
 ): React.ReactNode {
   const mentionColor = opts.mentionColor ?? "#1FA855";
   const boldStyle: TextStyle = opts.boldStyle ?? { fontFamily: "Inter_700Bold" };
-  const segments = parseChatTextSegments(text);
+  const plainColor =
+    opts.foregroundColor
+    ?? (typeof opts.baseStyle?.color === "string" ? opts.baseStyle.color : undefined);
+  const plainStyle: TextStyle | undefined = plainColor ? { color: plainColor } : undefined;
+  const segments = parseChatTextSegments(text, opts.knownMentionNames ?? []);
   if (segments.length === 1 && segments[0]!.kind === "plain") {
     return segments[0]!.value;
   }
@@ -70,11 +79,15 @@ export function renderFormattedChatText(
     }
     if (seg.kind === "bold") {
       return (
-        <Text key={i} style={boldStyle}>
+        <Text key={i} style={[boldStyle, plainStyle]}>
           {seg.value}
         </Text>
       );
     }
-    return <Text key={i}>{seg.value}</Text>;
+    return (
+      <Text key={i} style={plainStyle}>
+        {seg.value}
+      </Text>
+    );
   });
 }

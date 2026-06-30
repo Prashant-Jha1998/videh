@@ -1488,6 +1488,7 @@ router.put("/:chatId/wallpaper", async (req: Request, res: Response) => {
 // Get chat details (for chat-info screen)
 router.get("/:chatId/details", async (req: Request, res: Response) => {
   const { chatId } = req.params;
+  const viewerId = getAuthUserId(req);
   try {
     await ensureGroupMetadataColumns();
     const result = await query(`
@@ -1498,7 +1499,16 @@ router.get("/:chatId/details", async (req: Request, res: Response) => {
       FROM chats WHERE id = $1
     `, [chatId]);
     if (result.rows.length === 0) { res.status(404).json({ success: false }); return; }
-    res.json({ success: true, chat: result.rows[0] });
+    const chat = result.rows[0] as Record<string, unknown>;
+    let viewerIsAdmin = false;
+    if (viewerId) {
+      const adminRes = await query(
+        "SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+        [chatId, viewerId],
+      );
+      viewerIsAdmin = Boolean(adminRes.rows[0]?.is_admin);
+    }
+    res.json({ success: true, chat: { ...chat, viewer_is_admin: viewerIsAdmin } });
   } catch { res.status(500).json({ success: false }); }
 });
 
