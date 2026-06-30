@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v127-group-translate-share"
+        "key": "apk-release-v128-translation-fix"
       }
     },
     "production": {

@@ -63,33 +63,113 @@ export function normalizeLangCode(lang: string | null | undefined): TranslateLan
 }
 
 export function contentHash(text: string): string {
-  return crypto.createHash("sha256").update(text, "utf8").digest("hex");
+  return crypto.createHash("sha256").update(`${text}|v2`, "utf8").digest("hex");
 }
 
-/** Protect URLs, emails, mentions, and phone numbers from being altered by MT. */
+const PLACEHOLDER_PREFIX = "{{VIDEH";
+const PLACEHOLDER_SUFFIX = "}}";
+
+/** Protect URLs, emails, and phone numbers from being altered by MT. */
 export function protectTranslationTokens(input: string): { text: string; tokens: string[] } {
   const tokens: string[] = [];
   const patterns = [
     /https?:\/\/[^\s<>"']+/gi,
     /\bwww\.[^\s<>"']+/gi,
     /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g,
-    /@[\w][\w.]*/g,
     /\+\d[\d\s-]{8,}\d/g,
-    /\b\d{10,}\b/g,
+    /\b\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)\b/g,
+    /\b\d{1,2}:\d{2}\b/g,
   ];
   let text = input;
   for (const re of patterns) {
     text = text.replace(re, (match) => {
       const idx = tokens.length;
       tokens.push(match);
-      return `\u27E6${idx}\u27E7`;
+      return `${PLACEHOLDER_PREFIX}${idx}${PLACEHOLDER_SUFFIX}`;
     });
   }
   return { text, tokens };
 }
 
 export function restoreTranslationTokens(text: string, tokens: string[]): string {
-  return text.replace(/\u27E6(\d+)\u27E7/g, (_m, idx) => tokens[Number(idx)] ?? _m);
+  const restored = text.replace(
+    /\{\{VIDEH(\d+)\}\}/gi,
+    (_m, idx) => tokens[Number(idx)] ?? _m,
+  );
+  // Fallback if API altered placeholder spacing/casing
+  return restored.replace(
+    /\{\{\s*VIDEH\s*(\d+)\s*\}\}/gi,
+    (_m, idx) => tokens[Number(idx)] ?? _m,
+  );
+}
+
+function splitTranslationChunks(text: string, maxLen = 400): string[] {
+  if (text.length <= maxLen) return [text];
+  const sentences = text.split(/(?<=[.!?…])\s+|\n+/).filter(Boolean);
+  const chunks: string[] = [];
+  let buf = "";
+  for (const sentence of sentences) {
+    const piece = buf ? `${buf} ${sentence}` : sentence;
+    if (piece.length > maxLen && buf) {
+      chunks.push(buf.trim());
+      buf = sentence;
+    } else if (piece.length > maxLen) {
+      // Very long single sentence — hard split
+      for (let i = 0; i < sentence.length; i += maxLen) {
+        chunks.push(sentence.slice(i, i + maxLen));
+      }
+      buf = "";
+    } else {
+      buf = piece;
+    }
+  }
+  if (buf.trim()) chunks.push(buf.trim());
+  return chunks.length ? chunks : [text];
+}
+
+/** Rough check: Indic target but lots of Latin words left → incomplete translation. */
+function looksIncompleteTranslation(translated: string, targetLang: TranslateLang): boolean {
+  if (targetLang === "en") return false;
+  const words = translated.split(/\s+/).filter((w) => /[A-Za-z]{3,}/.test(w));
+  const latinWords = words.filter((w) => !/^\{\{VIDEH\d+\}\}$/i.test(w) && !/^https?:/i.test(w));
+  if (latinWords.length < 4) return false;
+  const totalWords = translated.split(/\s+/).filter(Boolean).length;
+  return latinWords.length / Math.max(totalWords, 1) > 0.15;
+}
+
+async function callTranslateApi(
+  text: string,
+  to: TranslateLang,
+  from: string,
+): Promise<{ text: string; detected: string }> {
+  const result = await translate(text, {
+    to,
+    from: from === "auto" ? "auto" : from,
+    autoSplit: true,
+  });
+  return {
+    text: result.text,
+    detected: normalizeLangCode(result.raw.src ?? from),
+  };
+}
+
+async function translateProtectedText(
+  protectedText: string,
+  to: TranslateLang,
+  from: string,
+): Promise<{ text: string; detected: string }> {
+  const chunks = splitTranslationChunks(protectedText);
+  if (chunks.length === 1) {
+    return callTranslateApi(chunks[0]!, to, from);
+  }
+  const parts: string[] = [];
+  let detected = from;
+  for (const chunk of chunks) {
+    const r = await callTranslateApi(chunk, to, from);
+    parts.push(r.text);
+    detected = r.detected;
+  }
+  return { text: parts.join(" "), detected };
 }
 
 function isMostlyEmojiOrSymbols(text: string): boolean {
@@ -163,15 +243,30 @@ export async function translateText(
   const from = options?.from && options.from !== "auto" ? normalizeLangCode(options.from) : "auto";
 
   try {
-    const result = await translate(protectedText, { to, from: from === "auto" ? "auto" : from });
-    const detected = normalizeLangCode(result.raw.src ?? from);
+    let { text: translatedRaw, detected } = await translateProtectedText(protectedText, to, from);
     if (languagesMatch(detected, to)) {
       return { translated: text, sourceLang: detected, skipped: true, reason: "same_language" };
     }
-    const restored = restoreTranslationTokens(result.text, tokens).trim();
+    let restored = restoreTranslationTokens(translatedRaw, tokens).trim();
+
+    // Retry sentence-by-sentence if middle paragraphs stayed in English
+    if (looksIncompleteTranslation(restored, to)) {
+      const sentences = splitTranslationChunks(protectedText, 220);
+      const retryParts: string[] = [];
+      let retryDetected = detected;
+      for (const sentence of sentences) {
+        const r = await callTranslateApi(sentence, to, from);
+        retryParts.push(r.text);
+        retryDetected = r.detected;
+      }
+      translatedRaw = retryParts.join(" ");
+      detected = retryDetected;
+      restored = restoreTranslationTokens(translatedRaw, tokens).trim();
+    }
+
     const finalText = restored || text;
 
-    if (messageId) {
+    if (messageId && finalText !== text) {
       await query(
         `INSERT INTO message_translations (message_id, target_lang, translated_text, source_lang, content_hash)
          VALUES ($1, $2, $3, $4, $5)

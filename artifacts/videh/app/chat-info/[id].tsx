@@ -181,6 +181,7 @@ export default function ChatInfoScreen() {
   const [memberAutoTranslate, setMemberAutoTranslate] = useState(true);
   const [memberTranslateLang, setMemberTranslateLang] = useState<string | null>(null);
   const [effectiveLangLabel, setEffectiveLangLabel] = useState("English");
+  const [groupLangPickerOpen, setGroupLangPickerOpen] = useState(false);
 
   const chatOtherUserId = useRef<number | null>(null);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
@@ -522,21 +523,13 @@ export default function ChatInfoScreen() {
   };
 
   const openGroupLanguagePicker = () => {
-    Alert.alert(
-      "Your language in this group",
-      "Messages from others will appear in this language when auto-translate is on.",
-      [
-        ...INDIAN_LANGUAGE_OPTIONS.map((lang) => ({
-          text: `${lang.native} (${lang.name})`,
-          onPress: () => { void persistMemberTranslation({ translateLang: lang.code }); },
-        })),
-        {
-          text: "Use app default",
-          onPress: () => { void persistMemberTranslation({ translateLang: null }); },
-        },
-        { text: "Cancel", style: "cancel" as const },
-      ],
-    );
+    setGroupLangPickerOpen(true);
+  };
+
+  const selectGroupLanguage = (code: string | null) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setGroupLangPickerOpen(false);
+    void persistMemberTranslation({ translateLang: code });
   };
 
   const pickGroupPhoto = async () => {
@@ -1243,6 +1236,54 @@ export default function ChatInfoScreen() {
         </Pressable>
       </Modal>
 
+      {/* Group language picker — full screen list (Alert only shows ~3 on Android) */}
+      <DismissibleModal visible={groupLangPickerOpen} onClose={() => setGroupLangPickerOpen(false)} animationType="slide">
+        <View style={[styles.langPickerScreen, { backgroundColor: colors.background, paddingTop: topPad }]}>
+          <View style={[styles.langPickerHeader, { backgroundColor: colors.headerBg }]}>
+            <TouchableOpacity onPress={() => setGroupLangPickerOpen(false)} style={styles.backBtn}>
+              <Ionicons name="arrow-back" size={22} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.langPickerHeaderTitle}>Your language in this group</Text>
+            <View style={{ width: 40 }} />
+          </View>
+          <Text style={[styles.langPickerHint, { color: colors.mutedForeground }]}>
+            Messages from others will appear in this language when auto-translate is on. Links, emails, and phone numbers stay as-is.
+          </Text>
+          <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+            <View style={[styles.section, { backgroundColor: colors.card }]}>
+              <TouchableOpacity
+                style={[styles.langPickerRow, { borderBottomColor: colors.border }]}
+                onPress={() => selectGroupLanguage(null)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.langPickerNative, { color: colors.foreground }]}>App default</Text>
+                <Text style={[styles.langPickerName, { color: colors.mutedForeground }]}>Use language from Settings</Text>
+                {!memberTranslateLang && (
+                  <Ionicons name="checkmark-circle" size={22} color={colors.primary} style={styles.langPickerCheck} />
+                )}
+              </TouchableOpacity>
+              {INDIAN_LANGUAGE_OPTIONS.map((lang, i) => (
+                <TouchableOpacity
+                  key={lang.code}
+                  style={[
+                    styles.langPickerRow,
+                    i < INDIAN_LANGUAGE_OPTIONS.length - 1 && { borderBottomWidth: 0.5, borderBottomColor: colors.border },
+                  ]}
+                  onPress={() => selectGroupLanguage(lang.code)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.langPickerNative, { color: colors.foreground }]}>{lang.native}</Text>
+                  <Text style={[styles.langPickerName, { color: colors.mutedForeground }]}>{lang.name}</Text>
+                  {memberTranslateLang === lang.code && (
+                    <Ionicons name="checkmark-circle" size={22} color={colors.primary} style={styles.langPickerCheck} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      </DismissibleModal>
+
       {/* Add Member Modal — device contacts + phone search */}
       <DismissibleModal visible={addMemberModal} onClose={closeAddMemberModal} animationType="slide">
         <KeyboardAvoidingView
@@ -1607,4 +1648,18 @@ const styles = StyleSheet.create({
   menuTitle: { fontSize: 16, fontFamily: "Inter_700Bold", paddingHorizontal: 16, paddingVertical: 10 },
   menuItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
   menuItemText: { fontSize: 15 },
+
+  langPickerScreen: { flex: 1 },
+  langPickerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingBottom: 12,
+  },
+  langPickerHeaderTitle: { flex: 1, color: "#fff", fontSize: 18, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  langPickerHint: { fontSize: 13, lineHeight: 18, paddingHorizontal: 16, paddingVertical: 12, fontFamily: "Inter_400Regular" },
+  langPickerRow: { paddingVertical: 14, paddingRight: 40 },
+  langPickerNative: { fontSize: 17, fontFamily: "Inter_600SemiBold" },
+  langPickerName: { fontSize: 13, marginTop: 2, fontFamily: "Inter_400Regular" },
+  langPickerCheck: { position: "absolute", right: 0, top: 16 },
 });
