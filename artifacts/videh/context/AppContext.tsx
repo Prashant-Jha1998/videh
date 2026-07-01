@@ -90,6 +90,7 @@ import {
 import {
   flushChatMessageCache,
   loadChatMessageCache,
+  persistOutgoingMessageNow,
   rememberChatMessagesInStore,
   schedulePersistChatMessageCache,
   type CachedChatMessage,
@@ -105,9 +106,13 @@ import {
   addTextToMessageOutbox,
   loadMessageOutbox,
   mergeOutboxIntoChats,
+  outboxNeedsRetry,
   removeFromMessageOutbox,
+  updateTextOutboxEntry,
   type TextOutboxEntry,
 } from "@/lib/messageOutbox";
+import { createClientMessageId } from "@/lib/clientMessageId";
+import { ackOutgoingMessage, messageMatchesClientId } from "@/lib/messageSendAck";
 import {
   chatClearCutoff,
   filterMessagesAfterClearCutoff,
@@ -166,7 +171,11 @@ export interface Message {
   senderName?: string;
   senderAvatar?: string;
   type: "text" | "image" | "video" | "audio" | "document" | "location" | "contact" | "deleted" | "call" | "system" | "album" | "template";
-  status: "sent" | "delivered" | "read";
+  status: "pending" | "sent" | "delivered" | "read";
+  /** Permanent local id for outgoing messages — never changes. */
+  clientMessageId?: string;
+  /** Server-assigned numeric id after ACK. */
+  serverMessageId?: string;
   mediaUrl?: string;
   /** Multiple images in one bubble (Videh album). */
   albumUrls?: string[];
@@ -252,10 +261,15 @@ function mapStatusReplyFields(m: any): Partial<Message> {
 
 function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal?: Message): Message {
   const isMe = String(m.sender_id) === String(viewerDbId);
-  let status: "sent" | "delivered" | "read" = isMe ? "delivered" : "sent";
+  const clientMsgId = m.client_message_id
+    ? String(m.client_message_id)
+    : prevLocal?.clientMessageId;
+  const serverId = String(m.id);
+  let status: "pending" | "sent" | "delivered" | "read" = isMe ? "sent" : "sent";
   if (isMe) {
     if (m.delivery_status === "read") status = "read";
     else if (m.delivery_status === "delivered") status = "delivered";
+    else if (prevLocal?.status === "pending" && !m.delivery_status) status = "sent";
   }
   if (m.is_deleted) {
     return {
@@ -309,9 +323,13 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
       ? businessTemplatePreviewText(templatePayload)
       : content;
   return coerceAlbumMessageFields({
-    id: String(m.id),
+    id: isMe && clientMsgId ? clientMsgId : serverId,
+    clientMessageId: isMe ? clientMsgId : undefined,
+    serverMessageId: serverId,
     text: displayText,
-    timestamp: new Date(m.created_at).getTime(),
+    timestamp: prevLocal?.timestamp && isMe && clientMsgId
+      ? prevLocal.timestamp
+      : new Date(m.created_at).getTime(),
     senderId: isMe ? "me" : String(m.sender_id),
     senderName: m.sender_name ?? undefined,
     senderAvatar: m.sender_avatar
@@ -595,22 +613,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const retryPendingTextOutbox = useCallback(async (userId: number) => {
     const outbox = await loadMessageOutbox(userId);
-    if (!outbox.length) return;
+    const retryEntries = outbox.filter(outboxNeedsRetry);
+    if (!retryEntries.length) return;
 
-    for (const entry of outbox) {
-      const chatSnapshot = chatsForPersistRef.current.find((c) => String(c.id) === String(entry.chatId));
-      const tempStillPending = chatSnapshot?.messages.some((m) => m.id === entry.tempId);
-      if (!tempStillPending) {
-        await removeFromMessageOutbox(userId, entry.tempId);
-        continue;
-      }
+    setChats((prev) => mergeOutboxIntoChats(prev, retryEntries));
 
+    for (const entry of retryEntries) {
       const payload = {
         senderId: userId,
         content: entry.text,
         type: "text",
-        clientMessageId: entry.tempId,
-        replyToId: entry.replyToId && !entry.replyToId.startsWith("tmp_")
+        clientMessageId: entry.clientMessageId,
+        replyToId: entry.replyToId && !entry.replyToId.startsWith("tmp_") && !/^[0-9a-f-]{36}$/i.test(entry.replyToId)
           ? Number(entry.replyToId)
           : undefined,
         statusReplyId: entry.statusReplyId ? Number(entry.statusReplyId) : undefined,
@@ -630,11 +644,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (res.status === 403) {
-        await removeFromMessageOutbox(userId, entry.tempId);
+        await removeFromMessageOutbox(userId, entry.clientMessageId);
         setChats((prev) =>
           prev.map((c) =>
             c.id === entry.chatId
-              ? { ...c, messages: c.messages.filter((m) => m.id !== entry.tempId) }
+              ? { ...c, messages: c.messages.filter((m) => m.id !== entry.clientMessageId) }
               : c,
           ),
         );
@@ -643,14 +657,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       if (!data?.success) {
         if (res.status >= 500 || res.status === 429) continue;
-        await removeFromMessageOutbox(userId, entry.tempId);
+        await updateTextOutboxEntry(userId, entry.clientMessageId, { status: "failed" });
         setChats((prev) =>
           prev.map((c) =>
             c.id === entry.chatId
               ? {
                   ...c,
                   messages: c.messages.map((m) =>
-                    m.id === entry.tempId ? { ...m, uploadFailed: true } : m,
+                    m.id === entry.clientMessageId ? { ...m, uploadFailed: true, status: "pending" as const } : m,
                   ),
                 }
               : c,
@@ -659,42 +673,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         continue;
       }
 
-      await removeFromMessageOutbox(userId, entry.tempId);
       if (data.message && typeof data.message === "object" && "id" in data.message) {
-        const mid = String(data.message.id);
+        const serverId = String(data.message.id);
         const row = data.message;
         let confirmedMessages: Message[] = [];
         setChats((prev) =>
           prev.map((c) => {
             if (c.id !== entry.chatId) return c;
-            let replaced = false;
-            const mapped = c.messages.map((m) => {
-              if (m.id === entry.tempId) {
-                replaced = true;
-                return {
-                  ...m,
-                  id: mid,
-                  status: "delivered" as const,
-                  uploadFailed: false,
-                  expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
-                  isKept: row.is_kept ?? m.isKept,
-                };
-              }
-              return m;
-            });
-            const withoutOrphanTemp = replaced ? mapped : mapped.filter((m) => m.id !== entry.tempId);
-            const byId = new Map<string, Message>();
-            for (const m of withoutOrphanTemp) {
-              const prevMsg = byId.get(m.id);
-              if (!prevMsg || (m.status === "delivered" || m.status === "read")) byId.set(m.id, m);
-            }
-            const messages = [...byId.values()].sort((a, b) => a.timestamp - b.timestamp);
+            const messages = c.messages.map((m) =>
+              m.id === entry.clientMessageId
+                ? ackOutgoingMessage(m, serverId, {
+                    status: "sent" as const,
+                    expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
+                    isKept: row.is_kept ?? m.isKept,
+                  })
+                : m,
+            );
             confirmedMessages = messages;
             return { ...c, messages };
           }),
         );
+        await removeFromMessageOutbox(userId, entry.clientMessageId);
         if (confirmedMessages.length > 0) {
           persistChatMessagesForUser(entry.chatId, confirmedMessages);
+          await flushChatMessageCache();
         }
       }
     }
@@ -1323,7 +1325,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!isAuthenticated || !uid) return;
     const tick = () => {
       const hasPending = chatsForPersistRef.current.some((c) =>
-        c.messages.some((m) => m.senderId === "me" && m.id.startsWith("tmp_") && !m.uploadFailed),
+        c.messages.some(
+          (m) => m.senderId === "me" && (m.status === "pending" || (!m.serverMessageId && m.clientMessageId)) && !m.uploadFailed,
+        ),
       );
       if (hasPending) void retryPendingTextOutbox(uid);
     };
@@ -1791,9 +1795,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setChats((prev) => {
         const prevChat = prev.find((c) => String(c.id) === String(chatId));
         const prevById = new Map((prevChat?.messages ?? []).map((pm) => [pm.id, pm]));
+        const prevByClientId = new Map(
+          (prevChat?.messages ?? [])
+            .filter((pm) => pm.clientMessageId)
+            .map((pm) => [pm.clientMessageId!, pm]),
+        );
 
         const msgs: Message[] = rawMessages.map((m: any) => {
-          const prevLocal = prevById.get(String(m.id));
+          const clientId = m.client_message_id ? String(m.client_message_id) : undefined;
+          const prevLocal = clientId
+            ? (prevByClientId.get(clientId) ?? prevById.get(clientId) ?? prevById.get(String(m.id)))
+            : prevById.get(String(m.id));
           let mapped = mapServerRowToMessage(m, u?.dbId, prevLocal);
           if (
             translationPrefs
@@ -1817,7 +1829,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           const prevStable = prevMsgs.filter((m) => !m.id.startsWith("hint_"));
           const hasPendingHints = prevMsgs.some((m) => m.id.startsWith("hint_"));
           const sameServerWindow = (a: Message, b: Message) =>
-            a.id === b.id
+            (a.id === b.id || messageMatchesClientId(a, b))
             && a.text === b.text
             && a.status === b.status
             && a.type === b.type
@@ -1899,7 +1911,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ? mergedMessages
           : dedupeChatMessages(
               (chatsForPersistRef.current.find((c) => String(c.id) === String(chatId))?.messages ?? [])
-                .filter((m) => !m.id.startsWith("tmp_") && !m.id.startsWith("hint_")),
+                .filter((m) => !m.id.startsWith("hint_")),
             );
         if (toPersist.length > 0) {
           persistChatMessagesForUser(chatId, toPersist);
@@ -2281,48 +2293,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   ) => {
     if (!text.trim()) return;
     const u = userRef.current;
-    const tempId = "tmp_" + Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    let newMsg: Message = {
-      id: tempId,
-      text,
-      timestamp: Date.now(),
-      senderId: "me",
-      type: "text",
-      status: "delivered",
-      replyToId,
-      replyText: replyQuote?.replyText,
-      replySenderName: replyQuote?.replySenderName,
-      replyQuotedSenderId: replyQuote?.replyQuotedSenderId,
-      replyType: replyQuote?.replyType,
-      ...(statusReply ? messageFromStatusReplyMeta(statusReply) : {}),
-    };
-    const chatListPreview = text.length > 120 ? `${text.slice(0, 117).trimEnd()}…` : text;
+    const clientMessageId = createClientMessageId();
     const sentAt = Date.now();
-    setChats((prev) => {
-      const chat = prev.find((c) => c.id === chatId);
-      const expiresAt = computeClientMessageExpiresAt(chat?.disappearAfterSeconds ?? null);
-      if (expiresAt) newMsg = { ...newMsg, expiresAt };
-      return prev.map((c) =>
-        c.id === chatId
-          ? {
-              ...c,
-              messages: [...c.messages, newMsg].sort((a, b) => a.timestamp - b.timestamp),
-              lastMessage: chatListPreview,
-              lastMessageTime: sentAt,
-            }
-          : c,
-      );
-    });
-    if (sentAt > (chatDeletedAtRef.current[chatId] ?? 0)) {
-      void restoreHiddenChatsWithNewActivity([{ id: chatId, lastMessageTime: sentAt }]);
-    }
+    const chatListPreview = text.length > 120 ? `${text.slice(0, 117).trimEnd()}…` : text;
 
-    if (u?.dbId) {
+    void (async () => {
+      let newMsg: Message = {
+        id: clientMessageId,
+        clientMessageId,
+        text,
+        timestamp: sentAt,
+        senderId: "me",
+        type: "text",
+        status: "pending",
+        replyToId,
+        replyText: replyQuote?.replyText,
+        replySenderName: replyQuote?.replySenderName,
+        replyQuotedSenderId: replyQuote?.replyQuotedSenderId,
+        replyType: replyQuote?.replyType,
+        ...(statusReply ? messageFromStatusReplyMeta(statusReply) : {}),
+      };
+
       const outboxEntry: TextOutboxEntry = {
-        tempId,
+        clientMessageId,
         chatId,
         text,
         timestamp: sentAt,
+        status: "pending",
         replyToId,
         replyText: replyQuote?.replyText,
         replySenderName: replyQuote?.replySenderName,
@@ -2330,66 +2327,100 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         replyType: replyQuote?.replyType,
         statusReplyId: statusReply?.statusId,
       };
-      void enqueueChatTextSend(chatId, async () => {
-        await addTextToMessageOutbox(u.dbId!, outboxEntry);
+
+      if (u?.dbId) {
+        await addTextToMessageOutbox(u.dbId, outboxEntry);
+        const chat = chatsForPersistRef.current.find((c) => c.id === chatId);
+        const expiresAt = computeClientMessageExpiresAt(chat?.disappearAfterSeconds ?? null);
+        if (expiresAt) newMsg = { ...newMsg, expiresAt };
+        messageCacheStoreRef.current = await persistOutgoingMessageNow(
+          u.dbId,
+          messageCacheStoreRef.current,
+          chatId,
+          newMsg as CachedChatMessage,
+        );
         const listSnapshot = chatsForPersistRef.current.map((c) =>
           c.id === chatId
             ? { ...c, lastMessage: chatListPreview, lastMessageTime: sentAt }
             : c,
         );
-        schedulePersistChatListCache(u.dbId!, listSnapshot);
-        void flushChatListCache();
+        schedulePersistChatListCache(u.dbId, listSnapshot);
+        await flushChatListCache();
+      }
+
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId
+            ? {
+                ...c,
+                messages: [...c.messages, newMsg].sort((a, b) => a.timestamp - b.timestamp),
+                lastMessage: chatListPreview,
+                lastMessageTime: sentAt,
+              }
+            : c,
+        ),
+      );
+
+      if (sentAt > (chatDeletedAtRef.current[chatId] ?? 0)) {
+        void restoreHiddenChatsWithNewActivity([{ id: chatId, lastMessageTime: sentAt }]);
+      }
+
+      if (!u?.dbId) return;
+
+      void enqueueChatTextSend(chatId, async () => {
+        const resolveReplyId = () => {
+          if (!replyToId) return undefined;
+          if (replyToId.startsWith("tmp_") || /^[0-9a-f-]{36}$/i.test(replyToId)) return undefined;
+          const n = Number(replyToId);
+          return Number.isFinite(n) ? n : undefined;
+        };
 
         const payload = {
           senderId: u.dbId,
           content: text,
           type: "text",
-          clientMessageId: tempId,
-          replyToId: replyToId && !replyToId.startsWith("tmp_") ? Number(replyToId) : undefined,
+          clientMessageId,
+          replyToId: resolveReplyId(),
           statusReplyId: statusReply?.statusId ? Number(statusReply.statusId) : undefined,
         };
-        const postOnce = async () => {
-          const res = await fetchWithTimeout(`${BASE_URL}/api/chats/${chatId}/messages`, {
+
+        let res: Response;
+        let data: { success?: boolean; message?: { id: number; expires_at?: string; is_kept?: boolean } | string; code?: string };
+        try {
+          res = await fetchWithTimeout(`${BASE_URL}/api/chats/${chatId}/messages`, {
             method: "POST",
             headers: authHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify(payload),
           }, 20_000);
-          return { res, data: (await res.json()) as {
-            success?: boolean;
-            message?: { id: number } | string;
-            code?: string;
-          } };
-        };
-
-        let res: Response;
-        let data: Awaited<ReturnType<typeof postOnce>>["data"];
-        try {
-          ({ res, data } = await postOnce());
+          data = await res.json();
         } catch {
           return;
         }
 
         if (res.status === 403) {
           const msg = typeof data.message === "string" ? data.message : "You are not allowed to send messages in this chat.";
-          await removeFromMessageOutbox(u.dbId!, tempId);
+          await removeFromMessageOutbox(u.dbId!, clientMessageId);
           Alert.alert("Cannot send message", msg);
           setChats((prev) =>
             prev.map((c) =>
-              c.id === chatId ? { ...c, messages: c.messages.filter((m) => m.id !== tempId) } : c,
+              c.id === chatId
+                ? { ...c, messages: c.messages.filter((m) => m.id !== clientMessageId) }
+                : c,
             ),
           );
           return;
         }
+
         if (!data?.success) {
           if (res.status >= 500 || res.status === 429) return;
-          await removeFromMessageOutbox(u.dbId!, tempId);
+          await updateTextOutboxEntry(u.dbId!, clientMessageId, { status: "failed" });
           setChats((prev) =>
             prev.map((c) =>
               c.id === chatId
                 ? {
                     ...c,
                     messages: c.messages.map((m) =>
-                      m.id === tempId ? { ...m, uploadFailed: true } : m,
+                      m.id === clientMessageId ? { ...m, uploadFailed: true } : m,
                     ),
                   }
                 : c,
@@ -2397,48 +2428,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           );
           return;
         }
-        await removeFromMessageOutbox(u.dbId!, tempId);
+
         if (data.message && typeof data.message === "object" && "id" in data.message) {
-          const mid = String(data.message.id);
-          const row = data.message as { expires_at?: string; is_kept?: boolean };
+          const serverId = String(data.message.id);
+          const row = data.message;
           let confirmedMessages: Message[] = [];
           setChats((prev) =>
             prev.map((c) => {
               if (c.id !== chatId) return c;
-              let replaced = false;
-              const mapped = c.messages.map((m) => {
-                if (m.id === tempId) {
-                  replaced = true;
-                  return {
-                    ...m,
-                    id: mid,
-                    status: "delivered" as const,
-                    uploadFailed: false,
-                    expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
-                    isKept: row.is_kept ?? m.isKept,
-                  };
-                }
-                return m;
-              });
-              const withoutOrphanTemp = replaced ? mapped : mapped.filter((m) => m.id !== tempId);
-              const byId = new Map<string, Message>();
-              for (const m of withoutOrphanTemp) {
-                const prev = byId.get(m.id);
-                if (!prev || (m.status === "delivered" || m.status === "read")) byId.set(m.id, m);
-              }
-              const messages = [...byId.values()].sort((a, b) => a.timestamp - b.timestamp);
+              const messages = c.messages.map((m) =>
+                m.id === clientMessageId
+                  ? ackOutgoingMessage(m, serverId, {
+                      status: "sent" as const,
+                      expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
+                      isKept: row.is_kept ?? m.isKept,
+                    })
+                  : m,
+              );
               confirmedMessages = messages;
               return { ...c, messages };
             }),
           );
+          await removeFromMessageOutbox(u.dbId!, clientMessageId);
           if (confirmedMessages.length > 0) {
             persistChatMessagesForUser(chatId, confirmedMessages);
-            void flushChatMessageCache();
+            await flushChatMessageCache();
           }
         }
       });
-    }
-  }, [persistChatMessagesForUser]);
+    })();
+  }, [persistChatMessagesForUser, restoreHiddenChatsWithNewActivity]);
 
   const markAsRead = useCallback((chatId: string) => {
     setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, unreadCount: 0 } : c));

@@ -51,12 +51,14 @@ export function slimChatForListCache(chat: Chat): CachedChatListRow {
 function cachedMessageToMessage(m: CachedChatMessage): Message {
   return {
     id: m.id,
+    clientMessageId: m.clientMessageId ?? m.id,
+    serverMessageId: m.serverMessageId,
     text: m.text,
     timestamp: m.timestamp,
     senderId: m.senderId,
     senderName: m.senderName,
     type: m.type as Message["type"],
-    status: (m.status as Message["status"]) ?? "delivered",
+    status: (m.status as Message["status"]) ?? (m.serverMessageId ? "sent" : "pending"),
     mediaUrl: m.mediaUrl,
     albumUrls: m.albumUrls,
     isViewOnce: m.isViewOnce,

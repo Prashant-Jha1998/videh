@@ -352,6 +352,7 @@ function toReplyData(msg: {
 
 // Tick icons
 function TickIcon({ status, color }: { status: Message["status"]; color: string }) {
+  if (status === "pending") return <Ionicons name="time-outline" size={13} color={color} />;
   if (status === "read") return <Ionicons name="checkmark-done" size={14} color="#53BDEB" />;
   if (status === "delivered") return <Ionicons name="checkmark-done" size={14} color={color} />;
   return <Ionicons name="checkmark" size={14} color={color} />;

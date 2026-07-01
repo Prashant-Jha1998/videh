@@ -636,6 +636,7 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
     await ensureViewOnceColumns();
     await ensureDisappearingMessageColumns();
     await ensureStatusReplyColumn();
+    await ensureClientMessageIdColumn();
     const viewerId = Number(userId);
     const viewerParam = before ? "$4" : "$3";
     const historySql = messageAfterHistoryClearedSql("cm");
@@ -649,7 +650,7 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
         END AS media_url,
         m.reply_to_id, m.is_deleted, m.is_forwarded, m.forward_count,
         m.is_starred, m.is_view_once, m.view_once_opened_at, m.edited_at, m.created_at,
-        m.expires_at, m.is_kept, m.status_reply_id,
+        m.expires_at, m.is_kept, m.status_reply_id, m.client_message_id,
         u.name AS sender_name, u.avatar_url AS sender_avatar,
         rm.content AS reply_content,
         rm.type AS reply_type,

@@ -4,6 +4,8 @@ import { safeJsonParse } from "@/lib/safeJson";
 /** Slim persisted row — enough to render chat instantly on cold start. */
 export type CachedChatMessage = {
   id: string;
+  clientMessageId?: string;
+  serverMessageId?: string;
   text: string;
   timestamp: number;
   senderId: string;
@@ -28,7 +30,7 @@ export type CachedChatMessage = {
 
 export type ChatMessageCacheStore = Record<string, CachedChatMessage[]>;
 
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 const MAX_MESSAGES_PER_CHAT = 80;
 const MAX_CACHED_CHATS = 40;
 
@@ -40,6 +42,8 @@ let pendingPersist: { userId: number; store: ChatMessageCacheStore } | null = nu
 export function slimMessageForCache(m: CachedChatMessage & Record<string, unknown>): CachedChatMessage {
   return {
     id: String(m.id),
+    clientMessageId: m.clientMessageId ? String(m.clientMessageId) : undefined,
+    serverMessageId: m.serverMessageId ? String(m.serverMessageId) : undefined,
     text: String(m.text ?? ""),
     timestamp: Number(m.timestamp) || Date.now(),
     senderId: String(m.senderId),
@@ -76,6 +80,12 @@ export async function loadChatMessageCache(userId: number): Promise<ChatMessageC
   }
 }
 
+function shouldPersistMessage(m: CachedChatMessage & { id?: string; clientMessageId?: string }): boolean {
+  if (!m.id) return false;
+  if (m.id.startsWith("hint_")) return false;
+  return true;
+}
+
 export function rememberChatMessagesInStore(
   store: ChatMessageCacheStore,
   chatId: string,
@@ -83,7 +93,7 @@ export function rememberChatMessagesInStore(
 ): ChatMessageCacheStore {
   const next = { ...store };
   const slim = messages
-    .filter((m) => m.id && !m.id.startsWith("tmp_") && !m.id.startsWith("hint_"))
+    .filter((m) => shouldPersistMessage(m))
     .map((m) => slimMessageForCache(m))
     .slice(-MAX_MESSAGES_PER_CHAT);
   next[String(chatId)] = slim;
@@ -99,6 +109,24 @@ export function rememberChatMessagesInStore(
       delete next[drop];
     }
   }
+  return next;
+}
+
+/** Append or update one outgoing row and flush immediately (before network). */
+export async function persistOutgoingMessageNow(
+  userId: number,
+  store: ChatMessageCacheStore,
+  chatId: string,
+  message: CachedChatMessage,
+): Promise<ChatMessageCacheStore> {
+  const cid = String(chatId);
+  const slim = slimMessageForCache(message);
+  const existing = (store[cid] ?? []).filter(
+    (m) => m.id !== slim.id && m.clientMessageId !== slim.clientMessageId,
+  );
+  const next = rememberChatMessagesInStore(store, cid, [...existing, slim]);
+  pendingPersist = { userId, store: next };
+  await flushChatMessageCache();
   return next;
 }
 

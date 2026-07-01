@@ -1,6 +1,8 @@
 import type { Message } from "@/context/AppContext";
 import { albumSendLog } from "@/lib/albumSendLog";
 import { parseAlbumMessageContent, parseAlbumPhotoCountLabel } from "@/lib/chatAlbumMessage";
+import { isClientMessageUuid, isLocalOutgoingMessageId } from "@/lib/clientMessageId";
+import { messageMatchesClientId } from "@/lib/messageSendAck";
 
 const TEMP_MATCH_WINDOW_MS = 60_000;
 const TEMP_TEXT_MATCH_WINDOW_MS = 15_000;
@@ -31,7 +33,16 @@ function albumUrlsLikelyMatch(tmp: Message, server: Message): boolean {
     && Math.abs(server.timestamp - tmp.timestamp) < 15_000;
 }
 
+function isLocalOutgoingRow(m: Message): boolean {
+  return m.senderId === "me" && (isLocalOutgoingMessageId(m.id) || Boolean(m.clientMessageId));
+}
+
+function pendingRowOnServer(local: Message, serverMessages: Message[]): boolean {
+  return serverMessages.some((s) => messageMatchesClientId(local, s));
+}
+
 function tempMatchesServer(tmp: Message, server: Message): boolean {
+  if (messageMatchesClientId(tmp, server)) return true;
   if (server.senderId !== "me") return false;
   const matchWindow = tmp.type === "text" || !tmp.type ? TEMP_TEXT_MATCH_WINDOW_MS : TEMP_MATCH_WINDOW_MS;
   if (Math.abs(server.timestamp - tmp.timestamp) > matchWindow) return false;
@@ -55,7 +66,7 @@ function tempMatchesServer(tmp: Message, server: Message): boolean {
   return Math.abs(server.timestamp - tmp.timestamp) < 15_000;
 }
 
-/** Pair each tmp_* row with at most one server row (avoids duplicate-text flicker). */
+/** Pair each optimistic row with at most one server row. */
 export function collectSupersededTempIds(tempMessages: Message[], serverMessages: Message[]): Set<string> {
   const superseded = new Set<string>();
   const usedServerIds = new Set<string>();
@@ -65,6 +76,7 @@ export function collectSupersededTempIds(tempMessages: Message[], serverMessages
   for (const tmp of sortedTemps) {
     if (isUploadInFlight(tmp)) continue;
     if (tmp.uploadFailed) continue;
+    if (!tmp.serverMessageId && tmp.status === "pending") continue;
     for (const s of myServer) {
       if (usedServerIds.has(s.id)) continue;
       if (tempMatchesServer(tmp, s)) {
@@ -96,10 +108,11 @@ export function collectPendingLocalMessages(
   now = Date.now(),
 ): Message[] {
   const serverIds = new Set(serverMessages.map((m) => m.id));
-  const supersededTmpIds = collectSupersededTempIds(
-    prevMessages.filter((m) => m.id.startsWith("tmp_")),
-    serverMessages,
+  const serverClientIds = new Set(
+    serverMessages.map((m) => m.clientMessageId).filter(Boolean) as string[],
   );
+  const localOutgoing = prevMessages.filter((m) => isLocalOutgoingRow(m));
+  const supersededTmpIds = collectSupersededTempIds(localOutgoing, serverMessages);
 
   return prevMessages.filter((m) => {
     if (m.id.startsWith("hint_")) {
@@ -163,18 +176,24 @@ export function collectPendingLocalMessages(
       }
       return true;
     }
-    if (m.id.startsWith("tmp_")) {
+    if (isLocalOutgoingRow(m)) {
       if (isUploadInFlight(m)) return true;
       if (m.uploadFailed) return true;
+      if (m.status === "pending" || !m.serverMessageId) {
+        if (pendingRowOnServer(m, serverMessages)) return false;
+        return true;
+      }
       if (supersededTmpIds.has(m.id)) {
         if (m.type === "album") {
           albumSendLog("cleanup", "dropping superseded optimistic album", { tempId: m.id });
         }
         return false;
       }
+      const clientId = m.clientMessageId ?? m.id;
+      if (serverClientIds.has(clientId)) return false;
       return true;
     }
-    if (m.senderId === "me" && !serverIds.has(m.id) && now - m.timestamp < RECENT_OUTGOING_KEEP_MS) {
+    if (m.senderId === "me" && !serverIds.has(m.id) && !m.serverMessageId && now - m.timestamp < RECENT_OUTGOING_KEEP_MS) {
       return true;
     }
     return false;
@@ -183,18 +202,14 @@ export function collectPendingLocalMessages(
 
 function messageIdRank(id: string): number {
   if (id.startsWith("hint_")) return 0;
-  if (id.startsWith("tmp_")) return 1;
+  if (isLocalOutgoingMessageId(id)) return 1;
   return 2;
 }
 
-function isNumericServerId(id: string): boolean {
-  return /^\d+$/.test(id);
-}
-
 function isLikelyDuplicateMessage(a: Message, b: Message): boolean {
+  if (messageMatchesClientId(a, b)) return true;
   if (a.id === b.id) return true;
   if (a.id === `hint_${b.id}` || b.id === `hint_${a.id}`) return true;
-  // Intentional duplicate text must stay as separate server rows.
   if (isNumericServerId(a.id) && isNumericServerId(b.id)) return false;
   if (a.senderId !== b.senderId) return false;
   if (a.type !== b.type && a.type !== "text" && b.type !== "text") return false;
@@ -202,6 +217,10 @@ function isLikelyDuplicateMessage(a: Message, b: Message): boolean {
   const bText = b.text.trim();
   if (!aText || !bText || aText !== bText) return false;
   return Math.abs(a.timestamp - b.timestamp) < 15_000;
+}
+
+function isNumericServerId(id: string): boolean {
+  return /^\d+$/.test(id);
 }
 
 function preferCanonicalDuplicate(existing: Message, incoming: Message): Message {
@@ -229,7 +248,12 @@ export function dedupeChatMessages(messages: Message[]): Message[] {
 export function mergeServerWithPending(serverMessages: Message[], pendingLocal: Message[]): Message[] {
   const merged = [...serverMessages];
   for (const p of pendingLocal) {
-    if (!merged.some((m) => m.id === p.id)) merged.push(p);
+    const idx = merged.findIndex((m) => messageMatchesClientId(m, p));
+    if (idx >= 0) {
+      merged[idx] = { ...merged[idx]!, ...p, id: p.clientMessageId ?? p.id, timestamp: p.timestamp };
+    } else if (!merged.some((m) => m.id === p.id)) {
+      merged.push(p);
+    }
   }
   return dedupeChatMessages(merged);
 }
@@ -245,7 +269,9 @@ export function preserveHistoricallyLoadedMessages(
   const oldestServerTs = serverMessages[0]!.timestamp;
   const olderKept = prevMessages.filter((m) => {
     if (clearCutoffMs > 0 && m.timestamp <= clearCutoffMs) return false;
-    if (m.id.startsWith("hint_") || m.id.startsWith("tmp_")) return false;
+    if (m.id.startsWith("hint_")) return false;
+    if (isLocalOutgoingRow(m) && (m.status === "pending" || !m.serverMessageId)) return false;
+    if (m.id.startsWith("tmp_")) return false;
     if (serverIds.has(m.id)) return false;
     return m.timestamp < oldestServerTs;
   });
@@ -260,9 +286,11 @@ export function serverWindowMatchesLocalTail(
   isSameMessage: (a: Message, b: Message) => boolean,
 ): boolean {
   if (!serverMessages.length) return prevMessages.length === 0;
-  const stable = prevMessages.filter((m) => !m.id.startsWith("hint_") && !m.id.startsWith("tmp_"));
+  const stable = prevMessages.filter(
+    (m) => !m.id.startsWith("hint_") && !(isLocalOutgoingRow(m) && m.status === "pending"),
+  );
   const newestServer = serverMessages[serverMessages.length - 1]!;
-  if (!stable.some((m) => m.id === newestServer.id)) return false;
+  if (!stable.some((m) => m.id === newestServer.id || messageMatchesClientId(m, newestServer))) return false;
   if (stable.length < serverMessages.length) return false;
   const tail = stable.slice(-serverMessages.length);
   return tail.every((m, i) => isSameMessage(m, serverMessages[i]!));
