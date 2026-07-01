@@ -5,7 +5,7 @@ export type ChatStreamHandler = (eventType: string, data: string) => void;
 
 const STALE_SSE_MS = 120_000;
 const AUTH_FAIL_RETRY_MS = 30_000;
-const NORMAL_RETRY_MS = 800;
+const NORMAL_RETRY_MS = 300;
 
 function parseSseBlocks(buffer: string): { events: Array<{ type: string; data: string }>; rest: string } {
   const parts = buffer.split("\n\n");

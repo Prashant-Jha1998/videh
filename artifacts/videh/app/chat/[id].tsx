@@ -1410,15 +1410,7 @@ export default function ChatScreen() {
         }
       };
       const pollMessages = (force = false) => {
-        if (messagePollInFlightRef.current && !force) return;
-        messagePollInFlightRef.current = true;
-        const safety = setTimeout(() => {
-          messagePollInFlightRef.current = false;
-        }, 30_000);
-        loadMessages(chatId).finally(() => {
-          clearTimeout(safety);
-          messagePollInFlightRef.current = false;
-        });
+        void loadMessages(chatId, { incremental: !force });
       };
       const msgTimer = setInterval(() => pollMessages(false), OPEN_CHAT_MESSAGE_POLL_MS);
       void pollMessages(true);

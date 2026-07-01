@@ -649,8 +649,11 @@ router.post("/media", requireAuth, chatMediaUpload.single("file"), async (req: R
 router.get("/:chatId/messages", async (req: Request, res: Response) => {
   const { chatId } = req.params;
   const userId = req.query.userId as string | undefined;
-  const limit = Number(req.query.limit ?? 50);
   const before = req.query.before as string | undefined;
+  const afterIdRaw = Number(req.query.afterId ?? 0);
+  const afterId = Number.isFinite(afterIdRaw) && afterIdRaw > 0 ? afterIdRaw : 0;
+  const incremental = afterId > 0 && !before;
+  const limit = Number(req.query.limit ?? (incremental ? 30 : 50));
   if (!assertSameUser(req, res, userId)) return;
   try {
     await ensureMessageUserHidesTable();
@@ -703,12 +706,12 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
         AND ${historySql}
         AND ${retentionSql}
         ${before ? "AND m.created_at < $3" : ""}
-      ORDER BY m.created_at DESC
+        ${incremental ? `AND m.id > ${afterId}` : ""}
+      ORDER BY m.created_at ${incremental ? "ASC" : "DESC"}
       LIMIT $2
     `, before ? [chatId, limit, before, viewerId] : [chatId, limit, viewerId]);
 
-    const messages = result.rows
-      .reverse();
+    const messages = incremental ? result.rows : result.rows.reverse();
     const skipTranslate =
       req.query.skipTranslate === "1"
       || req.query.fast === "1";
@@ -722,11 +725,12 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
       );
 
     const chatIdNorm = Array.isArray(chatId) ? chatId[0]! : chatId;
+    const skipDeliverMark = skipTranslate;
     const incomingIds = messages
       .filter((row: { sender_id?: number }) => Number(row.sender_id) !== viewerId)
       .map((row: { id: number }) => Number(row.id))
       .filter((id) => Number.isFinite(id) && id > 0);
-    if (incomingIds.length > 0) {
+    if (!skipDeliverMark && incomingIds.length > 0) {
       void markMessagesDeliveredForRecipient({
         chatId: chatIdNorm,
         recipientUserId: viewerId,
@@ -1034,7 +1038,10 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      message: await messageRowForSender(req, result.rows[0] as Record<string, unknown>, senderId),
+      message: {
+        ...resolveChatMessageRowForClient(req, result.rows[0] as Record<string, unknown>),
+        delivery_status: "sent",
+      },
     });
 
     if (recipientIds.length > 0 && Number.isFinite(newMessageId)) {

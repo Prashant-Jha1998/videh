@@ -18,6 +18,7 @@ import { emitChatMessageSignal, onChatMessageSignal, type ChatMessageSignal } fr
 import {
   deliverPremiumChatMessageNotification,
   getNotificationActiveChatId,
+  isOwnOutgoingChatMessage,
   setNotificationActiveChatId,
   setNotificationRuntimeState,
 } from "@/lib/incomingMessageNotify";
@@ -112,7 +113,7 @@ import {
   type TextOutboxEntry,
 } from "@/lib/messageOutbox";
 import { createClientMessageId } from "@/lib/clientMessageId";
-import { ackOutgoingMessage, messageMatchesClientId, outboundStatusFromServer } from "@/lib/messageSendAck";
+import { ackOutgoingMessage, latestServerMessageId, messageMatchesClientId, outboundStatusFromServer } from "@/lib/messageSendAck";
 import {
   ackMessagesDelivered,
   applyReceiptToOutgoingMessages,
@@ -501,7 +502,7 @@ interface AppContextType {
   updateAvatar: (base64: string, mimeType?: string) => Promise<void>;
   updateGroupAvatar: (chatId: string, localUri: string) => Promise<void>;
   createDirectChat: (otherUserId: number, otherName: string, otherAvatar?: string) => Promise<string>;
-  loadMessages: (chatId: string) => Promise<void>;
+  loadMessages: (chatId: string, opts?: { incremental?: boolean }) => Promise<void>;
   applyIncomingMessageHint: (signal: ChatMessageSignal) => void;
   loadOlderMessages: (
     chatId: string,
@@ -594,7 +595,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const hiddenChatIdsRef = useRef<string[]>([]);
   const [hiddenChatIds, setHiddenChatIds] = useState<string[]>([]);
   const messageCacheStoreRef = useRef<ChatMessageCacheStore>({});
-  const loadMessagesRef = useRef<(chatId: string) => Promise<void>>(async () => {});
+  const loadMessagesRef = useRef<(chatId: string, opts?: { incremental?: boolean }) => Promise<void>>(async () => {});
+  const scheduleDebouncedLoadMessagesRef = useRef<(chatId: string, opts?: { media?: boolean }) => void>(() => {});
   const chatsForPersistRef = useRef<Chat[]>([]);
 
   useEffect(() => {
@@ -1549,6 +1551,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [chats, user?.dbId]);
 
   const loadMessagesAfterHintTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const loadMessagesDebounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const loadMessagesAbortRef = useRef<Map<string, AbortController>>(new Map());
 
   /** Show incoming text immediately from push/SSE before the messages API catches up (Videh). */
   const applyIncomingMessageHint = useCallback((signal: ChatMessageSignal) => {
@@ -1614,8 +1618,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           };
         }),
       );
-      void loadMessagesRef.current?.(chatId);
-      setTimeout(() => void loadMessagesRef.current?.(chatId), MESSAGE_HINT_API_RETRY_MS);
+      void loadMessagesRef.current?.(chatId, { incremental: true });
     };
 
     if (!hasKnownContent) {
@@ -1744,11 +1747,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (isMediaType) {
-      void loadMessagesRef.current?.(chatId);
-    } else {
-      void loadMessagesRef.current?.(chatId);
-      setTimeout(() => void loadMessagesRef.current?.(chatId), MESSAGE_HINT_API_DELAY_MS);
-      setTimeout(() => void loadMessagesRef.current?.(chatId), MESSAGE_HINT_API_RETRY_MS);
+      scheduleDebouncedLoadMessagesRef.current(chatId, { media: true });
     }
 
     const hintedChat = chatsForPersistRef.current.find((c) => String(c.id) === chatId);
@@ -1792,7 +1791,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
-  const loadMessages = useCallback(async (chatId: string) => {
+  const loadMessages = useCallback(async (chatId: string, opts?: { incremental?: boolean }) => {
     const u = userRef.current;
     const cid = String(chatId);
     const cached = messageCacheStoreRef.current[cid];
@@ -1804,16 +1803,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
     }
 
+    const prevMessages = prevChatSnapshot?.messages ?? [];
+    const afterId = opts?.incremental ? latestServerMessageId(prevMessages) : 0;
+    const incremental = afterId > 0;
+
+    loadMessagesAbortRef.current.get(cid)?.abort();
+    const aborter = new AbortController();
+    loadMessagesAbortRef.current.set(cid, aborter);
+
     try {
       const prevChat = chatsForPersistRef.current.find((c) => String(c.id) === cid);
-      const translationPrefsPromise = prevChat?.isGroup && u?.dbId
+      const translationPrefsPromise = !incremental && prevChat?.isGroup && u?.dbId
         ? resolveGroupTranslationPrefs(prevChat, cid, u.dbId, authSessionToken)
         : Promise.resolve(null);
 
+      const url = incremental
+        ? `${BASE_URL}/api/chats/${cid}/messages?limit=30&afterId=${afterId}&skipTranslate=1&fast=1&userId=${u?.dbId ?? 0}`
+        : `${BASE_URL}/api/chats/${cid}/messages?limit=${CHAT_MESSAGES_PAGE}&skipTranslate=1&fast=1&userId=${u?.dbId ?? 0}`;
+
       const res = await fetchWithTimeout(
-        `${BASE_URL}/api/chats/${cid}/messages?limit=${CHAT_MESSAGES_PAGE}&skipTranslate=1&fast=1&userId=${u?.dbId ?? 0}`,
-        { headers: authHeaders() },
-        12_000,
+        url,
+        { headers: authHeaders(), signal: aborter.signal },
+        incremental ? 6000 : 12_000,
       );
       const data = await res.json() as { success: boolean; messages: any[] };
       const translationPrefs = await translationPrefsPromise;
@@ -1824,8 +1835,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ? data.messages.filter((m: any) => new Date(m.created_at).getTime() > clearedAt)
         : data.messages;
 
+      if (incremental && rawMessages.length === 0) return;
+
       let mergedMessages: Message[] = [];
 
+      if (incremental) {
+        setChats((prev) => {
+          const prevChat = prev.find((c) => String(c.id) === String(chatId));
+          const prevMsgs = prevChat?.messages ?? [];
+          const prevById = new Map(prevMsgs.map((pm) => [pm.id, pm]));
+          const prevByClientId = new Map(
+            prevMsgs.filter((pm) => pm.clientMessageId).map((pm) => [pm.clientMessageId!, pm]),
+          );
+          const incoming: Message[] = rawMessages.map((m: any) => {
+            const clientId = m.client_message_id ? String(m.client_message_id) : undefined;
+            const prevLocal = clientId
+              ? (prevByClientId.get(clientId) ?? prevById.get(clientId) ?? prevById.get(String(m.id)))
+              : prevById.get(String(m.id));
+            return mapServerRowToMessage(m, u?.dbId, prevLocal);
+          });
+          const merged = dedupeChatMessages(
+            filterMessagesAfterClearCutoff([...prevMsgs, ...incoming], clearedAt),
+          ).sort((a, b) => a.timestamp - b.timestamp);
+          mergedMessages = merged;
+          const last = merged.length > 0 ? merged[merged.length - 1] : undefined;
+          return prev.map((c) =>
+            String(c.id) !== String(chatId)
+              ? c
+              : {
+                  ...c,
+                  messages: merged,
+                  lastMessage: messagePreviewText(last) ?? c.lastMessage,
+                  lastMessageTime: last?.timestamp ?? c.lastMessageTime,
+                },
+          );
+        });
+      } else {
       setChats((prev) => {
         const prevChat = prev.find((c) => String(c.id) === String(chatId));
         const prevById = new Map((prevChat?.messages ?? []).map((pm) => [pm.id, pm]));
@@ -1899,6 +1944,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           };
         });
       });
+      }
 
       const settings = await loadChatMediaSettings().catch(() => null);
       if (settings && Platform.OS !== "web") {
@@ -1964,12 +2010,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           void ackMessagesDelivered(chatId, toAck, cacheUserId, authSessionToken);
         }
       }
-    } catch {
-      setTimeout(() => void loadMessagesRef.current?.(chatId), 1500);
+    } catch (err) {
+      if ((err as { name?: string })?.name === "AbortError") return;
+      setTimeout(() => void loadMessagesRef.current?.(chatId, { incremental: true }), 1500);
     }
   }, [patchChatMessage, persistChatMessagesForUser, supplementGroupMessageTranslations, getClearCutoff]);
 
   loadMessagesRef.current = loadMessages;
+
+  const scheduleDebouncedLoadMessages = useCallback((chatId: string, opts?: { media?: boolean }) => {
+    const key = String(chatId);
+    const delay = opts?.media ? MESSAGE_HINT_API_DELAY_MS : MESSAGE_HINT_API_RETRY_MS;
+    const pending = loadMessagesDebounceRef.current.get(key);
+    if (pending) clearTimeout(pending);
+    loadMessagesDebounceRef.current.set(
+      key,
+      setTimeout(() => {
+        loadMessagesDebounceRef.current.delete(key);
+        void loadMessages(key, { incremental: true });
+      }, delay),
+    );
+  }, [loadMessages]);
+  scheduleDebouncedLoadMessagesRef.current = scheduleDebouncedLoadMessages;
 
   /** Defer API refresh so the server row exists before we merge (avoids hint flicker). */
   const scheduleLoadMessagesAfterHint = useCallback(
@@ -1982,7 +2044,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (pending) clearTimeout(pending);
       const timer = setTimeout(() => {
         loadMessagesAfterHintTimersRef.current.delete(key);
-        void loadMessages(chatId);
+        void loadMessages(chatId, { incremental: true });
       }, firstDelay);
       loadMessagesAfterHintTimersRef.current.set(key, timer);
 
@@ -1991,7 +2053,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (pendingRetry) clearTimeout(pendingRetry);
       const retryTimer = setTimeout(() => {
         loadMessagesAfterHintTimersRef.current.delete(retryKey);
-        void loadMessages(chatId);
+        void loadMessages(chatId, { incremental: true });
       }, media ? MESSAGE_HINT_API_RETRY_MS : MESSAGE_HINT_API_RETRY_MS);
       loadMessagesAfterHintTimersRef.current.set(retryKey, retryTimer);
 
@@ -2001,7 +2063,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (pendingMedia) clearTimeout(pendingMedia);
         const mediaTimer = setTimeout(() => {
           loadMessagesAfterHintTimersRef.current.delete(mediaRetryKey);
-          void loadMessages(chatId);
+          void loadMessages(chatId, { incremental: true });
         }, MESSAGE_HINT_MEDIA_RETRY_MS);
         loadMessagesAfterHintTimersRef.current.set(mediaRetryKey, mediaTimer);
       }
@@ -2248,12 +2310,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             if (messageId && uid) {
               void ackMessagesDelivered(cid, [messageId], uid, authSessionToken);
             }
+            if (isMediaMessageType(messageType)) {
+              scheduleDebouncedLoadMessages(cid, { media: true });
+            }
           }
           emitChatMessageSignal(signal);
-          void loadMessages(cid);
-          if (activeChatIdRef.current === cid) {
-            scheduleLoadMessagesAfterHint(cid, { media: isMediaMessageType(messageType) });
-          }
         }
         if (cid) {
           const uid = userRef.current?.dbId;
@@ -2303,7 +2364,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const refreshOpenChat = () => {
       const cid = activeChatIdRef.current;
-      if (cid) void loadMessages(cid);
+      if (cid) void loadMessages(cid, { incremental: true });
     };
 
     /** SSE delivers instantly; polling is backup only (reduces API load at scale). */
@@ -2313,7 +2374,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!cid) return;
       // Open chat screen already polls; skip duplicate backup fetches.
       if (getNotificationActiveChatId() === cid) return;
-      void loadMessages(cid);
+      void loadMessages(cid, { incremental: true });
     }, ACTIVE_CHAT_MESSAGE_BACKUP_POLL_MS);
     const statusTimer = setInterval(runStatuses, 30000);
     const callTimer = setInterval(runCalls, 45000);
@@ -2331,21 +2392,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       clearInterval(statusTimer);
       clearInterval(callTimer);
     };
-  }, [isAuthenticated, loadChats, loadMessages, applyIncomingMessageHint, scheduleLoadMessagesAfterHint]);
+  }, [isAuthenticated, loadChats, loadMessages, applyIncomingMessageHint, scheduleDebouncedLoadMessages]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
     return onChatMessageSignal((signal) => {
-      applyIncomingMessageHint(signal);
-      void loadMessages(String(signal.chatId));
-      const cid = activeChatIdRef.current;
-      if (cid && String(signal.chatId) === cid) {
+      const uid = userRef.current?.dbId;
+      const isOwn = isOwnOutgoingChatMessage(signal.senderId, uid);
+      if (!isOwn) {
+        applyIncomingMessageHint(signal);
         const mt = signal.messageType
           ?? normalizeMessageType(signal.messageType, signal.body ?? "", signal.mediaUrl);
-        scheduleLoadMessagesAfterHint(cid, { media: isMediaMessageType(mt) });
+        if (isMediaMessageType(mt)) {
+          scheduleDebouncedLoadMessages(String(signal.chatId), { media: true });
+        }
       }
     });
-  }, [isAuthenticated, applyIncomingMessageHint, scheduleLoadMessagesAfterHint]);
+  }, [isAuthenticated, applyIncomingMessageHint, scheduleDebouncedLoadMessages]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -2437,7 +2500,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!u?.dbId) return;
 
       void enqueueChatTextSend(chatId, async () => {
-        await addTextToMessageOutbox(u.dbId!, outboxEntry);
+        void addTextToMessageOutbox(u.dbId!, outboxEntry);
         void persistOutgoingMessageNow(
           u.dbId!,
           messageCacheStoreRef.current,

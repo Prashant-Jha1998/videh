@@ -40,3 +40,22 @@ export function messageMatchesClientId(a: Message, b: Message): boolean {
 function isLocalOutgoingId(id: string): boolean {
   return id.startsWith("tmp_") || /^[0-9a-f]{8}-/i.test(id);
 }
+
+function isNumericServerId(id: string): boolean {
+  return /^\d+$/.test(id);
+}
+
+/** Highest confirmed server row id in local chat history (for incremental sync). */
+export function latestServerMessageId(messages: Array<{ id: string; serverMessageId?: string }>): number {
+  let max = 0;
+  for (const m of messages) {
+    if (isNumericServerId(m.id)) {
+      max = Math.max(max, Number(m.id));
+      continue;
+    }
+    if (m.serverMessageId && isNumericServerId(m.serverMessageId)) {
+      max = Math.max(max, Number(m.serverMessageId));
+    }
+  }
+  return max;
+}
