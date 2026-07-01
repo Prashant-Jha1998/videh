@@ -1241,7 +1241,6 @@ export default function ChatScreen() {
   const activeCallDurationLabel = `${Math.floor(activeCallDuration / 60).toString().padStart(2, "0")}:${(activeCallDuration % 60).toString().padStart(2, "0")}`;
 
   const [initializing, setInitializing] = useState(rawId?.startsWith("new_") ?? false);
-  const [messagesReady, setMessagesReady] = useState(false);
   const [disappearAfterSeconds, setDisappearAfterSeconds] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectionMenuOpen, setSelectionMenuOpen] = useState(false);
@@ -1324,14 +1323,9 @@ export default function ChatScreen() {
   }, [rawId]);
 
   useEffect(() => {
-    if (!chatId) {
-      setMessagesReady(false);
-      return;
-    }
-    const cachedCount = chats.find((c) => c.id === chatId)?.messages?.length ?? 0;
-    setMessagesReady(cachedCount > 0);
+    if (!chatId) return;
     markAsRead(chatId);
-    void loadMessages(chatId).finally(() => setMessagesReady(true));
+    void loadMessages(chatId);
   }, [chatId, markAsRead, loadMessages]);
 
   useEffect(() => {
@@ -1342,22 +1336,15 @@ export default function ChatScreen() {
   }, [chatId, chats, user?.dbId, user?.sessionToken]);
 
   useEffect(() => {
-    if (!chatId || messagesReady) return;
-    const cachedCount = chats.find((c) => c.id === chatId)?.messages?.length ?? 0;
-    if (cachedCount > 0) setMessagesReady(true);
-  }, [chatId, chats, messagesReady]);
-
-  useEffect(() => {
     const c = chats.find((x) => x.id === chatId);
     chatMetaRef.current = { peerId: c?.otherUserId, isGroup: !!c?.isGroup };
   }, [chatId, chats]);
 
   const remoteTypingNames = chatId ? (typingByChatId[chatId] ?? []) : [];
   const scheduleOpenChatPinRef = useRef<() => void>(() => {});
-  const messagesReadyRef = useRef(false);
   const messagesLenRef = useRef(0);
 
-  // Live messages: 1s poll + push/SSE signal + AppContext backup (Videh instant)
+  // Live messages: 500ms poll + push/SSE signal + AppContext backup (Videh instant)
   useFocusEffect(
     useCallback(() => {
       void loadEnterIsSend().then(setEnterIsSend);
@@ -2246,12 +2233,11 @@ export default function ChatScreen() {
   }, [selectionActive, searching, clearSelection]);
 
   useEffect(() => {
-    messagesReadyRef.current = messagesReady;
     messagesLenRef.current = messages.length;
   });
 
   useEffect(() => {
-    if (searching || !messagesReady) return;
+    if (searching) return;
     if (pendingScrollToEndRef.current) {
       if (messages.length === 0) {
         pendingScrollToEndRef.current = false;
@@ -2292,7 +2278,7 @@ export default function ChatScreen() {
     prevOldestMessageIdRef.current = oldestId;
     prevNewestMessageIdRef.current = newestId;
     prevMessageCountRef.current = count;
-  }, [messages.length, messagesReady, searching, scrollToLatestIfFollowing, scheduleOpenChatPin, blocksAutoScroll]);
+  }, [messages.length, searching, scrollToLatestIfFollowing, scheduleOpenChatPin, blocksAutoScroll]);
 
   /** Reserve space above sticky composer + keyboard/emoji (v1.0.40 WhatsApp-style). */
   const listVisualBottomPad = useMemo(() => {
@@ -3953,7 +3939,7 @@ export default function ChatScreen() {
   const chatListData = useMemo((): ChatListRow[] => {
     return searching ? listRows : listRowsInverted;
   }, [searching, listRows, listRowsInverted]);
-  const isChatEmpty = messagesReady && !searching && listRows.length === 0;
+  const isChatEmpty = !searching && listRows.length === 0;
   const showEmptyStateLabel = isChatEmpty && !hasIntroCards;
   const hasMessageRows = (searching ? listRows : listRowsInverted).length > 0;
   /** Invert only when real messages exist — intro-only chats stay upright. */
@@ -5091,13 +5077,6 @@ export default function ChatScreen() {
             ) : searching ? (
               <View style={styles.initWrap}>
                 <Text style={[styles.initText, { color: colors.mutedForeground }]}>{t("chat.noResults")}</Text>
-              </View>
-            ) : !messagesReady ? (
-              <View style={styles.initWrap}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={[styles.initText, { color: colors.mutedForeground, marginTop: 10 }]}>
-                  {t("chat.loadingMessages")}
-                </Text>
               </View>
             ) : null
           }

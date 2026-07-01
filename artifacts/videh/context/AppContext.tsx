@@ -1784,16 +1784,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loadMessages = useCallback(async (chatId: string) => {
-    try {
-      const u = userRef.current;
-      const prevChat = chatsForPersistRef.current.find((c) => String(c.id) === String(chatId));
-      const translationPrefs = prevChat?.isGroup && u?.dbId
-        ? await resolveGroupTranslationPrefs(prevChat, chatId, u.dbId, authSessionToken)
-        : null;
+    const u = userRef.current;
+    const cid = String(chatId);
+    const cached = messageCacheStoreRef.current[cid];
+    const prevChatSnapshot = chatsForPersistRef.current.find((c) => String(c.id) === cid);
+    if (cached?.length && !(prevChatSnapshot?.messages?.length)) {
+      const hydrated = (cached as CachedChatMessage[]).map((m) => coerceAlbumMessageFields(m as Message));
+      setChats((prev) =>
+        prev.map((c) => (String(c.id) === cid ? { ...c, messages: hydrated } : c)),
+      );
+    }
 
-      const data = await api(
-        `/chats/${chatId}/messages?limit=${CHAT_MESSAGES_PAGE}&skipTranslate=1&userId=${u?.dbId ?? 0}`,
-      ) as { success: boolean; messages: any[] };
+    try {
+      const prevChat = chatsForPersistRef.current.find((c) => String(c.id) === cid);
+      const translationPrefsPromise = prevChat?.isGroup && u?.dbId
+        ? resolveGroupTranslationPrefs(prevChat, cid, u.dbId, authSessionToken)
+        : Promise.resolve(null);
+
+      const res = await fetchWithTimeout(
+        `${BASE_URL}/api/chats/${cid}/messages?limit=${CHAT_MESSAGES_PAGE}&skipTranslate=1&fast=1&userId=${u?.dbId ?? 0}`,
+        { headers: authHeaders() },
+        12_000,
+      );
+      const data = await res.json() as { success: boolean; messages: any[] };
+      const translationPrefs = await translationPrefsPromise;
       if (!data.success || !data.messages) return;
 
       const clearedAt = getClearCutoff(chatId);
@@ -1942,9 +1956,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch {
-      setTimeout(() => void loadMessagesRef.current?.(chatId), 2000);
+      setTimeout(() => void loadMessagesRef.current?.(chatId), 1500);
     }
-  }, [patchChatMessage, persistChatMessagesForUser, supplementGroupMessageTranslations]);
+  }, [patchChatMessage, persistChatMessagesForUser, supplementGroupMessageTranslations, getClearCutoff]);
 
   loadMessagesRef.current = loadMessages;
 
@@ -2308,6 +2322,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!isAuthenticated) return;
     return onChatMessageSignal((signal) => {
       applyIncomingMessageHint(signal);
+      void loadMessages(String(signal.chatId));
       const cid = activeChatIdRef.current;
       if (cid && String(signal.chatId) === cid) {
         const mt = signal.messageType
@@ -2382,23 +2397,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       };
 
       if (u?.dbId) {
-        await addTextToMessageOutbox(u.dbId, outboxEntry);
         const chat = chatsForPersistRef.current.find((c) => c.id === chatId);
         const expiresAt = computeClientMessageExpiresAt(chat?.disappearAfterSeconds ?? null);
         if (expiresAt) newMsg = { ...newMsg, expiresAt };
-        messageCacheStoreRef.current = await persistOutgoingMessageNow(
-          u.dbId,
-          messageCacheStoreRef.current,
-          chatId,
-          newMsg as CachedChatMessage,
-        );
-        const listSnapshot = chatsForPersistRef.current.map((c) =>
-          c.id === chatId
-            ? { ...c, lastMessage: chatListPreview, lastMessageTime: sentAt }
-            : c,
-        );
-        schedulePersistChatListCache(u.dbId, listSnapshot);
-        await flushChatListCache();
       }
 
       setChats((prev) =>
@@ -2421,6 +2422,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!u?.dbId) return;
 
       void enqueueChatTextSend(chatId, async () => {
+        await addTextToMessageOutbox(u.dbId!, outboxEntry);
+        void persistOutgoingMessageNow(
+          u.dbId!,
+          messageCacheStoreRef.current,
+          chatId,
+          newMsg as CachedChatMessage,
+        ).then((store) => {
+          messageCacheStoreRef.current = store;
+        });
+        const listSnapshot = chatsForPersistRef.current.map((c) =>
+          c.id === chatId
+            ? { ...c, lastMessage: chatListPreview, lastMessageTime: sentAt }
+            : c,
+        );
+        schedulePersistChatListCache(u.dbId!, listSnapshot);
+        void flushChatListCache();
+
         const resolveReplyId = () => {
           if (!replyToId) return undefined;
           if (replyToId.startsWith("tmp_") || /^[0-9a-f-]{36}$/i.test(replyToId)) return undefined;
@@ -2447,6 +2465,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }, 20_000);
           data = await res.json();
         } catch {
+          void retryPendingTextOutbox(u.dbId!);
           return;
         }
 

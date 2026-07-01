@@ -17,4 +17,4 @@ export const MESSAGE_HINT_API_RETRY_MS = 400;
 export const MESSAGE_HINT_MEDIA_RETRY_MS = 2800;
 
 /** Retry unsent text outbox while app is open. */
-export const TEXT_OUTBOX_RETRY_MS = 3000;
+export const TEXT_OUTBOX_RETRY_MS = 1500;
