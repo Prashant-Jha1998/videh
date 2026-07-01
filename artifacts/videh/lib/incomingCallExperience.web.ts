@@ -3,22 +3,29 @@ import { showWebBrowserNotification } from "@/lib/web/webBrowserNotify";
 import { startIncomingCallAlert, stopCallAlert } from "@/lib/callRingtone";
 
 let ringingCallId: string | null = null;
+let surfacesPresentedFor: string | null = null;
+const handledCallIds = new Set<string>();
 
 export function getRingingCallId(): string | null {
   return ringingCallId;
 }
 
-export function isIncomingCallAlreadyHandled(_callId: string): boolean {
-  return false;
+export function isIncomingCallAlreadyHandled(callId: string): boolean {
+  return handledCallIds.has(callId);
 }
 
 export function shouldPresentIncomingCallSurfaces(callId: string): boolean {
-  if (ringingCallId === callId) return false;
+  if (handledCallIds.has(callId)) return false;
+  if (surfacesPresentedFor === callId) return false;
+  surfacesPresentedFor = callId;
   return true;
 }
 
 export function markIncomingCallHandled(callId: string): void {
+  handledCallIds.add(callId);
+  setTimeout(() => handledCallIds.delete(callId), 10 * 60_000);
   if (ringingCallId === callId) ringingCallId = null;
+  if (surfacesPresentedFor === callId) surfacesPresentedFor = null;
 }
 
 export function isAppInForeground(): boolean {
@@ -52,7 +59,11 @@ export async function startIncomingCallExperience(call: IncomingCallInfo & { cal
 
 export async function stopIncomingCallExperience(callId?: string): Promise<void> {
   if (callId && ringingCallId && ringingCallId !== callId) return;
-  ringingCallId = null;
+  if (callId) markIncomingCallHandled(callId);
+  else {
+    ringingCallId = null;
+    surfacesPresentedFor = null;
+  }
   await stopCallAlert();
 }
 

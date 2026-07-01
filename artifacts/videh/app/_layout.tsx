@@ -300,10 +300,6 @@ function RootLayoutNav() {
       return;
     }
 
-    if (partial.callId && partial.callerName && !isCallCaller(user.dbId, partial.callerId)) {
-      presentIncomingCallRing(partial);
-    }
-
     const callPayload = await hydrateAndValidateIncomingCall(partial, user.dbId, user.sessionToken);
     if (!callPayload) return;
     if (!shouldPresentIncomingCall({
@@ -414,7 +410,9 @@ function RootLayoutNav() {
         return;
       }
       if (data?.callId && isAuthenticated) {
-        void fetch(`${getApiUrl()}/api/webrtc/calls/${data.callId}/status?userId=${user?.dbId ?? ""}`)
+        void fetch(`${getApiUrl()}/api/webrtc/calls/${data.callId}/status?userId=${user?.dbId ?? ""}`, {
+          headers: webrtcAuthHeaders(user?.sessionToken),
+        })
           .then((res) => res.json())
           .then((payload: { success?: boolean; ended?: boolean; call?: IncomingCallInfo }) => {
             if (payload.ended) return;
@@ -508,6 +506,8 @@ function RootLayoutNav() {
         }
         const pollCallId = String(next.callId ?? "");
         if (dismissedIncomingCallIdsRef.current.has(pollCallId)) return;
+        if (isIncomingCallAlreadyHandled(pollCallId)) return;
+        if (getRingingCallId() === pollCallId) return;
         if (Number(next.callerId) === user.dbId) return;
         if (activeCallIdRef.current === pollCallId && activeCallIsOutgoingRef.current) return;
         if (activeCallSession?.callId === pollCallId && activeCallSession.isIncoming === false) return;
@@ -537,6 +537,8 @@ function RootLayoutNav() {
       const callId = signal.callId ?? "";
       if (action === "ringing" && callId && user.dbId) {
         if (dismissedIncomingCallIdsRef.current.has(callId)) return;
+        if (isIncomingCallAlreadyHandled(callId)) return;
+        if (getRingingCallId() === callId) return;
         if (activeCallIdRef.current === callId) return;
         const callInfo: IncomingCallInfo = {
           callId,

@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { assertSameUser, requireAuth } from "../lib/auth";
 import { insertCallChatMessage, publishCallSignal } from "../lib/callMessages";
 import { query } from "../lib/db";
-import { publishChatEvent } from "../lib/realtime";
+import { publishChatEvent, filterSseConnectedUserIds } from "../lib/realtime";
 import { EXPO_INCOMING_CALL_CATEGORY_ID } from "../lib/expoPush";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { stateDelete, stateGetJson, stateKeys, stateSetJson } from "../lib/sharedState";
@@ -57,10 +57,10 @@ const NEGOTIATE_IDLE_MS = 30 * 1000;
 const CONNECTED_CALL_IDLE_MS = 2 * 60 * 1000;
 const ringExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /**
- * FIX: Was 12_000ms — caused the callee to get the first ringing push/signal
- * very late. 4s is much more responsive while still avoiding spam.
+ * Ring reminders over SSE only when the app is connected; push is for background devices.
+ * 8s avoids notification spam while keeping backup delivery.
  */
-const RING_REMINDER_MS = 2_000;
+const RING_REMINDER_MS = 8_000;
 const ringReminderTimers = new Map<string, ReturnType<typeof setInterval>>();
 
 function callIsOrphanStale(call: CallInvite): boolean {
@@ -110,6 +110,11 @@ function clearRingReminderTimers(callId: string): void {
   }
 }
 
+function userIdsNeedingCallPush(userIds: number[]): number[] {
+  const sseConnected = new Set(filterSseConnectedUserIds(userIds));
+  return userIds.filter((id) => !sseConnected.has(id));
+}
+
 async function sendRingReminder(callId: string): Promise<void> {
   const call = await getCall(callId);
   if (!call) {
@@ -139,8 +144,11 @@ async function sendRingReminder(callId: string): Promise<void> {
        JOIN users u ON u.id = cm.user_id WHERE cm.chat_id = $1`,
       [call.chatId],
     );
+    const pushUserIds = userIdsNeedingCallPush(ringingIds);
     const pushTokens = members.rows
-      .filter((row: { user_id: number; push_token: string | null }) => ringingIds.includes(Number(row.user_id)))
+      .filter((row: { user_id: number; push_token: string | null }) =>
+        pushUserIds.includes(Number(row.user_id)),
+      )
       .map((row: { push_token: string | null }) => row.push_token)
       .filter((t: unknown): t is string => isValidPushToken(t));
     if (pushTokens.length > 0) {
@@ -617,8 +625,9 @@ router.post("/calls", async (req: Request, res: Response) => {
         },
       });
     }
+    const pushUserIds = userIdsNeedingCallPush(ringingIds);
     const pushTokens = members.rows
-      .filter((row: any) => ringingIds.includes(Number(row.user_id)))
+      .filter((row: any) => pushUserIds.includes(Number(row.user_id)))
       .map((row: any) => row.push_token)
       .filter((t: unknown): t is string => isValidPushToken(t));
     if (busyParticipantIds.length > 0) {
