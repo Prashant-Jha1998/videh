@@ -1,5 +1,14 @@
 import type { Message } from "@/context/AppContext";
 
+/** Map server delivery_status from POST/GET to outgoing message ticks. */
+export function outboundStatusFromServer(
+  deliveryStatus: string | null | undefined,
+): "sent" | "delivered" | "read" {
+  if (deliveryStatus === "read") return "read";
+  if (deliveryStatus === "delivered") return "delivered";
+  return "sent";
+}
+
 /** Update delivery fields after server ACK — never replace the local message id. */
 export function ackOutgoingMessage(
   msg: Message,

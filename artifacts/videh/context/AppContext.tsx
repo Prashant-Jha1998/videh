@@ -112,7 +112,7 @@ import {
   type TextOutboxEntry,
 } from "@/lib/messageOutbox";
 import { createClientMessageId } from "@/lib/clientMessageId";
-import { ackOutgoingMessage, messageMatchesClientId } from "@/lib/messageSendAck";
+import { ackOutgoingMessage, messageMatchesClientId, outboundStatusFromServer } from "@/lib/messageSendAck";
 import {
   chatClearCutoff,
   filterMessagesAfterClearCutoff,
@@ -631,7 +631,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       };
 
       let res: Response;
-      let data: { success?: boolean; message?: { id: number; expires_at?: string; is_kept?: boolean } | string; code?: string };
+      let data: { success?: boolean; message?: { id: number; expires_at?: string; is_kept?: boolean; delivery_status?: string } | string; code?: string };
       try {
         res = await fetchWithTimeout(`${BASE_URL}/api/chats/${entry.chatId}/messages`, {
           method: "POST",
@@ -683,7 +683,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             const messages = c.messages.map((m) =>
               m.id === entry.clientMessageId
                 ? ackOutgoingMessage(m, serverId, {
-                    status: "sent" as const,
+                    status: outboundStatusFromServer(row.delivery_status),
                     expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
                     isKept: row.is_kept ?? m.isKept,
                   })
@@ -2385,7 +2385,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         };
 
         let res: Response;
-        let data: { success?: boolean; message?: { id: number; expires_at?: string; is_kept?: boolean } | string; code?: string };
+        let data: { success?: boolean; message?: { id: number; expires_at?: string; is_kept?: boolean; delivery_status?: string } | string; code?: string };
         try {
           res = await fetchWithTimeout(`${BASE_URL}/api/chats/${chatId}/messages`, {
             method: "POST",
@@ -2439,7 +2439,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               const messages = c.messages.map((m) =>
                 m.id === clientMessageId
                   ? ackOutgoingMessage(m, serverId, {
-                      status: "sent" as const,
+                      status: outboundStatusFromServer(row.delivery_status),
                       expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : m.expiresAt,
                       isKept: row.is_kept ?? m.isKept,
                     })

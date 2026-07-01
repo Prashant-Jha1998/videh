@@ -70,6 +70,40 @@ const apiServerDir = path.resolve(routesDir, "../..");
 const chatUploadsDir = path.join(apiServerDir, "uploads", "chats");
 fs.mkdirSync(chatUploadsDir, { recursive: true });
 
+/** Best recipient delivery status for sender tick display (read > delivered > sent). */
+async function senderDeliveryStatusForMessage(
+  messageId: number,
+  senderId: number,
+): Promise<"read" | "delivered" | "sent"> {
+  const r = await query(
+    `SELECT ms.status
+     FROM message_status ms
+     WHERE ms.message_id = $1 AND ms.user_id != $2
+     ORDER BY CASE ms.status WHEN 'read' THEN 0 WHEN 'delivered' THEN 1 ELSE 2 END
+     LIMIT 1`,
+    [messageId, senderId],
+  );
+  const status = String(r.rows[0]?.status ?? "");
+  if (status === "read") return "read";
+  if (status === "delivered") return "delivered";
+  return "sent";
+}
+
+async function messageRowForSender(
+  req: Request,
+  row: Record<string, unknown>,
+  senderId: number,
+): Promise<Record<string, unknown>> {
+  const messageId = Number(row.id);
+  const delivery_status = Number.isFinite(messageId)
+    ? await senderDeliveryStatusForMessage(messageId, senderId)
+    : "sent";
+  return {
+    ...resolveChatMessageRowForClient(req, row),
+    delivery_status,
+  };
+}
+
 function mediaExtension(mime: string): string {
   if (mime === "application/pdf") return ".pdf";
   if (mime === "application/vnd.ms-excel") return ".xls";
@@ -953,7 +987,7 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
       if (idempotent.rows[0]) {
         res.json({
           success: true,
-          message: resolveChatMessageRowForClient(req, idempotent.rows[0] as Record<string, unknown>),
+          message: await messageRowForSender(req, idempotent.rows[0] as Record<string, unknown>, senderId),
           deduplicated: true,
         });
         return;
@@ -1009,7 +1043,7 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      message: resolveChatMessageRowForClient(req, result.rows[0] as Record<string, unknown>),
+      message: await messageRowForSender(req, result.rows[0] as Record<string, unknown>, senderId),
     });
 
     if (notifyMembers.length > 0) {
