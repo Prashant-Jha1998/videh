@@ -30,8 +30,8 @@ export type CachedChatMessage = {
 
 export type ChatMessageCacheStore = Record<string, CachedChatMessage[]>;
 
-const CACHE_VERSION = 4;
-const MAX_MESSAGES_PER_CHAT = 80;
+const CACHE_VERSION = 5;
+const MAX_MESSAGES_PER_CHAT = 200;
 const MAX_CACHED_CHATS = 40;
 
 const cacheKey = (userId: number) => `videh_chat_msg_cache_v${CACHE_VERSION}_${userId}`;
@@ -92,11 +92,19 @@ export function rememberChatMessagesInStore(
   messages: CachedChatMessage[],
 ): ChatMessageCacheStore {
   const next = { ...store };
-  const slim = messages
-    .filter((m) => shouldPersistMessage(m))
-    .map((m) => slimMessageForCache(m))
+  const cid = String(chatId);
+  const existing = (next[cid] ?? []).map((m) => slimMessageForCache(m));
+  const byKey = new Map<string, CachedChatMessage>();
+  for (const m of existing) {
+    byKey.set(m.clientMessageId ?? m.id, m);
+  }
+  for (const m of messages.filter((row) => shouldPersistMessage(row)).map((row) => slimMessageForCache(row))) {
+    byKey.set(m.clientMessageId ?? m.id, m);
+  }
+  const merged = [...byKey.values()]
+    .sort((a, b) => a.timestamp - b.timestamp)
     .slice(-MAX_MESSAGES_PER_CHAT);
-  next[String(chatId)] = slim;
+  next[cid] = merged;
 
   const keys = Object.keys(next);
   if (keys.length > MAX_CACHED_CHATS) {

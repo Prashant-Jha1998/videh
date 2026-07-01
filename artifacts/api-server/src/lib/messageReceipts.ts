@@ -104,33 +104,31 @@ export async function markMessagesDeliveredForRecipient(args: {
   const ids = [...new Set(messageIds.filter((id) => Number.isFinite(id) && id > 0))];
   if (ids.length === 0) return { updated: [] };
 
-  const valid = await query(
-    `SELECT m.id, m.sender_id
+  const inserted = await query(
+    `INSERT INTO message_status (message_id, user_id, status, updated_at)
+     SELECT m.id, $2, 'delivered', NOW()
      FROM messages m
      JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $2
      WHERE m.chat_id = $1
        AND m.id = ANY($3::int[])
        AND m.sender_id != $2
-       AND COALESCE(m.is_deleted, FALSE) = FALSE`,
+       AND COALESCE(m.is_deleted, FALSE) = FALSE
+       AND NOT EXISTS (
+         SELECT 1 FROM message_status ms
+         WHERE ms.message_id = m.id AND ms.user_id = $2
+           AND ms.status IN ('delivered', 'read')
+       )
+     RETURNING message_id`,
     [chatId, recipientUserId, ids],
   );
-  if (!valid.rows.length) return { updated: [] };
+  const updatedIds = inserted.rows.map((r: { message_id: number }) => Number(r.message_id));
+  if (updatedIds.length === 0) return { updated: [] };
 
-  const updatedIds = valid.rows.map((r: { id: number }) => Number(r.id));
-  await query(
-    `INSERT INTO message_status (message_id, user_id, status, updated_at)
-     SELECT unnest($1::int[]), $2, 'delivered', NOW()
-     ON CONFLICT (message_id, user_id)
-     DO UPDATE SET
-       status = CASE
-         WHEN message_status.status = 'read' THEN message_status.status
-         ELSE 'delivered'
-       END,
-       updated_at = NOW()`,
-    [updatedIds, recipientUserId],
+  const senders = await query(
+    `SELECT id, sender_id FROM messages WHERE id = ANY($1::int[])`,
+    [updatedIds],
   );
-
-  const senderIds = valid.rows.map((r: { sender_id: number }) => Number(r.sender_id));
+  const senderIds = senders.rows.map((r: { sender_id: number }) => Number(r.sender_id));
   publishReceiptEvent({
     chatId,
     senderIds,

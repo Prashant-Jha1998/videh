@@ -719,6 +719,20 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
         viewerId,
         messages as Array<Record<string, unknown> & { id: number }>,
       );
+
+    const chatIdNorm = Array.isArray(chatId) ? chatId[0]! : chatId;
+    const incomingIds = messages
+      .filter((row: { sender_id?: number }) => Number(row.sender_id) !== viewerId)
+      .map((row: { id: number }) => Number(row.id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    if (incomingIds.length > 0) {
+      void markMessagesDeliveredForRecipient({
+        chatId: chatIdNorm,
+        recipientUserId: viewerId,
+        messageIds: incomingIds,
+      });
+    }
+
     res.json({
       success: true,
       messages: withTranslations.map((row) => resolveChatMessageRowForClient(req, row as Record<string, unknown>)),

@@ -59,6 +59,11 @@ export async function ackMessagesDelivered(
         for (const id of (data.updated ?? []).map(String)) {
           ackedKeys.add(ackKey(chatId, id));
         }
+      } else if (res.status === 404) {
+        /* legacy server without /delivered — GET messages will mark delivered */
+        for (const id of numericIds) {
+          ackedKeys.add(ackKey(chatId, id));
+        }
       }
     } catch {
       /* retry on next loadMessages / hint */

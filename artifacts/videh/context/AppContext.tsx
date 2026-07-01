@@ -230,7 +230,8 @@ export interface Message {
   translationTargetLang?: string;
 }
 
-const OLDER_MESSAGES_PAGE = 40;
+const OLDER_MESSAGES_PAGE = 60;
+const CHAT_MESSAGES_PAGE = 150;
 
 function asDeletedMessage(m: Message): Message {
   return {
@@ -1791,7 +1792,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         : null;
 
       const data = await api(
-        `/chats/${chatId}/messages?limit=80&userId=${u?.dbId ?? 0}`,
+        `/chats/${chatId}/messages?limit=${CHAT_MESSAGES_PAGE}&skipTranslate=1&userId=${u?.dbId ?? 0}`,
       ) as { success: boolean; messages: any[] };
       if (!data.success || !data.messages) return;
 
@@ -1857,6 +1858,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           const pendingLocal = collectPendingLocalMessages(prevMsgs, serverWithHistory);
           let merged = mergeServerWithPending(serverWithHistory, pendingLocal);
           merged = dedupeChatMessages(filterMessagesAfterClearCutoff(merged, clearedAt));
+          const mergedIds = new Set(merged.map((m) => m.id));
+          for (const m of prevStable) {
+            if (mergedIds.has(m.id)) continue;
+            if (m.clientMessageId && merged.some((x) => x.clientMessageId === m.clientMessageId)) continue;
+            merged.push(m);
+            mergedIds.add(m.id);
+          }
+          merged.sort((a, b) => a.timestamp - b.timestamp);
           mergedMessages = merged;
           const last = merged.length > 0 ? merged[merged.length - 1] : undefined;
           return {
@@ -2212,11 +2221,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             mediaUrl,
           };
           emitChatMessageSignal(signal);
+          void loadMessages(cid);
           if (activeChatIdRef.current === cid) {
             scheduleLoadMessagesAfterHint(cid, { media: isMediaMessageType(messageType) });
-            if (!isMediaMessageType(messageType)) {
-              void loadMessages(cid);
-            }
           }
         }
         if (cid) {
