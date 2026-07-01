@@ -99,6 +99,7 @@ import {
 } from "@/lib/chatMessageCache";
 import {
   fetchGroupAutoTranslations,
+  lookupGroupTranslationResult,
   messagesNeedingGroupTranslation,
   resolveGroupTranslationPrefs,
   translateIncomingGroupMessages,
@@ -734,7 +735,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (String(c.id) !== String(chatId)) return c;
           const byId = new Map(results.map((r) => [r.messageId, r]));
           const nextMessages = c.messages.map((m) => {
-            const hit = byId.get(m.id);
+            const hit = lookupGroupTranslationResult(byId, m.id);
             if (!hit) return m;
             return {
               ...m,
@@ -1813,13 +1814,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const prevChat = chatsForPersistRef.current.find((c) => String(c.id) === cid);
-      const translationPrefsPromise = !incremental && prevChat?.isGroup && u?.dbId
-        ? resolveGroupTranslationPrefs(prevChat, cid, u.dbId, authSessionToken)
+      const isGroupChat = Boolean(prevChatSnapshot?.isGroup ?? prevChat?.isGroup);
+      const translationPrefsPromise = isGroupChat && u?.dbId
+        ? resolveGroupTranslationPrefs(prevChat ?? prevChatSnapshot, cid, u.dbId, authSessionToken)
         : Promise.resolve(null);
 
+      const fastParams = isGroupChat && !incremental ? "" : "&skipTranslate=1&fast=1";
       const url = incremental
-        ? `${BASE_URL}/api/chats/${cid}/messages?limit=30&afterId=${afterId}&skipTranslate=1&fast=1&userId=${u?.dbId ?? 0}`
-        : `${BASE_URL}/api/chats/${cid}/messages?limit=${CHAT_MESSAGES_PAGE}&skipTranslate=1&fast=1&userId=${u?.dbId ?? 0}`;
+        ? `${BASE_URL}/api/chats/${cid}/messages?limit=30&afterId=${afterId}${fastParams}&userId=${u?.dbId ?? 0}`
+        : `${BASE_URL}/api/chats/${cid}/messages?limit=${CHAT_MESSAGES_PAGE}${fastParams}&userId=${u?.dbId ?? 0}`;
 
       const res = await fetchWithTimeout(
         url,

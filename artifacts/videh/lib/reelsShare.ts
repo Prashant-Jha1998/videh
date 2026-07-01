@@ -14,10 +14,11 @@ function normalizeChannelHandle(handle: string): string {
   return handle.replace(/^@+/, "").trim();
 }
 
-/** Parse in-stream video share URL or videh:// deep link → video id. */
+/** Parse in-stream video share URL or videh:// deep link → opaque slug or legacy id. */
 export function parseReelsWatchIdFromUrl(url: string): string | null {
   if (!url) return null;
-  const goMatch = url.match(/\/api\/reels\/go\/(\d+)/i);
+  const refPattern = "([a-zA-Z0-9_-]{8,24}|\\d+)";
+  const goMatch = url.match(new RegExp(`/api/reels/go/${refPattern}`, "i"));
   if (goMatch?.[1]) return goMatch[1];
   const parsed = Linking.parse(url);
   const host = (parsed.hostname ?? "").toLowerCase();
@@ -25,9 +26,9 @@ export function parseReelsWatchIdFromUrl(url: string): string | null {
     const parts = String(parsed.path ?? "").replace(/^\//, "").split("/");
     if (parts[0] === "watch" && parts[1]) return parts[1];
   }
-  const pathMatch = String(parsed.path ?? url).match(/reels\/watch\/(\d+)/i);
+  const pathMatch = String(parsed.path ?? url).match(new RegExp(`reels/watch/${refPattern}`, "i"));
   if (pathMatch?.[1]) return pathMatch[1];
-  const watchMatch = url.match(/\/watch\/(\d+)/i);
+  const watchMatch = url.match(new RegExp(`/watch/${refPattern}`, "i"));
   if (watchMatch?.[1]) return watchMatch[1];
   return null;
 }
@@ -92,11 +93,12 @@ export async function shareReelsChannelLink(channel: {
   }
 }
 
-export function reelsShareUrlForVideo(video: Pick<ReelsVideo, "id" | "shareUrl">): string {
+export function reelsShareUrlForVideo(video: Pick<ReelsVideo, "id" | "shareUrl" | "shareSlug">): string {
   if (video.shareUrl) return video.shareUrl;
+  if (video.shareSlug) return `${videoPublicBase()}/watch/${encodeURIComponent(video.shareSlug)}`;
   const domain = process.env.EXPO_PUBLIC_DOMAIN ?? "videh.co.in";
   const base = domain.startsWith("http") ? domain.replace(/\/+$/, "") : `https://${domain}`;
-  return `${base}/api/reels/go/${video.id}`;
+  return `${base}/api/reels/go/${encodeURIComponent(String(video.shareSlug ?? video.id))}`;
 }
 
 export function reelsShareMessage(video: Pick<ReelsVideo, "id" | "title" | "channelHandle" | "shareUrl">): string {

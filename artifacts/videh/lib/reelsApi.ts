@@ -94,8 +94,9 @@ export type ReelsVideo = {
   createdAt?: string;
   /** Native upload height in px; drives per-video quality menu. */
   sourceHeight?: number | null;
-  /** Public HTTPS link — opens app via /api/reels/go/:id */
+  /** Public HTTPS link — opaque slug URL (not numeric id) */
   shareUrl?: string;
+  shareSlug?: string;
   deepLink?: string;
 };
 

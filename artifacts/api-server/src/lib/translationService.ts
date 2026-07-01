@@ -51,6 +51,12 @@ export async function ensureTranslationTables(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_message_translations_message
     ON message_translations (message_id)
   `);
+  await query(`ALTER TABLE chats ALTER COLUMN auto_translate_enabled SET DEFAULT TRUE`);
+  await query(`
+    UPDATE chats
+    SET auto_translate_enabled = TRUE
+    WHERE is_group = TRUE AND auto_translate_enabled = FALSE
+  `);
   tablesEnsured = true;
 }
 
@@ -446,7 +452,10 @@ export async function getViewerTranslationPrefs(
   await ensureTranslationTables();
   const r = await query(
     `SELECT c.is_group,
-            COALESCE(c.auto_translate_enabled, FALSE) AS group_enabled,
+            CASE
+              WHEN c.is_group THEN COALESCE(c.auto_translate_enabled, TRUE)
+              ELSE COALESCE(c.auto_translate_enabled, FALSE)
+            END AS group_enabled,
             COALESCE(cm.auto_translate_personal, TRUE) AS personal_enabled,
             cm.translate_lang AS member_lang,
             u.preferred_lang AS user_lang

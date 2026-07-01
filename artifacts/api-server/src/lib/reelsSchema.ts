@@ -1,4 +1,5 @@
 import { query } from "./db";
+import { ensureReelsShareSlugs } from "./reelsShareUrl";
 
 let ensured = false;
 
@@ -77,6 +78,7 @@ export async function ensureReelsTables(): Promise<void> {
   await ensureReelsCommentRepliesLikes();
   const { ensureReelsAdsTables } = await import("./reelsAdsSchema");
   await ensureReelsAdsTables();
+  await ensureReelsShareSlugs();
   ensured = true;
 }
 

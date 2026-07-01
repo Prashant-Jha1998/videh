@@ -1,6 +1,7 @@
 import type { Request } from "express";
 import path from "node:path";
 import { query } from "./db";
+import { generateReelsVideoShareSlug, ensureReelsShareSlugs } from "./reelsShareUrl";
 import { resolveStoredMediaUrl } from "./mediaStorage";
 import {
   applyVideoModerationResult,
@@ -72,22 +73,34 @@ export async function publishReelsVideo(input: PublishReelsVideoInput): Promise<
   }
   const channelId = Number(ch.rows[0].id);
 
-  const inserted = await query(
-    `INSERT INTO reels_videos (
-       channel_id, title, description, hashtags, video_url, thumbnail_url, duration_seconds,
-       status, play_enabled, moderation_status
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_review', FALSE, 'pending_scan') RETURNING *`,
-    [
-      channelId,
-      input.title.slice(0, 200),
-      input.description || null,
-      input.hashtags,
-      input.videoUrl,
-      input.thumbnailUrl,
-      input.durationSeconds,
-    ],
-  );
-  const row = inserted.rows[0] as Record<string, unknown>;
+  await ensureReelsShareSlugs();
+  let row: Record<string, unknown> | undefined;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const shareSlug = generateReelsVideoShareSlug();
+    try {
+      const inserted = await query(
+        `INSERT INTO reels_videos (
+           channel_id, title, description, hashtags, video_url, thumbnail_url, duration_seconds,
+           status, play_enabled, moderation_status, share_slug
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_review', FALSE, 'pending_scan', $8) RETURNING *`,
+        [
+          channelId,
+          input.title.slice(0, 200),
+          input.description || null,
+          input.hashtags,
+          input.videoUrl,
+          input.thumbnailUrl,
+          input.durationSeconds,
+          shareSlug,
+        ],
+      );
+      row = inserted.rows[0] as Record<string, unknown>;
+      break;
+    } catch {
+      if (attempt === 5) throw new Error("SHARE_SLUG_FAILED");
+    }
+  }
+  if (!row) throw new Error("INSERT_FAILED");
   const videoId = Number(row.id);
 
   const channel = await query(

@@ -61,9 +61,34 @@ import {
   buildReelsChannelShareUrl,
   buildReelsVideoDeepLink,
   buildReelsVideoShareUrl,
+  ensureReelsShareSlugs,
+  reelsVideoPublicShareRef,
+  resolveReelsVideoIdFromRef,
 } from "../lib/reelsShareUrl";
 
 const router = Router();
+type ReelsVideoRequest = Request & { resolvedVideoId?: number };
+
+function videoIdFromReq(req: Request): number {
+  return (req as ReelsVideoRequest).resolvedVideoId!;
+}
+
+router.param("videoId", async (req, res, next, raw) => {
+  try {
+    await ensureReelsTables();
+    await ensureReelsShareSlugs();
+    const id = await resolveReelsVideoIdFromRef(String(raw));
+    if (!id) {
+      res.status(404).json({ success: false, message: "Video not found" });
+      return;
+    }
+    (req as ReelsVideoRequest).resolvedVideoId = id;
+    next();
+  } catch (err) {
+    req.log.error({ err }, "resolve video ref");
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
 const currentFilePath = fileURLToPath(import.meta.url);
 const routesDir = path.dirname(currentFilePath);
 const apiServerDir = path.resolve(routesDir, "../..");
@@ -206,8 +231,9 @@ function mapVideoRow(row: Record<string, unknown>, req?: Request) {
       : (avatar ?? null),
     myReaction: row.my_reaction ?? null,
     createdAt: row.created_at,
-    shareUrl: buildReelsVideoShareUrl(row.id as number | string),
-    deepLink: buildReelsVideoDeepLink(row.id as number | string),
+    shareSlug: String(row.share_slug ?? "").trim() || undefined,
+    shareUrl: buildReelsVideoShareUrl(reelsVideoPublicShareRef(row)),
+    deepLink: buildReelsVideoDeepLink(reelsVideoPublicShareRef(row)),
   };
 }
 
@@ -556,15 +582,11 @@ router.get("/go/channel/:handle", async (req: Request, res: Response) => {
 
 /** in-stream video share link landing — opens Videh app or shows download prompt. */
 router.get("/go/:videoId", async (req: Request, res: Response) => {
-  const videoId = Number(req.params.videoId);
-  if (!videoId) {
-    res.status(400).send("Invalid video");
-    return;
-  }
+  const videoId = videoIdFromReq(req);
   try {
     await ensureReelsTables();
     const row = await query(
-      `SELECT v.title, v.status, v.play_enabled, c.handle, c.display_name
+      `SELECT v.title, v.status, v.play_enabled, v.share_slug, c.handle, c.display_name
        FROM reels_videos v
        JOIN reels_channels c ON c.id = v.channel_id
        WHERE v.id = $1`,
@@ -578,18 +600,20 @@ router.get("/go/:videoId", async (req: Request, res: Response) => {
       title?: string;
       status?: string;
       play_enabled?: boolean;
+      share_slug?: string | null;
       handle?: string;
       display_name?: string;
     };
     const published = v.status === "published" && v.play_enabled !== false;
+    const shareRef = reelsVideoPublicShareRef({ id: videoId, share_slug: v.share_slug });
     const title = String(v.title ?? "Videh Video").replace(/[<>&"]/g, (c) => (
       { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c] ?? c
     ));
     const channel = String(v.display_name ?? v.handle ?? "Videh").replace(/[<>&"]/g, (c) => (
       { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c] ?? c
     ));
-    const deepLink = buildReelsVideoDeepLink(videoId);
-    const shareUrl = buildReelsVideoShareUrl(videoId);
+    const deepLink = buildReelsVideoDeepLink(shareRef);
+    const shareUrl = buildReelsVideoShareUrl(shareRef);
     const thumb = resolveVideoThumbnailUrl(req, null, videoId);
     res.type("html").send(`<!DOCTYPE html>
 <html lang="en">
@@ -1830,12 +1854,8 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
 });
 
 router.get("/videos/:videoId", async (req: Request, res: Response) => {
-  const videoId = Number(req.params.videoId);
+  const videoId = videoIdFromReq(req);
   const viewerId = Number(req.query.userId) || 0;
-  if (!videoId) {
-    res.status(400).json({ success: false, message: "Invalid video" });
-    return;
-  }
   try {
     await ensureReelsTables();
     const result = await query(
@@ -1877,13 +1897,9 @@ router.get("/videos/:videoId", async (req: Request, res: Response) => {
 });
 
 router.post("/videos/:videoId/view", async (req: Request, res: Response) => {
-  const videoId = Number(req.params.videoId);
+  const videoId = videoIdFromReq(req);
   const { userId, watchedSeconds } = req.body as { userId?: number; watchedSeconds?: number };
   const secs = Math.min(3600, Math.max(0, Math.round(Number(watchedSeconds) || 0)));
-  if (!videoId) {
-    res.status(400).json({ success: false, message: "Invalid video" });
-    return;
-  }
   if (userId && !assertSameUser(req, res, userId)) return;
   try {
     await ensureReelsTables();
@@ -1930,10 +1946,10 @@ router.post("/videos/:videoId/view", async (req: Request, res: Response) => {
 });
 
 router.post("/videos/:videoId/react", async (req: Request, res: Response) => {
-  const videoId = Number(req.params.videoId);
+  const videoId = videoIdFromReq(req);
   const { userId, reaction } = req.body as { userId?: number; reaction?: string };
   if (!userId || !assertSameUser(req, res, userId)) return;
-  if (!videoId || !["like", "dislike"].includes(String(reaction))) {
+  if (!["like", "dislike"].includes(String(reaction))) {
     res.status(400).json({ success: false, message: "Invalid reaction" });
     return;
   }
@@ -1982,7 +1998,7 @@ const REELS_COMMENT_SELECT = `
 `;
 
 router.get("/videos/:videoId/comments", async (req: Request, res: Response) => {
-  const videoId = Number(req.params.videoId);
+  const videoId = videoIdFromReq(req);
   const userId = Number(req.query.userId ?? 0) || null;
   const sort = String(req.query.sort ?? "top") === "newest" ? "newest" : "top";
   try {
@@ -2012,7 +2028,7 @@ router.get("/videos/:videoId/comments", async (req: Request, res: Response) => {
 });
 
 router.get("/videos/:videoId/comments/:commentId/replies", async (req: Request, res: Response) => {
-  const videoId = Number(req.params.videoId);
+  const videoId = videoIdFromReq(req);
   const commentId = Number(req.params.commentId);
   const userId = Number(req.query.userId ?? 0) || null;
   try {
@@ -2039,7 +2055,7 @@ router.get("/videos/:videoId/comments/:commentId/replies", async (req: Request, 
 });
 
 router.post("/videos/:videoId/comments", async (req: Request, res: Response) => {
-  const videoId = Number(req.params.videoId);
+  const videoId = videoIdFromReq(req);
   const { userId, content, parentId } = req.body as {
     userId?: number;
     content?: string;
@@ -2187,12 +2203,8 @@ router.post("/subscribe/:channelId", async (req: Request, res: Response) => {
 });
 
 router.post("/videos/:videoId/share", async (req: Request, res: Response) => {
-  const videoId = Number(req.params.videoId);
+  const videoId = videoIdFromReq(req);
   const { userId } = req.body as { userId?: number };
-  if (!videoId) {
-    res.status(400).json({ success: false, message: "Invalid video" });
-    return;
-  }
   if (userId && !assertSameUser(req, res, userId)) return;
   try {
     await ensureReelsTables();
@@ -2203,7 +2215,12 @@ router.post("/videos/:videoId/share", async (req: Request, res: Response) => {
        FROM reels_videos v WHERE v.id = $1 AND c.id = v.channel_id`,
       [videoId],
     );
-    res.json({ success: true, shareUrl: buildReelsVideoShareUrl(videoId) });
+    const slugRow = await query(`SELECT share_slug FROM reels_videos WHERE id = $1`, [videoId]);
+    const shareRef = reelsVideoPublicShareRef({
+      id: videoId,
+      share_slug: (slugRow.rows[0] as { share_slug?: string } | undefined)?.share_slug,
+    });
+    res.json({ success: true, shareUrl: buildReelsVideoShareUrl(shareRef) });
   } catch (err) {
     req.log.error({ err }, "reels share");
     res.status(500).json({ success: false, message: "Server error" });
@@ -2211,7 +2228,7 @@ router.post("/videos/:videoId/share", async (req: Request, res: Response) => {
 });
 
 router.patch("/videos/:videoId", async (req: Request, res: Response) => {
-  const videoId = Number(req.params.videoId);
+  const videoId = videoIdFromReq(req);
   const body = req.body as {
     userId?: number;
     title?: string;
@@ -2219,10 +2236,6 @@ router.patch("/videos/:videoId", async (req: Request, res: Response) => {
     hashtags?: string;
   };
   const userId = Number(body.userId);
-  if (!videoId) {
-    res.status(400).json({ success: false, message: "Invalid video" });
-    return;
-  }
   if (!userId || !assertSameUser(req, res, userId)) return;
   const title = body.title != null ? String(body.title).trim().slice(0, 200) : null;
   const description = body.description != null ? String(body.description).trim().slice(0, 5000) : null;
@@ -2279,16 +2292,12 @@ router.patch("/videos/:videoId", async (req: Request, res: Response) => {
 });
 
 router.post("/videos/:videoId/report", async (req: Request, res: Response) => {
-  const videoId = Number(req.params.videoId);
+  const videoId = videoIdFromReq(req);
   const { userId, reason, details } = req.body as {
     userId?: number;
     reason?: string;
     details?: string;
   };
-  if (!videoId) {
-    res.status(400).json({ success: false, message: "Invalid video" });
-    return;
-  }
   if (!userId || !assertSameUser(req, res, userId)) return;
   const reportReason = String(reason ?? "").trim().slice(0, 120);
   if (!reportReason) {
@@ -2325,12 +2334,8 @@ router.post("/videos/:videoId/report", async (req: Request, res: Response) => {
 });
 
 router.delete("/videos/:videoId", async (req: Request, res: Response) => {
-  const videoId = Number(req.params.videoId);
+  const videoId = videoIdFromReq(req);
   const userId = Number(req.query.userId) || Number((req.body as { userId?: number }).userId);
-  if (!videoId) {
-    res.status(400).json({ success: false, message: "Invalid video" });
-    return;
-  }
   if (!userId || !assertSameUser(req, res, userId)) return;
   try {
     await ensureReelsTables();
@@ -2386,12 +2391,8 @@ router.delete("/subscribe/:channelId", async (req: Request, res: Response) => {
 
 /** Video ad breaks before / during playback. */
 router.get("/videos/:videoId/ad-breaks", async (req: Request, res: Response) => {
-  const videoId = Number(req.params.videoId);
+  const videoId = videoIdFromReq(req);
   const viewerId = Number(req.query.userId) || getAuthUserId(req) || 0;
-  if (!videoId) {
-    res.status(400).json({ success: false });
-    return;
-  }
   try {
     await ensureReelsTables();
     const row = await query(

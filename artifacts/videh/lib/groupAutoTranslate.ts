@@ -244,6 +244,22 @@ export async function fetchGroupAutoTranslations(args: {
   return out;
 }
 
+export function lookupGroupTranslationResult(
+  byId: Map<string, { translated: string; sourceLang: string }>,
+  messageId: string,
+): { translated: string; sourceLang: string } | undefined {
+  const direct = byId.get(messageId);
+  if (direct) return direct;
+  if (messageId.startsWith("hint_")) {
+    return byId.get(messageId.slice(5));
+  }
+  const numeric = Number(messageId);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return byId.get(`hint_${numeric}`) ?? byId.get(String(numeric));
+  }
+  return undefined;
+}
+
 /** Translate the newest incoming text rows (for SSE hints before full reload). */
 export async function translateIncomingGroupMessages(args: {
   chatId: string;
