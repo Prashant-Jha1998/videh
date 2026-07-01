@@ -226,14 +226,6 @@ router.post("/:listId/send", async (req: Request, res: Response) => {
       const message = msgResult.rows[0];
       const messageId = Number(message.id);
 
-      await query(
-        `INSERT INTO message_status (message_id, user_id, status)
-         VALUES ($1, $2, 'delivered')
-         ON CONFLICT (message_id, user_id)
-         DO UPDATE SET status = 'delivered', updated_at = NOW()`,
-        [messageId, recipientId],
-      );
-
       const muteRow = await query(
         "SELECT is_muted FROM chat_members WHERE chat_id = $1 AND user_id = $2",
         [chatId, recipientId],

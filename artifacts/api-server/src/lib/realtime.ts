@@ -54,7 +54,9 @@ export function attachChatEventStream(userId: number, res: Response): () => void
   const onEvent = (event: ChatEvent) => {
     if (!event.userIds.map(Number).includes(userId)) return;
     const payload = event.payload as { messageId?: number | string } | undefined;
-    const dedupeKey = `${event.type}:${event.chatId}:${payload?.messageId ?? ""}`;
+    const dedupeKey = event.type === "read"
+      ? `${event.type}:${event.chatId}:${(event.payload as { status?: string; recipientUserId?: number })?.status ?? ""}:${(event.payload as { recipientUserId?: number })?.recipientUserId ?? ""}`
+      : `${event.type}:${event.chatId}:${payload?.messageId ?? ""}`;
     const seen = (onEvent as { _seen?: Set<string> })._seen ??= new Set<string>();
     if (dedupeKey && seen.has(dedupeKey)) return;
     if (dedupeKey) {

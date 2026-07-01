@@ -57,21 +57,14 @@ export async function insertCallChatMessage(args: {
     );
     const messageId = result.rows[0]?.id;
     const recipientIds = args.participantIds.filter((id) => id !== args.callerId);
-    if (messageId && recipientIds.length > 0) {
-      await query(
-        `INSERT INTO message_status (message_id, user_id, status)
-         SELECT $1, unnest($2::int[]), 'delivered'
-         ON CONFLICT (message_id, user_id)
-         DO UPDATE SET status = 'delivered', updated_at = NOW()`,
-        [messageId, recipientIds],
-      );
+    if (messageId) {
+      publishChatEvent({
+        type: "message",
+        chatId: args.chatId,
+        userIds: [args.callerId, ...args.participantIds],
+        payload: { messageId, preview: callMessagePreview(meta, args.participantIds.length) },
+      });
     }
-    publishChatEvent({
-      type: "message",
-      chatId: args.chatId,
-      userIds: [args.callerId, ...args.participantIds],
-      payload: { messageId, preview: callMessagePreview(meta, args.participantIds.length) },
-    });
   } catch (err) {
     console.error("insertCallChatMessage error", err);
   }

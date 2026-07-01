@@ -738,14 +738,6 @@ router.post("/calls/:callId/respond", async (req: Request, res: Response) => {
         const messageId = msgRes.rows[0]?.id;
         if (messageId) {
           const recipientIds = [call.callerId, ...call.participantIds].filter((id) => id !== userId);
-          if (recipientIds.length > 0) {
-            await query(
-              `INSERT INTO message_status (message_id, user_id, status)
-              SELECT $1, unnest($2::int[]), 'delivered'
-              ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'delivered', updated_at = NOW()`,
-              [messageId, recipientIds],
-            );
-          }
           publishChatEvent({
             type: "message",
             chatId: call.chatId,

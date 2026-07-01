@@ -294,15 +294,6 @@ async function sendMessageForWeb(req: Request, res: Response, chatId: string | n
     [chatId, userId, trimmedContent || "Attachment", messageType, replyToId ?? null, mediaUrl ?? null, isForwarded ?? false, forwardCount ?? 0, isViewOnce ?? false, expiresAt],
   );
   const recipients = (await getChatMemberIds(chatId)).filter((id) => id !== userId);
-  if (recipients.length > 0) {
-    await query(
-      `INSERT INTO message_status (message_id, user_id, status)
-       SELECT $1, unnest($2::int[]), 'delivered'
-       ON CONFLICT (message_id, user_id)
-       DO UPDATE SET status = 'delivered', updated_at = NOW()`,
-      [result.rows[0].id, recipients],
-    );
-  }
   publishForChat("message", chatId, [userId, ...recipients], { messageId: result.rows[0].id });
   res.json({ success: true, message: result.rows[0] });
 }
@@ -783,15 +774,6 @@ router.post("/:token/chats/:chatId/messages/:messageId/forward", async (req: Req
     );
 
     const recipients = (await getChatMemberIds(targetChatId)).filter((id) => id !== session.userId);
-    if (recipients.length > 0) {
-      await query(
-        `INSERT INTO message_status (message_id, user_id, status)
-         SELECT $1, unnest($2::int[]), 'delivered'
-         ON CONFLICT (message_id, user_id)
-         DO UPDATE SET status = 'delivered', updated_at = NOW()`,
-        [result.rows[0].id, recipients],
-      );
-    }
 
     publishForChat("message", targetChatId, await getChatMemberIds(targetChatId), { messageId: result.rows[0].id });
     res.json({ success: true, message: result.rows[0] });

@@ -30,12 +30,6 @@ async function sendChatMessage(userId: number, chatId: number, text: string): Pr
   );
   const recipientIds = members.rows.map((r: { user_id: number }) => Number(r.user_id)).filter(Boolean);
   if (recipientIds.length > 0) {
-    await query(
-      `INSERT INTO message_status (message_id, user_id, status)
-       SELECT $1, unnest($2::int[]), 'delivered'
-       ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'delivered', updated_at = NOW()`,
-      [messageId, recipientIds],
-    );
     publishChatEvent({
       type: "message",
       chatId,

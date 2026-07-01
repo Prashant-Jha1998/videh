@@ -215,14 +215,6 @@ export async function deliverBusinessMessageToVidehInbox(input: {
   );
   const messageId = Number(ins.rows[0].id);
 
-  await query(
-    `INSERT INTO message_status (message_id, user_id, status)
-     VALUES ($1, $2, 'delivered')
-     ON CONFLICT (message_id, user_id)
-     DO UPDATE SET status = 'delivered', updated_at = NOW()`,
-    [messageId, recipient.id],
-  );
-
   const senderRow = await query("SELECT name FROM users WHERE id = $1", [senderId]);
   const senderName = (senderRow.rows[0] as { name?: string })?.name ?? input.senderDisplayName ?? "Business";
   const pushPreview = chatMessagePushPreview("template", content);

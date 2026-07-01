@@ -18,6 +18,12 @@ import { tryRedirectStoredMediaToCdn, uploadLocalFileToS3 } from "../lib/s3Stora
 import { auditFromRequest } from "../lib/s3MediaAudit";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
 import {
+  markMessagesDeliveredForRecipient,
+  publishReadReceiptsForChat,
+  senderDeliveryStatusForMessage,
+  SENDER_DELIVERY_STATUS_SQL,
+} from "../lib/messageReceipts";
+import {
   ensureChatMemberHistoryClearedColumn,
   messageAfterHistoryClearedSql,
 } from "../lib/chatMemberHistory";
@@ -69,25 +75,6 @@ const routesDir = path.dirname(currentFilePath);
 const apiServerDir = path.resolve(routesDir, "../..");
 const chatUploadsDir = path.join(apiServerDir, "uploads", "chats");
 fs.mkdirSync(chatUploadsDir, { recursive: true });
-
-/** Best recipient delivery status for sender tick display (read > delivered > sent). */
-async function senderDeliveryStatusForMessage(
-  messageId: number,
-  senderId: number,
-): Promise<"read" | "delivered" | "sent"> {
-  const r = await query(
-    `SELECT ms.status
-     FROM message_status ms
-     WHERE ms.message_id = $1 AND ms.user_id != $2
-     ORDER BY CASE ms.status WHEN 'read' THEN 0 WHEN 'delivered' THEN 1 ELSE 2 END
-     LIMIT 1`,
-    [messageId, senderId],
-  );
-  const status = String(r.rows[0]?.status ?? "");
-  if (status === "read") return "read";
-  if (status === "delivered") return "delivered";
-  return "sent";
-}
 
 async function messageRowForSender(
   req: Request,
@@ -701,12 +688,7 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
           SELECT json_agg(json_build_object('emoji', r.emoji, 'user_id', r.user_id))
           FROM message_reactions r WHERE r.message_id = m.id
         ) AS reactions,
-        (
-          SELECT ms.status FROM message_status ms
-          WHERE ms.message_id = m.id AND ms.user_id != m.sender_id
-          ORDER BY CASE ms.status WHEN 'read' THEN 0 WHEN 'delivered' THEN 1 ELSE 2 END
-          LIMIT 1
-        ) AS delivery_status
+        (${SENDER_DELIVERY_STATUS_SQL}) AS delivery_status
       FROM messages m
       JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ${viewerParam}::int
       LEFT JOIN users u ON u.id = m.sender_id
@@ -1012,15 +994,6 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
       [chatId, senderId]
     );
     const recipientIds = members.rows.map((member: any) => Number(member.user_id)).filter(Boolean);
-    if (recipientIds.length > 0) {
-      await query(
-        `INSERT INTO message_status (message_id, user_id, status)
-         SELECT $1, unnest($2::int[]), 'delivered'
-         ON CONFLICT (message_id, user_id)
-         DO UPDATE SET status = 'delivered', updated_at = NOW()`,
-        [result.rows[0].id, recipientIds],
-      );
-    }
 
     const senderRow = await query("SELECT name, avatar_url FROM users WHERE id = $1", [senderId]);
     const senderName = senderRow.rows[0]?.name ?? "Videh";
@@ -1185,15 +1158,6 @@ router.post("/:chatId/messages/:messageId/forward", async (req: Request, res: Re
       [targetId, senderId],
     );
     const recipientIds = members.rows.map((member: { user_id: number }) => Number(member.user_id)).filter(Boolean);
-    if (recipientIds.length > 0) {
-      await query(
-        `INSERT INTO message_status (message_id, user_id, status)
-         SELECT $1, unnest($2::int[]), 'delivered'
-         ON CONFLICT (message_id, user_id)
-         DO UPDATE SET status = 'delivered', updated_at = NOW()`,
-        [result.rows[0].id, recipientIds],
-      );
-    }
 
     const senderRow = await query("SELECT name, avatar_url FROM users WHERE id = $1", [senderId]);
     const senderName = senderRow.rows[0]?.name ?? "Videh";
@@ -1492,25 +1456,56 @@ router.post("/read-all", async (req: Request, res: Response) => {
   }
 });
 
+// Recipient device ACK — message reached this user's app (WhatsApp-style double tick).
+router.post("/:chatId/messages/delivered", async (req: Request, res: Response) => {
+  const chatIdNorm = Array.isArray(req.params.chatId) ? req.params.chatId[0]! : req.params.chatId;
+  const { userId, messageIds } = req.body as { userId?: number; messageIds?: number[] };
+  if (!userId || !Array.isArray(messageIds) || messageIds.length === 0) {
+    res.status(400).json({ success: false, message: "userId and messageIds are required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    const member = await query(
+      "SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatIdNorm, userId],
+    );
+    if (!member.rows[0]) {
+      res.status(403).json({ success: false, message: "Not a member of this chat" });
+      return;
+    }
+    const { updated } = await markMessagesDeliveredForRecipient({
+      chatId: chatIdNorm,
+      recipientUserId: userId,
+      messageIds,
+    });
+    res.json({ success: true, updated });
+  } catch (err) {
+    req.log.error({ err }, "mark messages delivered error");
+    res.status(500).json({ success: false });
+  }
+});
+
 // Mark chat as read (also updates message_status to 'read')
 router.post("/:chatId/read", async (req: Request, res: Response) => {
-  const { chatId } = req.params;
+  const chatIdNorm = Array.isArray(req.params.chatId) ? req.params.chatId[0]! : req.params.chatId;
   const { userId } = req.body as { userId?: number };
   if (!assertSameUser(req, res, userId)) return;
   try {
     await query(
       "UPDATE chat_members SET last_read_at = NOW() WHERE chat_id = $1 AND user_id = $2",
-      [chatId, userId]
+      [chatIdNorm, userId]
     );
     const privacy = userId ? await getExtendedPrivacy(userId) : null;
-    if (privacy?.read_receipts_enabled !== false) {
+    if (privacy?.read_receipts_enabled !== false && userId) {
       await query(`
         INSERT INTO message_status (message_id, user_id, status, updated_at)
         SELECT m.id, $2, 'read', NOW()
         FROM messages m
         WHERE m.chat_id = $1 AND m.sender_id != $2
         ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'read', updated_at = NOW()
-      `, [chatId, userId]);
+      `, [chatIdNorm, userId]);
+      void publishReadReceiptsForChat({ chatId: chatIdNorm, readerUserId: userId });
     }
     res.json({ success: true });
   } catch (err) {

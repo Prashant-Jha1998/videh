@@ -44,6 +44,7 @@ export function connectChatEventStream(
     es.addEventListener("message", bind("message") as EventListener);
     es.addEventListener("typing", bind("typing") as EventListener);
     es.addEventListener("call", bind("call") as EventListener);
+    es.addEventListener("read", bind("read") as EventListener);
     return () => es.close();
   }
 

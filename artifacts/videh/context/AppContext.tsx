@@ -114,6 +114,11 @@ import {
 import { createClientMessageId } from "@/lib/clientMessageId";
 import { ackOutgoingMessage, messageMatchesClientId, outboundStatusFromServer } from "@/lib/messageSendAck";
 import {
+  ackMessagesDelivered,
+  applyReceiptToOutgoingMessages,
+  incomingMessagesToAck,
+} from "@/lib/messageDeliveryAck";
+import {
   chatClearCutoff,
   filterMessagesAfterClearCutoff,
   loadChatDeletedAtMap,
@@ -1601,6 +1606,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (!hasKnownContent) {
       if (!serverMessageId) return;
+      if (u?.dbId) void ackMessagesDelivered(chatId, [serverMessageId], u.dbId, authSessionToken);
       bumpUnreadAndRefresh();
       return;
     }
@@ -1729,6 +1735,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       void loadMessagesRef.current?.(chatId);
       setTimeout(() => void loadMessagesRef.current?.(chatId), MESSAGE_HINT_API_DELAY_MS);
       setTimeout(() => void loadMessagesRef.current?.(chatId), MESSAGE_HINT_API_RETRY_MS);
+    }
+
+    if (serverMessageId && u?.dbId) {
+      void ackMessagesDelivered(chatId, [serverMessageId], u.dbId, authSessionToken);
     }
 
     const hintedChat = chatsForPersistRef.current.find((c) => String(c.id) === chatId);
@@ -1917,8 +1927,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           persistChatMessagesForUser(chatId, toPersist);
           void flushChatMessageCache();
         }
+        const toAck = incomingMessagesToAck(mergedMessages.length > 0 ? mergedMessages : toPersist);
+        if (toAck.length > 0) {
+          void ackMessagesDelivered(chatId, toAck, cacheUserId, authSessionToken);
+        }
       }
-    } catch {}
+    } catch {
+      setTimeout(() => void loadMessagesRef.current?.(chatId), 2000);
+    }
   }, [patchChatMessage, persistChatMessagesForUser, supplementGroupMessageTranslations]);
 
   loadMessagesRef.current = loadMessages;
@@ -2033,7 +2049,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     const onChatEvent = (eventType: string, raw?: string) => {
       if (eventType !== "message") {
-        if (eventType === "typing") {
+        if (eventType === "read") {
+          try {
+            const parsed = JSON.parse(raw ?? "") as {
+              chatId?: string | number;
+              payload?: {
+                action?: string;
+                status?: "delivered" | "read";
+                messageIds?: Array<string | number>;
+              };
+            };
+            if (parsed.payload?.action !== "receipt") return;
+            const cid = parsed.chatId != null ? String(parsed.chatId) : null;
+            const receiptStatus = parsed.payload.status;
+            if (!cid || !receiptStatus) return;
+            const messageIds = (parsed.payload.messageIds ?? []).map(String);
+            setChats((prev) =>
+              prev.map((c) => {
+                if (String(c.id) !== cid) return c;
+                return {
+                  ...c,
+                  messages: applyReceiptToOutgoingMessages(c.messages, receiptStatus, messageIds),
+                };
+              }),
+            );
+            if (activeChatIdRef.current === cid) {
+              void loadMessages(cid);
+            }
+          } catch {
+            /* ignore malformed receipt */
+          }
+        } else if (eventType === "typing") {
           try {
             const parsed = JSON.parse(raw ?? "") as {
               chatId?: string | number;
