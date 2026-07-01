@@ -1344,7 +1344,7 @@ export default function ChatScreen() {
   const scheduleOpenChatPinRef = useRef<() => void>(() => {});
   const messagesLenRef = useRef(0);
 
-  // Live messages: 500ms poll + push/SSE signal + AppContext backup (Videh instant)
+  // Live messages: 250ms poll + push/SSE signal + AppContext backup (Videh instant)
   useFocusEffect(
     useCallback(() => {
       void loadEnterIsSend().then(setEnterIsSend);

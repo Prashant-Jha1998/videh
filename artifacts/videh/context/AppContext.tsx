@@ -1588,6 +1588,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         : "other";
     if (senderId === "me") return;
 
+    if (serverMessageId && u?.dbId) {
+      void ackMessagesDelivered(chatId, [serverMessageId], u.dbId, authSessionToken);
+    }
+
     const bumpUnreadAndRefresh = () => {
       setChats((prev) =>
         prev.map((c) => {
@@ -1736,10 +1740,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       void loadMessagesRef.current?.(chatId);
       setTimeout(() => void loadMessagesRef.current?.(chatId), MESSAGE_HINT_API_DELAY_MS);
       setTimeout(() => void loadMessagesRef.current?.(chatId), MESSAGE_HINT_API_RETRY_MS);
-    }
-
-    if (serverMessageId && u?.dbId) {
-      void ackMessagesDelivered(chatId, [serverMessageId], u.dbId, authSessionToken);
     }
 
     const hintedChat = chatsForPersistRef.current.find((c) => String(c.id) === chatId);
@@ -2096,9 +2096,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 };
               }),
             );
-            if (activeChatIdRef.current === cid) {
-              void loadMessages(cid);
-            }
           } catch {
             /* ignore malformed receipt */
           }
@@ -2235,6 +2232,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             mediaUrl,
           };
           emitChatMessageSignal(signal);
+          if (cid) {
+            const uid = userRef.current?.dbId;
+            const isOwnMessage =
+              senderId != null && uid != null && String(senderId) === String(uid);
+            if (!isOwnMessage && messageId && uid) {
+              void ackMessagesDelivered(cid, [messageId], uid, authSessionToken);
+            }
+          }
           void loadMessages(cid);
           if (activeChatIdRef.current === cid) {
             scheduleLoadMessagesAfterHint(cid, { media: isMediaMessageType(messageType) });

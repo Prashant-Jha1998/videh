@@ -140,6 +140,31 @@ export async function markMessagesDeliveredForRecipient(args: {
   return { updated: updatedIds };
 }
 
+/** When recipients are online, mark delivered immediately (SSE will deliver the message). */
+export async function deliverToOnlineRecipientsOnSend(args: {
+  chatId: string | number;
+  messageId: number;
+  senderId: number;
+  recipientUserIds: number[];
+}): Promise<void> {
+  const recipients = [...new Set(
+    args.recipientUserIds.filter((id) => Number.isFinite(id) && id > 0 && id !== args.senderId),
+  )];
+  if (recipients.length === 0) return;
+
+  const online = await query(
+    `SELECT id FROM users WHERE id = ANY($1::int[]) AND is_online = TRUE`,
+    [recipients],
+  );
+  for (const row of online.rows as Array<{ id: number }>) {
+    await markMessagesDeliveredForRecipient({
+      chatId: args.chatId,
+      recipientUserId: Number(row.id),
+      messageIds: [args.messageId],
+    });
+  }
+}
+
 /** After mark-read, notify message senders in real time. */
 export async function publishReadReceiptsForChat(args: {
   chatId: string | number;

@@ -20,6 +20,7 @@ import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
 import {
   markMessagesDeliveredForRecipient,
   publishReadReceiptsForChat,
+  deliverToOnlineRecipientsOnSend,
   senderDeliveryStatusForMessage,
   SENDER_DELIVERY_STATUS_SQL,
 } from "../lib/messageReceipts";
@@ -1027,6 +1028,17 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
         senderName,
       },
     });
+
+    const chatIdNorm = Array.isArray(chatId) ? chatId[0]! : chatId;
+    const newMessageId = Number(result.rows[0].id);
+    if (recipientIds.length > 0 && Number.isFinite(newMessageId)) {
+      await deliverToOnlineRecipientsOnSend({
+        chatId: chatIdNorm,
+        messageId: newMessageId,
+        senderId,
+        recipientUserIds: recipientIds,
+      });
+    }
 
     res.json({
       success: true,
