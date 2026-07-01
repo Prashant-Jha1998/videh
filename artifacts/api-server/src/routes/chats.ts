@@ -1031,19 +1031,20 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
 
     const chatIdNorm = Array.isArray(chatId) ? chatId[0]! : chatId;
     const newMessageId = Number(result.rows[0].id);
+
+    res.json({
+      success: true,
+      message: await messageRowForSender(req, result.rows[0] as Record<string, unknown>, senderId),
+    });
+
     if (recipientIds.length > 0 && Number.isFinite(newMessageId)) {
-      await deliverToOnlineRecipientsOnSend({
+      void deliverToOnlineRecipientsOnSend({
         chatId: chatIdNorm,
         messageId: newMessageId,
         senderId,
         recipientUserIds: recipientIds,
       });
     }
-
-    res.json({
-      success: true,
-      message: await messageRowForSender(req, result.rows[0] as Record<string, unknown>, senderId),
-    });
 
     if (notifyMembers.length > 0) {
       const preview = chatMessagePushPreview(type ?? "text", content ?? "");

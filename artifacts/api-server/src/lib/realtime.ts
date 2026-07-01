@@ -13,7 +13,18 @@ export type ChatEvent = {
 const bus = new EventEmitter();
 bus.setMaxListeners(0);
 
+/** Active SSE streams per user (multi-tab / reconnect safe). */
+const sseConnectionCounts = new Map<number, number>();
+
 let redisBusActive = false;
+
+export function isUserSseConnected(userId: number): boolean {
+  return (sseConnectionCounts.get(userId) ?? 0) > 0;
+}
+
+export function filterSseConnectedUserIds(userIds: number[]): number[] {
+  return userIds.filter((id) => Number.isFinite(id) && id > 0 && isUserSseConnected(id));
+}
 
 /** Call once before accepting traffic. Enables cross-instance SSE when REDIS_URL is set. */
 export async function initRealtimeBus(): Promise<void> {
@@ -44,6 +55,8 @@ export function publishChatEvent(event: ChatEvent): void {
 }
 
 export function attachChatEventStream(userId: number, res: Response): () => void {
+  sseConnectionCounts.set(userId, (sseConnectionCounts.get(userId) ?? 0) + 1);
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
@@ -74,5 +87,8 @@ export function attachChatEventStream(userId: number, res: Response): () => void
   return () => {
     clearInterval(heartbeat);
     bus.off("chat", onEvent);
+    const next = (sseConnectionCounts.get(userId) ?? 1) - 1;
+    if (next <= 0) sseConnectionCounts.delete(userId);
+    else sseConnectionCounts.set(userId, next);
   };
 }

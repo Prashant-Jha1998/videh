@@ -1242,9 +1242,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Online presence tracking via AppState
   useEffect(() => {
     const uid = userRef.current?.dbId;
+    const pingOnline = () => {
+      const activeUid = userRef.current?.dbId;
+      if (!activeUid || AppState.currentState !== "active") return;
+      api(`/users/${activeUid}/online`, { method: "POST" }).catch(() => {});
+    };
     if (uid && AppState.currentState === "active") {
-      api(`/users/${uid}/online`, { method: "POST" }).catch(() => {});
+      pingOnline();
     }
+    const onlineHeartbeat = setInterval(pingOnline, 45_000);
     const handleAppStateChange = (nextState: AppStateStatus) => {
       const activeUid = userRef.current?.dbId;
       if (!activeUid) return;
@@ -1263,7 +1269,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     const sub = AppState.addEventListener("change", handleAppStateChange);
-    return () => sub.remove();
+    return () => {
+      sub.remove();
+      clearInterval(onlineHeartbeat);
+    };
   }, [isAuthenticated]);
 
   useEffect(() => {
@@ -2231,15 +2240,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             messageType,
             mediaUrl,
           };
-          emitChatMessageSignal(signal);
-          if (cid) {
-            const uid = userRef.current?.dbId;
-            const isOwnMessage =
-              senderId != null && uid != null && String(senderId) === String(uid);
-            if (!isOwnMessage && messageId && uid) {
+          const uid = userRef.current?.dbId;
+          const isOwnMessage =
+            senderId != null && uid != null && String(senderId) === String(uid);
+          if (!isOwnMessage) {
+            applyIncomingMessageHint(signal);
+            if (messageId && uid) {
               void ackMessagesDelivered(cid, [messageId], uid, authSessionToken);
             }
           }
+          emitChatMessageSignal(signal);
           void loadMessages(cid);
           if (activeChatIdRef.current === cid) {
             scheduleLoadMessagesAfterHint(cid, { media: isMediaMessageType(messageType) });

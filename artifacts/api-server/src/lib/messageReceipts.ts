@@ -1,5 +1,5 @@
 import { query } from "./db";
-import { publishChatEvent } from "./realtime";
+import { filterSseConnectedUserIds, publishChatEvent } from "./realtime";
 
 /** WhatsApp-style aggregate: all recipients read → read; all delivered+ → delivered; else sent. */
 export async function senderDeliveryStatusForMessage(
@@ -140,7 +140,10 @@ export async function markMessagesDeliveredForRecipient(args: {
   return { updated: updatedIds };
 }
 
-/** When recipients are online, mark delivered immediately (SSE will deliver the message). */
+/**
+ * Instant double-tick when the recipient can receive now (SSE open or DB online).
+ * Message body is always saved and pushed via SSE/push — never gated on is_online.
+ */
 export async function deliverToOnlineRecipientsOnSend(args: {
   chatId: string | number;
   messageId: number;
@@ -152,14 +155,18 @@ export async function deliverToOnlineRecipientsOnSend(args: {
   )];
   if (recipients.length === 0) return;
 
+  const reachable = new Set<number>(filterSseConnectedUserIds(recipients));
   const online = await query(
     `SELECT id FROM users WHERE id = ANY($1::int[]) AND is_online = TRUE`,
     [recipients],
   );
   for (const row of online.rows as Array<{ id: number }>) {
+    reachable.add(Number(row.id));
+  }
+  for (const recipientUserId of reachable) {
     await markMessagesDeliveredForRecipient({
       chatId: args.chatId,
-      recipientUserId: Number(row.id),
+      recipientUserId,
       messageIds: [args.messageId],
     });
   }
