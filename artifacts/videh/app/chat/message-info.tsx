@@ -15,6 +15,7 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { formatTime } from "@/utils/time";
 import { getApiUrl } from "@/lib/api";
+import { resolveServerMessageIdForApi } from "@/lib/messageSendAck";
 
 const BASE_URL = getApiUrl();
 
@@ -37,15 +38,29 @@ export default function MessageInfoScreen() {
 
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorText, setErrorText] = useState<string | null>(null);
 
   useEffect(() => {
     if (!chatId || !messageId || !user?.dbId) return;
-    fetch(`${BASE_URL}/api/chats/${chatId}/messages/${messageId}/info?userId=${user.dbId}`, {
+    const serverId = resolveServerMessageIdForApi(String(messageId));
+    if (!serverId) {
+      setErrorText("This message is still sending. Open message info again after it is sent.");
+      setLoading(false);
+      return;
+    }
+    setErrorText(null);
+    fetch(`${BASE_URL}/api/chats/${chatId}/messages/${serverId}/info?userId=${user.dbId}`, {
       headers: user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : undefined,
     })
-      .then((r) => r.json())
-      .then((d) => { if (d.success) setReceipts(d.receipts ?? []); })
-      .catch(() => {})
+      .then(async (r) => {
+        const d = await r.json() as { success?: boolean; receipts?: Receipt[]; message?: string };
+        if (d.success) {
+          setReceipts(d.receipts ?? []);
+          return;
+        }
+        setErrorText(d.message ?? "Could not load delivery info.");
+      })
+      .catch(() => setErrorText("Could not load delivery info."))
       .finally(() => setLoading(false));
   }, [chatId, messageId, user?.dbId, user?.sessionToken]);
 
@@ -110,6 +125,11 @@ export default function MessageInfoScreen() {
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
+      ) : errorText ? (
+        <View style={styles.empty}>
+          <Ionicons name="information-circle-outline" size={48} color={colors.mutedForeground} />
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>{errorText}</Text>
+        </View>
       ) : receipts.length === 0 ? (
         <View style={styles.empty}>
           <Ionicons name="information-circle-outline" size={48} color={colors.mutedForeground} />

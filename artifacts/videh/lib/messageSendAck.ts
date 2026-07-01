@@ -45,6 +45,26 @@ function isNumericServerId(id: string): boolean {
   return /^\d+$/.test(id);
 }
 
+/** Numeric server row id for receipts / message-info API (outgoing rows use client UUID as id). */
+export function resolveServerMessageIdForApi(
+  id: string,
+  opts?: { serverMessageId?: string },
+): string | null {
+  const fromField = opts?.serverMessageId?.trim();
+  if (fromField && isNumericServerId(fromField)) return fromField;
+
+  const raw = String(id ?? "").trim();
+  if (!raw || raw.startsWith("tmp_")) return null;
+  if (isNumericServerId(raw)) return raw;
+
+  if (raw.startsWith("hint_") && !raw.startsWith("hint_t")) {
+    const hinted = raw.slice(5);
+    if (isNumericServerId(hinted)) return hinted;
+  }
+
+  return null;
+}
+
 /** Highest confirmed server row id in local chat history (for incremental sync). */
 export function latestServerMessageId(messages: Array<{ id: string; serverMessageId?: string }>): number {
   let max = 0;

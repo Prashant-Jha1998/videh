@@ -378,9 +378,9 @@ function mapServerRowToMessage(m: any, viewerDbId: number | undefined, prevLocal
     templatePayload: templatePayload ?? prevLocal?.templatePayload,
     translatedText: m.translated_content != null && String(m.translated_content).trim()
       ? String(m.translated_content)
-      : undefined,
-    translationSourceLang: m.translation_source_lang ?? undefined,
-    translationTargetLang: m.translation_target_lang ?? undefined,
+      : prevLocal?.translatedText,
+    translationSourceLang: m.translation_source_lang ?? prevLocal?.translationSourceLang,
+    translationTargetLang: m.translation_target_lang ?? prevLocal?.translationTargetLang,
     ...mapStatusReplyFields(m),
   });
 }
@@ -1776,11 +1776,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [restoreHiddenChatsWithNewActivity]);
 
   const patchChatMessage = useCallback((chatId: string, messageId: string, patch: Partial<Message>) => {
+    const matches = (id: string) =>
+      id === messageId
+      || (id.startsWith("hint_") && id.slice(5) === messageId)
+      || (messageId.startsWith("hint_") && messageId.slice(5) === id);
     setChats((prev) =>
       prev.map((c) =>
         c.id !== chatId
           ? c
-          : { ...c, messages: c.messages.map((m) => (m.id === messageId ? { ...m, ...patch } : m)) },
+          : { ...c, messages: c.messages.map((m) => (matches(m.id) ? { ...m, ...patch } : m)) },
       ),
     );
   }, []);
@@ -1819,7 +1823,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ? resolveGroupTranslationPrefs(prevChat ?? prevChatSnapshot, cid, u.dbId, authSessionToken)
         : Promise.resolve(null);
 
-      const fastParams = isGroupChat && !incremental ? "" : "&skipTranslate=1&fast=1";
+      const fastParams = isGroupChat ? "" : "&skipTranslate=1&fast=1";
       const url = incremental
         ? `${BASE_URL}/api/chats/${cid}/messages?limit=30&afterId=${afterId}${fastParams}&userId=${u?.dbId ?? 0}`
         : `${BASE_URL}/api/chats/${cid}/messages?limit=${CHAT_MESSAGES_PAGE}${fastParams}&userId=${u?.dbId ?? 0}`;

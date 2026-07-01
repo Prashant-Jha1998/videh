@@ -173,6 +173,7 @@ import { ReturnToCallChatBar } from "@/components/ReturnToCallChatBar";
 import { normalizeMessageType } from "@/lib/normalizeMessage";
 import { messageReplyPreviewText, replyQuoteSenderLabel } from "@/lib/messageReplyPreview";
 import { canEditChatMessage } from "@/lib/messageEdit";
+import { resolveServerMessageIdForApi } from "@/lib/messageSendAck";
 import {
   buildStatusViewRouteParams,
   statusReplyIconName,
@@ -191,6 +192,11 @@ const { width: W } = Dimensions.get("window");
 const REACTION_EMOJIS = ["\u2764\uFE0F", "\uD83D\uDC4D", "\uD83D\uDE02", "\uD83D\uDE2E", "\uD83D\uDE22", "\uD83D\uDE4F"];
 const REPLY_SWIPE_ACTION_W = 56;
 const GROUP_MSG_AVATAR_SIZE = 36;
+
+function messageInfoRouteParams(chatId: string, msg: Message): { chatId: string; messageId: string } {
+  const serverId = resolveServerMessageIdForApi(msg.id, msg);
+  return { chatId, messageId: serverId ?? msg.id };
+}
 
 function GroupMemberAvatar({
   label,
@@ -2918,7 +2924,7 @@ export default function ChatScreen() {
       { text: "Translate", onPress: () => openTranslatePicker(msg) },
     ];
     if (isMe) {
-      opts.push({ text: "Info", onPress: () => router.push({ pathname: "/chat/message-info", params: { chatId: chatId!, messageId: msg.id } }) });
+      opts.push({ text: "Info", onPress: () => router.push({ pathname: "/chat/message-info", params: messageInfoRouteParams(chatId!, msg) }) });
       if (canEditChatMessage(msg, true)) {
         opts.push({ text: "Edit", onPress: () => beginEditMessage(msg) });
       }
@@ -4354,7 +4360,7 @@ export default function ChatScreen() {
   const openSelectedMessageInfo = () => {
     if (!chatId || !selectedMessage) return;
     clearSelection();
-    router.push({ pathname: "/chat/message-info", params: { chatId, messageId: selectedMessage.id } });
+    router.push({ pathname: "/chat/message-info", params: messageInfoRouteParams(chatId, selectedMessage) });
   };
 
   const inputBarBottomPad = keyboardVisible

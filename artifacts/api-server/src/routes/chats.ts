@@ -2168,13 +2168,28 @@ router.put("/:chatId/disappear", async (req: Request, res: Response) => {
 
 // Message info (delivery/read/not-seen status for each recipient)
 router.get("/:chatId/messages/:messageId/info", async (req: Request, res: Response) => {
-  const { chatId, messageId } = req.params;
+  const { chatId } = req.params;
+  const rawMessageId = String(req.params.messageId ?? "").trim();
   const userId = Number(req.query["userId"]);
   if (!assertSameUser(req, res, userId)) return;
   try {
+    let resolvedId: number | null = /^\d+$/.test(rawMessageId) ? Number(rawMessageId) : null;
+    if (!resolvedId) {
+      const byClient = await query(
+        `SELECT id FROM messages
+         WHERE chat_id = $1
+           AND (client_message_id = $2 OR id::text = $2)`,
+        [chatId, rawMessageId.replace(/^hint_/, "")],
+      );
+      resolvedId = Number((byClient.rows[0] as { id?: number } | undefined)?.id) || null;
+    }
+    if (!resolvedId) {
+      res.status(404).json({ success: false, message: "Message not found" });
+      return;
+    }
     const msg = await query(
       "SELECT sender_id FROM messages WHERE id = $1 AND chat_id = $2",
-      [messageId, chatId],
+      [resolvedId, chatId],
     );
     if (!msg.rows[0]) {
       res.status(404).json({ success: false, message: "Message not found" });
@@ -2201,7 +2216,7 @@ router.get("/:chatId/messages/:messageId/info", async (req: Request, res: Respon
       ORDER BY CASE COALESCE(ms.status, 'sent') WHEN 'read' THEN 0 WHEN 'delivered' THEN 1 ELSE 2 END,
                COALESCE(ms.updated_at, cm.joined_at) DESC,
                u.name
-    `, [chatId, messageId, senderId]);
+    `, [chatId, resolvedId, senderId]);
     res.json({ success: true, receipts: result.rows });
   } catch (err) {
     req.log.error({ err }, "message info");
@@ -2298,14 +2313,24 @@ router.put("/:chatId/translation-settings", async (req: Request, res: Response) 
         ? null
         : normalizeLangCode(translateLang);
       await query(
-        "UPDATE chat_members SET translate_lang = $1 WHERE chat_id = $2 AND user_id = $3",
+        `UPDATE chat_members
+         SET translate_lang = $1, auto_translate_personal = TRUE
+         WHERE chat_id = $2 AND user_id = $3`,
         [normalized, chatId, userId],
       );
-    }
-    if (typeof personalEnabled === "boolean") {
+      await query(
+        `UPDATE chats SET auto_translate_enabled = TRUE WHERE id = $1 AND is_group = TRUE`,
+        [chatId],
+      );
+    } else if (typeof personalEnabled === "boolean") {
       await query(
         "UPDATE chat_members SET auto_translate_personal = $1 WHERE chat_id = $2 AND user_id = $3",
         [personalEnabled, chatId, userId],
+      );
+    } else {
+      await query(
+        `UPDATE chat_members SET auto_translate_personal = TRUE WHERE chat_id = $1 AND user_id = $2`,
+        [chatId, userId],
       );
     }
     const prefs = await getViewerTranslationPrefs(chatId, userId);

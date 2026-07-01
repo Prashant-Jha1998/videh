@@ -489,10 +489,7 @@ export async function getViewerTranslationPrefs(
 
 /** Whether this viewer should receive auto-translated incoming messages. */
 export function viewerWantsIncomingTranslation(prefs: ViewerTranslationPrefs): boolean {
-  if (!prefs.personalEnabled) return false;
-  if (!prefs.isGroup) return prefs.memberLangExplicit;
-  // Groups: each member reads in their own language (cached per message_id + target_lang).
-  if (prefs.groupEnabled) return true;
+  if (prefs.isGroup) return true;
   return prefs.memberLangExplicit;
 }
 

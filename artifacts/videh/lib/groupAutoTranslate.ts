@@ -128,30 +128,16 @@ export async function resolveGroupTranslationPrefs(
     settings = await fetchGroupTranslationSettings(chatId, userId, sessionToken);
   }
 
-  const groupOn = Boolean(
-    settings?.groupAutoTranslateEnabled
-    ?? chat.autoTranslateEnabled
-    ?? cached?.autoTranslateEnabled
-    ?? true,
-  );
-  const personalOn = settings?.memberAutoTranslateEnabled ?? cached?.memberAutoTranslate ?? true;
-
   const explicitLang =
     settings?.memberTranslateLang
     ?? cached?.memberTranslateLang
     ?? (await readLocalGroupTranslateLang(chatId));
-  const memberLangExplicit = Boolean(explicitLang?.trim());
 
-  if (!personalOn) return null;
-
-  // Per-group language choice wins over server effectiveLang (which may fall back to app default en).
   const targetLang = normalizeTranslateLang(
-    memberLangExplicit
-      ? explicitLang!
+    explicitLang?.trim()
+      ? explicitLang
       : (settings?.effectiveLang ?? (await readAppDefaultLang())),
   );
-
-  if (!groupOn && !memberLangExplicit) return null;
 
   return { enabled: true, targetLang };
 }

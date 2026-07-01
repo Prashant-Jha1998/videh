@@ -199,7 +199,7 @@ export default function ChatInfoScreen() {
   );
   const [groupAvatarUploading, setGroupAvatarUploading] = useState(false);
   const [autoTranslateEnabled, setAutoTranslateEnabled] = useState(
-    bootCache?.autoTranslateEnabled ?? chat?.autoTranslateEnabled ?? false,
+    bootCache?.autoTranslateEnabled ?? chat?.autoTranslateEnabled ?? true,
   );
   const [memberAutoTranslate, setMemberAutoTranslate] = useState(
     bootCache?.memberAutoTranslate ?? true,
@@ -611,35 +611,6 @@ export default function ChatInfoScreen() {
 
   const disappearLabel = disappearTimerLabel(disappearing);
 
-  const toggleGroupAutoTranslate = async (enabled: boolean) => {
-    if (!canEditGroupInfo) {
-      Alert.alert("Not allowed", "You cannot edit group settings in this group.");
-      return;
-    }
-    if (!user?.sessionToken) {
-      Alert.alert("Sign in required", "Please sign in again to change this setting.");
-      return;
-    }
-    try {
-      const res = await fetch(`${BASE_URL}/api/chats/${id}/auto-translate`, {
-        method: "PUT",
-        headers: authedJsonHeaders(),
-        body: JSON.stringify({ enabled }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setAutoTranslateEnabled(enabled);
-        patchChatInList(id!, { autoTranslateEnabled: enabled });
-        void loadMessages(id!);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } else {
-        Alert.alert("Could not update", data.message ?? "Only admins can change this setting.");
-      }
-    } catch {
-      Alert.alert("Error", "Could not update auto-translate setting.");
-    }
-  };
-
   const persistMemberTranslation = async (patch: { translateLang?: string | null; personalEnabled?: boolean }) => {
     if (!user?.dbId) {
       Alert.alert("Sign in required", "Please sign in again to save language settings.");
@@ -708,7 +679,7 @@ export default function ChatInfoScreen() {
   const selectGroupLanguage = (code: string | null) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setGroupLangPickerOpen(false);
-    void persistMemberTranslation({ translateLang: code });
+    void persistMemberTranslation({ translateLang: code, personalEnabled: true });
   };
 
   const pickGroupPhoto = async () => {
@@ -1232,48 +1203,13 @@ export default function ChatInfoScreen() {
           )}
           {isGroup && (
             <InfoRow
-              icon="language-outline"
-              iconBg="#7E57C2"
-              label="Translation in group"
-              value={autoTranslateEnabled ? "On — each member, their language" : "Off"}
-              colors={colors}
-              right={
-                canEditGroupInfo ? (
-                  <Switch
-                    value={autoTranslateEnabled}
-                    onValueChange={(v) => { void toggleGroupAutoTranslate(v); }}
-                    thumbColor={autoTranslateEnabled ? colors.primary : "#f4f3f4"}
-                    trackColor={{ true: colors.primary + "80", false: colors.border }}
-                  />
-                ) : undefined
-              }
-            />
-          )}
-          {isGroup && (
-            <InfoRow
               icon="globe-outline"
               iconBg="#5C6BC0"
               label="Your reading language"
               value={memberTranslateLang ? languageNativeLabel(memberTranslateLang) : `App default (${effectiveLangLabel})`}
               colors={colors}
               onPress={openGroupLanguagePicker}
-            />
-          )}
-          {isGroup && (
-            <InfoRow
-              icon="text-outline"
-              iconBg="#26A69A"
-              label="Show translated messages"
-              value={memberAutoTranslate ? "On" : "Original only"}
-              colors={colors}
-              right={
-                <Switch
-                  value={memberAutoTranslate}
-                  onValueChange={(v) => { void persistMemberTranslation({ personalEnabled: v }); }}
-                  thumbColor={memberAutoTranslate ? colors.primary : "#f4f3f4"}
-                  trackColor={{ true: colors.primary + "80", false: colors.border }}
-                />
-              }
+              last
             />
           )}
           <InfoRow
