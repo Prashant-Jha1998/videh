@@ -5,6 +5,7 @@ export default function ReelsLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="setup" />
       <Stack.Screen name="upload" />
+      <Stack.Screen name="vibe-upload" />
       <Stack.Screen name="search" />
       <Stack.Screen name="hashtag/[tag]" />
       <Stack.Screen name="watch/[id]" />

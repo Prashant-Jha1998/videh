@@ -2,7 +2,6 @@ import { useRouter, usePathname } from "expo-router";
 import { useShareIntentContext } from "expo-share-intent";
 import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
-import { useApp } from "@/context/AppContext";
 import {
   stashIncomingShareQuick,
   peekIncomingShare,
@@ -12,13 +11,11 @@ import {
   isShareFlowConsumed,
   isFreshIncomingShare,
 } from "@/lib/incomingSharePayload";
-import { incomingShareRoute } from "@/lib/incomingShareRoute";
 
 /** Routes Android/iOS share sheet opens into Videh chat picker. */
 export function ShareIntentBridge() {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated } = useApp();
   const { isReady, hasShareIntent, shareIntent, resetShareIntent, error } = useShareIntentContext();
   const handlingRef = useRef(false);
   const navigatedRef = useRef(false);
@@ -28,10 +25,10 @@ export function ShareIntentBridge() {
   const goToShareFlow = () => {
     if (navigatedRef.current || onSharePicker || isShareFlowConsumed()) return;
     navigatedRef.current = true;
-    router.replace(incomingShareRoute(isAuthenticated));
+    router.replace("/share-to-chat");
     setTimeout(() => {
       navigatedRef.current = false;
-    }, 1500);
+    }, 2000);
   };
 
   const tryNavigateToShare = async () => {
@@ -65,7 +62,7 @@ export function ShareIntentBridge() {
         handlingRef.current = false;
       }
     })();
-  }, [hasShareIntent, shareIntent, isAuthenticated, isReady, resetShareIntent, onSharePicker]);
+  }, [hasShareIntent, shareIntent, isReady, resetShareIntent, onSharePicker]);
 
   useEffect(() => {
     if (Platform.OS === "web" || !isReady) return;
@@ -79,7 +76,7 @@ export function ShareIntentBridge() {
     if (Platform.OS === "web" || !isReady) return;
     let cancelled = false;
     const poll = async () => {
-      for (let i = 0; i < 60 && !cancelled; i++) {
+      for (let i = 0; i < 120 && !cancelled; i++) {
         if (onSharePicker || isShareFlowConsumed()) return;
         if (await hasPendingIncomingShare()) {
           goToShareFlow();
@@ -103,7 +100,7 @@ export function ShareIntentBridge() {
     return () => {
       cancelled = true;
     };
-  }, [isReady, isAuthenticated, hasShareIntent, shareIntent, resetShareIntent, onSharePicker]);
+  }, [isReady, hasShareIntent, shareIntent, resetShareIntent, onSharePicker]);
 
   useEffect(() => {
     if (error && __DEV__) {

@@ -365,7 +365,7 @@ export type ReelsFeedCursor = { at?: string; id: number; score?: number };
 
 export type ReelsFeedAd = {
   id: number;
-  format: "video" | "image" | "app_install" | "shopping";
+  format: "video" | "image" | "app_install" | "shopping" | "shorts_video" | "bumper";
   title: string;
   headline: string;
   description: string;
@@ -380,10 +380,40 @@ export type ReelsFeedAd = {
   sponsoredLabel: string;
 };
 
+export type ReelsVibeFeedAd = ReelsFeedAd & {
+  placement: "vibe_feed";
+  durationSeconds: number;
+  skipAfterSeconds: number | null;
+  adType: "non_skippable" | "skippable" | "bumper";
+};
+
 export type ReelsFeedAdPlacement = {
   insertAfterIndex: number;
   ad: ReelsFeedAd;
 };
+
+export type ReelsVibeAdPlacement = {
+  insertAfterIndex: number;
+  ad: ReelsVibeFeedAd;
+};
+
+function normalizeFeedAd(ad: ReelsFeedAd): ReelsFeedAd {
+  return {
+    ...ad,
+    imageUrl: normalizeReelsMediaUrl(ad.imageUrl),
+    videoUrl: normalizeReelsMediaUrl(ad.videoUrl),
+  };
+}
+
+function normalizeVibeFeedAd(ad: ReelsVibeFeedAd): ReelsVibeFeedAd {
+  return {
+    ...normalizeFeedAd(ad),
+    placement: "vibe_feed",
+    durationSeconds: Number(ad.durationSeconds) || 15,
+    skipAfterSeconds: ad.skipAfterSeconds != null ? Number(ad.skipAfterSeconds) : null,
+    adType: ad.adType ?? "skippable",
+  };
+}
 
 export async function fetchReelsFeed(
   userId: number,
@@ -405,12 +435,27 @@ export async function fetchReelsFeed(
     feedAdPlacements?: ReelsFeedAdPlacement[];
     feedAdMinGap?: number;
     feedAdMaxGap?: number;
+    vibeAdPlacements?: ReelsVibeAdPlacement[];
+    vibeAdMinGap?: number;
+    vibeAdMaxGap?: number;
   }>(
     `/feed?userId=${userId}&limit=15${c}`,
     { sessionToken },
   );
   res.videos = (res.videos ?? []).map(normalizeReelsVideo);
   if (res.trending) res.trending = res.trending.map(normalizeReelsVideo);
+  if (res.feedAdPlacements) {
+    res.feedAdPlacements = res.feedAdPlacements.map((p) => ({
+      ...p,
+      ad: normalizeFeedAd(p.ad),
+    }));
+  }
+  if (res.vibeAdPlacements) {
+    res.vibeAdPlacements = res.vibeAdPlacements.map((p) => ({
+      ...p,
+      ad: normalizeVibeFeedAd(p.ad),
+    }));
+  }
   return res;
 }
 
@@ -1100,6 +1145,43 @@ export async function uploadReelsVideo(opts: UploadReelsVideoOpts): Promise<{
     }
   }
   return uploadReelsVideoLegacy(opts);
+}
+
+/** Vibe short clips — always uploaded directly to S3 (no EC2 disk fallback). */
+export async function uploadVibeVideo(opts: UploadReelsVideoOpts): Promise<{
+  success: boolean;
+  pending?: boolean;
+  video?: ReelsVideo;
+  message?: string;
+  moderationStatus?: string;
+}> {
+  if (opts.durationSeconds > 60) {
+    return {
+      success: false,
+      message: "Vibe clips must be 60 seconds or shorter.",
+    };
+  }
+  const vibeOpts: UploadReelsVideoOpts = { ...opts, videoFormat: "vibe" };
+  try {
+    const direct = await uploadReelsVideoViaS3(vibeOpts);
+    if (!direct) {
+      return {
+        success: false,
+        message: "Vibe upload requires secure cloud storage. Please try again in a moment.",
+      };
+    }
+    if (direct.success) return direct;
+    return {
+      success: false,
+      message: direct.message ?? "Upload failed",
+      moderationStatus: direct.moderationStatus,
+    };
+  } catch (e) {
+    return {
+      success: false,
+      message: e instanceof Error ? e.message : "Upload failed",
+    };
+  }
 }
 
 export function formatViewCount(n: number): string {

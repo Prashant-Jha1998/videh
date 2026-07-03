@@ -26,6 +26,14 @@ export type ReelsFeedAdItem = {
   sponsoredLabel: string;
 };
 
+/** Vibe swipe-feed ad — includes playback metadata for vertical video ads. */
+export type VibeFeedAdItem = ReelsFeedAdItem & {
+  durationSeconds: number;
+  skipAfterSeconds: number | null;
+  adType: "non_skippable" | "skippable" | "bumper";
+  placement: "vibe_feed";
+};
+
 export type ReelsAdBreakItem = {
   id: number;
   title: string;
@@ -125,7 +133,21 @@ function mapFeedAd(row: CreativeRow): ReelsFeedAdItem {
     appStoreUrl: row.app_store_url ?? null,
     appName: row.app_name ?? null,
     advertiserName: row.company_name ?? "Advertiser",
-    sponsoredLabel: "Sponsored",
+    sponsoredLabel: row.sponsored_label ?? "Sponsored",
+  };
+}
+
+function mapVibeFeedAd(row: CreativeRow): VibeFeedAdItem {
+  const base = mapFeedAd(row);
+  const hasInstall = Boolean(row.play_store_url || row.app_store_url);
+  const rawDur = Number(row.duration_seconds) || 15;
+  return {
+    ...base,
+    placement: "vibe_feed",
+    durationSeconds: Math.min(60, Math.max(1, rawDur)),
+    skipAfterSeconds: row.skip_after_seconds != null ? Number(row.skip_after_seconds) : 3,
+    adType: row.ad_type === "skippable" ? "skippable" : row.ad_type === "bumper" ? "bumper" : "non_skippable",
+    ctaType: hasInstall && base.format === "shorts_video" ? "install" : base.ctaType,
   };
 }
 
@@ -173,7 +195,7 @@ function mapCreative(row: CreativeRow, placement: "pre_roll" | "mid_roll"): Reel
 }
 
 async function pickCreative(
-  placement: "pre_roll" | "mid_roll" | "feed_instream" | "shorts_feed",
+  placement: "pre_roll" | "mid_roll" | "feed_instream" | "shorts_feed" | "vibe_feed",
   adType?: "non_skippable" | "skippable" | "bumper",
   format?: ReelsAdFormat,
 ): Promise<CreativeRow | null> {
@@ -264,6 +286,57 @@ export function planFeedAdPlacements(
   return placements;
 }
 
+export type ReelsVibeAdPlacement = {
+  insertAfterIndex: number;
+  ad: VibeFeedAdItem;
+};
+
+export async function pickVibeFeedAds(count: number): Promise<VibeFeedAdItem[]> {
+  await ensureReelsAdsTables();
+  const cfg = await getReelsPlatformConfig();
+  if (!cfg.ads.enabled || !cfg.ads.vibeAdsEnabled || count <= 0) return [];
+
+  const formats: ReelsAdFormat[] = ["shorts_video", "shopping", "app_install"];
+  const out: VibeFeedAdItem[] = [];
+  for (let i = 0; i < count; i++) {
+    let row = await pickCreative("vibe_feed", undefined, formats[i % formats.length]);
+    if (!row) row = await pickCreative("vibe_feed");
+    if (!row) row = await pickCreative("shorts_feed", undefined, "shorts_video");
+    if (!row) break;
+    out.push(mapVibeFeedAd(row));
+  }
+  return out;
+}
+
+export async function pickVibeAdPlacementsForBatch(
+  vibeVideoCount: number,
+  minGap?: number,
+  maxGap?: number,
+): Promise<ReelsVibeAdPlacement[]> {
+  await ensureReelsAdsTables();
+  const cfg = await getReelsPlatformConfig();
+  if (!cfg.ads.enabled || !cfg.ads.vibeAdsEnabled || vibeVideoCount <= 0) return [];
+
+  const min = Math.max(2, minGap ?? cfg.ads.vibeFeedAdMinGap ?? 3);
+  const max = Math.max(min, maxGap ?? cfg.ads.vibeFeedAdMaxGap ?? 6);
+  const maxAds = Math.max(1, Math.ceil(vibeVideoCount / min));
+  const ads = await pickVibeFeedAds(maxAds);
+  const placements: ReelsVibeAdPlacement[] = [];
+  let adIdx = 0;
+  let videosSinceAd = 0;
+  let nextGap = min + Math.floor(Math.random() * (max - min + 1));
+
+  for (let i = 0; i < vibeVideoCount && adIdx < ads.length; i++) {
+    videosSinceAd++;
+    if (videosSinceAd >= nextGap) {
+      placements.push({ insertAfterIndex: i, ad: ads[adIdx++] });
+      videosSinceAd = 0;
+      nextGap = min + Math.floor(Math.random() * (max - min + 1));
+    }
+  }
+  return placements;
+}
+
 export async function pickFeedAdPlacementsForBatch(
   videoCount: number,
   minGap: number,
@@ -315,18 +388,27 @@ async function getCreativeBillingContext(creativeId: number): Promise<CreativeRo
   return (r.rows[0] as CreativeRow | undefined) ?? null;
 }
 
-function impressionCostInr(bidModel: string, bidAmount: number, ads: ReelsAdsRules): number {
-  const amt = bidAmount > 0 ? bidAmount : ads.feedCpmInr;
+function impressionCostInr(bidModel: string, bidAmount: number, ads: ReelsAdsRules, placement?: string): number {
+  const isVibe = placement === "vibe_feed" || placement === "shorts_feed";
+  const cpmDefault = isVibe ? ads.vibeCpmInr : ads.feedCpmInr;
+  const amt = bidAmount > 0 ? bidAmount : cpmDefault;
   if (bidModel === "cpm") return amt / 1000;
   if (bidModel === "cpv") return amt;
   return 0;
 }
 
-function clickCostInr(bidModel: string, bidAmount: number, ads: ReelsAdsRules): number {
-  const amt = bidAmount > 0 ? bidAmount : ads.feedCpcInr;
-  if (bidModel === "cpc") return amt;
-  if (bidModel === "cpi") return amt > 0 ? amt : ads.appInstallCpiInr;
-  return ads.feedCpcInr;
+function vibeCpvDefault(ads: ReelsAdsRules): number {
+  return ads.vibeCpvInr > 0 ? ads.vibeCpvInr : ads.videoCpvInr * 2;
+}
+
+function clickCostInr(bidModel: string, bidAmount: number, ads: ReelsAdsRules, placement?: string): number {
+  const isVibe = placement === "vibe_feed" || placement === "shorts_feed";
+  if (bidModel === "cpc") return bidAmount > 0 ? bidAmount : (isVibe ? ads.vibeCpcInr : ads.feedCpcInr);
+  if (bidModel === "cpi") {
+    const cpiDefault = isVibe ? ads.vibeCpiInr : ads.appInstallCpiInr;
+    return bidAmount > 0 ? bidAmount : cpiDefault;
+  }
+  return isVibe ? ads.vibeCpcInr : ads.feedCpcInr;
 }
 
 function fallbackAdBreakItem(
@@ -393,6 +475,8 @@ export async function resolveReelsAdBreaks(opts: {
   contentDurationSeconds: number;
   viewerUserId: number;
   channelOwnerUserId: number | null;
+  /** Vibe / short-form: no pre-roll or mid-roll on the clip itself — ads only as separate swipe items. */
+  videoFormat?: string | null;
 }): Promise<ReelsAdBreaksResponse> {
   await ensureReelsAdsTables();
   const cfg = await getReelsPlatformConfig();
@@ -402,6 +486,9 @@ export async function resolveReelsAdBreaks(opts: {
     return { enabled: false, preRoll: [], midRoll: [] };
   }
   if (opts.channelOwnerUserId && opts.viewerUserId === opts.channelOwnerUserId) {
+    return { enabled: false, preRoll: [], midRoll: [] };
+  }
+  if (opts.videoFormat === "vibe" || (opts.contentDurationSeconds > 0 && opts.contentDurationSeconds <= 60)) {
     return { enabled: false, preRoll: [], midRoll: [] };
   }
 
@@ -475,8 +562,13 @@ export async function recordReelsAdImpression(opts: {
   if (ctx?.campaign_id) {
     const bidModel = String(ctx.bid_model ?? "cpm");
     const bidAmt = Number(ctx.bid_amount_inr) || 0;
-    if (opts.placement === "feed_instream") {
-      cost = impressionCostInr(bidModel, bidAmt, cfg.ads);
+    const pl = opts.placement;
+    if (pl === "feed_instream" || pl === "vibe_feed" || pl === "shorts_feed") {
+      if (bidModel === "cpm" || (pl !== "feed_instream" && bidModel === "cpv" && !opts.completed)) {
+        cost = impressionCostInr(bidModel === "cpv" ? "cpm" : bidModel, bidAmt, cfg.ads, pl);
+      } else if (opts.completed && bidModel === "cpv") {
+        cost = bidAmt > 0 ? bidAmt : (pl === "vibe_feed" ? vibeCpvDefault(cfg.ads) : cfg.ads.videoCpvInr);
+      }
     } else if (opts.completed && bidModel === "cpv") {
       cost = bidAmt > 0 ? bidAmt : cfg.ads.videoCpvInr;
     }
@@ -529,7 +621,7 @@ export async function recordReelsAdClick(opts: {
   if (!ctx?.campaign_id) return { success: false };
   const bidModel = String(ctx.bid_model ?? "cpc");
   const bidAmt = Number(ctx.bid_amount_inr) || 0;
-  const cost = clickCostInr(bidModel, bidAmt, cfg.ads);
+  const cost = clickCostInr(bidModel, bidAmt, cfg.ads, opts.placement);
   if (cost > 0) {
     const ok = await chargeAdvertiser({
       creativeId: opts.creativeId,

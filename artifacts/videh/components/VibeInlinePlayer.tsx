@@ -1,7 +1,8 @@
 import { useEvent } from "expo";
+import { Image } from "expo-image";
 import { useVideoPlayer, VideoView } from "expo-video";
-import React, { useEffect, useRef } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { filterOverlayColor, type VideoEditorMetadata } from "@/lib/videoEditor";
 import { recordReelsView } from "@/lib/reelsApi";
 
@@ -12,6 +13,9 @@ type Props = {
   userId?: number;
   sessionToken?: string | null;
   isActive: boolean;
+  /** Buffer next clip without playing it. */
+  preload?: boolean;
+  posterUrl?: string | null;
   editorMetadata?: VideoEditorMetadata | null;
   musicTitle?: string | null;
 };
@@ -23,6 +27,8 @@ export function VibeInlinePlayer({
   userId,
   sessionToken,
   isActive,
+  preload = false,
+  posterUrl,
   editorMetadata,
   musicTitle,
 }: Props) {
@@ -33,25 +39,46 @@ export function VibeInlinePlayer({
       p.loop = true;
       p.muted = false;
       p.timeUpdateEventInterval = 1;
+      p.bufferOptions = {
+        preferredForwardBufferDuration: 12,
+        automaticallyWaitsToMinimizeStalling: true,
+      };
     } catch { /* ignore */ }
   });
   const statusEvent = useEvent(player, "statusChange", { status: player?.status ?? "idle" });
-  const timeEvent = useEvent(player, "timeUpdate", { currentTime: 0, currentLiveTimestamp: null, currentOffsetFromLive: 0, bufferedPosition: 0 });
+  const timeEvent = useEvent(player, "timeUpdate", {
+    currentTime: 0,
+    currentLiveTimestamp: null,
+    currentOffsetFromLive: 0,
+    bufferedPosition: 0,
+  });
   const currentTime = timeEvent?.currentTime ?? 0;
+  const bufferedPosition = timeEvent?.bufferedPosition ?? 0;
   const viewSentRef = useRef(false);
   const lastActiveRef = useRef(false);
+  const [showPoster, setShowPoster] = useState(true);
+
+  const status = statusEvent?.status ?? player?.status ?? "idle";
+  const isReady = status === "readyToPlay";
+  const isBuffering = isActive && (!isReady || (currentTime > 0 && bufferedPosition - currentTime < 0.35));
 
   useEffect(() => {
     if (!player) return;
-    if (isActive && !lastActiveRef.current) {
-      viewSentRef.current = false;
+    if (isActive && isReady) {
+      setShowPoster(false);
+      if (!lastActiveRef.current) viewSentRef.current = false;
       try { player.play(); } catch { /* ignore */ }
-    }
-    if (!isActive && lastActiveRef.current) {
+    } else {
       try { player.pause(); } catch { /* ignore */ }
+      if (!isActive) setShowPoster(true);
     }
     lastActiveRef.current = isActive;
-  }, [isActive, player]);
+  }, [isActive, isReady, player]);
+
+  useEffect(() => {
+    if (!preload || !player || isActive) return;
+    try { player.pause(); } catch { /* ignore */ }
+  }, [preload, player, isActive]);
 
   useEffect(() => {
     return () => {
@@ -86,7 +113,15 @@ export function VibeInlinePlayer({
         allowsFullscreen={false}
         allowsPictureInPicture={false}
       />
-      {statusEvent?.status === "error" ? (
+      {(showPoster || isBuffering) && posterUrl ? (
+        <Image source={{ uri: posterUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
+      ) : null}
+      {isActive && isBuffering ? (
+        <View style={styles.buffering} pointerEvents="none">
+          <ActivityIndicator color="#fff" size="large" />
+        </View>
+      ) : null}
+      {status === "error" ? (
         <View style={styles.error}>
           <Text style={styles.errorText}>Could not play</Text>
         </View>
@@ -129,6 +164,12 @@ export function VibeInlinePlayer({
 }
 
 const styles = StyleSheet.create({
+  buffering: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.2)",
+  },
   error: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.5)" },
   errorText: { color: "#fff", fontFamily: "Inter_600SemiBold" },
   caption: {

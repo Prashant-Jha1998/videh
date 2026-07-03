@@ -73,7 +73,28 @@ export async function ensureReelsAdsTables(): Promise<void> {
   await query(`CREATE INDEX IF NOT EXISTS idx_reels_ad_creatives_active ON reels_ad_creatives (is_active, placement)`);
   await ensureReelsAdsV2Columns();
   await ensureReelsAdsPaymentTables();
+  await ensureVibeFeedPlacementConstraint();
   adsEnsured = true;
+}
+
+async function ensureVibeFeedPlacementConstraint(): Promise<void> {
+  try {
+    await query(`ALTER TABLE reels_ad_creatives DROP CONSTRAINT IF EXISTS reels_ad_creatives_placement_check`);
+  } catch {
+    /* ignore */
+  }
+  try {
+    await query(`
+      ALTER TABLE reels_ad_creatives
+        ADD CONSTRAINT reels_ad_creatives_placement_check
+        CHECK (placement IN (
+          'pre_roll', 'mid_roll', 'feed_instream', 'shorts_feed', 'vibe_feed',
+          'search_promoted', 'channel_banner', 'video_overlay', 'any'
+        ))
+    `);
+  } catch {
+    /* constraint may already exist with correct values */
+  }
 }
 
 let adsPaymentsEnsured = false;

@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar } from "expo-status-bar";
@@ -42,6 +43,7 @@ import {
   type ReelsFeedCursor,
   type ReelsPlaylist,
   type ReelsVideo,
+  type ReelsVibeAdPlacement,
 } from "@/lib/reelsApi";
 import { loadReelsFeedCache, saveReelsFeedCache } from "@/lib/reelsFeedCache";
 import {
@@ -196,7 +198,9 @@ export default function VideoTabScreen() {
   const { t } = useUiPreferences();
   const [videos, setVideos] = useState<ReelsVideo[]>([]);
   const [adPlacements, setAdPlacements] = useState<ReelsFeedAdPlacement[]>([]);
+  const [vibeAdPlacements, setVibeAdPlacements] = useState<ReelsVibeAdPlacement[]>([]);
   const videoCountRef = useRef(0);
+  const vibeCountRef = useRef(0);
   const [nextCursor, setNextCursor] = useState<ReelsFeedCursor | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -242,10 +246,12 @@ export default function VideoTabScreen() {
   const applyFeed = useCallback((feed: {
     videos?: ReelsVideo[];
     feedAdPlacements?: ReelsFeedAdPlacement[];
+    vibeAdPlacements?: ReelsVibeAdPlacement[];
     nextCursor?: ReelsFeedCursor | null;
   }) => {
     setVideos(feed.videos ?? []);
     setAdPlacements(feed.feedAdPlacements ?? []);
+    setVibeAdPlacements(feed.vibeAdPlacements ?? []);
     setNextCursor(feed.nextCursor ?? null);
   }, []);
 
@@ -263,6 +269,7 @@ export default function VideoTabScreen() {
         applyFeed({
           videos: cached.videos,
           feedAdPlacements: cached.adPlacements,
+          vibeAdPlacements: cached.vibeAdPlacements,
           nextCursor: cached.nextCursor,
         });
         loadedOnceRef.current = true;
@@ -286,6 +293,7 @@ export default function VideoTabScreen() {
           videos: feed.videos ?? [],
           trending: feed.trending,
           adPlacements: feed.feedAdPlacements,
+          vibeAdPlacements: feed.vibeAdPlacements,
           nextCursor: feed.nextCursor,
         });
       }
@@ -309,6 +317,7 @@ export default function VideoTabScreen() {
     try {
       const feed = await fetchReelsFeed(user.dbId, nextCursor, user.sessionToken);
       const incoming = feed.videos ?? [];
+      const vibeOffset = vibeCountRef.current;
       if (incoming.length > 0) {
         setVideos((prev) => {
           const seen = new Set(prev.map((v) => v.id));
@@ -322,6 +331,16 @@ export default function VideoTabScreen() {
           ...prev,
           ...batchPlacements.map((p) => ({
             insertAfterIndex: offset + p.insertAfterIndex,
+            ad: p.ad,
+          })),
+        ]);
+      }
+      const batchVibePlacements = feed.vibeAdPlacements ?? [];
+      if (batchVibePlacements.length > 0) {
+        setVibeAdPlacements((prev) => [
+          ...prev,
+          ...batchVibePlacements.map((p) => ({
+            insertAfterIndex: vibeOffset + p.insertAfterIndex,
             ad: p.ad,
           })),
         ]);
@@ -372,6 +391,10 @@ export default function VideoTabScreen() {
     router.push("/reels/upload" as never);
   };
 
+  const openVibeUpload = () => {
+    router.push("/reels/vibe-upload" as never);
+  };
+
   const openLibrary = () => {
     router.push("/reels/library" as never);
   };
@@ -408,6 +431,10 @@ export default function VideoTabScreen() {
   useEffect(() => {
     videoCountRef.current = visibleVideos.length;
   }, [visibleVideos.length]);
+
+  useEffect(() => {
+    vibeCountRef.current = videos.filter((v) => isVibeVideo(v.durationSeconds, v.videoFormat)).length;
+  }, [videos]);
 
   const feedRows = useMemo(
     () => buildFeedRows(visibleVideos, adPlacements),
@@ -839,21 +866,44 @@ export default function VideoTabScreen() {
     return (
       <View style={[styles.container, { backgroundColor: "#000" }]}>
         <StatusBar style="light" backgroundColor="#000" translucent={Platform.OS === "android"} />
-        <View style={[styles.vibeHeaderOverlay, { paddingTop: insets.top + 4 }]}>
-          <TouchableOpacity onPress={() => setVideoSection("watch")} style={styles.vibeBackToWatch}>
-            <Ionicons name="albums-outline" size={22} color="#fff" />
+        <VibeSwipeFeed
+          videos={vibeVideos}
+          adPlacements={vibeAdPlacements}
+          onLoadMore={() => void loadMore()}
+          loadingMore={loadingMore}
+          onUpload={hasChannel ? openVibeUpload : undefined}
+        />
+        <LinearGradient
+          colors={["rgba(0,0,0,0.75)", "rgba(0,0,0,0.35)", "transparent"]}
+          style={[styles.vibeHeaderOverlay, { paddingTop: insets.top + 4 }]}
+          pointerEvents="box-none"
+        >
+          <TouchableOpacity onPress={() => setVideoSection("watch")} style={styles.vibeBackBtn} accessibilityLabel="Back to Watch">
+            <Ionicons name="chevron-back" size={26} color="#fff" />
             <Text style={styles.vibeBackText}>{t("video.section.watch")}</Text>
           </TouchableOpacity>
           <Text style={styles.vibeBrandTitle}>{VIBE_BRAND_NAME}</Text>
-          <TouchableOpacity onPress={() => router.push("/reels/search" as never)} style={styles.iconBtn}>
-            <Ionicons name="search" size={22} color="#fff" />
+          <View style={styles.vibeHeaderActions}>
+            {hasChannel ? (
+              <TouchableOpacity onPress={openVibeUpload} style={styles.vibeIconBtn} accessibilityLabel={`Upload ${VIBE_BRAND_NAME}`}>
+                <Ionicons name="add-circle-outline" size={26} color="#fff" />
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity onPress={() => router.push("/reels/search" as never)} style={styles.vibeIconBtn}>
+              <Ionicons name="search" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+        {hasChannel ? (
+          <TouchableOpacity
+            style={[styles.vibeFab, { bottom: insets.bottom + 72 }]}
+            activeOpacity={0.85}
+            onPress={openVibeUpload}
+            accessibilityLabel={`Upload ${VIBE_BRAND_NAME}`}
+          >
+            <Ionicons name="videocam" size={26} color="#fff" />
           </TouchableOpacity>
-        </View>
-        <VibeSwipeFeed
-          videos={vibeVideos}
-          onLoadMore={() => void loadMore()}
-          loadingMore={loadingMore}
-        />
+        ) : null}
       </View>
     );
   }
@@ -1095,16 +1145,34 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 20,
+    zIndex: 30,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 12,
-    paddingBottom: 8,
+    paddingHorizontal: 8,
+    paddingBottom: 28,
   },
-  vibeBackToWatch: { flexDirection: "row", alignItems: "center", gap: 6, padding: 6 },
-  vibeBackText: { color: "#fff", fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  vibeBackBtn: { flexDirection: "row", alignItems: "center", padding: 8, minWidth: 88 },
+  vibeBackText: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   vibeBrandTitle: { color: "#fff", fontSize: 17, fontFamily: "Inter_700Bold" },
+  vibeHeaderActions: { flexDirection: "row", alignItems: "center" },
+  vibeIconBtn: { padding: 8 },
+  vibeFab: {
+    position: "absolute",
+    right: 16,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#059669",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 25,
+    elevation: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
   chipIcon: {
     width: 36,
     height: 32,

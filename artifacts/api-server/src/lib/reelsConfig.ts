@@ -88,6 +88,14 @@ export type ReelsAdsRules = {
   appInstallCpiInr: number;
   videoCpvInr: number;
   minTopUpInr: number;
+  /** Vibe vertical swipe feed — premium placement (higher default rates). */
+  vibeAdsEnabled: boolean;
+  vibeFeedAdMinGap: number;
+  vibeFeedAdMaxGap: number;
+  vibeCpmInr: number;
+  vibeCpcInr: number;
+  vibeCpiInr: number;
+  vibeCpvInr: number;
   summary: string[];
 };
 
@@ -207,11 +215,19 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
     appInstallCpiInr: 45,
     videoCpvInr: 0.35,
     minTopUpInr: 500,
+    vibeAdsEnabled: true,
+    vibeFeedAdMinGap: 3,
+    vibeFeedAdMaxGap: 6,
+    vibeCpmInr: 220,
+    vibeCpcInr: 28,
+    vibeCpiInr: 85,
+    vibeCpvInr: 0.75,
     summary: [
       "Pre-roll: 6s bumper, 30s non-skippable, 60s skippable (skip after 5s)",
       "Mid-roll: 30s ads during long videos (8+ min)",
       "Home feed: sponsored cards between videos at natural random spacing",
-      "Shorts: vertical video ads in swipe feed",
+      "Vibe: premium full-screen vertical ads in the Vibe swipe feed (higher rates)",
+      "Vibe formats: vertical video, video+install, shopping, app install",
       "Display: search promoted, channel banner, video overlay (rolling out)",
       "Billing: CPM · CPC · CPI · CPV — wallet charged automatically",
       "All ads require Videh admin approval; manage at ads.videh.co.in",

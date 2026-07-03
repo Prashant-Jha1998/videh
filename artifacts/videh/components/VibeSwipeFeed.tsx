@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
 import {
   Dimensions,
@@ -13,9 +12,10 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReelsCommentsSheet } from "@/components/ReelsCommentsSheet";
+import { VibeAdCard } from "@/components/VibeAdCard";
 import { VibeInlinePlayer } from "@/components/VibeInlinePlayer";
 import { useColors } from "@/hooks/useColors";
-import { formatViewCount, reactReelsVideo, type ReelsVideo } from "@/lib/reelsApi";
+import { formatViewCount, reactReelsVideo, type ReelsVideo, type ReelsVibeAdPlacement } from "@/lib/reelsApi";
 import { shareReelsVideoLink } from "@/lib/reelsShare";
 import type { VideoEditorMetadata } from "@/lib/videoEditor";
 import { VIBE_BRAND_NAME } from "@/lib/vibeVideo";
@@ -26,9 +26,29 @@ const SCREEN_W = Dimensions.get("window").width;
 
 type Props = {
   videos: ReelsVideo[];
+  adPlacements?: ReelsVibeAdPlacement[];
   onLoadMore?: () => void;
   loadingMore?: boolean;
+  onUpload?: () => void;
 };
+
+type VibeRow =
+  | { kind: "video"; key: string; video: ReelsVideo }
+  | { kind: "ad"; key: string; ad: ReelsVibeAdPlacement["ad"] };
+
+function buildVibeRows(videos: ReelsVideo[], placements: ReelsVibeAdPlacement[]): VibeRow[] {
+  const adAfter = new Map<number, ReelsVibeAdPlacement["ad"]>();
+  for (const p of placements) {
+    adAfter.set(p.insertAfterIndex, p.ad);
+  }
+  const rows: VibeRow[] = [];
+  for (let i = 0; i < videos.length; i++) {
+    rows.push({ kind: "video", key: `vibe-v-${videos[i].id}`, video: videos[i] });
+    const ad = adAfter.get(i);
+    if (ad) rows.push({ kind: "ad", key: `vibe-ad-${ad.id}-${i}`, ad });
+  }
+  return rows;
+}
 
 function parseEditorMeta(raw: ReelsVideo["editorMetadata"]): VideoEditorMetadata | null {
   if (!raw || typeof raw !== "object") return null;
@@ -54,6 +74,7 @@ function VibeCard({
   height,
   bottomPad,
   isActive,
+  preload,
   liked,
   userId,
   sessionToken,
@@ -65,6 +86,7 @@ function VibeCard({
   height: number;
   bottomPad: number;
   isActive: boolean;
+  preload?: boolean;
   liked: boolean;
   userId?: number;
   sessionToken?: string | null;
@@ -72,15 +94,10 @@ function VibeCard({
   onComment: () => void;
   onShare: () => void;
 }) {
-  const router = useRouter();
   const colors = useColors();
   const channel = item.channelDisplayName ?? (item.channelHandle ? `@${item.channelHandle}` : "Channel");
   const editorMeta = parseEditorMeta(item.editorMetadata);
   const canPlay = Boolean(item.videoUrl && item.videoUrl.trim().length > 0);
-
-  const openFull = () => {
-    router.push({ pathname: "/reels/watch/[id]", params: { id: String(item.id), vibe: "1" } } as never);
-  };
 
   return (
     <View style={[styles.card, { height, backgroundColor: "#0a0a0a" }]}>
@@ -90,22 +107,22 @@ function VibeCard({
         <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.muted }]} />
       )}
 
-      {isActive && canPlay ? (
+      {(isActive || preload) && canPlay ? (
         <VibeInlinePlayer
           videoId={item.id}
           videoUrl={item.videoUrl}
           durationSeconds={item.durationSeconds}
           userId={userId}
           sessionToken={sessionToken}
-          isActive
+          isActive={isActive}
+          preload={preload && !isActive}
+          posterUrl={item.thumbnailUrl}
           editorMetadata={editorMeta}
           musicTitle={item.musicTitle}
         />
       ) : null}
 
-      <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={openFull}>
-        {!isActive ? <View style={styles.scrim} /> : null}
-      </TouchableOpacity>
+      {!isActive ? <View style={[StyleSheet.absoluteFill, styles.scrim]} pointerEvents="none" /> : null}
 
       <View style={[styles.sideActions, { bottom: bottomPad + 88 }]}>
         <TouchableOpacity style={styles.sideBtn} onPress={onLike} hitSlop={6}>
@@ -138,7 +155,7 @@ function VibeCard({
   );
 }
 
-export function VibeSwipeFeed({ videos, onLoadMore, loadingMore }: Props) {
+export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMore, onUpload }: Props) {
   const insets = useSafeAreaInsets();
   const colors = useColors();
   const { user } = useApp();
@@ -149,6 +166,8 @@ export function VibeSwipeFeed({ videos, onLoadMore, loadingMore }: Props) {
   const [commentVideo, setCommentVideo] = useState<ReelsVideo | null>(null);
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
 
+  const rows = React.useMemo(() => buildVibeRows(videos, adPlacements), [videos, adPlacements]);
+
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       const first = viewableItems[0];
@@ -156,13 +175,13 @@ export function VibeSwipeFeed({ videos, onLoadMore, loadingMore }: Props) {
       if (
         onLoadMore
         && first?.index != null
-        && first.index >= videos.length - 3
+        && first.index >= rows.length - 3
         && !loadingMore
       ) {
         onLoadMore();
       }
     },
-    [videos.length, onLoadMore, loadingMore],
+    [rows.length, onLoadMore, loadingMore],
   );
 
   const like = async (video: ReelsVideo) => {
@@ -187,12 +206,18 @@ export function VibeSwipeFeed({ videos, onLoadMore, loadingMore }: Props) {
 
   if (videos.length === 0) {
     return (
-      <View style={[styles.empty, { backgroundColor: colors.background }]}>
-        <Ionicons name="flash-outline" size={52} color={colors.mutedForeground} />
-        <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No {VIBE_BRAND_NAME} clips yet</Text>
-        <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
-          Upload a video under 60 seconds to appear in {VIBE_BRAND_NAME}.
+      <View style={[styles.empty, { backgroundColor: "#000" }]}>
+        <Ionicons name="flash-outline" size={52} color="rgba(255,255,255,0.55)" />
+        <Text style={styles.emptyTitle}>No {VIBE_BRAND_NAME} clips yet</Text>
+        <Text style={styles.emptyHint}>
+          Upload a vertical clip under 60 seconds to appear in {VIBE_BRAND_NAME}.
         </Text>
+        {onUpload ? (
+          <TouchableOpacity style={styles.emptyUploadBtn} onPress={onUpload} activeOpacity={0.85}>
+            <Ionicons name="add" size={22} color="#fff" />
+            <Text style={styles.emptyUploadText}>Upload {VIBE_BRAND_NAME}</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   }
@@ -200,8 +225,8 @@ export function VibeSwipeFeed({ videos, onLoadMore, loadingMore }: Props) {
   return (
     <>
       <FlatList
-        data={videos}
-        keyExtractor={(v) => `vibe-${v.id}`}
+        data={rows}
+        keyExtractor={(row) => row.key}
         pagingEnabled
         showsVerticalScrollIndicator={false}
         decelerationRate="fast"
@@ -214,20 +239,34 @@ export function VibeSwipeFeed({ videos, onLoadMore, loadingMore }: Props) {
         maxToRenderPerBatch={2}
         windowSize={3}
         removeClippedSubviews
-        renderItem={({ item, index }) => (
-          <VibeCard
-            item={item}
-            height={cardH}
-            bottomPad={insets.bottom}
-            isActive={index === activeIndex}
-            liked={likedMap[item.id] ?? item.myReaction === "like"}
-            userId={user?.dbId}
-            sessionToken={user?.sessionToken}
-            onLike={() => void like(item)}
-            onComment={() => setCommentVideo(item)}
-            onShare={() => share(item)}
-          />
-        )}
+        renderItem={({ item, index }) => {
+          if (item.kind === "ad") {
+            return (
+              <VibeAdCard
+                ad={item.ad}
+                height={cardH}
+                bottomPad={insets.bottom}
+                isActive={index === activeIndex}
+              />
+            );
+          }
+          const video = item.video;
+          return (
+            <VibeCard
+              item={video}
+              height={cardH}
+              bottomPad={insets.bottom}
+              isActive={index === activeIndex}
+              preload={index === activeIndex + 1}
+              liked={likedMap[video.id] ?? video.myReaction === "like"}
+              userId={user?.dbId}
+              sessionToken={user?.sessionToken}
+              onLike={() => void like(video)}
+              onComment={() => setCommentVideo(video)}
+              onShare={() => share(video)}
+            />
+          );
+        }}
         style={{ width: SCREEN_W }}
       />
       {commentVideo && user?.dbId ? (
@@ -274,6 +313,17 @@ const styles = StyleSheet.create({
   title: { color: "rgba(255,255,255,0.92)", fontSize: 14, fontFamily: "Inter_500Medium" },
   stats: { color: "rgba(255,255,255,0.65)", fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 6 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32, gap: 10 },
-  emptyTitle: { fontSize: 17, fontFamily: "Inter_700Bold", textAlign: "center" },
-  emptyHint: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20 },
+  emptyTitle: { fontSize: 17, fontFamily: "Inter_700Bold", textAlign: "center", color: "#fff" },
+  emptyHint: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20, color: "rgba(255,255,255,0.65)" },
+  emptyUploadBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: "#059669",
+  },
+  emptyUploadText: { color: "#fff", fontSize: 15, fontFamily: "Inter_700Bold" },
 });

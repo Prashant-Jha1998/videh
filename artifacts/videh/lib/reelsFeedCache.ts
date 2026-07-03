@@ -1,14 +1,15 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { fetchReelsFeed, type ReelsFeedAdPlacement, type ReelsFeedCursor, type ReelsVideo } from "@/lib/reelsApi";
+import { fetchReelsFeed, type ReelsFeedAdPlacement, type ReelsFeedCursor, type ReelsVideo, type ReelsVibeAdPlacement } from "@/lib/reelsApi";
 import { safeJsonParse } from "@/lib/safeJson";
 
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 const MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 export type CachedReelsFeed = {
   videos: ReelsVideo[];
   trending: ReelsVideo[];
   adPlacements: ReelsFeedAdPlacement[];
+  vibeAdPlacements: ReelsVibeAdPlacement[];
   nextCursor: ReelsFeedCursor | null;
   savedAt: number;
 };
@@ -42,6 +43,7 @@ export async function saveReelsFeedCache(
     videos: ReelsVideo[];
     trending?: ReelsVideo[];
     adPlacements?: ReelsFeedAdPlacement[];
+    vibeAdPlacements?: ReelsVibeAdPlacement[];
     nextCursor?: ReelsFeedCursor | null;
   },
 ): Promise<void> {
@@ -49,6 +51,7 @@ export async function saveReelsFeedCache(
     videos: feed.videos,
     trending: feed.trending ?? [],
     adPlacements: feed.adPlacements ?? [],
+    vibeAdPlacements: feed.vibeAdPlacements ?? [],
     nextCursor: feed.nextCursor ?? null,
     savedAt: Date.now(),
   };
@@ -70,6 +73,7 @@ export async function prefetchReelsFeed(userId: number, sessionToken?: string | 
         videos: feed.videos ?? [],
         trending: feed.trending,
         adPlacements: feed.feedAdPlacements,
+        vibeAdPlacements: feed.vibeAdPlacements,
         nextCursor: feed.nextCursor,
       });
     }

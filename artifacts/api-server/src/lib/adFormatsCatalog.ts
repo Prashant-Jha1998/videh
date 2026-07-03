@@ -9,6 +9,10 @@ export type AdFormatId =
   | "feed_shopping"
   | "feed_app_install"
   | "shorts_video"
+  | "vibe_video"
+  | "vibe_video_install"
+  | "vibe_shopping"
+  | "vibe_app_install"
   | "search_promoted"
   | "channel_banner"
   | "video_overlay"
@@ -18,7 +22,7 @@ export type AdFormatId =
 export type AdFormatSpec = {
   id: AdFormatId;
   label: string;
-  category: "video_watch" | "home_feed" | "shorts" | "display";
+  category: "video_watch" | "home_feed" | "shorts" | "vibe" | "display";
   description: string;
   where: string;
   format: string;
@@ -163,9 +167,9 @@ export const AD_FORMATS_CATALOG: AdFormatSpec[] = [
   },
   {
     id: "shorts_video",
-    label: "Shorts vertical video",
+    label: "Shorts vertical video (legacy)",
     category: "shorts",
-    description: "Full-screen vertical video ad in the Shorts-style swipe feed.",
+    description: "Full-screen vertical video ad in swipe feed. Use Vibe formats for premium placement.",
     where: "Shorts / vertical feed",
     format: "shorts_video",
     placement: "shorts_feed",
@@ -175,6 +179,70 @@ export const AD_FORMATS_CATALOG: AdFormatSpec[] = [
     bidModel: "cpv",
     requiresVideo: true,
     requiresImage: false,
+    live: true,
+  },
+  {
+    id: "vibe_video",
+    label: "Vibe vertical video",
+    category: "vibe",
+    description: "Premium full-screen vertical video in the Vibe swipe feed. Skip after 3 seconds.",
+    where: "Vibe tab — swipe between clips (Instagram Reels style, not on your video)",
+    format: "shorts_video",
+    placement: "vibe_feed",
+    adType: "skippable",
+    maxDurationSeconds: 60,
+    skipAfterSeconds: 3,
+    bidModel: "cpv",
+    requiresVideo: true,
+    requiresImage: false,
+    live: true,
+  },
+  {
+    id: "vibe_video_install",
+    label: "Vibe video + app install",
+    category: "vibe",
+    description: "Vertical video (up to 60s) with Install CTA — separate swipe card in Vibe feed.",
+    where: "Vibe tab — swipe between clips (not on your video)",
+    format: "shorts_video",
+    placement: "vibe_feed",
+    adType: "skippable",
+    maxDurationSeconds: 60,
+    skipAfterSeconds: 3,
+    bidModel: "cpv",
+    requiresVideo: true,
+    requiresImage: false,
+    live: true,
+  },
+  {
+    id: "vibe_shopping",
+    label: "Vibe shopping card",
+    category: "vibe",
+    description: "Full-screen product card with Shop now — premium Vibe placement.",
+    where: "Vibe tab — between clips",
+    format: "shopping",
+    placement: "vibe_feed",
+    adType: "non_skippable",
+    maxDurationSeconds: null,
+    skipAfterSeconds: null,
+    bidModel: "cpc",
+    requiresVideo: false,
+    requiresImage: true,
+    live: true,
+  },
+  {
+    id: "vibe_app_install",
+    label: "Vibe app install",
+    category: "vibe",
+    description: "Full-screen app install card with Play Store / App Store buttons in Vibe.",
+    where: "Vibe tab — between clips",
+    format: "app_install",
+    placement: "vibe_feed",
+    adType: "non_skippable",
+    maxDurationSeconds: null,
+    skipAfterSeconds: null,
+    bidModel: "cpi",
+    requiresVideo: false,
+    requiresImage: true,
     live: true,
   },
   {

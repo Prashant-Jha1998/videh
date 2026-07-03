@@ -58,6 +58,7 @@ export default function ShareToChatScreen() {
 
   const [payload, setPayload] = useState<IncomingSharePayload | null>(null);
   const [loadingShare, setLoadingShare] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [sendingTo, setSendingTo] = useState<string | null>(null);
@@ -71,33 +72,47 @@ export default function ShareToChatScreen() {
   }, [resetShareIntent, router]);
 
   useEffect(() => {
-    if (Platform.OS === "web") return;
+    if (Platform.OS === "web" || !isInitialized) return;
+    let cancelled = false;
     void (async () => {
       setLoadingShare(true);
-      const data = await waitForIncomingShare(15_000);
+      setLoadError(null);
+
+      const data = await waitForIncomingShare(20_000);
+      if (cancelled) return;
+
       if (!data || !payloadHasShareableContent(data)) {
+        const retry = await waitForIncomingShare(8_000);
+        if (cancelled) return;
+        if (!retry || !payloadHasShareableContent(retry)) {
+          if (!isAuthenticated) {
+            router.replace("/auth/phone");
+            return;
+          }
+          setLoadError("Videh could not read what you shared. Try Share again from the other app.");
+          setLoadingShare(false);
+          return;
+        }
         if (!isAuthenticated) {
           router.replace("/auth/phone");
           return;
         }
-        Alert.alert(
-          "Nothing to share",
-          "Videh could not read what you shared. Try Share again from the other app and pick Videh.",
-        );
-        await finishIncomingShareFlow();
-        resetShareIntent();
-        router.replace("/(tabs)/chats");
+        setPayload(retry);
+        setLoadingShare(false);
         return;
       }
+
       if (!isAuthenticated) {
         router.replace("/auth/phone");
         return;
       }
-      const ready = await ensureSharePayloadFiles(data);
-      setPayload(ready);
+      setPayload(data);
       setLoadingShare(false);
     })();
-  }, [isAuthenticated, router, resetShareIntent]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, isInitialized, router, resetShareIntent]);
 
   const targets = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -116,7 +131,18 @@ export default function ShareToChatScreen() {
     if (!payload || sendingTo) return;
     setSendingTo(chatId);
     try {
-      const ready = await ensureSharePayloadFiles(payload);
+      let ready = payload;
+      try {
+        ready = await Promise.race([
+          ensureSharePayloadFiles(payload),
+          new Promise<IncomingSharePayload>((_, reject) => {
+            setTimeout(() => reject(new Error("File copy timed out")), 45_000);
+          }),
+        ]);
+      } catch {
+        Alert.alert("Could not prepare file", "The shared file took too long to load. Try sharing again.");
+        return;
+      }
       const sendFns = { sendMessage, sendPreparedMediaMessage, sendDocumentMessage };
       const ok = await deliverIncomingShareToChat(chatId, ready, sendFns);
       if (!ok) {
@@ -136,13 +162,33 @@ export default function ShareToChatScreen() {
     }
   }, [payload, sendingTo, sendMessage, sendPreparedMediaMessage, sendDocumentMessage, router, chats, resetShareIntent]);
 
-  if (loadingShare || !payload) {
+  if (loadingShare || (!payload && !loadError)) {
     return (
       <View style={[styles.screen, styles.centered, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
         <Text style={[styles.loadingText, { color: colors.mutedForeground }]}>
           Reading shared content…
         </Text>
+        <TouchableOpacity onPress={() => void closeShareFlow()} style={{ marginTop: 20, padding: 12 }}>
+          <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (loadError || !payload) {
+    return (
+      <View style={[styles.screen, styles.centered, { backgroundColor: colors.background, padding: 24 }]}>
+        <Ionicons name="alert-circle-outline" size={48} color={colors.mutedForeground} />
+        <Text style={[styles.loadingText, { color: colors.foreground, textAlign: "center", marginTop: 12 }]}>
+          {loadError ?? "Nothing to share"}
+        </Text>
+        <TouchableOpacity
+          style={[styles.retryBtn, { backgroundColor: colors.primary }]}
+          onPress={() => void closeShareFlow()}
+        >
+          <Text style={{ color: "#fff", fontFamily: "Inter_700Bold" }}>Back to chats</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -258,6 +304,12 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   loadingText: { fontSize: 15, fontFamily: "Inter_400Regular", marginTop: 8 },
+  retryBtn: {
+    marginTop: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",

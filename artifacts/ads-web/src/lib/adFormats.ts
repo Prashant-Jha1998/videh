@@ -1,7 +1,7 @@
 export type AdFormatSpec = {
   id: string;
   label: string;
-  category: "video_watch" | "home_feed" | "shorts" | "display";
+  category: "video_watch" | "home_feed" | "shorts" | "vibe" | "display";
   description: string;
   where: string;
   format: string;
@@ -19,6 +19,7 @@ export const CATEGORY_LABELS: Record<AdFormatSpec["category"], string> = {
   video_watch: "Video watch ads",
   home_feed: "Home feed ads",
   shorts: "Shorts ads",
+  vibe: "Vibe ads (premium vertical)",
   display: "Display & discovery",
 };
 

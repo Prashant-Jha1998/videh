@@ -57,6 +57,7 @@ import {
 import { shareReelsVideoLink } from "@/lib/reelsShare";
 import { pushWatchHistory } from "@/lib/reelsLibrary";
 import { reelsWatchPlayerSize, reelsWatchTopInset } from "@/lib/reelsWatchLayout";
+import { isVibeVideo } from "@/lib/vibeVideo";
 
 const SCREEN_W = Dimensions.get("window").width;
 const THUMB_H = Math.round((SCREEN_W * 9) / 16);
@@ -276,10 +277,18 @@ export default function ReelsWatchScreen() {
     setRelated([...sameChannel, ...other].slice(0, 20));
 
     if (ads.success !== false) {
-      setAdBreaks(ads);
-      if (ads.enabled && ads.preRoll.length > 0) {
-        setWatchPhase("pre-roll");
+      const vibeClip = res.video
+        ? isVibeVideo(res.video.durationSeconds, res.video.videoFormat)
+        : false;
+      if (!vibeClip) {
+        setAdBreaks(ads);
+        if (ads.enabled && ads.preRoll.length > 0) {
+          setWatchPhase("pre-roll");
+        } else {
+          setWatchPhase("content");
+        }
       } else {
+        setAdBreaks({ enabled: false, preRoll: [], midRoll: [] });
         setWatchPhase("content");
       }
     } else {

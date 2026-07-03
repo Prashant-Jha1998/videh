@@ -40,7 +40,9 @@ type Dashboard = {
 };
 type Stats = { impressions: string; completions: string; skips: string; clicks?: string; spent_inr?: string; creatives: number };
 type Pricing = {
-  feedCpmInr: number; feedCpcInr: number; appInstallCpiInr: number; videoCpvInr: number; minTopUpInr: number;
+  feedCpmInr: number; feedCpcInr: number; appInstallCpiInr: number; videoCpvInr: number;
+  vibeCpmInr?: number; vibeCpcInr?: number; vibeCpiInr?: number; vibeCpvInr?: number;
+  minTopUpInr: number;
   feedAdEveryVideos: number;
   objectives: Array<{ id: string; label: string; bidModel: string; defaultBid: number }>;
   adFormats?: AdFormatSpec[];
@@ -82,6 +84,7 @@ const OBJECTIVE_LABELS: Record<string, string> = {
   shopping: "Shopping",
   app_promotion: "App promotion",
   video_views: "Video views",
+  vibe_reach: "Vibe reach (premium)",
 };
 
 const BID_LABELS: Record<string, string> = {
@@ -194,6 +197,7 @@ export default function App() {
     if (spec.maxDurationSeconds) setDurationSeconds(spec.maxDurationSeconds);
     if (spec.format === "shopping") setObjective("shopping");
     else if (spec.format === "app_install") setObjective("app_promotion");
+    else if (spec.category === "vibe") setObjective("vibe_reach");
     else if (spec.category === "video_watch" || spec.category === "shorts") setObjective("video_views");
     else setObjective("brand_awareness");
   }, []);
@@ -704,10 +708,14 @@ export default function App() {
 
               <Panel title="Billing rates">
                 <ul style={S.list}>
-                  <li><strong>CPM</strong> ₹{pricing?.feedCpmInr}/1,000 impressions (feed & bumper)</li>
-                  <li><strong>CPC</strong> ₹{pricing?.feedCpcInr}/click (shopping, discovery, overlay)</li>
-                  <li><strong>CPI</strong> ₹{pricing?.appInstallCpiInr}/app store tap</li>
-                  <li><strong>CPV</strong> ₹{pricing?.videoCpvInr}/completed video view (pre-roll, mid-roll, shorts)</li>
+                  <li><strong>Watch CPM</strong> ₹{pricing?.feedCpmInr}/1,000 impressions (feed & bumper)</li>
+                  <li><strong>Watch CPC</strong> ₹{pricing?.feedCpcInr}/click (shopping, discovery, overlay)</li>
+                  <li><strong>Watch CPI</strong> ₹{pricing?.appInstallCpiInr}/app store tap</li>
+                  <li><strong>Watch CPV</strong> ₹{pricing?.videoCpvInr}/completed video view (pre-roll, mid-roll, shorts)</li>
+                  <li><strong>Vibe CPM</strong> ₹{pricing?.vibeCpmInr ?? "—"}/1,000 impressions (premium vertical)</li>
+                  <li><strong>Vibe CPC</strong> ₹{pricing?.vibeCpcInr ?? "—"}/click (Vibe shopping)</li>
+                  <li><strong>Vibe CPI</strong> ₹{pricing?.vibeCpiInr ?? "—"}/app install tap (Vibe)</li>
+                  <li><strong>Vibe CPV</strong> ₹{pricing?.vibeCpvInr ?? "—"}/completed view (Vibe video)</li>
                   <li>Har ad <strong>Videh admin approve</strong> ke baad hi public hota hai</li>
                 </ul>
               </Panel>
@@ -1167,7 +1175,7 @@ function AdFormatsCatalog({
   selectedId?: string;
   recommendedIds?: string[];
 }) {
-  const categories = ["video_watch", "home_feed", "shorts", "display"] as const;
+  const categories = ["video_watch", "home_feed", "vibe", "shorts", "display"] as const;
   return (
     <Panel title={compact ? "Ad format" : "All ad formats on Videh"}>
       {categories.map((cat) => {

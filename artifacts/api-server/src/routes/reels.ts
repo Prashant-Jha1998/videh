@@ -36,7 +36,7 @@ import {
   redactPhoneNumbersInText,
 } from "../lib/reelsPrivacy";
 import { resolveViewerGeoFromRequest } from "../lib/adsGeo";
-import { pickFeedAdPlacementsForBatch, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
+import { pickFeedAdPlacementsForBatch, pickVibeAdPlacementsForBatch, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
 import { publishReelsVideo, resolveVideoFormat, validateVideoFormatChoice } from "../lib/reelsVideoPublish";
 import { searchVibeSounds } from "../lib/vibeSounds";
 import {
@@ -1479,6 +1479,12 @@ router.get("/feed", async (req: Request, res: Response) => {
     const feedAdPlacements = cfg.ads.feedAdsEnabled && videos.length > 0
       ? await pickFeedAdPlacementsForBatch(videos.length, feedAdMinGap, feedAdMaxGap)
       : [];
+    const vibeCount = videos.filter((v) => v.videoFormat === "vibe").length;
+    const vibeAdMinGap = cfg.ads.vibeFeedAdMinGap ?? 3;
+    const vibeAdMaxGap = cfg.ads.vibeFeedAdMaxGap ?? 6;
+    const vibeAdPlacements = cfg.ads.vibeAdsEnabled && vibeCount > 0
+      ? await pickVibeAdPlacementsForBatch(vibeCount, vibeAdMinGap, vibeAdMaxGap)
+      : [];
     res.json({
       success: true,
       videos,
@@ -1487,6 +1493,9 @@ router.get("/feed", async (req: Request, res: Response) => {
       feedAdPlacements,
       feedAdMinGap,
       feedAdMaxGap,
+      vibeAdPlacements,
+      vibeAdMinGap,
+      vibeAdMaxGap,
     });
   } catch (err) {
     req.log.error({ err }, "reels feed");
@@ -2581,7 +2590,7 @@ router.get("/videos/:videoId/ad-breaks", async (req: Request, res: Response) => 
   try {
     await ensureReelsTables();
     const row = await query(
-      `SELECT v.duration_seconds, c.user_id AS channel_owner_id
+      `SELECT v.duration_seconds, v.video_format, c.user_id AS channel_owner_id
        FROM reels_videos v
        JOIN reels_channels c ON c.id = v.channel_id
        WHERE v.id = $1`,
@@ -2591,12 +2600,13 @@ router.get("/videos/:videoId/ad-breaks", async (req: Request, res: Response) => 
       res.status(404).json({ success: false });
       return;
     }
-    const v = row.rows[0] as { duration_seconds?: number; channel_owner_id?: number };
+    const v = row.rows[0] as { duration_seconds?: number; video_format?: string; channel_owner_id?: number };
     const breaks = await resolveReelsAdBreaks({
       contentVideoId: videoId,
       contentDurationSeconds: Number(v.duration_seconds) || 0,
       viewerUserId: viewerId,
       channelOwnerUserId: Number(v.channel_owner_id) || null,
+      videoFormat: v.video_format ?? null,
     });
     res.json({ success: true, ...breaks });
   } catch (err) {
