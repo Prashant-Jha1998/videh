@@ -55,6 +55,7 @@ export type ReelsPublicRules = {
     minSubscribers: number;
     minWatchHours: number;
     minPublicVideos: number;
+    minVibeViews90Days: number;
   };
   playButton: { rules: string[] };
   feed: { rules: string[] };
@@ -83,6 +84,24 @@ export type ReelsVideo = {
   dislikeCount: number;
   commentCount: number;
   shareCount?: number;
+  videoFormat?: "watch" | "vibe";
+  commentsEnabled?: boolean;
+  sharesEnabled?: boolean;
+  editorMetadata?: {
+    filter?: string;
+    caption?: string;
+    textOverlays?: Array<{
+      id: string;
+      text: string;
+      x: number;
+      y: number;
+      color?: string;
+      fontSize?: number;
+    }>;
+  } | null;
+  musicTitle?: string | null;
+  musicArtist?: string | null;
+  musicUrl?: string | null;
   playEnabled?: boolean;
   status?: string;
   moderationStatus?: string;
@@ -98,6 +117,9 @@ export type ReelsVideo = {
   shareUrl?: string;
   shareSlug?: string;
   deepLink?: string;
+  /** Vibe-only short share URL (`/v/<slug>`). Set only when videoFormat === 'vibe'. */
+  vibeShareUrl?: string;
+  vibeDeepLink?: string;
 };
 
 export const REELS_HANDLE_RE = /^[a-zA-Z][a-zA-Z0-9_]{2,29}$/;
@@ -525,7 +547,8 @@ export async function fetchHashtagReels(
   return res;
 }
 
-export async function fetchReelsVideo(videoId: number, userId: number, sessionToken?: string | null) {
+export async function fetchReelsVideo(videoRef: number | string, userId: number, sessionToken?: string | null) {
+  const ref = encodeURIComponent(String(videoRef));
   const res = await reelsJson<{
     success: boolean;
     video: ReelsVideo;
@@ -533,7 +556,7 @@ export async function fetchReelsVideo(videoId: number, userId: number, sessionTo
     playBlockReasons?: string[];
     message?: string;
   }>(
-    `/videos/${videoId}?userId=${userId}`,
+    `/videos/${ref}?userId=${userId}`,
     { sessionToken },
   );
   if (res.video) res.video = normalizeReelsVideo(res.video);
@@ -760,7 +783,15 @@ export async function shareReelsVideo(
   userId: number,
   sessionToken?: string | null,
 ) {
-  return reelsJson<{ success: boolean; shareUrl?: string }>(`/videos/${videoId}/share`, {
+  return reelsJson<{
+    success: boolean;
+    /** Preferred share URL (Vibe URL for vibe videos, otherwise watch URL). */
+    shareUrl?: string;
+    /** Long-form watch URL (always slug-based, never id). */
+    watchUrl?: string;
+    /** Vibe short-form URL, present only for Vibe videos. */
+    vibeShareUrl?: string;
+  }>(`/videos/${videoId}/share`, {
     method: "POST",
     body: { userId },
     sessionToken,
@@ -792,7 +823,18 @@ export async function deleteReelsVideo(
 export async function updateReelsVideo(
   videoId: number,
   userId: number,
-  opts: { title?: string; description?: string; hashtags?: string },
+  opts: {
+    title?: string;
+    description?: string;
+    hashtags?: string;
+    videoFormat?: "watch" | "vibe";
+    commentsEnabled?: boolean;
+    sharesEnabled?: boolean;
+    editorMetadata?: ReelsVideo["editorMetadata"];
+    musicTitle?: string | null;
+    musicArtist?: string | null;
+    musicUrl?: string | null;
+  },
   sessionToken?: string | null,
 ) {
   const res = await reelsJson<{ success: boolean; video?: ReelsVideo; message?: string }>(
@@ -841,6 +883,13 @@ export type UploadReelsVideoOpts = {
   thumbnailUri?: string;
   sessionToken?: string | null;
   onProgress?: (pct: number) => void;
+  videoFormat?: "watch" | "vibe";
+  commentsEnabled?: boolean;
+  sharesEnabled?: boolean;
+  editorMetadata?: ReelsVideo["editorMetadata"];
+  musicTitle?: string | null;
+  musicArtist?: string | null;
+  musicUrl?: string | null;
 };
 
 type UploadIntentResponse = {
@@ -894,6 +943,13 @@ async function completeReelsDirectUpload(
       durationSeconds: opts.durationSeconds,
       videoUploadsRel: opts.videoUploadsRel,
       thumbnailUploadsRel: opts.thumbnailUploadsRel,
+      videoFormat: opts.videoFormat,
+      commentsEnabled: opts.commentsEnabled,
+      sharesEnabled: opts.sharesEnabled,
+      editorMetadata: opts.editorMetadata,
+      musicTitle: opts.musicTitle,
+      musicArtist: opts.musicArtist,
+      musicUrl: opts.musicUrl,
     },
   });
   if (res.video) res.video = normalizeReelsVideo(res.video);
@@ -992,6 +1048,13 @@ function uploadReelsVideoLegacy(opts: UploadReelsVideoOpts): Promise<{
     form.append("description", description);
     form.append("hashtags", hashtags);
     form.append("durationSeconds", String(durationSeconds));
+    if (opts.videoFormat) form.append("videoFormat", opts.videoFormat);
+    if (opts.commentsEnabled !== undefined) form.append("commentsEnabled", String(opts.commentsEnabled));
+    if (opts.sharesEnabled !== undefined) form.append("sharesEnabled", String(opts.sharesEnabled));
+    if (opts.editorMetadata) form.append("editorMetadata", JSON.stringify(opts.editorMetadata));
+    if (opts.musicTitle) form.append("musicTitle", opts.musicTitle);
+    if (opts.musicArtist) form.append("musicArtist", opts.musicArtist);
+    if (opts.musicUrl) form.append("musicUrl", opts.musicUrl);
 
     const webVideo = Platform.OS === "web" ? getWebFile(vUri) : undefined;
     if (webVideo) {

@@ -20,7 +20,7 @@ import { AssistantOverlay } from "@/components/AssistantOverlay";
 import { callDebug } from "@/lib/callDebug";
 import { getApiUrl } from "@/lib/api";
 import { parseGroupInviteTokenFromUrl } from "@/lib/groupInviteLinks";
-import { parseReelsChannelHandleFromUrl, parseReelsWatchIdFromUrl } from "@/lib/reelsShare";
+import { parseReelsChannelHandleFromUrl, parseReelsShareUrl } from "@/lib/reelsShare";
 import { onCallSignal, resolveCallSignal } from "@/lib/callEvents";
 import { shouldPresentIncomingCall, isCallCaller } from "@/lib/callRole";
 import { hydrateAndValidateIncomingCall, hasCompleteIncomingCallFields } from "@/lib/hydrateIncomingCall";
@@ -898,9 +898,14 @@ function RootLayoutNav() {
         } as unknown as Href);
         return;
       }
-      const videoId = parseReelsWatchIdFromUrl(url);
-      if (!videoId) return;
-      router.push({ pathname: "/reels/watch/[id]", params: { id: videoId } } as unknown as Href);
+      const videoRef = parseReelsShareUrl(url);
+      if (!videoRef) return;
+      router.push({
+        pathname: "/reels/watch/[id]",
+        params: videoRef.isVibe
+          ? { id: videoRef.ref, vibe: "1" }
+          : { id: videoRef.ref },
+      } as unknown as Href);
     };
     void Linking.getInitialURL().then(openReelsFromUrl);
     const sub = Linking.addEventListener("url", ({ url }) => openReelsFromUrl(url));
@@ -1113,7 +1118,7 @@ export default function RootLayout() {
   if (!fontsReady) return null;
 
   return (
-    <ShareIntentProvider options={{ resetOnBackground: false, debug: __DEV__ }}>
+    <ShareIntentProvider options={{ resetOnBackground: true, debug: __DEV__ }}>
     <SafeAreaProvider>
       <UiPreferencesProvider>
         <ErrorBoundary>

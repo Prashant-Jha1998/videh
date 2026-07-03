@@ -53,7 +53,7 @@ export default function StarredScreen() {
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
         {!webDesktop ? (
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
+            <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
           </TouchableOpacity>
         ) : (
           <View style={styles.backBtn} />

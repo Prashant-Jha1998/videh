@@ -57,7 +57,7 @@ export default function LanguageScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
+          <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t("language.title")}</Text>
         <View style={{ width: 40 }} />

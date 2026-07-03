@@ -9,7 +9,7 @@ import { WEB_LIST_PANE_WIDTH } from "@/lib/web/webDesktop";
 import { showHeyVidehComingSoon } from "@/lib/heyVidehFeature";
 
 const ROWS: Array<{ icon: string; iconBg: string; label: string; sub: string; href: string }> = [
-  { icon: "mic-circle-outline", iconBg: "#5B4FE8", label: "Hey Videh", sub: "Voice assistant", href: "/settings/assistant" },
+  { icon: "mic-circle-outline", iconBg: "#059669", label: "Hey Videh", sub: "Voice assistant", href: "/settings/assistant" },
   { icon: "key-outline", iconBg: "#2196F3", label: "Account", sub: "Security, account info", href: "/settings/account" },
   { icon: "lock-closed-outline", iconBg: "#9C27B0", label: "Privacy", sub: "Blocked, disappearing", href: "/settings/privacy" },
   { icon: "color-palette-outline", iconBg: "#7C3AED", label: "App theme", sub: "Colors and gradients", href: "/settings/theme" },

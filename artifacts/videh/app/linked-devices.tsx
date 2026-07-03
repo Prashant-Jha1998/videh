@@ -139,7 +139,7 @@ export default function LinkedDevicesScreen() {
         <View style={styles.overlay}>
           <View style={[styles.overlayTop, { paddingTop: insets.top + 10, flexDirection: "row", alignItems: "center", paddingHorizontal: 16 }]}>
             <TouchableOpacity onPress={() => setScanning(false)} style={{ padding: 8 }}>
-              <Ionicons name="arrow-back" size={24} color="#fff" />
+              <Ionicons name="arrow-back" size={24} color={colors.headerIconColor} />
             </TouchableOpacity>
             <Text style={{ color: "#fff", fontSize: 18, fontWeight: "700", marginLeft: 8 }}>Scan QR code</Text>
           </View>
@@ -174,7 +174,7 @@ export default function LinkedDevicesScreen() {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: insets.top + 10 }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Ionicons name="arrow-back" size={24} color={colors.headerIconColor} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Linked devices</Text>
       </View>
@@ -259,7 +259,7 @@ export default function LinkedDevicesScreen() {
           <Ionicons name="lock-closed-outline" size={14} color={colors.mutedForeground} />
           <Text style={[styles.encryptionText, { color: colors.mutedForeground }]}>
             Your personal messages are{" "}
-            <Text style={{ color: "#5B4FE8", fontWeight: "700" }}>protected with TLS encryption</Text>
+            <Text style={{ color: "#059669", fontWeight: "700" }}>protected with TLS encryption</Text>
             {" "}on all your linked devices.
           </Text>
         </View>
@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
   overlayRow: { flexDirection: "row", height: 260 },
   overlaySide: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
   scanWindow: { width: 260, position: "relative" },
-  corner: { position: "absolute", width: CORNER_SIZE, height: CORNER_SIZE, borderColor: "#5B4FE8" },
+  corner: { position: "absolute", width: CORNER_SIZE, height: CORNER_SIZE, borderColor: "#059669" },
   cornerTL: { top: 0, left: 0, borderTopWidth: CORNER_WIDTH, borderLeftWidth: CORNER_WIDTH, borderTopLeftRadius: 4 },
   cornerTR: { top: 0, right: 0, borderTopWidth: CORNER_WIDTH, borderRightWidth: CORNER_WIDTH, borderTopRightRadius: 4 },
   cornerBL: { bottom: 0, left: 0, borderBottomWidth: CORNER_WIDTH, borderLeftWidth: CORNER_WIDTH, borderBottomLeftRadius: 4 },

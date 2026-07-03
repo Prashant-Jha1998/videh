@@ -31,10 +31,6 @@ function NativeTabLayout() {
         <Icon sf={{ default: "phone", selected: "phone.fill" }} />
         <Label>{t("tab.calls")}</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="settings">
-        <Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />
-        <Label>{t("tab.settings")}</Label>
-      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }
@@ -118,10 +114,7 @@ export function ClassicTabLayout() {
       <Tabs.Screen
         name="settings"
         options={{
-          title: t("tab.settings"),
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "settings" : "settings-outline"} size={24} color={color} />
-          ),
+          href: null,
         }}
       />
       <Tabs.Screen name="index" options={{ href: null }} />

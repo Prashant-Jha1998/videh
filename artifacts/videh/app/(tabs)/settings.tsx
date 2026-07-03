@@ -101,7 +101,7 @@ export default function SettingsScreen() {
     () => [
       {
         icon: "mic-circle-outline",
-        iconBg: "#5B4FE8",
+        iconBg: "#059669",
         label: t("settings.heyVideh"),
         value: t("settings.heyVidehSub"),
         onPress: () => {
@@ -125,7 +125,7 @@ export default function SettingsScreen() {
       { icon: "person-add-outline", iconBg: "#8BC34A", label: t("settings.row.invite"), onPress: inviteFriend },
       {
         icon: "phone-portrait-outline",
-        iconBg: "#5B4FE8",
+        iconBg: "#059669",
         label: t("settings.row.updates"),
         value: t("settings.row.updatesSub"),
         onPress: () =>
@@ -142,13 +142,13 @@ export default function SettingsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
-        <Text style={styles.headerTitle}>{t("settings.header")}</Text>
+        <Text style={[styles.headerTitle, { color: colors.headerTitleColor }]}>{t("settings.header")}</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/settings/qr-code")}>
-            <Ionicons name="grid-outline" size={22} color="#fff" />
+            <Ionicons name="grid-outline" size={22} color={colors.headerIconColor} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/contacts")}>
-            <Ionicons name="search-outline" size={22} color="#fff" />
+            <Ionicons name="search-outline" size={22} color={colors.headerIconColor} />
           </TouchableOpacity>
         </View>
       </ThemedHeader>
@@ -245,7 +245,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
-  headerTitle: { color: "#fff", fontSize: 22, fontFamily: "Inter_700Bold" },
+  headerTitle: { fontSize: 22, fontFamily: "Inter_700Bold" },
   headerActions: { flexDirection: "row", gap: 4 },
   headerBtn: { padding: 6 },
   profileBlock: {

@@ -83,7 +83,7 @@ export function chatClearCutoff(
   );
 }
 
-/** Drop messages at or before the user's clear/delete cutoff (WhatsApp-style list delete). */
+/** Drop messages at or before the user's clear/delete cutoff (standard list delete). */
 export function filterMessagesAfterClearCutoff<T extends { timestamp: number }>(
   messages: T[],
   cutoffMs: number,

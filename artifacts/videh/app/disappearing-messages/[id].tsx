@@ -20,7 +20,7 @@ import {
   isSameDisappearTimer,
 } from "@/lib/disappearTimerOptions";
 
-const WA_GREEN = "#5B4FE8";
+const WA_GREEN = "#059669";
 
 function RadioOption({
   label,

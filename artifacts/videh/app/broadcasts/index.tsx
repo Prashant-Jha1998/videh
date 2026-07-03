@@ -406,7 +406,7 @@ export default function BroadcastsScreen() {
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
           <TouchableOpacity onPress={goBack} style={styles.headerBtn}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
+            <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
           </TouchableOpacity>
           <View style={styles.headerTextCol}>
             <Text style={styles.headerTitle}>{isAdding ? "Add recipients" : "New broadcast"}</Text>
@@ -495,7 +495,7 @@ export default function BroadcastsScreen() {
       >
         <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
           <TouchableOpacity onPress={goBack} style={styles.headerBtn}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
+            <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
           </TouchableOpacity>
           <View style={styles.headerTextCol}>
             <Text style={styles.headerTitle} numberOfLines={1}>{selectedList.name}</Text>
@@ -561,7 +561,7 @@ export default function BroadcastsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
+          <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, styles.headerTitleCenter]}>Broadcast lists</Text>
         <TouchableOpacity style={styles.headerBtn} onPress={startCreate}>
@@ -623,7 +623,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -637,7 +637,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
     borderRadius: 18,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -674,7 +674,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  checkCircleOn: { backgroundColor: "#5B4FE8", borderColor: "#5B4FE8" },
+  checkCircleOn: { backgroundColor: "#059669", borderColor: "#059669" },
   centerBox: { alignItems: "center", justifyContent: "center", padding: 40, gap: 12, marginTop: 40 },
   hintText: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20 },
   sectionHead: { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
@@ -703,7 +703,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 1,

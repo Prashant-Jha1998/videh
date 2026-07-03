@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 20,
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
   },
   backPillText: { color: "#fff", fontFamily: "Inter_600SemiBold" },
   replyBar: {

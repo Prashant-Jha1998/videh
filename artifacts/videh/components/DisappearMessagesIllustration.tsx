@@ -3,7 +3,7 @@ import React from "react";
 import { StyleSheet, View } from "react-native";
 import Svg, { Circle, Ellipse } from "react-native-svg";
 
-const WA_GREEN = "#5B4FE8";
+const WA_GREEN = "#059669";
 
 /** Videh header illustration for disappearing messages. */
 export function DisappearMessagesIllustration() {

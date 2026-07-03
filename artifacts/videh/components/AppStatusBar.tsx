@@ -4,13 +4,10 @@ import React, { useEffect } from "react";
 import { Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
 
-/**
- * Keeps system status bar icons readable: light icons on the branded header color
- * (Videh / video platform style) instead of washed-out icons on a white strip.
- */
+/** Light headers use dark status-bar icons on white; dark mode keeps light icons. */
 export function AppStatusBar() {
   const colors = useColors();
-  const barBg = colors.headerBg ?? colors.primary;
+  const barBg = colors.headerBg ?? colors.background;
 
   useEffect(() => {
     void SystemUI.setBackgroundColorAsync(barBg);
@@ -18,7 +15,7 @@ export function AppStatusBar() {
 
   return (
     <StatusBar
-      style="light"
+      style={colors.isDark ? "light" : "dark"}
       backgroundColor={barBg}
       translucent={Platform.OS === "android"}
     />

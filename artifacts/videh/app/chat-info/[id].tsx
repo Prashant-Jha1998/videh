@@ -942,9 +942,9 @@ export default function ChatInfoScreen() {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
+          <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{isGroup ? "Group Info" : "Contact Info"}</Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]}>{isGroup ? "Group Info" : "Contact Info"}</Text>
         <View style={{ width: 36 }} />
       </View>
 
@@ -1409,9 +1409,9 @@ export default function ChatInfoScreen() {
         <View style={[styles.langPickerScreen, { backgroundColor: colors.background, paddingTop: topPad }]}>
           <View style={[styles.langPickerHeader, { backgroundColor: colors.headerBg }]}>
             <TouchableOpacity onPress={() => setGroupLangPickerOpen(false)} style={styles.backBtn}>
-              <Ionicons name="arrow-back" size={22} color="#fff" />
+              <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
             </TouchableOpacity>
-            <Text style={styles.langPickerHeaderTitle}>Your language in this group</Text>
+            <Text style={[styles.langPickerHeaderTitle, { color: colors.foreground }]}>Your language in this group</Text>
             <View style={{ width: 40 }} />
           </View>
           <Text style={[styles.langPickerHint, { color: colors.mutedForeground }]}>
@@ -1684,9 +1684,9 @@ export default function ChatInfoScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingBottom: 12, backgroundColor: "#5B4FE8" },
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingBottom: 12 },
   backBtn: { padding: 8 },
-  headerTitle: { flex: 1, fontSize: 18, fontFamily: "Inter_600SemiBold", color: "#fff", marginLeft: 8 },
+  headerTitle: { flex: 1, fontSize: 18, fontFamily: "Inter_600SemiBold", marginLeft: 8 },
   headerBtn: { padding: 8 },
 
   profileBlock: { alignItems: "center", paddingVertical: 24, paddingHorizontal: 16, marginBottom: 8 },
@@ -1832,7 +1832,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingBottom: 12,
   },
-  langPickerHeaderTitle: { flex: 1, color: "#fff", fontSize: 18, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  langPickerHeaderTitle: { flex: 1, fontSize: 18, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   langPickerHint: { fontSize: 13, lineHeight: 18, paddingHorizontal: 16, paddingVertical: 12, fontFamily: "Inter_400Regular" },
   langPickerRow: { paddingVertical: 14, paddingRight: 40 },
   langPickerNative: { fontSize: 17, fontFamily: "Inter_600SemiBold" },

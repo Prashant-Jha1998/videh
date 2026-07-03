@@ -1,7 +1,7 @@
 import { query } from "./db";
 import { filterSseConnectedUserIds, publishChatEvent } from "./realtime";
 
-/** WhatsApp-style aggregate: all recipients read → read; all delivered+ → delivered; else sent. */
+/** standard aggregate: all recipients read → read; all delivered+ → delivered; else sent. */
 export async function senderDeliveryStatusForMessage(
   messageId: number,
   senderId: number,

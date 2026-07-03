@@ -14,7 +14,7 @@ export function VidehRailLogo({ size = 40 }: { size?: number }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "linear-gradient(135deg, #5B4FE8 0%, #008069 100%)",
+          background: "linear-gradient(135deg, #059669 0%, #10B981 100%)",
           borderRadius: 10,
           color: "white",
           fontWeight: 800,

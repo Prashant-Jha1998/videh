@@ -119,7 +119,7 @@ export default function MessageInfoScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
-        <Ionicons name="arrow-back" size={22} color="#fff" onPress={() => router.back()} style={{ padding: 8 }} />
+        <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} onPress={() => router.back()} style={{ padding: 8 }} />
         <Text style={styles.headerTitle}>Message info</Text>
       </View>
 
@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 4,
     paddingBottom: 12,
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
   },
   headerTitle: {
     flex: 1,

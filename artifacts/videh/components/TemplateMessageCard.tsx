@@ -31,8 +31,8 @@ type Props = {
 };
 
 function ButtonIcon({ type }: { type: BusinessTemplateButton["type"] }) {
-  if (type === "URL") return <Ionicons name="open-outline" size={16} color="#5B4FE8" />;
-  if (type === "PHONE_NUMBER") return <Ionicons name="call-outline" size={16} color="#5B4FE8" />;
+  if (type === "URL") return <Ionicons name="open-outline" size={16} color="#059669" />;
+  if (type === "PHONE_NUMBER") return <Ionicons name="call-outline" size={16} color="#059669" />;
   return null;
 }
 
@@ -80,7 +80,7 @@ function HeaderMedia({
         }}
       >
         <View style={styles.documentIconWrap}>
-          <Ionicons name="document-text-outline" size={28} color="#5B4FE8" />
+          <Ionicons name="document-text-outline" size={28} color="#059669" />
         </View>
         <Text style={styles.documentName} numberOfLines={2}>
           {documentName?.trim() || "Document"}
@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
-    color: "#5B4FE8",
+    color: "#059669",
   },
   footer: {
     fontSize: 12,
@@ -357,7 +357,7 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
-    color: "#5B4FE8",
+    color: "#059669",
     maxWidth: "85%",
   },
 });

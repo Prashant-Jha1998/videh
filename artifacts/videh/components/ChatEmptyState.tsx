@@ -67,7 +67,7 @@ export function ChatEmptyState({
                 activeOpacity={0.82}
                 accessibilityLabel="Voice call"
               >
-                <Ionicons name="call-outline" size={22} color="#5B4FE8" />
+                <Ionicons name="call-outline" size={22} color="#059669" />
                 <Text style={styles.actionLabel}>Call</Text>
               </TouchableOpacity>
             ) : null}
@@ -78,7 +78,7 @@ export function ChatEmptyState({
                 activeOpacity={0.82}
                 accessibilityLabel="Video call"
               >
-                <Ionicons name="videocam-outline" size={22} color="#5B4FE8" />
+                <Ionicons name="videocam-outline" size={22} color="#059669" />
                 <Text style={styles.actionLabel}>Video</Text>
               </TouchableOpacity>
             ) : null}
@@ -165,6 +165,6 @@ const styles = StyleSheet.create({
   actionLabel: {
     fontSize: 12,
     fontFamily: "Inter_500Medium",
-    color: "#5B4FE8",
+    color: "#059669",
   },
 });

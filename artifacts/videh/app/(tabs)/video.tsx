@@ -22,6 +22,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReelsFeedAdCard } from "@/components/ReelsFeedAdCard";
 import { ReelsFeedVideoMenu, type FeedVideoMenuAction } from "@/components/ReelsFeedVideoMenu";
+import { VibeSwipeFeed } from "@/components/VibeSwipeFeed";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
@@ -53,6 +54,9 @@ import {
 } from "@/lib/reelsLibrary";
 import { shareReelsVideoLink } from "@/lib/reelsShare";
 import { downloadReelsVideoToApp } from "@/lib/reelsVideoDownload";
+import { isVibeVideo, isWatchVideo, VIBE_BRAND_NAME } from "@/lib/vibeVideo";
+
+type VideoSection = "watch" | "vibe";
 
 type FeedRow =
   | { kind: "video"; key: string; video: ReelsVideo }
@@ -201,6 +205,7 @@ export default function VideoTabScreen() {
   const [myChannel, setMyChannel] = useState<ReelsChannel | null>(null);
   const [myPlaylists, setMyPlaylists] = useState<ReelsPlaylist[]>([]);
   const [feedCategory, setFeedCategory] = useState<FeedCategory>("all");
+  const [videoSection, setVideoSection] = useState<VideoSection>("watch");
   const [menuVideo, setMenuVideo] = useState<ReelsVideo | null>(null);
   const [playlistPickerVideo, setPlaylistPickerVideo] = useState<ReelsVideo | null>(null);
   const [createPlaylistVideo, setCreatePlaylistVideo] = useState<ReelsVideo | null>(null);
@@ -386,8 +391,19 @@ export default function VideoTabScreen() {
 
   const visibleVideos = useMemo(() => {
     const hidden = { videoIds: hiddenVideoIds, channelIds: hiddenChannelIds };
-    return filterFeedVideos(videos, hidden).filter((v) => matchesCategory(v, feedCategory));
-  }, [videos, hiddenVideoIds, hiddenChannelIds, feedCategory]);
+    return filterFeedVideos(videos, hidden)
+      .filter((v) => matchesCategory(v, feedCategory))
+      .filter((v) =>
+        videoSection === "vibe"
+          ? isVibeVideo(v.durationSeconds, v.videoFormat)
+          : isWatchVideo(v.durationSeconds, v.videoFormat),
+      );
+  }, [videos, hiddenVideoIds, hiddenChannelIds, feedCategory, videoSection]);
+
+  const vibeVideos = useMemo(
+    () => visibleVideos.filter((v) => isVibeVideo(v.durationSeconds, v.videoFormat)),
+    [visibleVideos],
+  );
 
   useEffect(() => {
     videoCountRef.current = visibleVideos.length;
@@ -598,6 +614,7 @@ export default function VideoTabScreen() {
           </Text>
           <Text style={[styles.ytMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
             {channelLabel(item)} · {formatViewCount(item.viewCount)} views
+            {(item.shareCount ?? 0) > 0 ? ` · ${formatViewCount(item.shareCount ?? 0)} shares` : ""}
             {item.createdAt ? ` · ${formatTimeAgo(item.createdAt)}` : ""}
           </Text>
         </TouchableOpacity>
@@ -755,6 +772,32 @@ export default function VideoTabScreen() {
     </View>
   );
 
+  const sectionTabs = (
+    <View style={[styles.sectionTabs, { borderBottomColor: colors.border }]}>
+      {(["watch", "vibe"] as const).map((id) => {
+        const active = videoSection === id;
+        const label = id === "watch" ? t("video.section.watch") : VIBE_BRAND_NAME;
+        return (
+          <TouchableOpacity
+            key={id}
+            style={[styles.sectionTab, active && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
+            onPress={() => setVideoSection(id)}
+          >
+            <Text
+              style={{
+                color: active ? colors.primary : colors.mutedForeground,
+                fontFamily: active ? "Inter_700Bold" : "Inter_500Medium",
+                fontSize: 14,
+              }}
+            >
+              {label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
   const topChrome = (
     <View
       style={[
@@ -766,7 +809,8 @@ export default function VideoTabScreen() {
       ]}
     >
       {headerBar}
-      {categoryChips}
+      {sectionTabs}
+      {videoSection === "watch" ? categoryChips : null}
     </View>
   );
 
@@ -786,6 +830,29 @@ export default function VideoTabScreen() {
         <VideoFeedSkeleton
           mutedColor={colors.muted}
           softColor={colors.border ?? colors.muted}
+        />
+      </View>
+    );
+  }
+
+  if (videoSection === "vibe") {
+    return (
+      <View style={[styles.container, { backgroundColor: "#000" }]}>
+        <StatusBar style="light" backgroundColor="#000" translucent={Platform.OS === "android"} />
+        <View style={[styles.vibeHeaderOverlay, { paddingTop: insets.top + 4 }]}>
+          <TouchableOpacity onPress={() => setVideoSection("watch")} style={styles.vibeBackToWatch}>
+            <Ionicons name="albums-outline" size={22} color="#fff" />
+            <Text style={styles.vibeBackText}>{t("video.section.watch")}</Text>
+          </TouchableOpacity>
+          <Text style={styles.vibeBrandTitle}>{VIBE_BRAND_NAME}</Text>
+          <TouchableOpacity onPress={() => router.push("/reels/search" as never)} style={styles.iconBtn}>
+            <Ionicons name="search" size={22} color="#fff" />
+          </TouchableOpacity>
+        </View>
+        <VibeSwipeFeed
+          videos={vibeVideos}
+          onLoadMore={() => void loadMore()}
+          loadingMore={loadingMore}
         />
       </View>
     );
@@ -1021,6 +1088,23 @@ const styles = StyleSheet.create({
   notifBadgeText: { color: "#fff", fontSize: 9, fontFamily: "Inter_700Bold" },
   chipsBar: {},
   chipsContent: { paddingHorizontal: 12, paddingVertical: 8, gap: 8, alignItems: "center" },
+  sectionTabs: { flexDirection: "row", paddingHorizontal: 16, gap: 20 },
+  sectionTab: { paddingVertical: 10, paddingHorizontal: 2 },
+  vibeHeaderOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+  },
+  vibeBackToWatch: { flexDirection: "row", alignItems: "center", gap: 6, padding: 6 },
+  vibeBackText: { color: "#fff", fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  vibeBrandTitle: { color: "#fff", fontSize: 17, fontFamily: "Inter_700Bold" },
   chipIcon: {
     width: 36,
     height: 32,

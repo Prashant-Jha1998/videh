@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system/legacy";
 import type { IncomingSharePayload } from "@/lib/incomingSharePayload";
-import { ensureSharePayloadFiles } from "@/lib/incomingSharePayload";
+import { ensureSharePayloadFiles, isShareMediaPlaceholder } from "@/lib/incomingSharePayload";
 import { guessMimeFromFilename } from "@/lib/prepareFileUpload";
 
 type SendFns = {
@@ -48,21 +48,12 @@ function isDocumentMime(mime?: string): boolean {
 }
 
 function defaultCaption(payload: IncomingSharePayload, extra?: string): string {
-  const skipText = payload.files?.length && isWhatsAppMediaPlaceholder(payload.text);
+  const skipText = payload.files?.length && isShareMediaPlaceholder(payload.text);
   const textPart = skipText ? undefined : payload.text?.trim();
   const urlPart = payload.webUrl?.trim();
   const parts = [extra?.trim(), textPart, urlPart].filter(Boolean);
   return parts.join("\n").trim();
 }
-
-function isWhatsAppMediaPlaceholder(text?: string): boolean {
-  const t = text?.trim() ?? "";
-  if (!t) return false;
-  return /^photo from .+$/i.test(t)
-    || /^video from .+$/i.test(t)
-    || /^document from .+$/i.test(t);
-}
-
 async function readTextFile(path: string): Promise<string | null> {
   try {
     const content = await FileSystem.readAsStringAsync(path);
@@ -89,7 +80,7 @@ export async function deliverIncomingShareToChat(
   const docFiles = files.filter((f) => isDocumentMime(fileMime(f)));
 
   if (mediaFiles.length > 0) {
-    const mediaCaption = caption && !isWhatsAppMediaPlaceholder(caption) ? caption : extraCaption?.trim();
+    const mediaCaption = caption && !isShareMediaPlaceholder(caption) ? caption : extraCaption?.trim();
     mediaFiles.forEach((file, index) => {
       const mime = fileMime(file);
       const kind = isVideoMime(mime) ? "video" : "image";

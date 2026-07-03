@@ -70,7 +70,7 @@ export default function StatusViewersScreen() {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
+          <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Status info</Text>
       </View>

@@ -447,7 +447,7 @@ function ReelsWatchPlayerInner({
                   <Text style={[styles.qualityRowText, selected && styles.qualityRowTextActive]}>
                     {qualityLabel(q)}
                   </Text>
-                  {selected ? <Ionicons name="checkmark" size={22} color="#5B4FE8" /> : null}
+                  {selected ? <Ionicons name="checkmark" size={22} color="#059669" /> : null}
                 </TouchableOpacity>
               );
             })}
@@ -608,7 +608,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(0,0,0,0.08)",
   },
   qualityRowText: { fontSize: 16, fontFamily: "Inter_400Regular", color: "#111" },
-  qualityRowTextActive: { fontFamily: "Inter_700Bold", color: "#5B4FE8" },
+  qualityRowTextActive: { fontFamily: "Inter_700Bold", color: "#059669" },
   sheetFoot: {
     fontSize: 12,
     color: "#667781",

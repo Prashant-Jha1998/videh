@@ -84,7 +84,7 @@ export async function saveMessageOutbox(userId: number, entries: TextOutboxEntry
   }
 }
 
-/** Persist to disk before any network request (WhatsApp-style). */
+/** Persist to disk before any network request (standard). */
 export async function addTextToMessageOutbox(userId: number, entry: TextOutboxEntry): Promise<void> {
   const existing = await loadMessageOutbox(userId);
   const normalized = normalizeOutboxEntry(entry);

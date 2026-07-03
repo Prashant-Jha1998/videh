@@ -30,7 +30,7 @@ export function ContactMessageBubble({ text, colors, isMe, onPress, onCall }: Pr
   return (
     <TouchableOpacity style={styles.wrap} onPress={onPress} activeOpacity={0.85}>
       <View style={styles.topRow}>
-        <View style={[styles.avatar, { backgroundColor: isMe ? "rgba(255,255,255,0.92)" : "#5B4FE822" }]}>
+        <View style={[styles.avatar, { backgroundColor: isMe ? "rgba(255,255,255,0.92)" : "#05966922" }]}>
           <Text style={[styles.avatarTxt, { color: colors.primary }]}>{initials}</Text>
         </View>
         <View style={styles.info}>

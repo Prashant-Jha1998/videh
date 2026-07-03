@@ -1,4 +1,4 @@
-/** Group @mention + sender UI helpers (WhatsApp-style). */
+/** Group @mention + sender UI helpers (standard). */
 
 export const MENTION_ALL_TOKEN = "all";
 

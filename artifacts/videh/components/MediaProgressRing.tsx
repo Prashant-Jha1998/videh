@@ -17,7 +17,7 @@ export function MediaProgressRing({
   strokeWidth = 3,
   progress,
   trackColor = "rgba(0,0,0,0.12)",
-  progressColor = "#5B4FE8",
+  progressColor = "#059669",
   children,
 }: Props) {
   const radius = (size - strokeWidth) / 2;

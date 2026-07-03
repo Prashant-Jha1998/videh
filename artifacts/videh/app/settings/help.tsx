@@ -112,7 +112,7 @@ export default function HelpScreen() {
       onPress: () => router.push("/legal/terms"),
     },
     {
-      icon: "shield-checkmark-outline", iconBg: "#5B4FE8", label: "Privacy Policy",
+      icon: "shield-checkmark-outline", iconBg: "#059669", label: "Privacy Policy",
       hint: "How we handle your data",
       onPress: () => router.push("/legal/privacy"),
     },
@@ -122,7 +122,7 @@ export default function HelpScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
+          <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Help and Feedback</Text>
         <View style={{ width: 40 }} />

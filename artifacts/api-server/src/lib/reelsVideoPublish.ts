@@ -13,6 +13,19 @@ import { notifySubscribersNewVideo } from "./reelsNotifications";
 import { scheduleS3Upload, uploadLocalFileToS3 } from "./s3Storage";
 import { auditFromRequest, linkS3UploadEntity } from "./s3MediaAudit";
 
+export type VideoEditorMetadata = {
+  filter?: string;
+  caption?: string;
+  textOverlays?: Array<{
+    id: string;
+    text: string;
+    x: number;
+    y: number;
+    color?: string;
+    fontSize?: number;
+  }>;
+};
+
 export type PublishReelsVideoInput = {
   req: Request;
   userId: number;
@@ -25,7 +38,35 @@ export type PublishReelsVideoInput = {
   thumbPath: string | null;
   videoPath: string | null;
   deferModeration?: boolean;
+  videoFormat?: "watch" | "vibe";
+  commentsEnabled?: boolean;
+  sharesEnabled?: boolean;
+  editorMetadata?: VideoEditorMetadata | null;
+  musicTitle?: string | null;
+  musicArtist?: string | null;
+  musicUrl?: string | null;
 };
+
+const VIBE_MAX_SECONDS = 60;
+
+export function resolveVideoFormat(
+  durationSeconds: number,
+  explicit?: string | null,
+): "watch" | "vibe" {
+  if (explicit === "vibe") return "vibe";
+  if (explicit === "watch") return "watch";
+  return durationSeconds > 0 && durationSeconds <= VIBE_MAX_SECONDS ? "vibe" : "watch";
+}
+
+export function validateVideoFormatChoice(
+  durationSeconds: number,
+  format: "watch" | "vibe",
+): string | null {
+  if (format === "vibe" && durationSeconds > VIBE_MAX_SECONDS) {
+    return `Vibe clips must be ${VIBE_MAX_SECONDS} seconds or shorter.`;
+  }
+  return null;
+}
 
 export type PublishReelsVideoResult = {
   videoId: number;
@@ -73,6 +114,17 @@ export async function publishReelsVideo(input: PublishReelsVideoInput): Promise<
   }
   const channelId = Number(ch.rows[0].id);
 
+  const videoFormat = resolveVideoFormat(input.durationSeconds, input.videoFormat);
+  const formatErr = validateVideoFormatChoice(input.durationSeconds, videoFormat);
+  if (formatErr) throw new Error(`FORMAT_INVALID:${formatErr}`);
+
+  const commentsEnabled = input.commentsEnabled !== false;
+  const sharesEnabled = input.sharesEnabled !== false;
+  const editorJson = input.editorMetadata ? JSON.stringify(input.editorMetadata) : null;
+  const musicTitle = input.musicTitle?.trim().slice(0, 200) || null;
+  const musicArtist = input.musicArtist?.trim().slice(0, 200) || null;
+  const musicUrl = input.musicUrl?.trim().slice(0, 2000) || null;
+
   await ensureReelsShareSlugs();
   let row: Record<string, unknown> | undefined;
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -81,8 +133,11 @@ export async function publishReelsVideo(input: PublishReelsVideoInput): Promise<
       const inserted = await query(
         `INSERT INTO reels_videos (
            channel_id, title, description, hashtags, video_url, thumbnail_url, duration_seconds,
-           status, play_enabled, moderation_status, share_slug
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_review', FALSE, 'pending_scan', $8) RETURNING *`,
+           status, play_enabled, moderation_status, share_slug,
+           video_format, comments_enabled, shares_enabled,
+           editor_metadata, music_title, music_artist, music_url
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_review', FALSE, 'pending_scan', $8,
+           $9, $10, $11, $12::jsonb, $13, $14, $15) RETURNING *`,
         [
           channelId,
           input.title.slice(0, 200),
@@ -92,6 +147,13 @@ export async function publishReelsVideo(input: PublishReelsVideoInput): Promise<
           input.thumbnailUrl,
           input.durationSeconds,
           shareSlug,
+          videoFormat,
+          commentsEnabled,
+          sharesEnabled,
+          editorJson,
+          musicTitle,
+          musicArtist,
+          musicUrl,
         ],
       );
       row = inserted.rows[0] as Record<string, unknown>;

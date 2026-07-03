@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useRouter, usePathname } from "expo-router";
 import { useShareIntentContext } from "expo-share-intent";
 import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
@@ -8,33 +8,49 @@ import {
   peekIncomingShare,
   payloadHasShareableContent,
   hasPendingIncomingShare,
+  clearStaleIncomingShare,
+  isShareFlowConsumed,
+  isFreshIncomingShare,
 } from "@/lib/incomingSharePayload";
 import { incomingShareRoute } from "@/lib/incomingShareRoute";
 
 /** Routes Android/iOS share sheet opens into Videh chat picker. */
 export function ShareIntentBridge() {
   const router = useRouter();
-  const { isAuthenticated, isInitialized } = useApp();
+  const pathname = usePathname();
+  const { isAuthenticated } = useApp();
   const { isReady, hasShareIntent, shareIntent, resetShareIntent, error } = useShareIntentContext();
   const handlingRef = useRef(false);
   const navigatedRef = useRef(false);
 
+  const onSharePicker = pathname === "/share-to-chat" || pathname?.endsWith("/share-to-chat");
+
   const goToShareFlow = () => {
-    if (navigatedRef.current || !isInitialized) return;
+    if (navigatedRef.current || onSharePicker || isShareFlowConsumed()) return;
     navigatedRef.current = true;
     router.replace(incomingShareRoute(isAuthenticated));
     setTimeout(() => {
       navigatedRef.current = false;
-    }, 2500);
+    }, 1500);
   };
 
   const tryNavigateToShare = async () => {
-    if (!isInitialized) return;
+    if (onSharePicker || isShareFlowConsumed()) return;
+    await clearStaleIncomingShare();
     const pending = await peekIncomingShare();
-    if (pending && payloadHasShareableContent(pending)) {
+    if (pending && payloadHasShareableContent(pending) && isFreshIncomingShare(pending)) {
+      goToShareFlow();
+      return;
+    }
+    if (await hasPendingIncomingShare()) {
       goToShareFlow();
     }
   };
+
+  useEffect(() => {
+    if (Platform.OS === "web" || !isReady) return;
+    void clearStaleIncomingShare();
+  }, [isReady]);
 
   useEffect(() => {
     if (Platform.OS === "web" || !isReady) return;
@@ -44,24 +60,27 @@ export function ShareIntentBridge() {
       try {
         await stashIncomingShareQuick(shareIntent);
         resetShareIntent();
-        await tryNavigateToShare();
+        goToShareFlow();
       } finally {
         handlingRef.current = false;
       }
     })();
-  }, [hasShareIntent, shareIntent, isAuthenticated, isInitialized, isReady, resetShareIntent]);
+  }, [hasShareIntent, shareIntent, isAuthenticated, isReady, resetShareIntent, onSharePicker]);
 
   useEffect(() => {
-    if (Platform.OS === "web" || !isInitialized) return;
-    void tryNavigateToShare();
-  }, [isAuthenticated, isInitialized]);
+    if (Platform.OS === "web" || !isReady) return;
+    if (hasShareIntent) {
+      void tryNavigateToShare();
+    }
+  }, [hasShareIntent, isReady, onSharePicker]);
 
-  // Cold start: share intent can arrive after first paint — keep checking briefly.
+  // Cold start: share intent can arrive after first paint — poll until stashed or timeout.
   useEffect(() => {
     if (Platform.OS === "web" || !isReady) return;
     let cancelled = false;
     const poll = async () => {
-      for (let i = 0; i < 40 && !cancelled; i++) {
+      for (let i = 0; i < 60 && !cancelled; i++) {
+        if (onSharePicker || isShareFlowConsumed()) return;
         if (await hasPendingIncomingShare()) {
           goToShareFlow();
           return;
@@ -77,14 +96,14 @@ export function ShareIntentBridge() {
             handlingRef.current = false;
           }
         }
-        await new Promise((r) => setTimeout(r, 150));
+        await new Promise((r) => setTimeout(r, 100));
       }
     };
     void poll();
     return () => {
       cancelled = true;
     };
-  }, [isReady, isInitialized, isAuthenticated, hasShareIntent, shareIntent, resetShareIntent]);
+  }, [isReady, isAuthenticated, hasShareIntent, shareIntent, resetShareIntent, onSharePicker]);
 
   useEffect(() => {
     if (error && __DEV__) {

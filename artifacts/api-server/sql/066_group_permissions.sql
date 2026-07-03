@@ -1,4 +1,4 @@
--- WhatsApp-style granular group permissions (per-group toggles).
+-- standard granular group permissions (per-group toggles).
 
 ALTER TABLE chats
   ADD COLUMN IF NOT EXISTS perm_members_edit_info BOOLEAN NOT NULL DEFAULT TRUE;

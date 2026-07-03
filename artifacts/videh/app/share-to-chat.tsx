@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
+import { useShareIntentContext } from "expo-share-intent";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -25,7 +26,7 @@ import {
   sharePreviewUri,
 } from "@/lib/deliverIncomingShare";
 import {
-  clearIncomingShare,
+  finishIncomingShareFlow,
   payloadHasShareableContent,
   payloadPreviewText,
   waitForIncomingShare,
@@ -51,6 +52,7 @@ export default function ShareToChatScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { resetShareIntent } = useShareIntentContext();
   const { t } = useUiPreferences();
   const { chats, user, isAuthenticated, isInitialized, sendMessage, sendPreparedMediaMessage, sendDocumentMessage } = useApp();
 
@@ -62,11 +64,17 @@ export default function ShareToChatScreen() {
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
+  const closeShareFlow = useCallback(async () => {
+    await finishIncomingShareFlow();
+    resetShareIntent();
+    router.replace("/(tabs)/chats");
+  }, [resetShareIntent, router]);
+
   useEffect(() => {
-    if (Platform.OS === "web" || !isInitialized) return;
+    if (Platform.OS === "web") return;
     void (async () => {
       setLoadingShare(true);
-      const data = await waitForIncomingShare(20_000);
+      const data = await waitForIncomingShare(15_000);
       if (!data || !payloadHasShareableContent(data)) {
         if (!isAuthenticated) {
           router.replace("/auth/phone");
@@ -76,7 +84,9 @@ export default function ShareToChatScreen() {
           "Nothing to share",
           "Videh could not read what you shared. Try Share again from the other app and pick Videh.",
         );
-        router.back();
+        await finishIncomingShareFlow();
+        resetShareIntent();
+        router.replace("/(tabs)/chats");
         return;
       }
       if (!isAuthenticated) {
@@ -87,7 +97,7 @@ export default function ShareToChatScreen() {
       setPayload(ready);
       setLoadingShare(false);
     })();
-  }, [isAuthenticated, isInitialized, router]);
+  }, [isAuthenticated, router, resetShareIntent]);
 
   const targets = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -113,15 +123,18 @@ export default function ShareToChatScreen() {
         Alert.alert("Could not share", "Videh could not send this content. Try sharing again from Google Pay.");
         return;
       }
-      await clearIncomingShare();
+      await finishIncomingShareFlow();
+      resetShareIntent();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       const name = chats.find((c) => c.id === chatId)?.name ?? "chat";
-      router.back();
-      Alert.alert("Sent", `Shared to ${name}`);
+      router.replace("/(tabs)/chats");
+      setTimeout(() => {
+        Alert.alert("Sent", `Shared to ${name}`);
+      }, 200);
     } finally {
       setSendingTo(null);
     }
-  }, [payload, sendingTo, sendMessage, sendPreparedMediaMessage, sendDocumentMessage, router, chats]);
+  }, [payload, sendingTo, sendMessage, sendPreparedMediaMessage, sendDocumentMessage, router, chats, resetShareIntent]);
 
   if (loadingShare || !payload) {
     return (
@@ -164,7 +177,7 @@ export default function ShareToChatScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topPad, borderBottomColor: colors.border }]}>
-        <TouchableOpacity style={styles.headerBtn} onPress={() => { void clearIncomingShare(); router.back(); }} hitSlop={12}>
+        <TouchableOpacity style={styles.headerBtn} onPress={() => { void closeShareFlow(); }} hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>Send to…</Text>

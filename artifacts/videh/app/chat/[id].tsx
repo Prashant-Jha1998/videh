@@ -660,7 +660,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
             {avatarUri ? (
               <Image source={{ uri: avatarUri }} style={{ width: 34, height: 34, borderRadius: 17 }} contentFit="cover" />
             ) : (
-              <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#5B4FE8", alignItems: "center", justifyContent: "center" }}>
+              <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#059669", alignItems: "center", justifyContent: "center" }}>
                 <Ionicons name="person" size={18} color="#fff" />
               </View>
             )}
@@ -672,7 +672,7 @@ const VoiceNotePlayer = React.memo(function VoiceNotePlayer({
                 width: 16,
                 height: 16,
                 borderRadius: 8,
-                backgroundColor: "#5B4FE8",
+                backgroundColor: "#059669",
                 alignItems: "center",
                 justifyContent: "center",
                 borderWidth: 1.5,
@@ -833,7 +833,7 @@ function ReplyQuoteStrip({
   );
 }
 
-/** Story/status reply preview — tap opens the original status (WhatsApp-style). */
+/** Story/status reply preview — tap opens the original status (standard). */
 function StatusReplyStrip({
   ownerLabel,
   subtitle,
@@ -853,7 +853,7 @@ function StatusReplyStrip({
   sessionToken?: string | null;
   onPress: () => void;
 }) {
-  const accent = "#008069";
+  const accent = colors.primary;
   const subtitleColor = isMe ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.5)";
   const resolvedThumb = thumbUri ? (resolvePublicAssetUrl(thumbUri) ?? thumbUri) : undefined;
   return (
@@ -900,7 +900,7 @@ function StatusReplyStrip({
   );
 }
 
-/** Quick forward on media/document bubbles (WhatsApp-style side arrow). */
+/** Quick forward on media/document bubbles (standard side arrow). */
 function MediaForwardButton({ onPress }: { onPress: () => void }) {
   return (
     <TouchableOpacity
@@ -929,7 +929,7 @@ function CallMessageBubble({
   const iconName = meta.callType === "video"
     ? (missed && !isMe ? "videocam-off" : "videocam")
     : (missed && !isMe ? "call" : "call");
-  const tint = missed && !isMe ? "#ef4444" : isMe ? "#008069" : colors.primary;
+  const tint = missed && !isMe ? "#ef4444" : isMe ? colors.primary : colors.primary;
   const label = formatCallMessageLabel(meta, isMe);
   return (
     <TouchableOpacity style={styles.callBubble} onPress={onPress} activeOpacity={0.85}>
@@ -1029,7 +1029,7 @@ function MediaUploadOverlay({
           size={48}
           strokeWidth={3}
           progress={progress}
-          progressColor="#5B4FE8"
+          progressColor="#059669"
           trackColor="rgba(255,255,255,0.35)"
         >
           <Text style={styles.mediaUploadPct}>{progress}%</Text>
@@ -1270,7 +1270,7 @@ export default function ChatScreen() {
   // Group @mentions + header member count
   const [groupMembers, setGroupMembers] = useState<GroupMentionMember[]>([]);
 
-  // Forward screen opens via /chat/forward route (full screen, WhatsApp-style).
+  // Forward screen opens via /chat/forward route (full screen, standard).
 
   // Share contact â€” full-screen picker (Alert.alert only fits ~3 buttons on Android)
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
@@ -1299,9 +1299,11 @@ export default function ChatScreen() {
     return {
       ...baseColors,
       primary: accent,
-      accent,
+      accent: chatLook.isDark ? accent : baseColors.accent,
       tint: accent,
-      headerBg: chatLook.isDark ? baseColors.headerBg : accent,
+      headerBg: baseColors.headerBg,
+      headerTitleColor: chatLook.isDark ? baseColors.headerTitleColor : baseColors.foreground,
+      headerIconColor: baseColors.headerIconColor,
       statusRing: accent,
       onlineGreen: accent,
       appThemeColors: accentPair,
@@ -1310,7 +1312,10 @@ export default function ChatScreen() {
       chatBackground: chatLook.chatBackground,
     };
   }, [baseColors, chatLook]);
-  const headerAccent = chatLook.appearance.accent;
+  const headerAccent = chatLook.isDark ? chatLook.appearance.accent : (["#FFFFFF", "#FFFFFF"] as [string, string]);
+  const headerIcon = colors.headerIconColor;
+  const chatHeaderTitleColor = chatLook.isDark ? "#fff" : colors.foreground;
+  const chatHeaderStatusColor = chatLook.isDark ? "rgba(255,255,255,0.75)" : colors.mutedForeground;
   const { chatFontScale, t } = useUiPreferences();
   const messageFallback = t("common.message");
   const insets = useSafeAreaInsets();
@@ -2169,7 +2174,7 @@ export default function ChatScreen() {
     if (!keyboardVisible) keyboardAnimatingRef.current = false;
   }, [keyboardVisible]);
 
-  /** Videh: keyboard opens → keep latest messages above composer (WhatsApp-style). */
+  /** Videh: keyboard opens → keep latest messages above composer (standard). */
   useEffect(() => {
     if (searching) return;
     const justOpened = keyboardVisible && !prevKeyboardVisibleRef.current;
@@ -2278,7 +2283,7 @@ export default function ChatScreen() {
     prevMessageCountRef.current = count;
   }, [messages.length, searching, scrollToLatestIfFollowing, scheduleOpenChatPin, blocksAutoScroll]);
 
-  /** Reserve space above sticky composer + keyboard/emoji (v1.0.40 WhatsApp-style). */
+  /** Reserve space above sticky composer + keyboard/emoji (v1.0.40 standard). */
   const listVisualBottomPad = useMemo(() => {
     if (searching) return 8;
     const typingInset = remoteTypingNames.length > 0 ? CHAT_TYPING_FOOTER_PX : 0;
@@ -3386,7 +3391,7 @@ export default function ChatScreen() {
                   ? item.statusReplyMediaUrl
                   : undefined
               }
-              thumbBg={item.statusReplyBackgroundColor ?? "#5B4FE8"}
+              thumbBg={item.statusReplyBackgroundColor ?? "#059669"}
               isMe={isMe}
               sessionToken={user?.sessionToken}
               onPress={() => { void openStatusReply(item); }}
@@ -4442,11 +4447,11 @@ export default function ChatScreen() {
       {!selectionActive && replyTo && !editTarget && (
         <View style={[styles.replyPreviewBar, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
           <Pressable
-            style={[styles.replyPreview, { borderLeftColor: "#5B4FE8" }]}
+            style={[styles.replyPreview, { borderLeftColor: "#059669" }]}
             onPress={() => scrollToQuotedMessage(replyTo.id)}
           >
             <View style={styles.replyPreviewTextCol}>
-              <Text style={[styles.replyPreviewLabel, { color: "#5B4FE8" }]} numberOfLines={1}>
+              <Text style={[styles.replyPreviewLabel, { color: "#059669" }]} numberOfLines={1}>
                 {replyQuoteSenderLabel({
                   replyQuotedSenderId: replyTo.senderId === "me" ? String(user?.dbId ?? "") : replyTo.senderId,
                   replySenderName: replyTo.senderName,
@@ -4648,10 +4653,10 @@ export default function ChatScreen() {
       {selectionActive ? (
         <ThemedHeader accentColors={headerAccent} style={[styles.header, styles.selectionHeader, { paddingTop: topPad }]}>
           <TouchableOpacity style={styles.selectionHeaderBtn} onPress={clearSelection} hitSlop={8}>
-            <Ionicons name="arrow-back" size={26} color="#fff" />
+            <Ionicons name="arrow-back" size={26} color={headerIcon} />
           </TouchableOpacity>
           <View style={{ flex: 1, minWidth: 0, justifyContent: "center", paddingHorizontal: 4 }}>
-            <Text style={styles.headerName} numberOfLines={1}>
+            <Text style={[styles.headerName, { color: chatHeaderTitleColor }]} numberOfLines={1}>
               {selectedIds.length} selected
             </Text>
           </View>
@@ -4674,7 +4679,7 @@ export default function ChatScreen() {
                     inputRef.current?.focus();
                   }}
                 >
-                  <Ionicons name="arrow-undo-outline" size={26} color="#fff" />
+                  <Ionicons name="arrow-undo-outline" size={26} color={headerIcon} />
                 </TouchableOpacity>
                 {canCopySelection ? (
                   <TouchableOpacity
@@ -4682,7 +4687,7 @@ export default function ChatScreen() {
                     hitSlop={6}
                     onPress={copySelectedMessages}
                   >
-                    <Ionicons name="copy-outline" size={25} color="#fff" />
+                    <Ionicons name="copy-outline" size={25} color={headerIcon} />
                   </TouchableOpacity>
                 ) : null}
                 <TouchableOpacity
@@ -4694,7 +4699,7 @@ export default function ChatScreen() {
                     starMessage(chatId, m.id);
                   }}
                 >
-                  <Ionicons name="star-outline" size={26} color="#fff" />
+                  <Ionicons name="star-outline" size={26} color={headerIcon} />
                 </TouchableOpacity>
                 {canOpenMessageInfo ? (
                   <TouchableOpacity
@@ -4702,7 +4707,7 @@ export default function ChatScreen() {
                     hitSlop={6}
                     onPress={openSelectedMessageInfo}
                   >
-                    <Ionicons name="information-circle-outline" size={27} color="#fff" />
+                    <Ionicons name="information-circle-outline" size={27} color={headerIcon} />
                   </TouchableOpacity>
                 ) : null}
               </>
@@ -4712,7 +4717,7 @@ export default function ChatScreen() {
                 hitSlop={6}
                 onPress={copySelectedMessages}
               >
-                <Ionicons name="copy-outline" size={25} color="#fff" />
+                <Ionicons name="copy-outline" size={25} color={headerIcon} />
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
@@ -4728,14 +4733,14 @@ export default function ChatScreen() {
                 openForwardScreen(ids);
               }}
             >
-              <Ionicons name="arrow-redo-outline" size={26} color="#fff" />
+              <Ionicons name="arrow-redo-outline" size={26} color={headerIcon} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.selectionHeaderBtn}
               hitSlop={6}
               onPress={() => setBulkDeleteOpen(true)}
             >
-              <Ionicons name="trash-outline" size={26} color="#fff" />
+              <Ionicons name="trash-outline" size={26} color={headerIcon} />
             </TouchableOpacity>
             {selectedIds.length === 1 && selectionMenuItems.length > 0 ? (
               <TouchableOpacity
@@ -4743,7 +4748,7 @@ export default function ChatScreen() {
                 hitSlop={6}
                 onPress={() => setSelectionMenuOpen(true)}
               >
-                <Ionicons name="ellipsis-vertical" size={26} color="#fff" />
+                <Ionicons name="ellipsis-vertical" size={26} color={headerIcon} />
               </TouchableOpacity>
             ) : null}
           </ScrollView>
@@ -4751,7 +4756,7 @@ export default function ChatScreen() {
       ) : (
         <ThemedHeader accentColors={headerAccent} style={[styles.header, { paddingTop: topPad }]}>
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Ionicons name="arrow-back" size={24} color={headerIcon} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -4781,14 +4786,14 @@ export default function ChatScreen() {
             onPress={() => chatId && router.push({ pathname: "/chat-info/[id]", params: { id: chatId, name: displayName } })}
           >
             <View style={styles.headerNameRow}>
-              <Text style={styles.headerName} numberOfLines={1}>
+              <Text style={[styles.headerName, { color: chatHeaderTitleColor }]} numberOfLines={1}>
                 {businessChannelInfo?.displayName ?? displayName}
               </Text>
               {businessChannelInfo ? (
                 <BusinessVerifiedBadge size={18} />
               ) : null}
             </View>
-            <Text style={[styles.headerStatus, remoteTypingNames.length > 0 && { color: "#a7f3d0" }]}>
+            <Text style={[styles.headerStatus, { color: chatHeaderStatusColor }, remoteTypingNames.length > 0 && { color: colors.primary }]}>
               {headerStatusText}
             </Text>
           </TouchableOpacity>
@@ -4801,23 +4806,23 @@ export default function ChatScreen() {
                   disabled={Boolean(chat?.isGroup) || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))}
                   onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })}
                 >
-                  <Ionicons name="videocam-outline" size={22} color="#fff" />
+                  <Ionicons name="videocam-outline" size={22} color={headerIcon} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.headerBtn, (chat?.isGroup || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))) && { opacity: 0.45 }]}
                   disabled={Boolean(chat?.isGroup) || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))}
                   onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })}
                 >
-                  <Ionicons name="call-outline" size={22} color="#fff" />
+                  <Ionicons name="call-outline" size={22} color={headerIcon} />
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.headerBtn} onPress={() => setMenuOpen(true)}>
-                  <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+                  <Ionicons name="ellipsis-vertical" size={22} color={headerIcon} />
                 </TouchableOpacity>
               </>
             )}
             {searching && (
               <TouchableOpacity style={styles.headerBtn} onPress={() => { setSearching(false); setSearchQuery(""); }}>
-                <Ionicons name="close" size={22} color="#fff" />
+                <Ionicons name="close" size={22} color={headerIcon} />
               </TouchableOpacity>
             )}
           </View>
@@ -5664,7 +5669,7 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 12,
     borderBottomRightRadius: 12,
   },
-  /** WhatsApp-style colored frame around shared media (Videh indigo for sent). */
+  /** standard colored frame around shared media (Videh indigo for sent). */
   bubbleMediaFrame: {
     padding: 3,
   },
@@ -5816,7 +5821,7 @@ const styles = StyleSheet.create({
   callBubbleIcon: { flexShrink: 0 },
   callBubbleText: { flex: 1, fontSize: 14.5, fontFamily: "Inter_500Medium", lineHeight: 19 },
   translatedBox: { marginTop: 6, paddingTop: 6, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.15)" },
-  translatedLabel: { fontSize: 10, color: "#5B4FE8", fontFamily: "Inter_600SemiBold", marginBottom: 3 },
+  translatedLabel: { fontSize: 10, color: "#059669", fontFamily: "Inter_600SemiBold", marginBottom: 3 },
   docCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, minWidth: 220 },
   docIcon: { width: 48, height: 48, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   docName: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
@@ -5862,7 +5867,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 3,
     borderColor: "#fff",
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
   },
   locationPinStem: {
     width: 0,
@@ -5903,11 +5908,11 @@ const styles = StyleSheet.create({
   stopShareRow: { paddingVertical: 12, alignItems: "center", borderTopWidth: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.96)" },
   stopShareText: { color: "#c62828", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   contactCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, minWidth: 220, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },
-  contactCardAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#5B4FE840", alignItems: "center", justifyContent: "center" },
-  contactCardAvatarTxt: { color: "#5B4FE8", fontSize: 18, fontWeight: "700" },
+  contactCardAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#05966940", alignItems: "center", justifyContent: "center" },
+  contactCardAvatarTxt: { color: "#059669", fontSize: 18, fontWeight: "700" },
   contactCardName: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
   contactCardPhone: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
-  contactCallBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#5B4FE820", alignItems: "center", justifyContent: "center" },
+  contactCallBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#05966920", alignItems: "center", justifyContent: "center" },
   linkPreview: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, paddingTop: 4, borderTopWidth: 0.5, borderTopColor: "rgba(0,0,0,0.1)" },
   linkText: { flex: 1, fontSize: 12, fontFamily: "Inter_400Regular" },
   msgMeta: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 2 },

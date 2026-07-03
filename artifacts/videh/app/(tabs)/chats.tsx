@@ -408,13 +408,13 @@ export default function ChatsScreen() {
   const topPad = headerTopInset(insets, Platform.OS === "web" ? 67 : 0);
 
   const menuItems = [
+    { label: t("tab.settings"), icon: "settings-outline", onPress: () => router.push("/(tabs)/settings") },
     { label: "New group", icon: "people-outline", onPress: () => router.push("/new-group") },
     { label: "New broadcast", icon: "radio-outline", onPress: () => router.push("/broadcasts") },
     { label: "Linked devices", icon: "phone-portrait-outline", onPress: () => router.push("/linked-devices") },
     { label: "Khata", icon: "book-outline", onPress: () => router.push("/settings/khata") },
     { label: "Starred messages", icon: "star-outline", onPress: () => router.push("/starred") },
     { label: "Read all", icon: "checkmark-done-outline", onPress: () => { void markAllAsRead(); setMenuOpen(false); } },
-    { label: "Settings", icon: "settings-outline", onPress: () => router.push("/(tabs)/settings") },
   ];
 
   const selectionMenuItems = [
@@ -436,49 +436,49 @@ export default function ChatsScreen() {
         {isSelectionMode ? (
           <View style={styles.selectionHeaderLeft}>
             <TouchableOpacity onPress={clearSelection} style={styles.archivedBackBtn}>
-              <Ionicons name="arrow-back" size={23} color="#fff" />
+              <Ionicons name="arrow-back" size={23} color={colors.headerIconColor} />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>{selectedIds.length}</Text>
+            <Text style={[styles.headerTitle, { color: colors.foreground }]}>{selectedIds.length}</Text>
           </View>
         ) : showArchived ? (
           <View style={styles.archivedHeaderTitleRow}>
             <TouchableOpacity onPress={() => setShowArchived(false)} style={styles.archivedBackBtn}>
-              <Ionicons name="arrow-back" size={23} color="#fff" />
+              <Ionicons name="arrow-back" size={23} color={colors.headerIconColor} />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>{t("chats.archived")}</Text>
+            <Text style={[styles.headerTitle, { color: colors.foreground }]}>{t("chats.archived")}</Text>
           </View>
         ) : (
-          <Text style={styles.headerTitle}>{t("settings.header")}</Text>
+          <Text style={[styles.headerTitle, { color: colors.headerTitleColor }]}>{t("settings.header")}</Text>
         )}
         <View style={styles.headerRight}>
           {isSelectionMode ? (
             <>
               <TouchableOpacity style={styles.headerBtn} onPress={applyBulkPin}>
-                <Ionicons name="pin-outline" size={21} color="#fff" />
+                <Ionicons name="pin-outline" size={21} color={colors.headerIconColor} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerBtn} onPress={deleteSelectedFromList}>
-                <Ionicons name="trash-outline" size={21} color="#fff" />
+                <Ionicons name="trash-outline" size={21} color={colors.headerIconColor} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerBtn} onPress={applyBulkMute}>
-                <Ionicons name={selectedChats.every((c) => c.isMuted) ? "notifications-outline" : "notifications-off-outline"} size={21} color="#fff" />
+                <Ionicons name={selectedChats.every((c) => c.isMuted) ? "notifications-outline" : "notifications-off-outline"} size={21} color={colors.headerIconColor} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerBtn} onPress={applyBulkArchive}>
-                <Ionicons name={selectedChats.every((c) => c.isArchived) ? "archive" : "archive-outline"} size={21} color="#fff" />
+                <Ionicons name={selectedChats.every((c) => c.isArchived) ? "archive" : "archive-outline"} size={21} color={colors.headerIconColor} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerBtn} onPress={() => setSelectionMenuOpen(true)}>
-                <Ionicons name="ellipsis-vertical" size={21} color="#fff" />
+                <Ionicons name="ellipsis-vertical" size={21} color={colors.headerIconColor} />
               </TouchableOpacity>
             </>
           ) : (
             <>
               <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/contacts")}>
-                <Ionicons name="person-add-outline" size={22} color="#fff" />
+                <Ionicons name="person-add-outline" size={22} color={colors.headerIconColor} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.headerBtn}
                 onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMenuOpen(true); }}
               >
-                <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+                <Ionicons name="ellipsis-vertical" size={22} color={colors.headerIconColor} />
               </TouchableOpacity>
             </>
           )}
@@ -514,7 +514,7 @@ export default function ChatsScreen() {
         </TouchableOpacity>
       ) : null}
 
-      {!isSelectionMode ? <View style={[styles.searchBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      {!isSelectionMode ? <View style={[styles.searchBar, { backgroundColor: colors.muted, borderColor: colors.border }]}>
         <Ionicons name="search" size={16} color={colors.mutedForeground} />
         <TextInput
           style={[styles.searchInput, { color: colors.foreground }]}
@@ -544,12 +544,12 @@ export default function ChatsScreen() {
             style={[
               styles.filterChip,
               {
-                backgroundColor: tab === chip.id ? colors.primary + "20" : colors.card,
-                borderColor: tab === chip.id ? colors.primary + "55" : colors.border,
+                backgroundColor: tab === chip.id ? colors.accent : colors.background,
+                borderColor: tab === chip.id ? colors.accent : colors.border,
               },
             ]}
           >
-            <Text style={[styles.filterChipText, { color: tab === chip.id ? colors.primary : colors.mutedForeground }]}>
+            <Text style={[styles.filterChipText, { color: tab === chip.id ? colors.accentForeground : colors.mutedForeground }]}>
               {chip.label}
             </Text>
           </TouchableOpacity>
@@ -645,7 +645,7 @@ export default function ChatsScreen() {
 
       {/* FAB */}
       {!isSelectionMode ? <TouchableOpacity
-        style={[styles.fab, { backgroundColor: colors.primary }]}
+        style={[styles.fab, { backgroundColor: colors.primary, borderRadius: 16 }]}
         onPress={() => router.push("/contacts")}
         activeOpacity={0.8}
       >
@@ -860,7 +860,7 @@ function ChatRow({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 10 },
-  headerTitle: { color: "#fff", fontSize: 22, fontFamily: "Inter_700Bold" },
+  headerTitle: { fontSize: 22, fontFamily: "Inter_700Bold" },
   archivedHeaderTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   selectionHeaderLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
   archivedBackBtn: { paddingRight: 4, paddingVertical: 4 },
@@ -933,7 +933,7 @@ const styles = StyleSheet.create({
   emptyHint: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 21 },
   emptyBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 14, paddingHorizontal: 28, borderRadius: 50, marginTop: 4 },
   emptyBtnText: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
-  fab: { position: "absolute", bottom: 90, right: 20, width: 60, height: 60, borderRadius: 30, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 5 },
+  fab: { position: "absolute", bottom: 90, right: 20, width: 58, height: 58, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 5 },
   previewOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", paddingHorizontal: 28 },
   previewCard: { width: "100%", maxWidth: 280, borderRadius: 2, overflow: "hidden" },
   previewName: { fontSize: 18, fontFamily: "Inter_600SemiBold", paddingHorizontal: 12, paddingVertical: 10 },

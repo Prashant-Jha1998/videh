@@ -6,6 +6,8 @@ export const hi = locale({
   "tab.calls": "कॉल",
   "tab.settings": "सेटिंग",
   "tab.video": "वीडियो",
+  "video.section.watch": "वॉच",
+  "video.section.vibe": "वाइब",
   "settings.header": "विदेह",
   "settings.sectionTitle": "सेटिंग",
   "settings.row.account": "खाता",

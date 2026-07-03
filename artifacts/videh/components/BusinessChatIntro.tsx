@@ -94,7 +94,7 @@ export function formatBusinessJoinedLabel(joinedAt?: string | null): string {
   return `Joined in ${month}, ${year}`;
 }
 
-/** Footer info when business marketing is active (WhatsApp-style). */
+/** Footer info when business marketing is active (standard). */
 export function BusinessOffersInfoBanner({ onLearnMore }: { onLearnMore?: () => void }) {
   return (
     <View style={styles.offersBannerWrap}>
@@ -125,7 +125,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   bannerBrand: { fontFamily: "Inter_700Bold", color: "#14131F" },
-  bannerLink: { color: "#5B4FE8", fontFamily: "Inter_500Medium" },
+  bannerLink: { color: "#059669", fontFamily: "Inter_500Medium" },
   cardWrap: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 12 },
   card: {
     backgroundColor: "#FFFFFF",

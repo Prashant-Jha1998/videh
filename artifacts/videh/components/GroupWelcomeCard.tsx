@@ -62,7 +62,7 @@ export function GroupWelcomeCard({
         </Text>
 
         <TouchableOpacity style={styles.safetyRow} onPress={openSafetyTools} activeOpacity={0.7}>
-          <Ionicons name="shield-checkmark" size={16} color="#5B4FE8" />
+          <Ionicons name="shield-checkmark" size={16} color="#059669" />
           <Text style={styles.safetyText}>Safety tools</Text>
         </TouchableOpacity>
 
@@ -73,7 +73,7 @@ export function GroupWelcomeCard({
           </TouchableOpacity>
           <View style={[styles.actionDivider, isDark && styles.actionDividerDark]} />
           <TouchableOpacity style={styles.actionBtn} onPress={onStay} activeOpacity={0.7}>
-            <Ionicons name="checkmark-circle-outline" size={18} color="#5B4FE8" />
+            <Ionicons name="checkmark-circle-outline" size={18} color="#059669" />
             <Text style={styles.stayTxt}>Stay</Text>
           </TouchableOpacity>
         </View>
@@ -130,7 +130,7 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 18,
   },
-  safetyText: { fontSize: 14, fontFamily: "Inter_500Medium", color: "#5B4FE8" },
+  safetyText: { fontSize: 14, fontFamily: "Inter_500Medium", color: "#059669" },
   actionsRow: {
     flexDirection: "row",
     alignSelf: "stretch",
@@ -152,5 +152,5 @@ const styles = StyleSheet.create({
   },
   actionDividerDark: { backgroundColor: "rgba(255,255,255,0.08)" },
   exitTxt: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#EA0038" },
-  stayTxt: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#5B4FE8" },
+  stayTxt: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#059669" },
 });

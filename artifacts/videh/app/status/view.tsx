@@ -534,7 +534,7 @@ export default function ViewStatusScreen() {
 
   const userInitials = (currentStatus.userName ?? "?").split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
   const totalReactions = Object.values(reactionSummary).reduce((a, b) => a + b, 0);
-  const bgColor = isMedia ? "#000" : (currentStatus.backgroundColor ?? "#5B4FE8");
+  const bgColor = isMedia ? "#000" : (currentStatus.backgroundColor ?? "#059669");
 
   return (
     <View style={[styles.container, { backgroundColor: bgColor, paddingTop: topPad }]}>
@@ -762,7 +762,7 @@ export default function ViewStatusScreen() {
                 onChangeText={setReply}
                 placeholder={isBoostedStory ? "Reply to this boosted story..." : `Reply to ${currentStatus.userName}...`}
                 placeholderTextColor="rgba(20,19,31,0.45)"
-                cursorColor="#5B4FE8"
+                cursorColor="#059669"
                 selectionColor="rgba(91,79,232,0.35)"
                 onFocus={pauseStory}
                 onBlur={resumeStory}

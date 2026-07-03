@@ -117,7 +117,7 @@ function normalizePhone(raw: string): string {
   return `+${digits}`;
 }
 
-const TEXT_BG_COLORS = ["#5B4FE8", "#128C7E", "#075E54", "#2563EB", "#7C3AED", "#DB2777", "#DC2626", "#EA580C", "#CA8A04", "#16A34A", "#0891B2", "#374151", "#1F2937", "#6B21A8", "#BE123C"];
+const TEXT_BG_COLORS = ["#059669", "#128C7E", "#075E54", "#2563EB", "#7C3AED", "#DB2777", "#DC2626", "#EA580C", "#CA8A04", "#16A34A", "#0891B2", "#374151", "#1F2937", "#6B21A8", "#BE123C"];
 const TEXT_COLORS = ["#FFFFFF", "#000000", "#F3F4F6", "#FEF9C3", "#ECFDF5"];
 
 function mediaExt(uri: string, type: "image" | "video"): string {
@@ -607,7 +607,7 @@ export default function StatusCreateScreen() {
               )}
               <Text style={styles.limitHint}>Selected {selectedAudienceIds.length}/{MAX_STORY_PARTICIPANTS}</Text>
               {audienceLoading ? (
-                <ActivityIndicator color="#5B4FE8" style={{ marginVertical: 16 }} />
+                <ActivityIndicator color="#059669" style={{ marginVertical: 16 }} />
               ) : (
                 <ScrollView style={styles.membersList} contentContainerStyle={{ paddingBottom: 14 }}>
                   {filteredAudience.map((m) => {
@@ -615,7 +615,7 @@ export default function StatusCreateScreen() {
                     return (
                       <TouchableOpacity key={m.id} style={styles.memberRow} onPress={() => toggleAudienceContact(m.id)}>
                         <Text style={styles.memberName}>{m.name}</Text>
-                        <Ionicons name={selected ? "checkmark-circle" : "ellipse-outline"} size={22} color={selected ? "#5B4FE8" : "#8ea2ad"} />
+                        <Ionicons name={selected ? "checkmark-circle" : "ellipse-outline"} size={22} color={selected ? "#059669" : "#8ea2ad"} />
                       </TouchableOpacity>
                     );
                   })}
@@ -761,7 +761,7 @@ export default function StatusCreateScreen() {
               <Ionicons name="happy-outline" size={22} color="rgba(255,255,255,0.7)" />
               <TextInput value={caption} onChangeText={setCaption} placeholder="Add a caption..." placeholderTextColor="rgba(255,255,255,0.5)" style={styles.captionText} multiline />
             </View>
-            <TouchableOpacity style={[styles.sendBtn, { backgroundColor: "#5B4FE8" }]} onPress={proceedToAudience}><Ionicons name="arrow-forward" size={22} color="#fff" /></TouchableOpacity>
+            <TouchableOpacity style={[styles.sendBtn, { backgroundColor: "#059669" }]} onPress={proceedToAudience}><Ionicons name="arrow-forward" size={22} color="#fff" /></TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
         <Modal visible={textModalVisible} transparent animationType="fade" onRequestClose={() => setTextModalVisible(false)}>
@@ -830,7 +830,7 @@ export default function StatusCreateScreen() {
                         <Text style={styles.musicTitle} numberOfLines={1}>{track.title}</Text>
                         <Text style={styles.musicArtist} numberOfLines={1}>{track.artist} • {track.duration}</Text>
                       </View>
-                      {selected ? <Ionicons name="checkmark-circle" size={20} color="#5B4FE8" /> : null}
+                      {selected ? <Ionicons name="checkmark-circle" size={20} color="#059669" /> : null}
                       <TouchableOpacity style={styles.musicSaveBtn} onPress={() => toggleSavedMusic(track.id)}>
                         <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={22} color="#fff" />
                       </TouchableOpacity>
@@ -871,7 +871,7 @@ export default function StatusCreateScreen() {
             <TouchableOpacity key={c} style={[styles.colorDot, { backgroundColor: c }, bgColor === c && styles.colorDotSelected]} onPress={() => { setBgColor(c); Haptics.selectionAsync(); }} />
           ))}
         </ScrollView>
-        <TouchableOpacity style={[styles.postBtn, { backgroundColor: text.trim() ? "#5B4FE8" : "rgba(255,255,255,0.3)" }]} onPress={proceedToAudience} disabled={!text.trim()}>
+        <TouchableOpacity style={[styles.postBtn, { backgroundColor: text.trim() ? "#059669" : "rgba(255,255,255,0.3)" }]} onPress={proceedToAudience} disabled={!text.trim()}>
           <Text style={styles.postBtnText}>Next</Text>
           <Ionicons name="arrow-forward" size={18} color="#fff" />
         </TouchableOpacity>
@@ -936,7 +936,7 @@ const styles = StyleSheet.create({
   editorModalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 14 },
   editorModalBtn: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: "#2A2838" },
   editorModalBtnText: { color: "#E0DCFF", fontWeight: "700" },
-  editorModalPrimary: { backgroundColor: "#5B4FE8" },
+  editorModalPrimary: { backgroundColor: "#059669" },
   editorModalPrimaryText: { color: "#fff", fontWeight: "800" },
   stickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   stickerBtn: { width: 54, height: 54, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#1E1D2E" },
@@ -967,12 +967,12 @@ const styles = StyleSheet.create({
   settingInput: { backgroundColor: "#2A2838", color: "#fff", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, borderWidth: 1, borderColor: "#3f515b" },
   modeRow: { flexDirection: "row", gap: 8, marginBottom: 6 },
   modeBtn: { flex: 1, backgroundColor: "#2A2838", borderRadius: 10, paddingVertical: 10, alignItems: "center", borderWidth: 1, borderColor: "#3f515b" },
-  modeBtnActive: { borderColor: "#5B4FE8", backgroundColor: "#5B4FE822" },
+  modeBtnActive: { borderColor: "#059669", backgroundColor: "#05966922" },
   modeBtnText: { color: "#fff", fontSize: 13, fontWeight: "600" },
   searchWrap: { marginTop: 8, backgroundColor: "#2A2838", borderRadius: 10, borderWidth: 1, borderColor: "#3f515b", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10 },
   searchInput: { color: "#fff", flex: 1, fontSize: 14, paddingVertical: 10 },
   chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  chip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, backgroundColor: "#5B4FE8" },
+  chip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, backgroundColor: "#059669" },
   chipText: { color: "#fff", fontSize: 12, fontWeight: "600" },
   limitHint: { color: "#91a3ab", marginTop: 8, fontSize: 12 },
   membersList: { marginTop: 8, maxHeight: 150 },

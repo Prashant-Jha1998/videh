@@ -1,4 +1,4 @@
-/** Serialize text message POSTs per chat so order is preserved (WhatsApp-style). */
+/** Serialize text message POSTs per chat so order is preserved (standard). */
 const tailByChat = new Map<string, Promise<void>>();
 
 export function enqueueChatTextSend(chatId: string, task: () => Promise<void>): Promise<void> {

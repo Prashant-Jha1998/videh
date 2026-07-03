@@ -45,7 +45,6 @@ const PREFERRED_ALBUM_TITLES = [
   "Downloads",
   "Download",
   "Videh",
-  "WhatsApp",
 ];
 
 function mapAsset(asset: MediaLibrary.Asset): GalleryAsset {

@@ -96,7 +96,7 @@ export function getDocumentVisual(filename: string): DocumentVisual {
     case "aac":
       return { icon: "musical-notes", badge: ext.toUpperCase(), iconColor: "#7B1FA2", iconBg: "#F3E5F5" };
     default:
-      return { icon: "document", badge: ext ? ext.toUpperCase().slice(0, 4) : "FILE", iconColor: "#5B4FE8", iconBg: "#E8E6FF" };
+      return { icon: "document", badge: ext ? ext.toUpperCase().slice(0, 4) : "FILE", iconColor: "#059669", iconBg: "#E8E6FF" };
   }
 }
 

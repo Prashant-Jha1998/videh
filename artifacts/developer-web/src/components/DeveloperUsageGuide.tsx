@@ -63,7 +63,7 @@ const ENDPOINTS = [
 
 const ERRORS = [
   { code: "unauthorized", http: "401", fix: "Check Bearer token: vsk_KEY:vsec_SECRET or vsec_SECRET only" },
-  { code: "phone_number_id_mismatch", http: "403", fix: "Use YOUR Phone Number ID in URL — not /v1/whatsapp/messages" },
+  { code: "phone_number_id_mismatch", http: "403", fix: "Use YOUR Phone Number ID in the Videh API URL — not a third-party messaging API path" },
   { code: "channel_not_verified", http: "403", fix: "Complete phone OTP under Business channel" },
   { code: "template_not_approved", http: "400", fix: "Submit template and wait for Videh approval" },
   { code: "language_mismatch", http: "400", fix: "Use exact language from template (e.g. en)" },
@@ -195,7 +195,7 @@ export function DeveloperUsageGuide({ variant = "public", snippetCtx = {} }: Pro
             <li>
               <strong>Correct send URL:</strong>{" "}
               <code className="text-xs bg-white/60 px-1 rounded">POST /v1/YOUR_PHONE_NUMBER_ID/messages</code> — not{" "}
-              <code className="text-xs bg-white/60 px-1 rounded">/v1/whatsapp/messages</code>.
+              <code className="text-xs bg-white/60 px-1 rounded">/v1/third-party/messages</code>.
             </li>
             <li>
               <strong>Videh users only:</strong> Recipients must have the Videh app installed with the same Indian

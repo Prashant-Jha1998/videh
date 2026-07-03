@@ -121,7 +121,7 @@ export function WebEmptyPane({ section }: { section: WebSection }) {
                 borderRadius: 999,
                 border: "1px solid #e9edef",
                 background: "white",
-                color: "#008069",
+                color: "#059669",
                 fontSize: "0.875rem",
                 fontWeight: 600,
                 cursor: "pointer",

@@ -179,16 +179,18 @@ export default function ReelsWatchScreen() {
     result: { watchedSeconds: number; skipped: boolean; completed: boolean },
   ) => {
     if (!user?.dbId || !id || ad.id <= 0) return;
+    const contentVideoId = video?.id ?? (/^\d+$/.test(String(id)) ? Number(id) : 0);
+    if (!contentVideoId) return;
     await recordReelsAdImpression({
       creativeId: ad.id,
-      contentVideoId: Number(id),
+      contentVideoId,
       userId: user.dbId,
       placement,
       watchedSeconds: result.watchedSeconds,
       skipped: result.skipped,
       completed: result.completed,
     }, user.sessionToken);
-  }, [id, user?.dbId, user?.sessionToken]);
+  }, [id, video?.id, user?.dbId, user?.sessionToken]);
 
   const handlePreRollFinished = useCallback(async (
     ad: ReelsAdBreakItem,
@@ -240,11 +242,15 @@ export default function ReelsWatchScreen() {
     setContentResumeAt(0);
     setWatchPhase("loading");
 
-    const videoId = Number(id);
+    const videoRef: number | string = /^\d+$/.test(String(id)) ? Number(id) : String(id);
     const [res, feed, ads] = await Promise.all([
-      fetchReelsVideo(videoId, user.dbId, user.sessionToken),
+      fetchReelsVideo(videoRef, user.dbId, user.sessionToken),
       fetchReelsFeed(user.dbId, null, user.sessionToken),
-      fetchReelsAdBreaks(videoId, user.dbId, user.sessionToken),
+      fetchReelsAdBreaks(
+        typeof videoRef === "number" ? videoRef : 0,
+        user.dbId,
+        user.sessionToken,
+      ),
     ]);
 
     if (res.success && res.video) {
@@ -264,7 +270,7 @@ export default function ReelsWatchScreen() {
       }
     }
 
-    const list = (feed.videos ?? []).filter((v) => v.id !== videoId);
+    const list = (feed.videos ?? []).filter((v) => v.id !== res.video?.id);
     const sameChannel = list.filter((v) => v.channelId === res.video?.channelId);
     const other = list.filter((v) => v.channelId !== res.video?.channelId);
     setRelated([...sameChannel, ...other].slice(0, 20));
@@ -297,9 +303,9 @@ export default function ReelsWatchScreen() {
     }, 1000);
     return () => {
       if (watchTickRef.current) clearInterval(watchTickRef.current);
-      if (!viewSentRef.current && user?.dbId && id && watchedRef.current > 2 && !isOwnerViewRef.current) {
+      if (!viewSentRef.current && user?.dbId && video?.id && watchedRef.current > 2 && !isOwnerViewRef.current) {
         viewSentRef.current = true;
-        void recordReelsView(Number(id), user.dbId, watchedRef.current, user.sessionToken);
+        void recordReelsView(video.id, user.dbId, watchedRef.current, user.sessionToken);
       }
     };
   }, [id, user?.dbId, user?.sessionToken, switchingVideo, video, watchPhase]);
@@ -585,10 +591,17 @@ export default function ReelsWatchScreen() {
                 />
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.chip, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={shareVideo}>
-                <Ionicons name="share-outline" size={16} color={colors.foreground} />
-                <Text style={[styles.chipText, { color: colors.foreground }]}>Share</Text>
-              </TouchableOpacity>
+              {video.sharesEnabled !== false ? (
+                <TouchableOpacity style={[styles.chip, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={shareVideo}>
+                  <Ionicons name="share-outline" size={16} color={colors.foreground} />
+                  <Text style={[styles.chipText, { color: colors.foreground }]}>Share</Text>
+                  {(video.shareCount ?? 0) > 0 ? (
+                    <Text style={{ color: colors.mutedForeground, fontSize: 12, marginLeft: 4 }}>
+                      {formatViewCount(video.shareCount ?? 0)}
+                    </Text>
+                  ) : null}
+                </TouchableOpacity>
+              ) : null}
             </ScrollView>
 
             {video.description ? (
@@ -602,17 +615,21 @@ export default function ReelsWatchScreen() {
               </TouchableOpacity>
             ) : null}
 
-            <TouchableOpacity
-              style={[styles.commentsBar, { borderColor: colors.border }]}
-              onPress={() => setCommentsOpen(true)}
-            >
-              <Text style={[styles.commentsBarTitle, { color: colors.foreground }]}>Comments</Text>
-              <Text style={{ color: colors.mutedForeground, fontFamily: "Inter_600SemiBold" }}>
-                {formatViewCount(video.commentCount)}
-              </Text>
-              <View style={{ flex: 1 }} />
-              <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
-            </TouchableOpacity>
+            {video.commentsEnabled !== false ? (
+              <TouchableOpacity
+                style={[styles.commentsBar, { borderColor: colors.border }]}
+                onPress={() => setCommentsOpen(true)}
+              >
+                <Text style={[styles.commentsBarTitle, { color: colors.foreground }]}>Comments</Text>
+                <Text style={{ color: colors.mutedForeground, fontFamily: "Inter_600SemiBold" }}>
+                  {formatViewCount(video.commentCount)}
+                </Text>
+                <View style={{ flex: 1 }} />
+                <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            ) : (
+              <Text style={{ color: colors.mutedForeground, fontSize: 13, marginTop: 8 }}>Comments are turned off</Text>
+            )}
           </View>
         }
       />
@@ -770,7 +787,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 8,
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
   },
   playerRetryText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 14 },
   headerBlock: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 },

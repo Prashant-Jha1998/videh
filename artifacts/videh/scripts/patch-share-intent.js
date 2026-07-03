@@ -123,7 +123,7 @@ function patchKotlin() {
                     ))`;
 
     const textSendReplacement = `if (intent.type!!.startsWith("text/")) {
-                // text / urls — WhatsApp & others may attach image URI with text/plain
+                // text / urls — other apps may attach image URI with text/plain
                 if (intent.action == Intent.ACTION_SEND) {
                     val uris = extractShareUris(intent)
                     if (uris.isNotEmpty()) {

@@ -200,7 +200,7 @@ function AssistantSettingsContent() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topPad, backgroundColor: colors.headerBg }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Ionicons name="arrow-back" size={24} color={colors.headerIconColor} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Hey Videh</Text>
         <View style={{ width: 36 }} />
@@ -209,7 +209,7 @@ function AssistantSettingsContent() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
         <View style={[styles.hero, { backgroundColor: colors.card }]}>
           <View style={styles.heroIcon}>
-            <Ionicons name="mic-circle" size={56} color="#5B4FE8" />
+            <Ionicons name="mic-circle" size={56} color="#059669" />
           </View>
           <Text style={[styles.heroTitle, { color: colors.foreground }]}>Videh AI voice assistant</Text>
           <Text style={[styles.heroSub, { color: colors.mutedForeground }]}>
@@ -246,7 +246,7 @@ function AssistantSettingsContent() {
             <Switch
               value={Boolean(prefs?.enabled)}
               onValueChange={(v) => void setEnabled(v)}
-              trackColor={{ true: "#5B4FE8" }}
+              trackColor={{ true: "#059669" }}
             />
           </View>
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
@@ -290,7 +290,7 @@ function AssistantSettingsContent() {
                       width: 6,
                       height: 8 + meter * 20 + ((i * 3) % 8),
                       borderRadius: 3,
-                      backgroundColor: "#5B4FE8",
+                      backgroundColor: "#059669",
                       opacity: 0.35 + meter * 0.65,
                     }}
                   />
@@ -332,7 +332,7 @@ function AssistantSettingsContent() {
                     <Ionicons
                       name={playingIdx === i ? "hourglass-outline" : "play"}
                       size={16}
-                      color="#5B4FE8"
+                      color="#059669"
                     />
                     <Text style={styles.playChipText}>
                       {playingIdx === i ? "Playing…" : "Play"}
@@ -424,7 +424,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
     borderRadius: 28,
     paddingVertical: 14,
   },
@@ -455,6 +455,6 @@ const styles = StyleSheet.create({
   },
   sampleLabel: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   playChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6 },
-  playChipText: { color: "#5B4FE8", fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  playChipText: { color: "#059669", fontSize: 13, fontFamily: "Inter_600SemiBold" },
   cmd: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 22 },
 });

@@ -58,7 +58,7 @@ export default function ChatMediaComposeBatchScreen() {
   if (!chatId || uris.length === 0) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#5B4FE8" />
+        <ActivityIndicator color="#059669" />
       </View>
     );
   }
@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
   title: { color: "#fff", fontSize: 17, fontWeight: "600" },
   qualityRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, marginBottom: 10 },
   qualityBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: "#202c33", alignItems: "center" },
-  qualityBtnActive: { backgroundColor: "#5B4FE8" },
+  qualityBtnActive: { backgroundColor: "#059669" },
   qualityText: { color: "#8696a0", fontWeight: "600" },
   qualityTextActive: { color: "#fff" },
   grid: { paddingHorizontal: 12, paddingBottom: 8 },
@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
   },
   sendBtn: {
     marginHorizontal: 16,
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
     borderRadius: 14,
     paddingVertical: 14,
     flexDirection: "row",

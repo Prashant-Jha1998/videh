@@ -54,12 +54,12 @@ const styles = StyleSheet.create({
     borderColor: "#FFFFFF",
   },
   logoFallback: {
-    backgroundColor: "#5B4FE822",
+    backgroundColor: "#05966922",
     alignItems: "center",
     justifyContent: "center",
   },
   logoFallbackTxt: {
     fontFamily: "Inter_700Bold",
-    color: "#5B4FE8",
+    color: "#059669",
   },
 });

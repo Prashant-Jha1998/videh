@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -21,7 +22,9 @@ import {
   suggestReelsHashtags,
   updateReelsVideo,
   type ReelsHashtagStat,
+  type ReelsVideo,
 } from "@/lib/reelsApi";
+import { VIBE_BRAND_NAME, VIBE_MAX_DURATION_SECONDS, type VideoFormat } from "@/lib/vibeVideo";
 
 export default function ReelsVideoEditScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -32,9 +35,13 @@ export default function ReelsVideoEditScreen() {
   const { user } = useApp();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [video, setVideo] = useState<ReelsVideo | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [hashtags, setHashtags] = useState("");
+  const [videoFormat, setVideoFormat] = useState<VideoFormat>("watch");
+  const [commentsEnabled, setCommentsEnabled] = useState(true);
+  const [sharesEnabled, setSharesEnabled] = useState(true);
   const [hashtagSuggestions, setHashtagSuggestions] = useState<ReelsHashtagStat[]>([]);
 
   useEffect(() => {
@@ -44,9 +51,13 @@ export default function ReelsVideoEditScreen() {
         Alert.alert("Not found", "Video could not be loaded.", [{ text: "OK", onPress: () => router.back() }]);
         return;
       }
+      setVideo(res.video);
       setTitle(res.video.title);
       setDescription(res.video.description ?? "");
       setHashtags((res.video.hashtags ?? []).join(", "));
+      setVideoFormat(res.video.videoFormat ?? "watch");
+      setCommentsEnabled(res.video.commentsEnabled !== false);
+      setSharesEnabled(res.video.sharesEnabled !== false);
       setLoading(false);
     });
   }, [user?.dbId, user?.sessionToken, videoId, router]);
@@ -65,12 +76,23 @@ export default function ReelsVideoEditScreen() {
       Alert.alert("Title", "Enter a title (at least 2 characters).");
       return;
     }
+    if (videoFormat === "vibe" && (video?.durationSeconds ?? 0) > VIBE_MAX_DURATION_SECONDS) {
+      Alert.alert("Format", `${VIBE_BRAND_NAME} requires video length ≤ ${VIBE_MAX_DURATION_SECONDS}s.`);
+      return;
+    }
     setSaving(true);
     try {
       const res = await updateReelsVideo(
         videoId,
         user.dbId,
-        { title: trimmed, description: description.trim(), hashtags },
+        {
+          title: trimmed,
+          description: description.trim(),
+          hashtags,
+          videoFormat,
+          commentsEnabled,
+          sharesEnabled,
+        },
         user.sessionToken,
       );
       if (!res.success) {
@@ -91,6 +113,8 @@ export default function ReelsVideoEditScreen() {
     );
   }
 
+  const vibeDisabled = (video?.durationSeconds ?? 0) > VIBE_MAX_DURATION_SECONDS;
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
       <View style={styles.header}>
@@ -108,7 +132,34 @@ export default function ReelsVideoEditScreen() {
       </View>
 
       <KeyboardAwareScrollViewCompat contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}>
-        <Text style={[styles.label, { color: colors.mutedForeground }]}>Title</Text>
+        <Text style={[styles.label, { color: colors.mutedForeground }]}>Format</Text>
+        <View style={styles.formatRow}>
+          {(["watch", "vibe"] as VideoFormat[]).map((fmt) => {
+            const active = videoFormat === fmt;
+            const disabled = fmt === "vibe" && vibeDisabled;
+            return (
+              <TouchableOpacity
+                key={fmt}
+                disabled={disabled}
+                style={[
+                  styles.formatChip,
+                  {
+                    borderColor: active ? colors.primary : colors.border,
+                    backgroundColor: active ? colors.primary + "18" : colors.card,
+                    opacity: disabled ? 0.45 : 1,
+                  },
+                ]}
+                onPress={() => setVideoFormat(fmt)}
+              >
+                <Text style={{ color: active ? colors.primary : colors.foreground, fontFamily: "Inter_600SemiBold" }}>
+                  {fmt === "watch" ? "Watch" : VIBE_BRAND_NAME}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Text style={[styles.label, { color: colors.mutedForeground, marginTop: 16 }]}>Title</Text>
         <TextInput
           style={[styles.input, { color: colors.foreground, borderColor: colors.border }]}
           value={title}
@@ -151,9 +202,37 @@ export default function ReelsVideoEditScreen() {
           </View>
         ) : null}
 
-        <Text style={[styles.studioHint, { color: colors.mutedForeground }]}>
-          Advanced settings: visibility, monetization, and comments are managed from your channel studio.
-        </Text>
+        <Text style={[styles.sectionTitle, { color: colors.foreground, marginTop: 20 }]}>Engagement</Text>
+        <View style={[styles.toggleRow, { borderColor: colors.border }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.toggleTitle, { color: colors.foreground }]}>Comments</Text>
+            <Text style={[styles.toggleHint, { color: colors.mutedForeground }]}>Allow viewers to comment</Text>
+          </View>
+          <Switch
+            value={commentsEnabled}
+            onValueChange={setCommentsEnabled}
+            trackColor={{ true: colors.primary + "80", false: colors.muted }}
+            thumbColor={commentsEnabled ? colors.primary : "#f4f3f4"}
+          />
+        </View>
+        <View style={[styles.toggleRow, { borderColor: colors.border }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.toggleTitle, { color: colors.foreground }]}>Sharing</Text>
+            <Text style={[styles.toggleHint, { color: colors.mutedForeground }]}>Allow link shares & share count</Text>
+          </View>
+          <Switch
+            value={sharesEnabled}
+            onValueChange={setSharesEnabled}
+            trackColor={{ true: colors.primary + "80", false: colors.muted }}
+            thumbColor={sharesEnabled ? colors.primary : "#f4f3f4"}
+          />
+        </View>
+
+        {(video?.shareCount ?? 0) > 0 ? (
+          <Text style={[styles.stats, { color: colors.mutedForeground }]}>
+            {video?.shareCount} total shares · helps reach more viewers
+          </Text>
+        ) : null}
       </KeyboardAwareScrollViewCompat>
     </View>
   );
@@ -171,6 +250,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 17, fontFamily: "Inter_700Bold" },
   label: { fontSize: 13, fontFamily: "Inter_600SemiBold", marginBottom: 6 },
+  sectionTitle: { fontSize: 15, fontFamily: "Inter_700Bold", marginBottom: 8 },
   input: {
     borderWidth: 1,
     borderRadius: 10,
@@ -181,5 +261,22 @@ const styles = StyleSheet.create({
   multiline: { minHeight: 100, textAlignVertical: "top" },
   suggestRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   suggestChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14 },
-  studioHint: { fontSize: 12, lineHeight: 18, marginTop: 24 },
+  formatRow: { flexDirection: "row", gap: 10 },
+  formatChip: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+  },
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+  },
+  toggleTitle: { fontFamily: "Inter_600SemiBold", fontSize: 15 },
+  toggleHint: { fontSize: 12, marginTop: 2 },
+  stats: { fontSize: 12, marginTop: 12 },
 });

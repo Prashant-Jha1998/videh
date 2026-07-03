@@ -106,7 +106,7 @@ export default function DocumentComposeScreen() {
             <Text style={styles.docFallbackMeta}>{metaLine}</Text>
           </View>
         )}
-        {loadingMeta ? <ActivityIndicator color="#5B4FE8" style={{ marginTop: 12 }} /> : null}
+        {loadingMeta ? <ActivityIndicator color="#059669" style={{ marginTop: 12 }} /> : null}
       </View>
 
       <TextInput
@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#12101F" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#12101F" },
   err: { color: "#fff", marginBottom: 12 },
-  link: { color: "#5B4FE8", fontWeight: "600" },
+  link: { color: "#059669", fontWeight: "600" },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -182,7 +182,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
     alignItems: "center",
     justifyContent: "center",
     elevation: 6,

@@ -11,7 +11,7 @@ function isServerMessageId(id: string): boolean {
   return /^\d+$/.test(id);
 }
 
-/** Tell server this recipient's device received the message (WhatsApp-style delivery receipt). */
+/** Tell server this recipient's device received the message (standard delivery receipt). */
 export async function ackMessagesDelivered(
   chatId: string,
   messageIds: string[],

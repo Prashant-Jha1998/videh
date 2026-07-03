@@ -59,7 +59,7 @@ export function ManageBusinessMessagesSheet({
               <Switch
                 value={!isMuted}
                 onValueChange={(on) => onToggleMute(!on)}
-                trackColor={{ false: "#CBD5E1", true: "#5B4FE8" }}
+                trackColor={{ false: "#CBD5E1", true: "#059669" }}
                 thumbColor="#FFFFFF"
               />
             </View>

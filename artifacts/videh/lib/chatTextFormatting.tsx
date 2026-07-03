@@ -9,7 +9,7 @@ export type ChatTextSegment =
 
 const BOLD_TOKEN_RE = /\*([^*\n]+)\*/g;
 
-/** Split plain text into normal + *bold* segments (WhatsApp-style). */
+/** Split plain text into normal + *bold* segments (standard). */
 export function splitBoldSegments(text: string): { bold: boolean; value: string }[] {
   const out: { bold: boolean; value: string }[] = [];
   let last = 0;

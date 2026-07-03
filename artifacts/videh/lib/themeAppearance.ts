@@ -78,7 +78,7 @@ export const ANIMATED_WALLPAPERS: { id: AnimatedWallpaperId; name: string }[] = 
 ];
 
 export const APP_ICON_STYLES: { id: AppIconStyleId; name: string; color: string }[] = [
-  { id: "default", name: "Videh Indigo", color: "#5B4FE8" },
+  { id: "default", name: "Videh Emerald", color: "#059669" },
   { id: "indigo", name: "Indigo", color: "#6366F1" },
   { id: "black", name: "Black", color: "#111827" },
   { id: "gold", name: "Gold", color: "#CA8A04" },

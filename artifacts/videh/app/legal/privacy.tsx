@@ -74,7 +74,7 @@ export default function PrivacyScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: insets.top + (Platform.OS === "web" ? 67 : 10) }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Ionicons name="arrow-back" size={24} color={colors.headerIconColor} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Privacy Policy</Text>
         <View style={{ width: 40 }} />
@@ -84,9 +84,9 @@ export default function PrivacyScreen() {
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 40 }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.badge, { backgroundColor: "#5B4FE8" + "20" }]}>
-          <Ionicons name="shield-checkmark-outline" size={24} color="#5B4FE8" />
-          <Text style={[styles.badgeText, { color: "#5B4FE8" }]}>Your privacy is our priority</Text>
+        <View style={[styles.badge, { backgroundColor: "#059669" + "20" }]}>
+          <Ionicons name="shield-checkmark-outline" size={24} color="#059669" />
+          <Text style={[styles.badgeText, { color: "#059669" }]}>Your privacy is our priority</Text>
         </View>
 
         <Text style={[styles.intro, { color: colors.foreground }]}>
@@ -94,7 +94,7 @@ export default function PrivacyScreen() {
         </Text>
 
         {SECTIONS.map((s) => (
-          <View key={s.title} style={[styles.section, { borderLeftColor: "#5B4FE8" }]}>
+          <View key={s.title} style={[styles.section, { borderLeftColor: "#059669" }]}>
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>{s.title}</Text>
             <Text style={[styles.sectionBody, { color: colors.mutedForeground }]}>{s.body}</Text>
           </View>

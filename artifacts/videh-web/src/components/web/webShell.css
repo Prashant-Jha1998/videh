@@ -1,8 +1,8 @@
 /* Videh Web — Shell design system */
 .vw-app {
-  --vw-primary: #5B4FE8;
-  --vw-primary-dark: #008069;
-  --vw-primary-soft: rgba(0, 168, 132, 0.14);
+  --vw-primary: #059669;
+  --vw-primary-dark: #047857;
+  --vw-primary-soft: rgba(5, 150, 105, 0.14);
   --vw-text: #14131F;
   --vw-muted: #667781;
   --vw-border: #e9edef;
@@ -10,11 +10,11 @@
   --vw-panel: #f0f2f5;
   --vw-rail-bg: #1a2329;
   --vw-rail-hover: rgba(255, 255, 255, 0.06);
-  --vw-rail-active: var(--vw-primary-soft, rgba(0, 168, 132, 0.18));
-  --vw-bubble-sent: #E0DCFF;
+  --vw-rail-active: var(--vw-primary-soft, rgba(5, 150, 105, 0.18));
+  --vw-bubble-sent: #D1FAE5;
   --vw-bubble-received: #ffffff;
-  --vw-chat-bg: #EDEAF5;
-  --vw-accent-gradient: linear-gradient(135deg, #5B4FE8 0%, #008069 100%);
+  --vw-chat-bg: #ECFDF5;
+  --vw-accent-gradient: linear-gradient(135deg, #059669 0%, #10B981 100%);
   --vw-shadow-sm: 0 1px 3px rgba(17, 27, 33, 0.06);
   --vw-shadow-md: 0 8px 28px rgba(17, 27, 33, 0.08);
   --vw-radius: 12px;
@@ -643,7 +643,7 @@
   border: none;
   border-radius: 50%;
   background: var(--vw-panel, #fff);
-  color: var(--vw-primary, #5B4FE8);
+  color: var(--vw-primary, #059669);
   box-shadow: 0 2px 8px rgba(11, 20, 26, 0.18);
   cursor: pointer;
   display: flex;
@@ -663,7 +663,7 @@
   height: 20px;
   padding: 0 5px;
   border-radius: 10px;
-  background: var(--vw-primary, #5B4FE8);
+  background: var(--vw-primary, #059669);
   color: #fff;
   font-size: 11px;
   font-weight: 700;
@@ -870,7 +870,7 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
   font-size: 11px;
   font-weight: 600;
   font-style: italic;
-  color: #5B4FE8;
+  color: #059669;
   margin-bottom: 2px;
 }
 
@@ -901,7 +901,7 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
 }
 
 .vw-msg-reactions__chip--mine {
-  border-color: #5B4FE8;
+  border-color: #059669;
   background: rgba(0, 168, 132, 0.08);
 }
 
@@ -1000,8 +1000,8 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
 }
 
 .vw-msg-check--on {
-  background: #5B4FE8;
-  border-color: #5B4FE8;
+  background: #059669;
+  border-color: #059669;
 }
 
 .vw-chat__messages--selecting {
@@ -1010,7 +1010,7 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
 }
 
 .vw-chat__header--selection {
-  background: #5B4FE8;
+  background: #059669;
   color: #fff;
 }
 
@@ -1093,7 +1093,7 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
 }
 
 .vw-msg-bubble__quote {
-  border-left: 3px solid #5B4FE8;
+  border-left: 3px solid #059669;
   background: rgba(0, 0, 0, 0.05);
   border-radius: 6px;
   padding: 4px 8px;
@@ -1109,7 +1109,7 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
   display: block;
   font-size: 12px;
   font-weight: 600;
-  color: #5B4FE8;
+  color: #059669;
   margin-bottom: 1px;
 }
 
@@ -1135,7 +1135,7 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
 .vw-reply-compose__accent {
   width: 4px;
   border-radius: 2px;
-  background: #5B4FE8;
+  background: #059669;
   flex-shrink: 0;
 }
 
@@ -1150,7 +1150,7 @@ html[data-theme="dark"] .vw-msg-wrap--selected .vw-msg-select-row,
 .vw-reply-compose__name {
   font-size: 13px;
   font-weight: 600;
-  color: #5B4FE8;
+  color: #059669;
 }
 
 .vw-reply-compose__text {
@@ -2050,7 +2050,7 @@ html[data-theme="dark"] .vw-dropdown__item:hover,
 
 .vw-status-detail__boost-badge--active {
   background: rgba(0, 168, 132, 0.15);
-  color: var(--vw-accent, #5B4FE8);
+  color: var(--vw-accent, #059669);
 }
 
 /* ─── Advanced story boost (Instagram-style) ─── */
@@ -2103,7 +2103,7 @@ html[data-theme="dark"] .vw-dropdown__item:hover,
   margin-left: auto;
   border: none;
   background: none;
-  color: var(--vw-accent, #5B4FE8);
+  color: var(--vw-accent, #059669);
   font-weight: 600;
   font-size: 0.8125rem;
   cursor: pointer;
@@ -2160,7 +2160,7 @@ html[data-theme="dark"] .vw-dropdown__item:hover,
 }
 
 .vw-story-boost__goal--active {
-  border-color: var(--vw-accent, #5B4FE8);
+  border-color: var(--vw-accent, #059669);
   background: rgba(0, 168, 132, 0.08);
 }
 
@@ -2183,8 +2183,8 @@ html[data-theme="dark"] .vw-dropdown__item:hover,
 }
 
 .vw-story-boost__tab--active {
-  border-color: var(--vw-accent, #5B4FE8) !important;
-  color: var(--vw-accent, #5B4FE8) !important;
+  border-color: var(--vw-accent, #059669) !important;
+  color: var(--vw-accent, #059669) !important;
   background: rgba(0, 168, 132, 0.08) !important;
 }
 
@@ -2248,9 +2248,9 @@ html[data-theme="dark"] .vw-dropdown__item:hover,
 }
 
 .vw-story-boost__chip--active {
-  border-color: var(--vw-accent, #5B4FE8);
+  border-color: var(--vw-accent, #059669);
   background: rgba(0, 168, 132, 0.12);
-  color: var(--vw-accent, #5B4FE8);
+  color: var(--vw-accent, #059669);
 }
 
 .vw-story-boost__estimates {
@@ -2328,7 +2328,7 @@ html[data-theme="dark"] .vw-dropdown__item:hover,
 }
 
 .vw-story-boost__success-icon {
-  color: var(--vw-accent, #5B4FE8);
+  color: var(--vw-accent, #059669);
   margin-bottom: 12px;
 }
 
@@ -2429,7 +2429,7 @@ html[data-theme="dark"] .vw-dropdown__item:hover,
   padding: 11px 18px;
   border: none;
   border-radius: 10px;
-  background: var(--vw-accent, #5B4FE8);
+  background: var(--vw-accent, #059669);
   color: #fff;
   font-weight: 700;
   font-size: 0.875rem;
@@ -2498,7 +2498,7 @@ html[data-theme="dark"] .vw-dropdown__item:hover,
 }
 
 .vw-voice--sent .vw-voice__play {
-  background: #008069;
+  background: #059669;
 }
 
 .vw-voice__body {

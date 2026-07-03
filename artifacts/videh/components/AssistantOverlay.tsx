@@ -49,9 +49,9 @@ export function AssistantOverlay() {
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           <Animated.View style={[styles.iconRing, phase === "listening" && { opacity: pulse }]}>
             {phase === "processing" ? (
-              <ActivityIndicator size="large" color="#5B4FE8" />
+              <ActivityIndicator size="large" color="#059669" />
             ) : (
-              <Ionicons name="mic" size={34} color="#5B4FE8" />
+              <Ionicons name="mic" size={34} color="#059669" />
             )}
           </Animated.View>
           <Text style={[styles.title, { color: colors.foreground }]}>{title}</Text>
@@ -112,5 +112,5 @@ const styles = StyleSheet.create({
   error: { fontSize: 13, fontFamily: "Inter_500Medium", textAlign: "center", marginBottom: 8 },
   response: { fontSize: 15, fontFamily: "Inter_500Medium", textAlign: "center", marginTop: 4, lineHeight: 21 },
   closeBtn: { marginTop: 18, paddingVertical: 10, paddingHorizontal: 20 },
-  closeText: { color: "#5B4FE8", fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  closeText: { color: "#059669", fontSize: 15, fontFamily: "Inter_600SemiBold" },
 });

@@ -6,6 +6,8 @@ export const en: Record<string, string> = {
   "tab.calls": "Calls",
   "tab.settings": "Settings",
   "tab.video": "Video",
+  "video.section.watch": "Watch",
+  "video.section.vibe": "Vibe",
   "settings.header": "Videh",
   "settings.sectionTitle": "Settings",
   "settings.row.account": "Account",

@@ -70,7 +70,7 @@ export default function TermsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: insets.top + (Platform.OS === "web" ? 67 : 10) }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Ionicons name="arrow-back" size={24} color={colors.headerIconColor} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Terms of Service</Text>
         <View style={{ width: 40 }} />

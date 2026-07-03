@@ -28,21 +28,21 @@
 }
 
 :root {
-  /* Videh green palette */
+  /* Videh emerald palette */
   --background: 210 20% 98%;
   --foreground: 215 25% 15%;
   --border: 210 15% 88%;
   --input: 210 15% 88%;
-  --ring: 152 60% 35%;
+  --ring: 160 93% 30%;
   --card: 0 0% 100%;
   --card-foreground: 215 25% 15%;
-  --primary: 152 60% 34%;          /* #5B4FE8 Videh green */
+  --primary: 160 93% 30%;
   --primary-foreground: 0 0% 100%;
   --secondary: 210 20% 94%;
   --secondary-foreground: 215 25% 15%;
   --muted: 210 20% 94%;
   --muted-foreground: 215 15% 50%;
-  --accent: 152 60% 34%;
+  --accent: 160 93% 30%;
   --accent-foreground: 0 0% 100%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 100%;
@@ -50,10 +50,10 @@
   --radius: 0.5rem;
 
   /* Chat specific */
-  --chat-bg: #efeae2;
-  --bubble-sent: #E0DCFF;
+  --chat-bg: #ecfdf5;
+  --bubble-sent: #d1fae5;
   --bubble-recv: #ffffff;
-  --header-bg: #5B4FE8;
+  --header-bg: #ffffff;
   --sidebar-bg: #ffffff;
   --sidebar-header: #f0f2f5;
   --panel-bg: #f0f2f5;

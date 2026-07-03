@@ -97,7 +97,7 @@ export function UnsavedContactCard({
         </Text>
 
         <TouchableOpacity style={styles.safetyRow} onPress={openSafetyTools} activeOpacity={0.7}>
-          <Ionicons name="shield-checkmark" size={16} color="#5B4FE8" />
+          <Ionicons name="shield-checkmark" size={16} color="#059669" />
           <Text style={styles.safetyText}>Safety tools</Text>
         </TouchableOpacity>
 
@@ -108,7 +108,7 @@ export function UnsavedContactCard({
           </TouchableOpacity>
           <View style={[styles.actionDivider, isDark && styles.actionDividerDark]} />
           <TouchableOpacity style={styles.actionBtn} onPress={onAdd} activeOpacity={0.7}>
-            <Ionicons name="person-add-outline" size={18} color="#5B4FE8" />
+            <Ionicons name="person-add-outline" size={18} color="#059669" />
             <Text style={styles.addTxt}>Add</Text>
           </TouchableOpacity>
         </View>
@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   encryptText: { flex: 1, fontSize: 12.5, lineHeight: 17, color: "#54656F", fontFamily: "Inter_400Regular" },
-  encryptLink: { color: "#5B4FE8", fontFamily: "Inter_500Medium" },
+  encryptLink: { color: "#059669", fontFamily: "Inter_500Medium" },
   wrap: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 10 },
   card: {
     backgroundColor: "#FFFFFF",
@@ -184,7 +184,7 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 18,
   },
-  safetyText: { fontSize: 14, fontFamily: "Inter_500Medium", color: "#5B4FE8" },
+  safetyText: { fontSize: 14, fontFamily: "Inter_500Medium", color: "#059669" },
   actionsRow: {
     flexDirection: "row",
     alignSelf: "stretch",
@@ -206,5 +206,5 @@ const styles = StyleSheet.create({
   },
   actionDividerDark: { backgroundColor: "rgba(255,255,255,0.08)" },
   blockTxt: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#EA0038" },
-  addTxt: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#5B4FE8" },
+  addTxt: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#059669" },
 });

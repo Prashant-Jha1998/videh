@@ -16,7 +16,7 @@ type Props = {
 
 export function renderChatMentionParts(
   text: string,
-  mentionColor = "#5B4FE8",
+  mentionColor = "#059669",
   knownMentionNames?: string[],
   foregroundColor?: string,
 ) {

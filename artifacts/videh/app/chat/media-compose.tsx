@@ -216,7 +216,7 @@ export default function ChatMediaComposeScreen() {
             <Ionicons name="refresh" size={20} color="#fff" />
             <Text style={styles.editBtnText}>Rotate</Text>
           </TouchableOpacity>
-          {editing ? <ActivityIndicator color="#5B4FE8" style={{ marginLeft: 8 }} /> : null}
+          {editing ? <ActivityIndicator color="#059669" style={{ marginLeft: 8 }} /> : null}
         </View>
       ) : null}
 
@@ -254,12 +254,12 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#12101F" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#12101F" },
   err: { color: "#fff", marginBottom: 12 },
-  link: { color: "#5B4FE8", fontWeight: "600" },
+  link: { color: "#059669", fontWeight: "600" },
   topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, marginBottom: 8 },
   title: { color: "#fff", fontSize: 17, fontWeight: "600" },
   qualityRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, marginBottom: 8 },
   qualityBtn: { flex: 1, paddingVertical: 9, borderRadius: 10, backgroundColor: "#202c33", alignItems: "center" },
-  qualityBtnActive: { backgroundColor: "#5B4FE8" },
+  qualityBtnActive: { backgroundColor: "#059669" },
   qualityText: { color: "#8696a0", fontWeight: "600", fontSize: 14 },
   qualityTextActive: { color: "#fff" },
   previewWrap: { flex: 1, marginHorizontal: 12, borderRadius: 12, overflow: "hidden", backgroundColor: "#14131F", position: "relative" },
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
   },
   sendBtn: {
     marginHorizontal: 16,
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
     borderRadius: 14,
     paddingVertical: 14,
     flexDirection: "row",

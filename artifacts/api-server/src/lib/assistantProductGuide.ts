@@ -334,7 +334,7 @@ export const PRODUCT_KNOWLEDGE_ENTRIES: ProductKnowledgeEntry[] = [
   {
     id: "videh-channel",
     category: "Videh Video",
-    keywords: ["channel", "create channel", "your channel", "youtube channel"],
+    keywords: ["channel", "create channel", "your channel", "video channel"],
     title: "Create a video channel",
     path: "Video tab → profile → Create channel",
     answerEn: "Video tab → your profile icon → Create channel. Set handle, name, logo, and bio to start uploading.",
@@ -346,7 +346,7 @@ export const PRODUCT_KNOWLEDGE_ENTRIES: ProductKnowledgeEntry[] = [
     keywords: ["library", "history", "watch history", "downloads", "playlist", "liked videos"],
     title: "Video Library",
     path: "Video tab → Library icon",
-    answerEn: "Video tab → Library icon for History, Liked videos, Playlists, Downloads, and Your videos — like YouTube Library.",
+    answerEn: "Video tab → Library icon for History, Liked videos, Playlists, Downloads, and Your videos.",
     answerHi: "Video tab → Library icon se History, Liked, Playlists, Downloads aur Your videos dekhein.",
   },
   {

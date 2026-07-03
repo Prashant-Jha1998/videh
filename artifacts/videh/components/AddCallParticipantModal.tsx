@@ -117,7 +117,7 @@ export function AddCallParticipantModal({ visible, onClose, onAdd, excludeUserId
         </View>
 
         {loading ? (
-          <ActivityIndicator color="#5B4FE8" style={{ marginTop: 40 }} />
+          <ActivityIndicator color="#059669" style={{ marginTop: 40 }} />
         ) : Platform.OS === "web" ? (
           <Text style={styles.hint}>Use the mobile app to add people during a call.</Text>
         ) : filtered.length === 0 ? (
@@ -142,7 +142,7 @@ export function AddCallParticipantModal({ visible, onClose, onAdd, excludeUserId
                   <Ionicons
                     name={on ? "checkmark-circle" : "ellipse-outline"}
                     size={24}
-                    color={on ? "#5B4FE8" : "#8696A0"}
+                    color={on ? "#059669" : "#8696A0"}
                   />
                 </TouchableOpacity>
               );
@@ -165,7 +165,7 @@ const styles = StyleSheet.create({
   },
   title: { flex: 1, color: "#E9EDEF", fontSize: 18, fontFamily: "Inter_600SemiBold" },
   addBtn: {
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 18,
@@ -196,7 +196,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
     alignItems: "center",
     justifyContent: "center",
   },

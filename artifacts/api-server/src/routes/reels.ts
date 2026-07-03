@@ -37,7 +37,8 @@ import {
 } from "../lib/reelsPrivacy";
 import { resolveViewerGeoFromRequest } from "../lib/adsGeo";
 import { pickFeedAdPlacementsForBatch, recordReelsAdClick, recordReelsAdImpression, resolveReelsAdBreaks } from "../lib/reelsAds";
-import { publishReelsVideo } from "../lib/reelsVideoPublish";
+import { publishReelsVideo, resolveVideoFormat, validateVideoFormatChoice } from "../lib/reelsVideoPublish";
+import { searchVibeSounds } from "../lib/vibeSounds";
 import {
   countUnreadReelsVideoNotifications,
   fetchReelsVideoNotifications,
@@ -61,8 +62,11 @@ import {
   buildReelsChannelShareUrl,
   buildReelsVideoDeepLink,
   buildReelsVideoShareUrl,
+  buildVibeDeepLink,
+  buildVibeShareUrl,
   ensureReelsShareSlugs,
   reelsVideoPublicShareRef,
+  reelsVideoSlugOnlyRef,
   resolveReelsVideoIdFromRef,
 } from "../lib/reelsShareUrl";
 
@@ -152,6 +156,44 @@ function parseHashtags(raw: unknown): string[] {
   return s.split(/[\s,#]+/).map((t) => t.trim().replace(/^#/, "")).filter(Boolean).slice(0, 20);
 }
 
+function parseBoolFlag(raw: unknown, defaultValue = true): boolean {
+  if (raw === undefined || raw === null || raw === "") return defaultValue;
+  if (typeof raw === "boolean") return raw;
+  const s = String(raw).trim().toLowerCase();
+  if (["0", "false", "no", "off"].includes(s)) return false;
+  if (["1", "true", "yes", "on"].includes(s)) return true;
+  return defaultValue;
+}
+
+function parseEditorMetadata(raw: unknown): Record<string, unknown> | null {
+  if (raw == null || raw === "") return null;
+  if (typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, unknown>;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
+function parsePublishExtras(body: Record<string, unknown>, durationSeconds: number) {
+  const videoFormat = resolveVideoFormat(durationSeconds, String(body.videoFormat ?? ""));
+  const formatErr = validateVideoFormatChoice(durationSeconds, videoFormat);
+  return {
+    videoFormat,
+    formatErr,
+    commentsEnabled: parseBoolFlag(body.commentsEnabled, true),
+    sharesEnabled: parseBoolFlag(body.sharesEnabled, true),
+    editorMetadata: parseEditorMetadata(body.editorMetadata),
+    musicTitle: body.musicTitle != null ? String(body.musicTitle).trim().slice(0, 200) : null,
+    musicArtist: body.musicArtist != null ? String(body.musicArtist).trim().slice(0, 200) : null,
+    musicUrl: body.musicUrl != null ? String(body.musicUrl).trim().slice(0, 2000) : null,
+  };
+}
+
 function needsReelsImageProxy(url: string): boolean {
   return /images\.pexels\.com|picsum\.photos/i.test(url);
 }
@@ -219,6 +261,13 @@ function mapVideoRow(row: Record<string, unknown>, req?: Request) {
     dislikeCount: Number(row.dislike_count ?? 0),
     commentCount: Number(row.comment_count ?? 0),
     shareCount: Number(row.share_count ?? 0),
+    videoFormat: (row.video_format === "vibe" ? "vibe" : "watch") as "watch" | "vibe",
+    commentsEnabled: row.comments_enabled !== false,
+    sharesEnabled: row.shares_enabled !== false,
+    editorMetadata: row.editor_metadata ?? null,
+    musicTitle: row.music_title ?? null,
+    musicArtist: row.music_artist ?? null,
+    musicUrl: row.music_url ?? null,
     fraudScore: Number(row.fraud_score ?? 0),
     playEnabled: row.play_enabled !== false,
     status: row.status ?? "published",
@@ -234,6 +283,12 @@ function mapVideoRow(row: Record<string, unknown>, req?: Request) {
     shareSlug: String(row.share_slug ?? "").trim() || undefined,
     shareUrl: buildReelsVideoShareUrl(reelsVideoPublicShareRef(row)),
     deepLink: buildReelsVideoDeepLink(reelsVideoPublicShareRef(row)),
+    vibeShareUrl: (row.video_format === "vibe" && reelsVideoSlugOnlyRef(row))
+      ? buildVibeShareUrl(reelsVideoSlugOnlyRef(row)!)
+      : undefined,
+    vibeDeepLink: (row.video_format === "vibe" && reelsVideoSlugOnlyRef(row))
+      ? buildVibeDeepLink(reelsVideoSlugOnlyRef(row)!)
+      : undefined,
   };
 }
 
@@ -586,7 +641,7 @@ router.get("/go/:videoId", async (req: Request, res: Response) => {
   try {
     await ensureReelsTables();
     const row = await query(
-      `SELECT v.title, v.status, v.play_enabled, v.share_slug, c.handle, c.display_name
+      `SELECT v.title, v.status, v.play_enabled, v.share_slug, v.video_format, c.handle, c.display_name
        FROM reels_videos v
        JOIN reels_channels c ON c.id = v.channel_id
        WHERE v.id = $1`,
@@ -601,19 +656,22 @@ router.get("/go/:videoId", async (req: Request, res: Response) => {
       status?: string;
       play_enabled?: boolean;
       share_slug?: string | null;
+      video_format?: string;
       handle?: string;
       display_name?: string;
     };
     const published = v.status === "published" && v.play_enabled !== false;
     const shareRef = reelsVideoPublicShareRef({ id: videoId, share_slug: v.share_slug });
+    const slug = reelsVideoSlugOnlyRef({ share_slug: v.share_slug });
+    const isVibe = v.video_format === "vibe";
     const title = String(v.title ?? "Videh Video").replace(/[<>&"]/g, (c) => (
       { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c] ?? c
     ));
     const channel = String(v.display_name ?? v.handle ?? "Videh").replace(/[<>&"]/g, (c) => (
       { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c] ?? c
     ));
-    const deepLink = buildReelsVideoDeepLink(shareRef);
-    const shareUrl = buildReelsVideoShareUrl(shareRef);
+    const deepLink = isVibe && slug ? buildVibeDeepLink(slug) : buildReelsVideoDeepLink(shareRef);
+    const shareUrl = isVibe && slug ? buildVibeShareUrl(slug) : buildReelsVideoShareUrl(shareRef);
     const thumb = resolveVideoThumbnailUrl(req, null, videoId);
     res.type("html").send(`<!DOCTYPE html>
 <html lang="en">
@@ -1449,6 +1507,20 @@ router.get("/hashtags/suggest", async (req: Request, res: Response) => {
   }
 });
 
+/** Royalty-free sounds (Freesound API + fallback catalog). */
+router.get("/sounds/search", async (req: Request, res: Response) => {
+  const q = String(req.query.q ?? "").trim();
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const perPage = Math.min(50, Math.max(3, Number(req.query.perPage) || 20));
+  try {
+    const result = await searchVibeSounds(q, page, perPage);
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "reels sounds search");
+    res.status(500).json({ success: false, sounds: [], total: 0, message: "Server error" });
+  }
+});
+
 router.get("/hashtags/:tag", async (req: Request, res: Response) => {
   const tag = String(req.params.tag ?? "").trim();
   const viewerId = Number(req.query.userId) || 0;
@@ -1666,6 +1738,12 @@ router.post("/videos/complete", async (req: Request, res: Response) => {
     return;
   }
 
+  const extras = parsePublishExtras(body as Record<string, unknown>, durationSeconds);
+  if (extras.formatErr) {
+    res.status(400).json({ success: false, message: extras.formatErr });
+    return;
+  }
+
   try {
     await ensureReelsTables();
     const combinedText = [title, description, ...hashtags.map((h) => `#${h}`)].join(" ");
@@ -1716,6 +1794,13 @@ router.post("/videos/complete", async (req: Request, res: Response) => {
       thumbPath: null,
       videoPath: null,
       deferModeration: true,
+      videoFormat: extras.videoFormat,
+      commentsEnabled: extras.commentsEnabled,
+      sharesEnabled: extras.sharesEnabled,
+      editorMetadata: extras.editorMetadata,
+      musicTitle: extras.musicTitle,
+      musicArtist: extras.musicArtist,
+      musicUrl: extras.musicUrl,
     });
 
     void linkS3UploadEntity(videoUploadsRel, "reels_video", published.videoId);
@@ -1746,6 +1831,10 @@ router.post("/videos/complete", async (req: Request, res: Response) => {
   } catch (err) {
     if (err instanceof Error && err.message === "CHANNEL_REQUIRED") {
       res.status(403).json({ success: false, message: "Create your reels account first." });
+      return;
+    }
+    if (err instanceof Error && err.message.startsWith("FORMAT_INVALID:")) {
+      res.status(400).json({ success: false, message: err.message.replace("FORMAT_INVALID:", "") });
       return;
     }
     req.log.error({ err }, "reels complete upload");
@@ -1811,6 +1900,15 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
       }
     }
 
+    const bodyRaw = req.body as Record<string, unknown>;
+    const extras = parsePublishExtras(bodyRaw, durationSeconds);
+    if (extras.formatErr) {
+      fs.unlinkSync(path.join(reelsUploadsDir, videoFile.filename));
+      if (files?.thumbnail?.[0]) fs.unlinkSync(path.join(reelsUploadsDir, files.thumbnail[0].filename));
+      res.status(400).json({ success: false, message: extras.formatErr });
+      return;
+    }
+
     const published = await publishReelsVideo({
       req,
       userId,
@@ -1823,6 +1921,13 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
       thumbPath,
       videoPath,
       deferModeration: false,
+      videoFormat: extras.videoFormat,
+      commentsEnabled: extras.commentsEnabled,
+      sharesEnabled: extras.sharesEnabled,
+      editorMetadata: extras.editorMetadata,
+      musicTitle: extras.musicTitle,
+      musicArtist: extras.musicArtist,
+      musicUrl: extras.musicUrl,
     });
 
     if (published.modResult?.action === "reject") {
@@ -1848,6 +1953,10 @@ router.post("/videos", runReelsUpload, async (req: Request, res: Response) => {
       }, req),
     });
   } catch (err) {
+    if (err instanceof Error && err.message.startsWith("FORMAT_INVALID:")) {
+      res.status(400).json({ success: false, message: err.message.replace("FORMAT_INVALID:", "") });
+      return;
+    }
     req.log.error({ err }, "reels post video");
     res.status(500).json({ success: false, message: "Could not post video." });
   }
@@ -2069,7 +2178,18 @@ router.post("/videos/:videoId/comments", async (req: Request, res: Response) => 
   }
   try {
     await ensureReelsTables();
-    const meta = await query(`SELECT channel_id FROM reels_videos WHERE id = $1`, [videoId]);
+    const meta = await query(
+      `SELECT channel_id, comments_enabled FROM reels_videos WHERE id = $1`,
+      [videoId],
+    );
+    if (!meta.rows[0]) {
+      res.status(404).json({ success: false, message: "Video not found" });
+      return;
+    }
+    if (meta.rows[0].comments_enabled === false) {
+      res.status(403).json({ success: false, message: "Comments are turned off for this video." });
+      return;
+    }
     const channelId = Number(meta.rows[0]?.channel_id);
     let replyParentId: number | null = null;
     if (parentId != null && Number(parentId) > 0) {
@@ -2208,6 +2328,18 @@ router.post("/videos/:videoId/share", async (req: Request, res: Response) => {
   if (userId && !assertSameUser(req, res, userId)) return;
   try {
     await ensureReelsTables();
+    const meta = await query(
+      `SELECT shares_enabled, share_slug, video_format FROM reels_videos WHERE id = $1`,
+      [videoId],
+    );
+    if (!meta.rows[0]) {
+      res.status(404).json({ success: false, message: "Video not found" });
+      return;
+    }
+    if (meta.rows[0].shares_enabled === false) {
+      res.status(403).json({ success: false, message: "Sharing is turned off for this video." });
+      return;
+    }
     await query(`INSERT INTO reels_video_shares (video_id, user_id) VALUES ($1, $2)`, [videoId, userId ?? null]);
     await query(`UPDATE reels_videos SET share_count = share_count + 1 WHERE id = $1`, [videoId]);
     await query(
@@ -2215,12 +2347,17 @@ router.post("/videos/:videoId/share", async (req: Request, res: Response) => {
        FROM reels_videos v WHERE v.id = $1 AND c.id = v.channel_id`,
       [videoId],
     );
-    const slugRow = await query(`SELECT share_slug FROM reels_videos WHERE id = $1`, [videoId]);
-    const shareRef = reelsVideoPublicShareRef({
-      id: videoId,
-      share_slug: (slugRow.rows[0] as { share_slug?: string } | undefined)?.share_slug,
+    const row = meta.rows[0] as { share_slug?: string; video_format?: string };
+    const slug = reelsVideoSlugOnlyRef(row);
+    const shareRef = reelsVideoPublicShareRef({ id: videoId, share_slug: row.share_slug });
+    const shareUrl = buildReelsVideoShareUrl(shareRef);
+    const vibeShareUrl = row.video_format === "vibe" && slug ? buildVibeShareUrl(slug) : undefined;
+    res.json({
+      success: true,
+      shareUrl: vibeShareUrl ?? shareUrl,
+      watchUrl: shareUrl,
+      vibeShareUrl,
     });
-    res.json({ success: true, shareUrl: buildReelsVideoShareUrl(shareRef) });
   } catch (err) {
     req.log.error({ err }, "reels share");
     res.status(500).json({ success: false, message: "Server error" });
@@ -2234,6 +2371,13 @@ router.patch("/videos/:videoId", async (req: Request, res: Response) => {
     title?: string;
     description?: string;
     hashtags?: string;
+    videoFormat?: string;
+    commentsEnabled?: boolean;
+    sharesEnabled?: boolean;
+    editorMetadata?: unknown;
+    musicTitle?: string;
+    musicArtist?: string;
+    musicUrl?: string;
   };
   const userId = Number(body.userId);
   if (!userId || !assertSameUser(req, res, userId)) return;
@@ -2247,7 +2391,8 @@ router.patch("/videos/:videoId", async (req: Request, res: Response) => {
   try {
     await ensureReelsTables();
     const owner = await query(
-      `SELECT v.id, v.title, v.description, v.hashtags, c.handle, c.avatar_url, c.updated_at
+      `SELECT v.id, v.title, v.description, v.hashtags, v.duration_seconds,
+              c.handle, c.avatar_url, c.updated_at
        FROM reels_videos v
        JOIN reels_channels c ON c.id = v.channel_id
        WHERE v.id = $1 AND c.user_id = $2`,
@@ -2267,11 +2412,51 @@ router.patch("/videos/:videoId", async (req: Request, res: Response) => {
       res.status(403).json({ success: false, message: quickText.reason ?? "Sexual or nudity content is not allowed." });
       return;
     }
+
+    const sets: string[] = ["title = $1", "description = $2", "hashtags = $3"];
+    const params: unknown[] = [nextTitle, nextDescription || null, nextHashtags];
+    let idx = 4;
+
+    if (body.videoFormat != null) {
+      const dur = Number(current.duration_seconds ?? 0);
+      const fmt = resolveVideoFormat(dur, String(body.videoFormat));
+      const fmtErr = validateVideoFormatChoice(dur, fmt);
+      if (fmtErr) {
+        res.status(400).json({ success: false, message: fmtErr });
+        return;
+      }
+      sets.push(`video_format = $${idx++}`);
+      params.push(fmt);
+    }
+    if (body.commentsEnabled !== undefined) {
+      sets.push(`comments_enabled = $${idx++}`);
+      params.push(parseBoolFlag(body.commentsEnabled, true));
+    }
+    if (body.sharesEnabled !== undefined) {
+      sets.push(`shares_enabled = $${idx++}`);
+      params.push(parseBoolFlag(body.sharesEnabled, true));
+    }
+    if (body.editorMetadata !== undefined) {
+      sets.push(`editor_metadata = $${idx++}::jsonb`);
+      params.push(body.editorMetadata ? JSON.stringify(parseEditorMetadata(body.editorMetadata)) : null);
+    }
+    if (body.musicTitle !== undefined) {
+      sets.push(`music_title = $${idx++}`);
+      params.push(String(body.musicTitle ?? "").trim().slice(0, 200) || null);
+    }
+    if (body.musicArtist !== undefined) {
+      sets.push(`music_artist = $${idx++}`);
+      params.push(String(body.musicArtist ?? "").trim().slice(0, 200) || null);
+    }
+    if (body.musicUrl !== undefined) {
+      sets.push(`music_url = $${idx++}`);
+      params.push(String(body.musicUrl ?? "").trim().slice(0, 2000) || null);
+    }
+
+    params.push(videoId);
     await query(
-      `UPDATE reels_videos
-       SET title = $1, description = $2, hashtags = $3
-       WHERE id = $4`,
-      [nextTitle, nextDescription || null, nextHashtags, videoId],
+      `UPDATE reels_videos SET ${sets.join(", ")} WHERE id = $${idx}`,
+      params,
     );
     const refreshed = await query(
       `SELECT v.*, c.handle AS channel_handle, c.display_name AS channel_display_name,

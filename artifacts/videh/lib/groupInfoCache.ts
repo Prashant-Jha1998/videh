@@ -1,4 +1,4 @@
-/** In-memory cache so Group Info opens instantly (WhatsApp-style). */
+/** In-memory cache so Group Info opens instantly (standard). */
 
 export type CachedGroupMember = {
   id: number;

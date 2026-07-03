@@ -66,7 +66,7 @@ function applyVariablesToButtons(buttons: TemplateButton[], values: string[]): T
   });
 }
 
-/** Structured WhatsApp-style template payload for Videh inbox delivery. */
+/** Structured standard template payload for Videh inbox delivery. */
 export function buildBusinessTemplatePayload(
   tmpl: MessageTemplateRow,
   apiBody: SendMessageBody,

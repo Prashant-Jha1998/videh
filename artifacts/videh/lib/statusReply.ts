@@ -80,7 +80,7 @@ export function mapApiStatusRow(
     timestamp: new Date(String(s.created_at)).getTime(),
     expiresAt: s.expires_at ? new Date(String(s.expires_at)).getTime() : undefined,
     viewed: true,
-    backgroundColor: (s.background_color as string | undefined) ?? "#5B4FE8",
+    backgroundColor: (s.background_color as string | undefined) ?? "#059669",
   };
 }
 

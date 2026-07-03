@@ -37,10 +37,10 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 151,
+      "versionCode": 152,
       "androidStatusBar": {
-        "backgroundColor": "#5B4FE8",
-        "barStyle": "light-content",
+        "backgroundColor": "#FFFFFF",
+        "barStyle": "dark-content",
         "translucent": true
       },
       "adaptiveIcon": {
@@ -136,7 +136,7 @@
     },
     "notification": {
       "icon": "./assets/images/videh_icon_foreground.png",
-      "color": "#5B4FE8"
+      "color": "#059669"
     },
     "plugins": [
       [
@@ -178,7 +178,7 @@
         "expo-notifications",
         {
           "icon": "./assets/images/videh_icon_foreground.png",
-          "color": "#5B4FE8",
+          "color": "#059669",
           "defaultChannel": "messages",
           "sounds": [
             "./assets/sounds/msg_default.wav",

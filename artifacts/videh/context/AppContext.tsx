@@ -203,7 +203,7 @@ export interface Message {
   replySenderName?: string;
   replyType?: string;
   replyQuotedSenderId?: string;
-  /** Story/status this message replies to (WhatsApp-style). */
+  /** Story/status this message replies to (standard). */
   statusReplyId?: string;
   statusReplyOwnerId?: string;
   statusReplyOwnerName?: string;
@@ -224,7 +224,7 @@ export interface Message {
   expiresAt?: number;
   /** User chose to keep this message past the disappear timer. */
   isKept?: boolean;
-  /** WhatsApp-style business API template (image, body, footer, buttons). */
+  /** standard business API template (image, body, footer, buttons). */
   templatePayload?: BusinessTemplatePayload;
   /** Server auto-translated text for this viewer (group chats). */
   translatedText?: string;
@@ -1174,7 +1174,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           boostVerificationNote: s.boost_verification_note ?? undefined,
           editorData,
           viewed: Boolean(s.viewed),
-          backgroundColor: s.background_color ?? "#5B4FE8",
+          backgroundColor: s.background_color ?? "#059669",
         };
       }).filter(isStatusActive);
       setStatuses(mapped);
@@ -3545,7 +3545,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       userAvatar: u.avatar,
       content, type, mediaUrl, timestamp: Date.now(), expiresAt: Date.now() + STATUS_LIFETIME_MS, viewed: false,
       editorData,
-      backgroundColor: bg ?? "#5B4FE8",
+      backgroundColor: bg ?? "#059669",
     };
     setStatuses((prev) => [newStatus, ...prev].filter(isStatusActive));
 
@@ -3569,7 +3569,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             userId: u.dbId,
             content,
             type,
-            backgroundColor: bg ?? "#5B4FE8",
+            backgroundColor: bg ?? "#059669",
             mediaUrl: uploadedMediaUrl,
             videoDurationMs: type === "video" ? videoDurationMs ?? null : undefined,
             editorData: uploadedEditorData,

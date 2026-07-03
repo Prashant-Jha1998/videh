@@ -2,26 +2,26 @@ import { VIDEH_BRAND } from "@/lib/brandColors";
 
 const colors = {
   light: {
-    text: "#111111",
+    text: "#111B21",
     tint: VIDEH_BRAND.primary,
 
     background: "#FFFFFF",
-    foreground: "#111111",
+    foreground: "#111B21",
 
-    card: "#F7F8F9",
-    cardForeground: "#111111",
+    card: "#FFFFFF",
+    cardForeground: "#111B21",
 
     primary: VIDEH_BRAND.primary,
     primaryForeground: "#FFFFFF",
 
     secondary: "#F0F2F5",
-    secondaryForeground: "#1a1a1a",
+    secondaryForeground: "#111B21",
 
     muted: "#F0F2F5",
     mutedForeground: "#667781",
 
     accent: VIDEH_BRAND.accentTint,
-    accentForeground: VIDEH_BRAND.primary,
+    accentForeground: VIDEH_BRAND.primaryDark,
 
     destructive: "#ef4444",
     destructiveForeground: "#ffffff",
@@ -33,7 +33,9 @@ const colors = {
     chatBubbleReceived: VIDEH_BRAND.receivedBubbleLight,
     chatBackground: VIDEH_BRAND.chatBgLight,
     onlineGreen: VIDEH_BRAND.online,
-    headerBg: VIDEH_BRAND.primary,
+    headerBg: "#FFFFFF",
+    headerTitle: VIDEH_BRAND.primary,
+    headerIcon: "#111B21",
     tabBar: "#FFFFFF",
     callBg: "#1A1A1A",
     statusRing: VIDEH_BRAND.primaryLight,
@@ -72,6 +74,8 @@ const colors = {
     chatBackground: VIDEH_BRAND.chatBgDark,
     onlineGreen: VIDEH_BRAND.online,
     headerBg: VIDEH_BRAND.cardDark,
+    headerTitle: "#E9EDEF",
+    headerIcon: "#E9EDEF",
     tabBar: VIDEH_BRAND.cardDark,
     callBg: VIDEH_BRAND.chatBgDark,
     statusRing: VIDEH_BRAND.primaryLight,

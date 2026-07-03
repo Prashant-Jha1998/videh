@@ -4,6 +4,27 @@ import type { ShareIntent } from "expo-share-intent";
 import { ensureUploadableFileUri } from "@/lib/prepareFileUpload";
 
 const KEY = "videh_incoming_share_v1";
+/** Pending share older than this is discarded (prevents reopening Send to after normal launch). */
+const SHARE_TTL_MS = 5 * 60 * 1000;
+
+let shareFlowConsumed = false;
+
+export function resetShareFlowConsumed(): void {
+  shareFlowConsumed = false;
+}
+
+export function markShareFlowConsumed(): void {
+  shareFlowConsumed = true;
+}
+
+export function isShareFlowConsumed(): boolean {
+  return shareFlowConsumed;
+}
+
+export function isFreshIncomingShare(payload: IncomingSharePayload | null): boolean {
+  if (!payload?.receivedAt) return false;
+  return Date.now() - payload.receivedAt < SHARE_TTL_MS;
+}
 
 export type IncomingShareFile = {
   path: string;
@@ -46,7 +67,7 @@ function dedupeShareText(text: string): string {
   return result;
 }
 
-function isWhatsAppMediaPlaceholder(text?: string): boolean {
+export function isShareMediaPlaceholder(text?: string): boolean {
   const t = text?.trim() ?? "";
   if (!t) return false;
   return /^photo from .+$/i.test(t)
@@ -117,12 +138,27 @@ export async function stashIncomingShare(
 
 /** Store share immediately (copy files later on share-to-chat screen). */
 export async function stashIncomingShareQuick(intent: ShareIntent): Promise<void> {
+  resetShareFlowConsumed();
   await stashIncomingShare(intent, { copyFiles: false });
 }
 
 export async function hasPendingIncomingShare(): Promise<boolean> {
+  if (shareFlowConsumed) return false;
   const peek = await peekIncomingShare();
-  return payloadHasShareableContent(peek);
+  if (!payloadHasShareableContent(peek)) return false;
+  if (!isFreshIncomingShare(peek)) {
+    await clearIncomingShare();
+    return false;
+  }
+  return true;
+}
+
+/** Drop expired share payloads (normal app open, not a new share). */
+export async function clearStaleIncomingShare(): Promise<void> {
+  const peek = await peekIncomingShare();
+  if (peek && !isFreshIncomingShare(peek)) {
+    await clearIncomingShare();
+  }
 }
 
 /** Wait until ShareIntentBridge stashes payload (cold start can take a few seconds). */
@@ -139,13 +175,25 @@ export async function clearIncomingShare(): Promise<void> {
   await AsyncStorage.removeItem(KEY);
 }
 
+export async function finishIncomingShareFlow(): Promise<void> {
+  markShareFlowConsumed();
+  await clearIncomingShare();
+}
+
 /** Wait for ShareIntentBridge to finish stashing (cold start / GPay can be slow). */
 export async function waitForIncomingShare(maxMs = 10_000): Promise<IncomingSharePayload | null> {
   const started = Date.now();
   while (Date.now() - started < maxMs) {
+    if (shareFlowConsumed) return null;
     const peek = await peekIncomingShare();
-    if (peek && payloadHasShareableContent(peek)) return peek;
-    await new Promise((r) => setTimeout(r, 200));
+    if (peek && payloadHasShareableContent(peek)) {
+      if (!isFreshIncomingShare(peek)) {
+        await clearIncomingShare();
+        return null;
+      }
+      return peek;
+    }
+    await new Promise((r) => setTimeout(r, 80));
   }
   return null;
 }

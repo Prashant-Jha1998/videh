@@ -25,7 +25,7 @@ export async function ensureGroupInviteTables(): Promise<void> {
   tablesEnsured = true;
 }
 
-/** WhatsApp-style opaque token (not a numeric group id). */
+/** standard opaque token (not a numeric group id). */
 export function makeGroupInviteToken(): string {
   return randomBytes(16).toString("base64url").replace(/[^A-Za-z0-9]/g, "").slice(0, 22);
 }

@@ -190,7 +190,7 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
     maxWidth: 96,
   },
   actionLblGreen: {
-    color: "#5B4FE8",
+    color: "#059669",
     fontSize: 11,
     fontFamily: "Inter_600SemiBold",
     textAlign: "center",

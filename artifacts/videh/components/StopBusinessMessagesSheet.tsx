@@ -113,11 +113,11 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   learnMore: {
-    color: "#5B4FE8",
+    color: "#059669",
     fontFamily: "Inter_500Medium",
   },
   stopBtn: {
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
     borderRadius: 28,
     paddingVertical: 14,
     alignItems: "center",

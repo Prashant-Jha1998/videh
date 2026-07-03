@@ -55,6 +55,14 @@ export function reelsVideoPublicShareRef(
   return slug || String(row.id ?? "");
 }
 
+/** Slug-only ref (never returns numeric id). */
+export function reelsVideoSlugOnlyRef(
+  row: { share_slug?: unknown },
+): string | null {
+  const slug = String(row.share_slug ?? "").trim();
+  return slug || null;
+}
+
 /** Resolve numeric id from public share ref (slug or legacy numeric). */
 export async function resolveReelsVideoIdFromRef(ref: string): Promise<number | null> {
   const trimmed = String(ref ?? "").trim();
@@ -75,6 +83,15 @@ export function buildReelsVideoShareUrl(shareRef: string | number): string {
 
 export function buildReelsVideoDeepLink(shareRef: string | number): string {
   return `videh://reels/watch/${encodeURIComponent(String(shareRef))}`;
+}
+
+/** Short-form (Vibe) share URL — dedicated /v/<slug> path, slug only. */
+export function buildVibeShareUrl(slug: string): string {
+  return `${videoPublicBase()}/v/${encodeURIComponent(slug)}`;
+}
+
+export function buildVibeDeepLink(slug: string): string {
+  return `videh://vibe/${encodeURIComponent(slug)}`;
 }
 
 /** Public channel page — opens in Videh Video web or app. */

@@ -153,13 +153,13 @@ export default function KhataPickChatScreen() {
 
       <Pressable style={styles.addCard} onPress={() => setShowAdd(true)}>
         <View style={styles.addIcon}>
-          <Ionicons name="book-outline" size={22} color="#5B4FE8" />
+          <Ionicons name="book-outline" size={22} color="#059669" />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.addTitle}>New ledger (not on Videh)</Text>
           <Text style={styles.addMeta}>Enter a name to create a separate ledger</Text>
         </View>
-        <Ionicons name="add-circle" size={26} color="#5B4FE8" />
+        <Ionicons name="add-circle" size={26} color="#059669" />
       </Pressable>
 
       <SectionList
@@ -173,7 +173,7 @@ export default function KhataPickChatScreen() {
         renderSectionFooter={({ section }) => {
           if (section.title !== "Not on Videh") return null;
           if (loadingNotebooks) {
-            return <ActivityIndicator color="#5B4FE8" style={{ marginVertical: 16 }} />;
+            return <ActivityIndicator color="#059669" style={{ marginVertical: 16 }} />;
           }
           if (section.data.length === 0) {
             return (
@@ -193,7 +193,7 @@ export default function KhataPickChatScreen() {
               <Ionicons
                 name={item.kind === "notebook" ? "book-outline" : item.isGroup ? "people" : "person"}
                 size={20}
-                color="#5B4FE8"
+                color="#059669"
               />
             </View>
             <View style={{ flex: 1 }}>
@@ -293,7 +293,7 @@ const styles = StyleSheet.create({
   addTitle: { color: "#E9EDEF", fontSize: 15, fontWeight: "700" },
   addMeta: { color: "#8696A0", fontSize: 12, marginTop: 2 },
   sectionTitle: {
-    color: "#5B4FE8",
+    color: "#059669",
     fontSize: 13,
     fontWeight: "700",
     textTransform: "uppercase",
@@ -349,7 +349,7 @@ const styles = StyleSheet.create({
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
   cancelText: { color: "#8696A0", fontSize: 16, fontWeight: "600" },
   saveBtn: {
-    backgroundColor: "#5B4FE8",
+    backgroundColor: "#059669",
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 20,

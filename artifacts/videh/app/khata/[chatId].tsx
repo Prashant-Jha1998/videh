@@ -522,7 +522,7 @@ export default function KhataScreen() {
       )}
 
       {loading ? (
-        <ActivityIndicator color="#5B4FE8" style={{ marginTop: 40 }} />
+        <ActivityIndicator color="#059669" style={{ marginTop: 40 }} />
       ) : screenTab === "balances" ? (
         <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
           {pairwise.length > 0 ? (
@@ -588,7 +588,7 @@ export default function KhataScreen() {
                   {item.note ? <Text style={styles.noteText}>{item.note}</Text> : null}
                   {item.reminder_at && !item.paid && !item.reminder_sent ? (
                     <View style={styles.reminderBadge}>
-                      <Ionicons name="alarm-outline" size={12} color="#5B4FE8" />
+                      <Ionicons name="alarm-outline" size={12} color="#059669" />
                       <Text style={styles.reminderBadgeTxt}>
                         Reminder {formatReminderLabel(new Date(item.reminder_at))}
                       </Text>
@@ -602,7 +602,7 @@ export default function KhataScreen() {
                 <View style={{ gap: 8 }}>
                   {!item.paid && (
                     <Pressable onPress={() => markPaid(item)} style={styles.payBtn}>
-                      <Ionicons name="checkmark-circle" size={28} color="#5B4FE8" />
+                      <Ionicons name="checkmark-circle" size={28} color="#059669" />
                     </Pressable>
                   )}
                   <Pressable onPress={() => deleteEntry(item.id)}>
@@ -642,7 +642,7 @@ export default function KhataScreen() {
                     }}
                     style={styles.changeBtn}
                   >
-                    <Ionicons name="create-outline" size={16} color="#5B4FE8" />
+                    <Ionicons name="create-outline" size={16} color="#059669" />
                     <Text style={styles.changeBtnTxt}>Change people or add manual name</Text>
                   </Pressable>
                 </>
@@ -673,7 +673,7 @@ export default function KhataScreen() {
                     }}
                     style={styles.changeBtn}
                   >
-                    <Ionicons name="create-outline" size={16} color="#5B4FE8" />
+                    <Ionicons name="create-outline" size={16} color="#059669" />
                     <Text style={styles.changeBtnTxt}>Change creditor or manual name</Text>
                   </Pressable>
                 </>
@@ -777,8 +777,8 @@ export default function KhataScreen() {
                 <Switch
                   value={reminderEnabled}
                   onValueChange={setReminderEnabled}
-                  trackColor={{ false: "#3B4A54", true: "#5B4FE880" }}
-                  thumbColor={reminderEnabled ? "#5B4FE8" : "#8696A0"}
+                  trackColor={{ false: "#3B4A54", true: "#05966980" }}
+                  thumbColor={reminderEnabled ? "#059669" : "#8696A0"}
                 />
               </View>
 
@@ -791,12 +791,12 @@ export default function KhataScreen() {
                       display="compact"
                       minimumDate={new Date()}
                       themeVariant="dark"
-                      accentColor="#5B4FE8"
+                      accentColor="#059669"
                       onChange={(_, d) => { if (d) setReminderAt(d); }}
                     />
                   ) : (
                     <Pressable style={styles.pickerRow} onPress={() => setShowReminderDatePicker(true)}>
-                      <Ionicons name="calendar-outline" size={20} color="#5B4FE8" />
+                      <Ionicons name="calendar-outline" size={20} color="#059669" />
                       <Text style={styles.pickerRowTxt}>{formatReminderLabel(reminderAt)}</Text>
                       <Ionicons name="chevron-forward" size={18} color="#667781" />
                     </Pressable>
@@ -843,19 +843,19 @@ const styles = StyleSheet.create({
   summaryText: { color: "#F0C040", fontSize: 14, fontWeight: "600" },
   tabs: { flexDirection: "row", backgroundColor: "#1E1D2E", paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
   tab: { flex: 1, paddingVertical: 8, borderRadius: 20, alignItems: "center", backgroundColor: "#2A2838" },
-  tabActive: { backgroundColor: "#5B4FE8" },
+  tabActive: { backgroundColor: "#059669" },
   tabTxt: { color: "#8696A0", fontSize: 14, fontWeight: "600" },
   tabTxtActive: { color: "#fff" },
   subTabs: { flexDirection: "row", paddingHorizontal: 16, paddingTop: 8, gap: 8 },
   subTab: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: "#2A2838" },
-  subTabActive: { backgroundColor: "#5B4FE830" },
+  subTabActive: { backgroundColor: "#05966930" },
   subTabTxt: { color: "#8696A0", fontSize: 13, fontWeight: "600" },
-  subTabTxtActive: { color: "#5B4FE8" },
+  subTabTxtActive: { color: "#059669" },
   sectionTitle: { color: "#E9EEF0", fontSize: 15, fontWeight: "700", marginTop: 4 },
   balanceCard: { backgroundColor: "#1E1D2E", borderRadius: 12, padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   balanceMain: { color: "#E9EEF0", fontSize: 15, fontWeight: "600", flex: 1, marginRight: 8 },
-  balanceAmt: { color: "#5B4FE8", fontSize: 16, fontWeight: "800" },
-  positive: { color: "#5B4FE8" },
+  balanceAmt: { color: "#059669", fontSize: 16, fontWeight: "800" },
+  positive: { color: "#059669" },
   negative: { color: "#F0C040" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
   emptyText: { color: "#E9EEF0", fontSize: 18, fontWeight: "600" },
@@ -864,11 +864,11 @@ const styles = StyleSheet.create({
   cardPaid: { opacity: 0.65 },
   debtorName: { color: "#E9EEF0", fontSize: 15, fontWeight: "700" },
   creditorName: { color: "#8696A0", fontSize: 15, fontWeight: "600" },
-  amountText: { color: "#5B4FE8", fontSize: 20, fontWeight: "800", marginVertical: 4 },
+  amountText: { color: "#059669", fontSize: 20, fontWeight: "800", marginVertical: 4 },
   noteText: { color: "#8696A0", fontSize: 14, marginBottom: 4 },
   metaText: { color: "#555E65", fontSize: 12 },
-  paidBadge: { backgroundColor: "#5B4FE820", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  paidBadgeTxt: { color: "#5B4FE8", fontSize: 12, fontWeight: "600" },
+  paidBadge: { backgroundColor: "#05966920", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  paidBadgeTxt: { color: "#059669", fontSize: 12, fontWeight: "600" },
   payBtn: {},
   modalRoot: { flex: 1 },
   keyboardAvoider: { flex: 1, justifyContent: "flex-end" },
@@ -879,20 +879,20 @@ const styles = StyleSheet.create({
   pickerHint: { color: "#667781", fontSize: 12, marginTop: 4 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   memberChip: { backgroundColor: "#2A2838", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18 },
-  memberChipActive: { backgroundColor: "#5B4FE8" },
+  memberChipActive: { backgroundColor: "#059669" },
   memberChipText: { color: "#8696A0", fontSize: 13, fontWeight: "600", maxWidth: 140 },
   memberChipTextActive: { color: "#fff" },
   input: { backgroundColor: "#2A2838", color: "#E9EEF0", borderRadius: 10, padding: 12, fontSize: 15 },
-  saveBtn: { backgroundColor: "#5B4FE8", borderRadius: 12, padding: 14, alignItems: "center", marginTop: 20 },
+  saveBtn: { backgroundColor: "#059669", borderRadius: 12, padding: 14, alignItems: "center", marginTop: 20 },
   saveBtnTxt: { color: "#fff", fontSize: 16, fontWeight: "700" },
   autoBox: { backgroundColor: "#2A2838", borderRadius: 12, padding: 14, gap: 10 },
   autoRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
   autoLabel: { color: "#8696A0", fontSize: 13 },
   autoValue: { color: "#E9EDEF", fontSize: 16, fontWeight: "700", flex: 1, textAlign: "right" },
   changeBtn: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", marginTop: 8, marginBottom: 4 },
-  changeBtnTxt: { color: "#5B4FE8", fontSize: 14, fontWeight: "600" },
+  changeBtnTxt: { color: "#059669", fontSize: 14, fontWeight: "600" },
   backAutoBtn: { marginBottom: 8 },
-  backAutoTxt: { color: "#5B4FE8", fontSize: 13, fontWeight: "600" },
+  backAutoTxt: { color: "#059669", fontSize: 13, fontWeight: "600" },
   reminderRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 16 },
   reminderTitle: { color: "#E9EDEF", fontSize: 15, fontWeight: "700" },
   reminderSub: { color: "#8696A0", fontSize: 12, lineHeight: 17, marginTop: 4 },
@@ -920,7 +920,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 2,
   },
-  reminderBadgeTxt: { color: "#5B4FE8", fontSize: 12, fontWeight: "600" },
+  reminderBadgeTxt: { color: "#059669", fontSize: 12, fontWeight: "600" },
   partyBlock: { marginTop: 4 },
   modeRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
   modeChip: {
@@ -932,7 +932,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "transparent",
   },
-  modeChipActive: { backgroundColor: "rgba(0,168,132,0.2)", borderColor: "#5B4FE8" },
+  modeChipActive: { backgroundColor: "rgba(0,168,132,0.2)", borderColor: "#059669" },
   modeChipText: { color: "#8696A0", fontSize: 12, fontWeight: "700" },
   modeChipTextActive: { color: "#00E5B0" },
   manualBanner: {
@@ -952,7 +952,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
   },
-  quickBtnText: { color: "#5B4FE8", fontSize: 12, fontWeight: "700" },
+  quickBtnText: { color: "#059669", fontSize: 12, fontWeight: "700" },
   manualTag: {
     backgroundColor: "#3B4A54",
     paddingHorizontal: 6,

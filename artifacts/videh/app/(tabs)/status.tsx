@@ -123,12 +123,12 @@ export default function StatusScreen() {
               style={styles.headerBtn}
               onPress={() => { setSearching(false); setSearchQuery(""); }}
             >
-              <Ionicons name="arrow-back" size={22} color="#fff" />
+              <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
             </TouchableOpacity>
             <TextInput
-              style={styles.searchInput}
+              style={[styles.searchInput, { color: colors.headerIconColor }]}
               placeholder={t("status.searchPlaceholder")}
-              placeholderTextColor="rgba(255,255,255,0.65)"
+              placeholderTextColor={colors.headerSearchPlaceholder}
               value={searchQuery}
               onChangeText={setSearchQuery}
               autoFocus
@@ -138,19 +138,19 @@ export default function StatusScreen() {
           </View>
         ) : (
           <>
-            <Text style={styles.headerTitle}>{t("status.title")}</Text>
+            <Text style={[styles.headerTitle, { color: colors.headerTitleColor }]}>{t("status.title")}</Text>
             <View style={styles.headerRight}>
               <TouchableOpacity
                 style={styles.headerBtn}
                 onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSearching(true); }}
               >
-                <Ionicons name="search-outline" size={22} color="#fff" />
+                <Ionicons name="search-outline" size={22} color={colors.headerIconColor} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.headerBtn}
                 onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMenuOpen(true); }}
               >
-                <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+                <Ionicons name="ellipsis-vertical" size={22} color={colors.headerIconColor} />
               </TouchableOpacity>
             </View>
           </>
@@ -348,10 +348,10 @@ function StatusGroupRow({ group, colors, t, onPress }: { group: StatusGroup; col
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 10 },
-  headerTitle: { color: "#fff", fontSize: 22, fontFamily: "Inter_700Bold" },
+  headerTitle: { fontSize: 22, fontFamily: "Inter_700Bold" },
   headerRight: { flexDirection: "row" },
   searchHeader: { flex: 1, flexDirection: "row", alignItems: "center", gap: 4 },
-  searchInput: { flex: 1, color: "#fff", fontSize: 17, fontFamily: "Inter_400Regular", paddingVertical: 4 },
+  searchInput: { flex: 1, fontSize: 17, fontFamily: "Inter_400Regular", paddingVertical: 4 },
   headerBtn: { padding: 6 },
   myStatus: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: 2 },
   myStatusLeft: { flexDirection: "row", alignItems: "center", gap: 14 },

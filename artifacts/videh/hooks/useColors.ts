@@ -11,6 +11,9 @@ export function useColors(): ColorScheme & {
   appThemeColors: [string, string];
   chatBubbleSent: string;
   chatBubbleReceived: string;
+  headerTitleColor: string;
+  headerIconColor: string;
+  headerSearchPlaceholder: string;
 } {
   const scheme = useColorScheme();
   const { appTheme, themeAppearance, customBubbleOverride } = useUiPreferences();
@@ -20,13 +23,17 @@ export function useColors(): ColorScheme & {
     : colors.light;
   const [primary, secondary] = appTheme.colors;
   const bubbles = resolveBubbles(themeAppearance, isDark, customBubbleOverride);
+  const headerOnLight = !isDark;
   return {
     ...palette,
     tint: primary,
     primary,
-    accent: primary,
-    accentForeground: "#FFFFFF",
-    headerBg: isDark ? palette.headerBg : primary,
+    accent: headerOnLight ? palette.accent : primary,
+    accentForeground: headerOnLight ? palette.accentForeground : "#FFFFFF",
+    headerBg: palette.headerBg,
+    headerTitleColor: headerOnLight ? primary : palette.headerTitle,
+    headerIconColor: palette.headerIcon,
+    headerSearchPlaceholder: headerOnLight ? "rgba(102,119,129,0.85)" : "rgba(255,255,255,0.65)",
     statusRing: primary,
     onlineGreen: primary,
     chatBubbleSent: bubbles.sent,

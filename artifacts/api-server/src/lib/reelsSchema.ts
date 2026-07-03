@@ -93,6 +93,13 @@ export async function ensureReelsAdminColumns(): Promise<void> {
   await query(`ALTER TABLE reels_channels ADD COLUMN IF NOT EXISTS monetization_status VARCHAR(24) NOT NULL DEFAULT 'not_eligible'`);
   await query(`ALTER TABLE reels_channels ADD COLUMN IF NOT EXISTS monetization_eligible BOOLEAN NOT NULL DEFAULT FALSE`);
   await query(`ALTER TABLE reels_videos ADD COLUMN IF NOT EXISTS share_count INTEGER NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE reels_videos ADD COLUMN IF NOT EXISTS video_format VARCHAR(12) NOT NULL DEFAULT 'watch'`);
+  await query(`ALTER TABLE reels_videos ADD COLUMN IF NOT EXISTS comments_enabled BOOLEAN NOT NULL DEFAULT TRUE`);
+  await query(`ALTER TABLE reels_videos ADD COLUMN IF NOT EXISTS shares_enabled BOOLEAN NOT NULL DEFAULT TRUE`);
+  await query(`ALTER TABLE reels_videos ADD COLUMN IF NOT EXISTS editor_metadata JSONB`);
+  await query(`ALTER TABLE reels_videos ADD COLUMN IF NOT EXISTS music_title VARCHAR(200)`);
+  await query(`ALTER TABLE reels_videos ADD COLUMN IF NOT EXISTS music_artist VARCHAR(200)`);
+  await query(`ALTER TABLE reels_videos ADD COLUMN IF NOT EXISTS music_url TEXT`);
   await query(`ALTER TABLE reels_videos ADD COLUMN IF NOT EXISTS fraud_score NUMERIC(6, 2) NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE reels_videos ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'published'`);
   await query(`ALTER TABLE reels_videos ADD COLUMN IF NOT EXISTS play_enabled BOOLEAN NOT NULL DEFAULT TRUE`);

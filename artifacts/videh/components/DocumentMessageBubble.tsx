@@ -52,7 +52,7 @@ export function DocumentMessageBubble({ item, isMe, colors, onPress, onSaveAs, o
   const bubbleBg = bubbleBackground ?? (isMe ? "#E0DCFF" : "#FFFFFF");
   const titleColor = textColorForBubbleBackground(bubbleBg, { darkText: colors.foreground });
   const metaColor = mutedTextColorForBubbleBackground(bubbleBg);
-  const ringColor = "#5B4FE8";
+  const ringColor = "#059669";
 
   let metaLine = richDocumentMetaLine(filename, item.fileSizeBytes, pageCount);
   if (failed) metaLine = "Couldn't send · Tap to retry";

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Video } from "expo-av";
+import { ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -9,6 +9,7 @@ import {
   Image,
   Platform,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -17,6 +18,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { ManualImageCropModal } from "@/components/ManualImageCropModal";
+import { VideoEditorPanel, defaultEditorMetadata } from "@/components/VideoEditorPanel";
+import { VibeSoundPicker } from "@/components/VibeSoundPicker";
 import { cropImageRect } from "@/lib/imageEdit";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
@@ -34,6 +37,12 @@ import {
   type ReelsHashtagStat,
 } from "@/lib/reelsApi";
 import { showUploadShareDialog } from "@/lib/reelsShare";
+import {
+  VIBE_BRAND_NAME,
+  VIBE_MAX_DURATION_SECONDS,
+  type VideoFormat,
+} from "@/lib/vibeVideo";
+import type { SelectedSound, VideoEditorMetadata } from "@/lib/videoEditor";
 
 export default function ReelsUploadScreen() {
   const colors = useColors();
@@ -55,6 +64,18 @@ export default function ReelsUploadScreen() {
   const [hashtagSuggestions, setHashtagSuggestions] = useState<ReelsHashtagStat[]>([]);
   const [hashtagSuggestLoading, setHashtagSuggestLoading] = useState(false);
   const suggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [videoFormat, setVideoFormat] = useState<VideoFormat>("watch");
+  const [commentsEnabled, setCommentsEnabled] = useState(true);
+  const [sharesEnabled, setSharesEnabled] = useState(true);
+  const [editor, setEditor] = useState<VideoEditorMetadata>(defaultEditorMetadata());
+  const [selectedSound, setSelectedSound] = useState<SelectedSound | null>(null);
+  const [soundPickerVisible, setSoundPickerVisible] = useState(false);
+
+  useEffect(() => {
+    if (durationSec > 0) {
+      setVideoFormat(durationSec <= VIBE_MAX_DURATION_SECONDS ? "vibe" : "watch");
+    }
+  }, [durationSec]);
 
   useEffect(() => {
     if (!hashtagFocused) {
@@ -143,6 +164,10 @@ export default function ReelsUploadScreen() {
 
   const post = async () => {
     if (!user?.dbId || !videoUri || title.trim().length < 2) return;
+    if (videoFormat === "vibe" && durationSec > VIBE_MAX_DURATION_SECONDS) {
+      Alert.alert("Too long for Vibe", `${VIBE_BRAND_NAME} clips must be ${VIBE_MAX_DURATION_SECONDS} seconds or shorter.`);
+      return;
+    }
     let thumbToUpload = thumbUri;
     if (!thumbToUpload) {
       setThumbPreparing(true);
@@ -165,6 +190,13 @@ export default function ReelsUploadScreen() {
         thumbnailUri: thumbToUpload ?? undefined,
         sessionToken: user.sessionToken,
         onProgress: setProgress,
+        videoFormat,
+        commentsEnabled,
+        sharesEnabled,
+        editorMetadata: editor,
+        musicTitle: selectedSound?.title ?? null,
+        musicArtist: selectedSound?.artist ?? null,
+        musicUrl: selectedSound?.audioUrl ?? null,
       });
       if (!res.success) {
         Alert.alert(
@@ -211,7 +243,7 @@ export default function ReelsUploadScreen() {
       <TouchableOpacity style={[styles.pickBox, { borderColor: colors.border }]} onPress={pickVideo}>
         {videoUri ? (
           <>
-            <Video source={{ uri: videoUri }} style={styles.preview} useNativeControls resizeMode="contain" />
+            <Video source={{ uri: videoUri }} style={styles.preview} useNativeControls resizeMode={ResizeMode.CONTAIN} />
             <Text style={{ color: colors.mutedForeground, marginTop: 8 }}>{durationSec}s selected</Text>
           </>
         ) : (
@@ -221,6 +253,52 @@ export default function ReelsUploadScreen() {
           </>
         )}
       </TouchableOpacity>
+
+      {videoUri ? (
+        <>
+          <Text style={[styles.sectionLabel, { color: colors.foreground }]}>Format</Text>
+          <View style={styles.formatRow}>
+            {(["watch", "vibe"] as VideoFormat[]).map((fmt) => {
+              const disabled = fmt === "vibe" && durationSec > VIBE_MAX_DURATION_SECONDS;
+              const active = videoFormat === fmt;
+              return (
+                <TouchableOpacity
+                  key={fmt}
+                  disabled={disabled}
+                  style={[
+                    styles.formatChip,
+                    {
+                      borderColor: active ? colors.primary : colors.border,
+                      backgroundColor: active ? colors.primary + "18" : colors.card,
+                      opacity: disabled ? 0.45 : 1,
+                    },
+                  ]}
+                  onPress={() => setVideoFormat(fmt)}
+                >
+                  <Text style={{ color: active ? colors.primary : colors.foreground, fontFamily: "Inter_600SemiBold" }}>
+                    {fmt === "watch" ? "Watch (long)" : VIBE_BRAND_NAME}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <Text style={[styles.thumbHint, { color: colors.mutedForeground, marginBottom: 12 }]}>
+            {videoFormat === "vibe"
+              ? `Vertical ${VIBE_BRAND_NAME} · up to ${VIBE_MAX_DURATION_SECONDS}s`
+              : "Horizontal Watch · any length up to 4 hours"}
+          </Text>
+
+          <VideoEditorPanel
+            videoUri={videoUri}
+            durationSec={durationSec}
+            isVibeFormat={videoFormat === "vibe"}
+            editor={editor}
+            selectedSound={selectedSound}
+            onChange={setEditor}
+            onOpenSounds={() => setSoundPickerVisible(true)}
+          />
+        </>
+      ) : null}
 
       <Text style={[styles.sectionLabel, { color: colors.foreground }]}>Thumbnail</Text>
       <Text style={[styles.thumbHint, { color: colors.mutedForeground }]}>
@@ -300,6 +378,31 @@ export default function ReelsUploadScreen() {
         </View>
       ) : null}
 
+      <View style={[styles.toggleRow, { borderColor: colors.border }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.toggleTitle, { color: colors.foreground }]}>Allow comments</Text>
+          <Text style={[styles.toggleHint, { color: colors.mutedForeground }]}>Viewers can comment on this video</Text>
+        </View>
+        <Switch
+          value={commentsEnabled}
+          onValueChange={setCommentsEnabled}
+          trackColor={{ true: colors.primary + "80", false: colors.muted }}
+          thumbColor={commentsEnabled ? colors.primary : "#f4f3f4"}
+        />
+      </View>
+      <View style={[styles.toggleRow, { borderColor: colors.border }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.toggleTitle, { color: colors.foreground }]}>Allow sharing</Text>
+          <Text style={[styles.toggleHint, { color: colors.mutedForeground }]}>Share link & reach count</Text>
+        </View>
+        <Switch
+          value={sharesEnabled}
+          onValueChange={setSharesEnabled}
+          trackColor={{ true: colors.primary + "80", false: colors.muted }}
+          thumbColor={sharesEnabled ? colors.primary : "#f4f3f4"}
+        />
+      </View>
+
       <TouchableOpacity
         style={[styles.postBtn, { backgroundColor: colors.primary, opacity: videoUri && title.trim() && !uploading && !thumbPreparing ? 1 : 0.5 }]}
         disabled={!videoUri || title.trim().length < 2 || uploading || thumbPreparing}
@@ -323,6 +426,13 @@ export default function ReelsUploadScreen() {
         hint="Drag to position · 16:9 widescreen frame"
         onCancel={() => setThumbCropUri(null)}
         onDone={(rect) => void onThumbCropDone(rect)}
+      />
+      <VibeSoundPicker
+        visible={soundPickerVisible}
+        sessionToken={user?.sessionToken}
+        selected={selectedSound}
+        onClose={() => setSoundPickerVisible(false)}
+        onSelect={setSelectedSound}
       />
     </KeyboardAwareScrollViewCompat>
   );
@@ -389,4 +499,22 @@ const styles = StyleSheet.create({
   },
   postBtn: { flexDirection: "row", justifyContent: "center", gap: 10, paddingVertical: 16, borderRadius: 28, marginTop: 8 },
   postText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 16 },
+  formatRow: { flexDirection: "row", gap: 10, marginBottom: 6 },
+  formatChip: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+  },
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    marginBottom: 4,
+    gap: 12,
+  },
+  toggleTitle: { fontFamily: "Inter_600SemiBold", fontSize: 15 },
+  toggleHint: { fontSize: 12, marginTop: 2 },
 });

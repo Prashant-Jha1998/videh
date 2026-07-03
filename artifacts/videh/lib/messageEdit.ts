@@ -1,6 +1,6 @@
 import type { Message } from "@/context/AppContext";
 
-/** WhatsApp-style edit window after send. */
+/** standard edit window after send. */
 export const MESSAGE_EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 const NON_EDITABLE_TYPES = new Set([

@@ -5,6 +5,7 @@ export type ReelsMonetizationRules = {
   minSubscribers: number;
   minWatchHours: number;
   minPublicVideos: number;
+  minVibeViews90Days: number;
   maxFraudScore: number;
   revenueSharePercent: number;
   requireGoodStanding: boolean;
@@ -106,6 +107,7 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
     minSubscribers: 500,
     minWatchHours: 4000,
     minPublicVideos: 5,
+    minVibeViews90Days: 5_000_000,
     maxFraudScore: 25,
     revenueSharePercent: 35,
     requireGoodStanding: true,
@@ -113,6 +115,7 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
       "At least 500 subscribers on your channel",
       "At least 4,000 valid watch hours in the last 12 months",
       "At least 5 public videos on your channel",
+      "At least 5 million valid public Vibe views in the last 90 days",
       "Channel in good standing (low fraud score, no policy strikes)",
       "Videh may review your channel before ads run on your videos",
     ],
@@ -276,6 +279,7 @@ export function publicReelsRules(config: ReelsPlatformConfig) {
       minSubscribers: config.monetization.minSubscribers,
       minWatchHours: config.monetization.minWatchHours,
       minPublicVideos: config.monetization.minPublicVideos,
+      minVibeViews90Days: config.monetization.minVibeViews90Days,
     },
     playButton: { rules: config.playButton.summary },
     feed: { rules: config.feed.summary },

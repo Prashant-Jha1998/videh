@@ -1,4 +1,4 @@
-const packages = ["com.traya.prod", "com.instagram.android", "com.whatsapp"];
+const packages = ["com.traya.prod", "com.instagram.android", "com.example.messenger"];
 
 function formatReviewCount(count) {
   if (!Number.isFinite(count) || count <= 0) return "";

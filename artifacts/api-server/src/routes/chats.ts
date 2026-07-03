@@ -1490,7 +1490,7 @@ router.post("/read-all", async (req: Request, res: Response) => {
   }
 });
 
-// Recipient device ACK — message reached this user's app (WhatsApp-style double tick).
+// Recipient device ACK — message reached this user's app (standard double tick).
 router.post("/:chatId/messages/delivered", async (req: Request, res: Response) => {
   const chatIdNorm = Array.isArray(req.params.chatId) ? req.params.chatId[0]! : req.params.chatId;
   const { userId, messageIds } = req.body as { userId?: number; messageIds?: number[] };

@@ -3,7 +3,7 @@ import type { Chat, Message } from "@/context/AppContext";
 import { safeJsonParse } from "@/lib/safeJson";
 import type { CachedChatMessage, ChatMessageCacheStore } from "@/lib/chatMessageCache";
 
-/** Chat list row persisted for instant cold start (WhatsApp-style). */
+/** Chat list row persisted for instant cold start (standard). */
 export type CachedChatListRow = {
   id: string;
   name: string;
