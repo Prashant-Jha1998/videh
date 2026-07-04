@@ -459,6 +459,11 @@ async function serveChannelBrandingAsset(
 }
 
 function runChannelBrandingUpload(req: Request, res: Response, next: NextFunction): void {
+  const contentType = String(req.headers["content-type"] ?? "");
+  if (!contentType.includes("multipart/form-data")) {
+    next();
+    return;
+  }
   reelsUpload.fields([
     { name: "avatar", maxCount: 1 },
     { name: "cover", maxCount: 1 },

@@ -1238,7 +1238,7 @@ export function formatTimeAgo(iso: string | null | undefined): string {
   return `${Math.floor(days / 365)}y ago`;
 }
 
-export function updateChannelProfile(opts: {
+export async function updateChannelProfile(opts: {
   userId: number;
   sessionToken?: string;
   displayName?: string;
@@ -1247,6 +1247,25 @@ export function updateChannelProfile(opts: {
   coverUri?: string;
 }): Promise<{ success: boolean; channel?: ReelsChannel; message?: string }> {
   const { userId, sessionToken, displayName, bio, avatarUri, coverUri } = opts;
+
+  if (!avatarUri && !coverUri) {
+    const res = await fetch(reelsUrl("/channel/me", sessionToken), {
+      method: "PATCH",
+      headers: jsonAuthHeaders(sessionToken),
+      body: JSON.stringify({ userId, displayName, bio }),
+    });
+    const data = await res.json() as {
+      success: boolean;
+      channel?: ReelsChannel;
+      message?: string;
+    };
+    if (res.ok && data.success) {
+      if (data.channel) data.channel = normalizeReelsChannel(data.channel);
+      return data;
+    }
+    return { success: false, message: data.message ?? "Update failed" };
+  }
+
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PATCH", `${getApiUrl()}/api/reels/channel/me`);
@@ -1292,10 +1311,16 @@ export async function updateChannelLinks(
   links: { title: string; url: string }[],
   sessionToken?: string | null,
 ) {
-  return reelsJson<{ success: boolean; links?: ReelsChannelLink[]; message?: string }>(
-    "/channel/me/links",
-    { method: "PUT", body: { userId, links }, sessionToken },
-  );
+  const res = await fetch(reelsUrl("/channel/me/links", sessionToken), {
+    method: "PUT",
+    headers: jsonAuthHeaders(sessionToken),
+    body: JSON.stringify({ userId, links }),
+  });
+  const data = await res.json() as { success: boolean; links?: ReelsChannelLink[]; message?: string };
+  if (!res.ok || !data.success) {
+    return { success: false, message: data.message ?? "Could not save links." };
+  }
+  return data;
 }
 
 export async function createReelsPlaylist(

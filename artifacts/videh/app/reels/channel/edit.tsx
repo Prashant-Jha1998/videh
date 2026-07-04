@@ -2,11 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -52,6 +53,7 @@ export default function ReelsChannelEditScreen() {
   const [channelStats, setChannelStats] = useState<ReelsChannel | null>(null);
   const [monetization, setMonetization] = useState<ReelsMonetizationStatus | null>(null);
   const [platformRules, setPlatformRules] = useState<ReelsPublicRules | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     if (!user?.dbId) return;
@@ -107,6 +109,31 @@ export default function ReelsChannelEditScreen() {
     }
   };
 
+  const persistLinks = async (): Promise<{ ok: boolean; message?: string }> => {
+    if (!user?.dbId) return { ok: false, message: "Not signed in." };
+    const cleaned = links
+      .map((l) => ({ title: l.title.trim(), url: l.url.trim() }))
+      .filter((l) => l.title && l.url);
+    const incomplete = links.some((l) => {
+      const title = l.title.trim();
+      const url = l.url.trim();
+      return (title && !url) || (!title && url);
+    });
+    if (incomplete) {
+      return { ok: false, message: "Each link needs both a title and a URL, or remove the empty row." };
+    }
+    try {
+      const res = await updateChannelLinks(user.dbId, cleaned, user.sessionToken);
+      if (!res.success) {
+        return { ok: false, message: res.message ?? "Could not save links." };
+      }
+      setLinks(cleaned);
+      return { ok: true };
+    } catch {
+      return { ok: false, message: "Could not save links." };
+    }
+  };
+
   const save = async () => {
     if (!user?.dbId) return;
     const name = displayName.trim();
@@ -128,12 +155,18 @@ export default function ReelsChannelEditScreen() {
         Alert.alert("Could not save", res.message ?? "Please try again.");
         return;
       }
+      const linksResult = await persistLinks();
+      if (!linksResult.ok) {
+        Alert.alert("Could not save links", linksResult.message ?? "Please try again.");
+        return;
+      }
       if (res.channel) {
         setExistingAvatar(res.channel.avatarUrl ?? null);
         setExistingCover(res.channel.coverUrl ?? null);
         setAvatarUri(null);
         setCoverUri(null);
       }
+      Alert.alert("Saved", "Channel updated.");
       router.back();
     } catch {
       Alert.alert("Error", "Could not update channel.");
@@ -147,32 +180,29 @@ export default function ReelsChannelEditScreen() {
       Alert.alert("Links", "Maximum 20 links allowed.");
       return;
     }
-    setLinks([...links, { title: "", url: "" }]);
+    setLinks((prev) => [...prev, { title: "", url: "" }]);
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    });
   };
 
   const updateLink = (index: number, field: "title" | "url", value: string) => {
-    setLinks(links.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
+    setLinks((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
   };
 
   const removeLink = (index: number) => {
-    setLinks(links.filter((_, i) => i !== index));
+    setLinks((prev) => prev.filter((_, i) => i !== index));
   };
 
   const saveLinks = async () => {
-    if (!user?.dbId) return;
-    const cleaned = links
-      .map((l) => ({ title: l.title.trim(), url: l.url.trim() }))
-      .filter((l) => l.title && l.url);
     setSavingLinks(true);
     try {
-      const res = await updateChannelLinks(user.dbId, cleaned, user.sessionToken);
-      if (!res.success) {
-        Alert.alert("Could not save links", res.message ?? "Please try again.");
+      const result = await persistLinks();
+      if (!result.ok) {
+        Alert.alert("Could not save links", result.message ?? "Please try again.");
         return;
       }
       Alert.alert("Saved", "Channel links updated.");
-    } catch {
-      Alert.alert("Error", "Could not save links.");
     } finally {
       setSavingLinks(false);
     }
@@ -188,10 +218,11 @@ export default function ReelsChannelEditScreen() {
 
   const avatarPreview = avatarUri ?? existingAvatar;
   const coverPreview = coverUri ?? existingCover;
-  const busy = saving || preparingAvatar || preparingCover;
+  const busy = saving || savingLinks || preparingAvatar || preparingCover;
 
   return (
     <KeyboardAwareScrollViewCompat
+      ref={scrollRef}
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 32, paddingHorizontal: 20 }}
       keyboardShouldPersistTaps="handled"
@@ -288,7 +319,7 @@ export default function ReelsChannelEditScreen() {
         App, website, and social links — shown to viewers in your channel About section
       </Text>
       {links.map((link, index) => (
-        <View key={index} style={[styles.linkCard, { borderColor: colors.border }]}>
+        <View key={`link-${index}`} style={[styles.linkCard, { borderColor: colors.border }]}>
           <View style={styles.linkCardHeader}>
             <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Link {index + 1}</Text>
             <TouchableOpacity onPress={() => removeLink(index)}>
@@ -314,7 +345,7 @@ export default function ReelsChannelEditScreen() {
           />
         </View>
       ))}
-      <TouchableOpacity style={styles.addLinkBtn} onPress={addLink}>
+      <TouchableOpacity style={styles.addLinkBtn} onPress={addLink} activeOpacity={0.75}>
         <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
         <Text style={{ color: colors.primary, fontFamily: "Inter_600SemiBold" }}>Add link</Text>
       </TouchableOpacity>
@@ -402,7 +433,7 @@ export default function ReelsChannelEditScreen() {
 
       <TouchableOpacity
         style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: busy ? 0.6 : 1 }]}
-        onPress={save}
+        onPress={() => void save()}
         disabled={busy}
       >
         {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Save changes</Text>}
