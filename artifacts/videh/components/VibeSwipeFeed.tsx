@@ -4,6 +4,7 @@ import React, { useCallback, useRef, useState } from "react";
 import {
   Dimensions,
   FlatList,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -51,13 +52,21 @@ function buildVibeRows(videos: ReelsVideo[], placements: ReelsVibeAdPlacement[])
 }
 
 function parseEditorMeta(raw: ReelsVideo["editorMetadata"]): VideoEditorMetadata | null {
-  if (!raw || typeof raw !== "object") return null;
-  const src = raw as Record<string, unknown>;
+  let src: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      src = JSON.parse(raw) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (!src || typeof src !== "object") return null;
+  const obj = src as Record<string, unknown>;
   return {
-    filter: (src.filter as VideoEditorMetadata["filter"]) ?? "none",
-    caption: String(src.caption ?? ""),
-    textOverlays: Array.isArray(src.textOverlays)
-      ? (src.textOverlays as Array<Record<string, unknown>>).map((t) => ({
+    filter: (obj.filter as VideoEditorMetadata["filter"]) ?? "none",
+    caption: String(obj.caption ?? ""),
+    textOverlays: Array.isArray(obj.textOverlays)
+      ? (obj.textOverlays as Array<Record<string, unknown>>).map((t) => ({
         id: String(t.id ?? Math.random().toString(36).slice(2)),
         text: String(t.text ?? ""),
         x: Number(t.x ?? 0.1),
@@ -74,7 +83,6 @@ function VibeCard({
   height,
   bottomPad,
   isActive,
-  preload,
   liked,
   userId,
   sessionToken,
@@ -86,7 +94,6 @@ function VibeCard({
   height: number;
   bottomPad: number;
   isActive: boolean;
-  preload?: boolean;
   liked: boolean;
   userId?: number;
   sessionToken?: string | null;
@@ -107,15 +114,14 @@ function VibeCard({
         <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.muted }]} />
       )}
 
-      {(isActive || preload) && canPlay ? (
+      {isActive && canPlay ? (
         <VibeInlinePlayer
           videoId={item.id}
           videoUrl={item.videoUrl}
           durationSeconds={item.durationSeconds}
           userId={userId}
           sessionToken={sessionToken}
-          isActive={isActive}
-          preload={preload && !isActive}
+          isActive
           posterUrl={item.thumbnailUrl}
           editorMetadata={editorMeta}
           musicTitle={item.musicTitle}
@@ -238,7 +244,7 @@ export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMo
         initialNumToRender={1}
         maxToRenderPerBatch={2}
         windowSize={3}
-        removeClippedSubviews
+        removeClippedSubviews={Platform.OS !== "android"}
         renderItem={({ item, index }) => {
           if (item.kind === "ad") {
             return (
@@ -257,7 +263,6 @@ export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMo
               height={cardH}
               bottomPad={insets.bottom}
               isActive={index === activeIndex}
-              preload={index === activeIndex + 1}
               liked={likedMap[video.id] ?? video.myReaction === "like"}
               userId={user?.dbId}
               sessionToken={user?.sessionToken}

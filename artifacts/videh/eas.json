@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v153-vibe-ads"
+        "key": "apk-release-v154-vibe-upload-fix"
       }
     },
     "production": {

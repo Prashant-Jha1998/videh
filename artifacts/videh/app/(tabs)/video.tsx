@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
@@ -194,6 +194,7 @@ export default function VideoTabScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const params = useLocalSearchParams<{ section?: string; refreshFeed?: string }>();
   const { user } = useApp();
   const { t } = useUiPreferences();
   const [videos, setVideos] = useState<ReelsVideo[]>([]);
@@ -223,6 +224,7 @@ export default function VideoTabScreen() {
   const [loadMoreError, setLoadMoreError] = useState(false);
   const loadingMoreRef = useRef(false);
   const loadedOnceRef = useRef(false);
+  const handledUploadReturnRef = useRef(false);
 
   const refreshHidden = useCallback(async () => {
     const hidden = await loadFeedHiddenIds();
@@ -308,6 +310,17 @@ export default function VideoTabScreen() {
       setLoading(false);
     }
   }, [user?.dbId, user?.sessionToken, applyFeed, refreshHidden]);
+
+  useEffect(() => {
+    if (params.section === "vibe") {
+      setVideoSection("vibe");
+    }
+    if (params.refreshFeed === "1" && !handledUploadReturnRef.current) {
+      handledUploadReturnRef.current = true;
+      void loadInitial({ silent: false });
+      router.setParams({ section: undefined, refreshFeed: undefined } as never);
+    }
+  }, [params.section, params.refreshFeed, loadInitial, router]);
 
   const loadMore = useCallback(async () => {
     if (!user?.dbId || !nextCursor || loadingMoreRef.current) return;

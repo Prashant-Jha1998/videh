@@ -63,7 +63,7 @@ export function VibeAdCard({ ad, height, bottomPad, isActive }: Props) {
   const brandName = ad.appName ?? ad.headline ?? ad.title;
   const tagline = ad.description?.trim() || ad.advertiserName;
   const maxDuration = Math.min(VIBE_AD_MAX_SECONDS, ad.durationSeconds || VIBE_AD_MAX_SECONDS);
-  const safeVideoUrl = videoAd && ad.videoUrl?.trim() ? ad.videoUrl : null;
+  const safeVideoUrl = videoAd && isActive && ad.videoUrl?.trim() ? ad.videoUrl : null;
 
   const player = useVideoPlayer(safeVideoUrl, (p) => {
     if (!p) return;

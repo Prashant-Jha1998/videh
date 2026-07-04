@@ -237,6 +237,6 @@ export function showUploadShareDialog(
         });
       },
     },
-    { text: opts.pending ? "OK" : "Watch", onPress: () => { opts.onWatch(); } },
+    { text: opts.pending ? "OK" : (isVibe(video) ? `Open ${VIBE_BRAND_NAME}` : "Watch"), onPress: () => { opts.onWatch(); } },
   ]);
 }

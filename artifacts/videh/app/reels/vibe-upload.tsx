@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  InteractionManager,
   Platform,
   StyleSheet,
   Switch,
@@ -192,7 +193,15 @@ export default function VibeUploadScreen() {
         return;
       }
       if (!res.video) return;
-      const goVibe = () => router.replace("/(tabs)/video" as never);
+      setVideoUri(null);
+      const goVibe = () => {
+        InteractionManager.runAfterInteractions(() => {
+          router.replace({
+            pathname: "/(tabs)/video",
+            params: { section: "vibe", refreshFeed: "1" },
+          } as never);
+        });
+      };
       if (res.pending) {
         showUploadShareDialog(res.video, {
           pending: true,

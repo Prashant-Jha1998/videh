@@ -61,6 +61,7 @@ export function VibeInlinePlayer({
   const status = statusEvent?.status ?? player?.status ?? "idle";
   const isReady = status === "readyToPlay";
   const isBuffering = isActive && (!isReady || (currentTime > 0 && bufferedPosition - currentTime < 0.35));
+  const effectiveDuration = Math.max(1, Number(durationSeconds) || 1);
 
   useEffect(() => {
     if (!player) return;
@@ -89,11 +90,11 @@ export function VibeInlinePlayer({
   useEffect(() => {
     if (!isActive || !userId || viewSentRef.current) return;
     const watched = Math.floor(currentTime);
-    if (watched >= Math.min(3, Math.max(1, durationSeconds))) {
+    if (watched >= Math.min(3, effectiveDuration)) {
       viewSentRef.current = true;
       void recordReelsView(videoId, userId, watched, sessionToken).catch(() => { /* ignore */ });
     }
-  }, [isActive, userId, sessionToken, videoId, durationSeconds, currentTime]);
+  }, [isActive, userId, sessionToken, videoId, effectiveDuration, currentTime]);
 
   const filterTint = editorMetadata?.filter ? filterOverlayColor(editorMetadata.filter) : null;
   const overlays = editorMetadata?.textOverlays ?? [];
