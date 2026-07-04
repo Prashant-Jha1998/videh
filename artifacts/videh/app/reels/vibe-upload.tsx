@@ -24,7 +24,7 @@ import { useApp } from "@/context/AppContext";
 import {
   activeHashtagQuery,
   applyHashtagSuggestion,
-  autoThumbnailFromVideo,
+  autoVibeThumbnailFromVideo,
   formatViewCount,
   suggestReelsHashtags,
   uploadVibeVideo,
@@ -67,7 +67,7 @@ async function applyPickedAsset(
     setters.setDurationSec(durSec > 0 ? durSec : VIBE_MAX_DURATION_SECONDS);
     setters.setThumbPreparing(false);
     InteractionManager.runAfterInteractions(() => {
-      void autoThumbnailFromVideo(stableUri, durSec > 0 ? durSec : 1)
+      void autoVibeThumbnailFromVideo(stableUri, durSec > 0 ? durSec : 1)
         .then((auto) => { if (auto) setters.setThumbUri(auto); });
     });
   } catch (e) {
@@ -180,7 +180,7 @@ export default function VibeUploadScreen() {
     if (!thumbToUpload) {
       setThumbPreparing(true);
       try {
-        thumbToUpload = await autoThumbnailFromVideo(videoUri, durationSec);
+        thumbToUpload = await autoVibeThumbnailFromVideo(videoUri, durationSec);
       } finally {
         setThumbPreparing(false);
       }

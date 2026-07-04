@@ -7,6 +7,7 @@ import { clampCropRect, ensureEditableImageUri } from "./imageEdit";
 import { ensureUploadableFileUri } from "./prepareFileUpload";
 import { putFileToPresignedUrl, type PresignedUploadSlot } from "./s3DirectUpload";
 import { getWebFile } from "./web/webFileRegistry";
+import { VIBE_THUMB_HEIGHT, VIBE_THUMB_WIDTH } from "./vibeVideo";
 
 export type ReelsChannel = {
   id: number;
@@ -189,6 +190,11 @@ export async function prepareReelsThumbnail(uri: string): Promise<string> {
   return prepareFixedImage(uri, REELS_THUMB_WIDTH, REELS_THUMB_HEIGHT);
 }
 
+/** Crop to 9:16 for Vibe vertical clips. */
+export async function prepareVibeThumbnail(uri: string): Promise<string> {
+  return prepareFixedImage(uri, VIBE_THUMB_WIDTH, VIBE_THUMB_HEIGHT);
+}
+
 /** Auto-pick one frame from a local video when user skipped manual thumbnail. */
 export async function autoThumbnailFromVideo(videoUri: string, durationSeconds = 0): Promise<string | null> {
   try {
@@ -200,6 +206,22 @@ export async function autoThumbnailFromVideo(videoUri: string, durationSeconds =
       quality: 0.85,
     });
     return prepareReelsThumbnail(uri);
+  } catch {
+    return null;
+  }
+}
+
+/** Vibe clips use vertical 9:16 thumbnails so the feed does not crop/zoom. */
+export async function autoVibeThumbnailFromVideo(videoUri: string, durationSeconds = 0): Promise<string | null> {
+  try {
+    const VideoThumbnails = await import("expo-video-thumbnails");
+    const timeMs = durationSeconds > 10
+      ? Math.min(5000, Math.floor(durationSeconds * 100)) : 1000;
+    const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, {
+      time: timeMs,
+      quality: 0.85,
+    });
+    return prepareVibeThumbnail(uri);
   } catch {
     return null;
   }
@@ -471,6 +493,9 @@ export type ReelsVideoNotification = {
   channelHandle: string | null;
   channelDisplayName: string | null;
   channelAvatarUrl: string | null;
+  actorUserId?: number | null;
+  actorLabel?: string | null;
+  detailText?: string | null;
 };
 
 function normalizeReelsVideoNotification(n: ReelsVideoNotification): ReelsVideoNotification {

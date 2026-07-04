@@ -1,5 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
 import {
   Dimensions,
@@ -16,7 +18,14 @@ import { ReelsCommentsSheet } from "@/components/ReelsCommentsSheet";
 import { VibeAdCard } from "@/components/VibeAdCard";
 import { VibeInlinePlayer } from "@/components/VibeInlinePlayer";
 import { useColors } from "@/hooks/useColors";
-import { formatViewCount, reactReelsVideo, type ReelsVideo, type ReelsVibeAdPlacement } from "@/lib/reelsApi";
+import {
+  formatViewCount,
+  reactReelsVideo,
+  subscribeReelsChannel,
+  unsubscribeReelsChannel,
+  type ReelsVideo,
+  type ReelsVibeAdPlacement,
+} from "@/lib/reelsApi";
 import { shareReelsVideoLink } from "@/lib/reelsShare";
 import type { VideoEditorMetadata } from "@/lib/videoEditor";
 import { VIBE_BRAND_NAME } from "@/lib/vibeVideo";
@@ -24,6 +33,7 @@ import { useApp } from "@/context/AppContext";
 
 const SCREEN_H = Dimensions.get("window").height;
 const SCREEN_W = Dimensions.get("window").width;
+const TAB_BAR_H = Platform.OS === "ios" ? 49 : 56;
 
 type Props = {
   videos: ReelsVideo[];
@@ -78,38 +88,54 @@ function parseEditorMeta(raw: ReelsVideo["editorMetadata"]): VideoEditorMetadata
   };
 }
 
+function formatActionCount(n: number): string {
+  return formatViewCount(Math.max(0, n));
+}
+
 function VibeCard({
   item,
   height,
-  bottomPad,
+  bottomChrome,
   isActive,
   liked,
+  subscribed,
   userId,
   sessionToken,
   onLike,
   onComment,
   onShare,
+  onFollow,
+  onOpenChannel,
 }: {
   item: ReelsVideo;
   height: number;
-  bottomPad: number;
+  bottomChrome: number;
   isActive: boolean;
   liked: boolean;
+  subscribed: boolean;
   userId?: number;
   sessionToken?: string | null;
   onLike: () => void;
   onComment: () => void;
   onShare: () => void;
+  onFollow: () => void;
+  onOpenChannel: () => void;
 }) {
   const colors = useColors();
+  const [captionExpanded, setCaptionExpanded] = useState(false);
   const channel = item.channelDisplayName ?? (item.channelHandle ? `@${item.channelHandle}` : "Channel");
+  const handle = item.channelHandle ? `@${item.channelHandle}` : channel;
   const editorMeta = parseEditorMeta(item.editorMetadata);
   const canPlay = Boolean(item.videoUrl && item.videoUrl.trim().length > 0);
+  const likeCount = item.likeCount + (liked && item.myReaction !== "like" ? 1 : 0);
+  const caption = editorMeta?.caption?.trim() || item.title;
+  const description = item.description?.trim();
+  const musicLabel = [item.musicTitle, item.musicArtist].filter(Boolean).join(" · ");
 
   return (
-    <View style={[styles.card, { height, backgroundColor: "#0a0a0a" }]}>
+    <View style={[styles.card, { height, backgroundColor: "#000" }]}>
       {item.thumbnailUrl ? (
-        <Image source={{ uri: item.thumbnailUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
+        <Image source={{ uri: item.thumbnailUrl }} style={StyleSheet.absoluteFill} contentFit="contain" />
       ) : (
         <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.muted }]} />
       )}
@@ -124,38 +150,90 @@ function VibeCard({
           isActive
           posterUrl={item.thumbnailUrl}
           editorMetadata={editorMeta}
-          musicTitle={item.musicTitle}
         />
       ) : null}
 
       {!isActive ? <View style={[StyleSheet.absoluteFill, styles.scrim]} pointerEvents="none" /> : null}
 
-      <View style={[styles.sideActions, { bottom: bottomPad + 88 }]}>
-        <TouchableOpacity style={styles.sideBtn} onPress={onLike} hitSlop={6}>
-          <Ionicons name={liked ? "heart" : "heart-outline"} size={28} color={liked ? "#EF4444" : "#fff"} />
-          <Text style={styles.sideLabel}>{formatViewCount(item.likeCount + (liked && item.myReaction !== "like" ? 1 : 0))}</Text>
+      <LinearGradient
+        colors={["rgba(0,0,0,0.45)", "transparent"]}
+        style={styles.topGradient}
+        pointerEvents="none"
+      />
+      <LinearGradient
+        colors={["transparent", "rgba(0,0,0,0.25)", "rgba(0,0,0,0.72)"]}
+        style={[styles.bottomGradient, { height: bottomChrome + 200 }]}
+        pointerEvents="none"
+      />
+
+      <View style={[styles.sideActions, { bottom: bottomChrome + 8 }]}>
+        <TouchableOpacity style={styles.sideBtn} onPress={onLike} hitSlop={8}>
+          <Ionicons name={liked ? "heart" : "heart-outline"} size={30} color={liked ? "#FF3040" : "#fff"} />
+          <Text style={styles.sideLabel}>{formatActionCount(likeCount)}</Text>
         </TouchableOpacity>
         {item.commentsEnabled !== false ? (
-          <TouchableOpacity style={styles.sideBtn} onPress={onComment} hitSlop={6}>
-            <Ionicons name="chatbubble-outline" size={26} color="#fff" />
-            <Text style={styles.sideLabel}>{formatViewCount(item.commentCount)}</Text>
+          <TouchableOpacity style={styles.sideBtn} onPress={onComment} hitSlop={8}>
+            <Ionicons name="chatbubble-outline" size={28} color="#fff" />
+            <Text style={styles.sideLabel}>{formatActionCount(item.commentCount)}</Text>
           </TouchableOpacity>
         ) : null}
         {item.sharesEnabled !== false ? (
-          <TouchableOpacity style={styles.sideBtn} onPress={onShare} hitSlop={6}>
-            <Ionicons name="arrow-redo-outline" size={26} color="#fff" />
-            <Text style={styles.sideLabel}>{formatViewCount(item.shareCount ?? 0)}</Text>
+          <TouchableOpacity style={styles.sideBtn} onPress={onShare} hitSlop={8}>
+            <Ionicons name="paper-plane-outline" size={27} color="#fff" />
+            <Text style={styles.sideLabel}>{formatActionCount(item.shareCount ?? 0)}</Text>
           </TouchableOpacity>
+        ) : null}
+        {musicLabel ? (
+          <View style={styles.musicDisc}>
+            <Ionicons name="musical-notes" size={14} color="#fff" />
+          </View>
         ) : null}
       </View>
 
-      <View style={[styles.bottomMeta, { paddingBottom: bottomPad + 12 }]}>
-        <Text style={styles.channelName} numberOfLines={1}>{channel}</Text>
-        <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
-        <Text style={styles.stats}>
-          {formatViewCount(item.viewCount)} views
-          {(item.shareCount ?? 0) > 0 ? ` · ${formatViewCount(item.shareCount ?? 0)} shares` : ""}
-        </Text>
+      <View style={[styles.bottomMeta, { paddingBottom: bottomChrome + 8 }]}>
+        <View style={styles.authorRow}>
+          <TouchableOpacity style={styles.authorTap} onPress={onOpenChannel} activeOpacity={0.85}>
+            {item.channelAvatarUrl ? (
+              <Image source={{ uri: item.channelAvatarUrl }} style={styles.avatar} contentFit="cover" />
+            ) : (
+              <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                <Ionicons name="person" size={16} color="#fff" />
+              </View>
+            )}
+            <Text style={styles.handle} numberOfLines={1}>{handle}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.followBtn, subscribed && styles.followBtnDone]}
+            onPress={onFollow}
+            hitSlop={6}
+          >
+            <Text style={[styles.followText, subscribed && styles.followTextDone]}>
+              {subscribed ? "Connected" : "Connect"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {caption ? (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => setCaptionExpanded((v) => !v)}
+          >
+            <Text style={styles.caption} numberOfLines={captionExpanded ? undefined : 2}>
+              {caption}
+              {!captionExpanded && description && description !== caption ? " …" : ""}
+            </Text>
+            {captionExpanded && description && description !== caption ? (
+              <Text style={styles.captionSub}>{description}</Text>
+            ) : null}
+          </TouchableOpacity>
+        ) : null}
+
+        {musicLabel ? (
+          <View style={styles.musicRow}>
+            <Ionicons name="musical-notes" size={13} color="#fff" />
+            <Text style={styles.musicText} numberOfLines={1}>{musicLabel}</Text>
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -164,11 +242,14 @@ function VibeCard({
 export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMore, onUpload }: Props) {
   const insets = useSafeAreaInsets();
   const colors = useColors();
+  const router = useRouter();
   const { user } = useApp();
   const cardH = SCREEN_H;
+  const bottomChrome = insets.bottom + TAB_BAR_H;
   const viewConfig = useRef({ viewAreaCoveragePercentThreshold: 80 }).current;
   const [activeIndex, setActiveIndex] = useState(0);
   const [likedMap, setLikedMap] = useState<Record<number, boolean>>({});
+  const [subscribedMap, setSubscribedMap] = useState<Record<number, boolean>>({});
   const [commentVideo, setCommentVideo] = useState<ReelsVideo | null>(null);
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
 
@@ -205,9 +286,30 @@ export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMo
     }
   };
 
+  const follow = async (video: ReelsVideo) => {
+    if (!user?.dbId) return;
+    const wasSubscribed = subscribedMap[video.channelId] ?? false;
+    setSubscribedMap((m) => ({ ...m, [video.channelId]: !wasSubscribed }));
+    try {
+      if (wasSubscribed) {
+        await unsubscribeReelsChannel(video.channelId, user.dbId, user.sessionToken);
+      } else {
+        await subscribeReelsChannel(video.channelId, user.dbId, user.sessionToken);
+      }
+    } catch {
+      setSubscribedMap((m) => ({ ...m, [video.channelId]: wasSubscribed }));
+    }
+  };
+
   const share = (video: ReelsVideo) => {
     if (!user?.dbId) return;
     void shareReelsVideoLink(video, user.dbId, user.sessionToken);
+  };
+
+  const openChannel = (video: ReelsVideo) => {
+    if (video.channelHandle) {
+      router.push(`/reels/channel/${video.channelHandle}` as never);
+    }
   };
 
   if (videos.length === 0) {
@@ -251,7 +353,7 @@ export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMo
               <VibeAdCard
                 ad={item.ad}
                 height={cardH}
-                bottomPad={insets.bottom}
+                bottomPad={bottomChrome}
                 isActive={index === activeIndex}
               />
             );
@@ -261,14 +363,17 @@ export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMo
             <VibeCard
               item={video}
               height={cardH}
-              bottomPad={insets.bottom}
+              bottomChrome={bottomChrome}
               isActive={index === activeIndex}
               liked={likedMap[video.id] ?? video.myReaction === "like"}
+              subscribed={subscribedMap[video.channelId] ?? false}
               userId={user?.dbId}
               sessionToken={user?.sessionToken}
               onLike={() => void like(video)}
               onComment={() => setCommentVideo(video)}
               onShare={() => share(video)}
+              onFollow={() => void follow(video)}
+              onOpenChannel={() => openChannel(video)}
             />
           );
         }}
@@ -297,26 +402,93 @@ export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMo
 
 const styles = StyleSheet.create({
   card: { width: SCREEN_W, position: "relative" },
-  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.15)" },
+  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.12)" },
+  topGradient: { position: "absolute", top: 0, left: 0, right: 0, height: 120, zIndex: 2 },
+  bottomGradient: { position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 2 },
   sideActions: {
     position: "absolute",
-    right: 10,
+    right: 8,
     alignItems: "center",
-    gap: 18,
+    gap: 20,
     zIndex: 4,
   },
-  sideBtn: { alignItems: "center", gap: 4 },
-  sideLabel: { color: "#fff", fontSize: 11, fontFamily: "Inter_600SemiBold" },
+  sideBtn: { alignItems: "center", gap: 2 },
+  sideLabel: {
+    color: "#fff",
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    textShadowColor: "rgba(0,0,0,0.75)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  musicDisc: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.85)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+    backgroundColor: "rgba(0,0,0,0.35)",
+  },
   bottomMeta: {
     position: "absolute",
-    left: 14,
-    right: 72,
+    left: 12,
+    right: 64,
     bottom: 0,
     zIndex: 4,
+    gap: 8,
   },
-  channelName: { color: "#fff", fontSize: 15, fontFamily: "Inter_700Bold", marginBottom: 4 },
-  title: { color: "rgba(255,255,255,0.92)", fontSize: 14, fontFamily: "Inter_500Medium" },
-  stats: { color: "rgba(255,255,255,0.65)", fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 6 },
+  authorRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  authorTap: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 },
+  avatar: { width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: "#fff" },
+  avatarPlaceholder: { backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  handle: {
+    flex: 1,
+    color: "#fff",
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+    textShadowColor: "rgba(0,0,0,0.6)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  followBtn: {
+    borderWidth: 1,
+    borderColor: "#fff",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  followBtnDone: { borderColor: "rgba(255,255,255,0.45)", backgroundColor: "rgba(255,255,255,0.12)" },
+  followText: { color: "#fff", fontSize: 12, fontFamily: "Inter_700Bold" },
+  followTextDone: { color: "rgba(255,255,255,0.85)" },
+  caption: {
+    color: "#fff",
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 19,
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  captionSub: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  musicRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
+  musicText: {
+    flex: 1,
+    color: "#fff",
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32, gap: 10 },
   emptyTitle: { fontSize: 17, fontFamily: "Inter_700Bold", textAlign: "center", color: "#fff" },
   emptyHint: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20, color: "rgba(255,255,255,0.65)" },

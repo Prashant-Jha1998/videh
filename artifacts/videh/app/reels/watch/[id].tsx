@@ -579,7 +579,7 @@ export default function ReelsWatchScreen() {
                   color={subscribed ? "#fff" : colors.foreground}
                 />
                 <Text style={[styles.chipText, { color: subscribed ? "#fff" : colors.foreground }]}>
-                  {subscribed ? "Subscribed" : "Subscribe"}
+                  {subscribed ? "Connected" : "Connect"}
                 </Text>
               </TouchableOpacity>
 
@@ -712,7 +712,7 @@ export default function ReelsWatchScreen() {
                         fontSize: 13,
                       }}
                     >
-                      {subscribed ? "Subscribed" : "Subscribe"}
+                      {subscribed ? "Connected" : "Connect"}
                     </Text>
                   </TouchableOpacity>
                 </TouchableOpacity>

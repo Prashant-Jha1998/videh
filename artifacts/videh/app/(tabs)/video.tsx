@@ -887,36 +887,38 @@ export default function VideoTabScreen() {
           onUpload={hasChannel ? openVibeUpload : undefined}
         />
         <LinearGradient
-          colors={["rgba(0,0,0,0.75)", "rgba(0,0,0,0.35)", "transparent"]}
-          style={[styles.vibeHeaderOverlay, { paddingTop: insets.top + 4 }]}
+          colors={["rgba(0,0,0,0.55)", "rgba(0,0,0,0.2)", "transparent"]}
+          style={[styles.vibeHeaderOverlay, { paddingTop: insets.top + 6 }]}
           pointerEvents="box-none"
         >
-          <TouchableOpacity onPress={() => setVideoSection("watch")} style={styles.vibeBackBtn} accessibilityLabel="Back to Watch">
-            <Ionicons name="chevron-back" size={26} color="#fff" />
-            <Text style={styles.vibeBackText}>{t("video.section.watch")}</Text>
-          </TouchableOpacity>
-          <Text style={styles.vibeBrandTitle}>{VIBE_BRAND_NAME}</Text>
-          <View style={styles.vibeHeaderActions}>
-            {hasChannel ? (
-              <TouchableOpacity onPress={openVibeUpload} style={styles.vibeIconBtn} accessibilityLabel={`Upload ${VIBE_BRAND_NAME}`}>
-                <Ionicons name="add-circle-outline" size={26} color="#fff" />
-              </TouchableOpacity>
-            ) : null}
-            <TouchableOpacity onPress={() => router.push("/reels/search" as never)} style={styles.vibeIconBtn}>
-              <Ionicons name="search" size={22} color="#fff" />
+          {hasChannel ? (
+            <TouchableOpacity onPress={openVibeUpload} style={styles.vibeIconBtn} accessibilityLabel={`Upload ${VIBE_BRAND_NAME}`}>
+              <Ionicons name="add" size={30} color="#fff" />
             </TouchableOpacity>
+          ) : (
+            <View style={styles.vibeIconBtn} />
+          )}
+          <View style={styles.vibeTopTabs}>
+            {(["watch", "vibe"] as const).map((id) => {
+              const active = id === "vibe";
+              const label = id === "watch" ? t("video.section.watch") : VIBE_BRAND_NAME;
+              return (
+                <TouchableOpacity
+                  key={id}
+                  onPress={() => setVideoSection(id)}
+                  style={styles.vibeTopTab}
+                  accessibilityState={{ selected: active }}
+                >
+                  <Text style={[styles.vibeTopTabText, active && styles.vibeTopTabTextActive]}>{label}</Text>
+                  {active ? <View style={styles.vibeTopTabIndicator} /> : null}
+                </TouchableOpacity>
+              );
+            })}
           </View>
-        </LinearGradient>
-        {hasChannel ? (
-          <TouchableOpacity
-            style={[styles.vibeFab, { bottom: insets.bottom + 72 }]}
-            activeOpacity={0.85}
-            onPress={openVibeUpload}
-            accessibilityLabel={`Upload ${VIBE_BRAND_NAME}`}
-          >
-            <Ionicons name="videocam" size={26} color="#fff" />
+          <TouchableOpacity onPress={() => router.push("/reels/search" as never)} style={styles.vibeIconBtn}>
+            <Ionicons name="search" size={24} color="#fff" />
           </TouchableOpacity>
-        ) : null}
+        </LinearGradient>
       </View>
     );
   }
@@ -1160,32 +1162,17 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 30,
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
-    paddingHorizontal: 8,
-    paddingBottom: 28,
+    paddingHorizontal: 4,
+    paddingBottom: 20,
   },
-  vibeBackBtn: { flexDirection: "row", alignItems: "center", padding: 8, minWidth: 88 },
-  vibeBackText: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
-  vibeBrandTitle: { color: "#fff", fontSize: 17, fontFamily: "Inter_700Bold" },
-  vibeHeaderActions: { flexDirection: "row", alignItems: "center" },
-  vibeIconBtn: { padding: 8 },
-  vibeFab: {
-    position: "absolute",
-    right: 16,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "#059669",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 25,
-    elevation: 6,
-    shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-  },
+  vibeIconBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  vibeTopTabs: { flexDirection: "row", alignItems: "center", gap: 18, paddingTop: 8 },
+  vibeTopTab: { alignItems: "center", gap: 4, minWidth: 56 },
+  vibeTopTabText: { color: "rgba(255,255,255,0.55)", fontSize: 16, fontFamily: "Inter_600SemiBold" },
+  vibeTopTabTextActive: { color: "#fff", fontFamily: "Inter_700Bold" },
+  vibeTopTabIndicator: { width: 28, height: 2, borderRadius: 1, backgroundColor: "#fff" },
   chipIcon: {
     width: 36,
     height: 32,

@@ -20,3 +20,8 @@ export function isWatchVideo(durationSeconds: number, format?: string | null): b
 
 /** Monetization: valid public Vibe views required in rolling 90 days. */
 export const VIBE_MONETIZATION_VIEWS_90D = 5_000_000;
+
+/** Vibe feed thumbnail — vertical 9:16 (not Watch 16:9). */
+export const VIBE_THUMB_WIDTH = 720;
+export const VIBE_THUMB_HEIGHT = 1280;
+export const VIBE_THUMB_ASPECT = 9 / 16;

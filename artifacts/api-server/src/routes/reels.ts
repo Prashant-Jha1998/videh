@@ -44,6 +44,7 @@ import {
   fetchReelsVideoNotifications,
   hideReelsVideoNotification,
   markReelsVideoNotificationsRead,
+  notifyChannelOwnerEngagement,
 } from "../lib/reelsNotifications";
 import {
   cdnDeliveryEnabled,
@@ -1390,6 +1391,9 @@ function mapVideoNotificationRow(req: Request, row: import("../lib/reelsNotifica
       "avatar",
       row.channelUpdatedAt,
     ),
+    actorUserId: row.actorUserId,
+    actorLabel: row.actorLabel,
+    detailText: row.detailText,
   };
 }
 
@@ -2097,6 +2101,21 @@ router.post("/videos/:videoId/react", async (req: Request, res: Response) => {
            FROM reels_videos v WHERE v.id = $1 AND c.id = v.channel_id`,
           [videoId],
         );
+        if (prevReaction !== "like") {
+          const ownerMeta = await query(
+            `SELECT v.channel_id FROM reels_videos v WHERE v.id = $1`,
+            [videoId],
+          );
+          const channelId = Number(ownerMeta.rows[0]?.channel_id ?? 0);
+          if (channelId > 0) {
+            void notifyChannelOwnerEngagement({
+              channelId,
+              videoId,
+              actorUserId: userId,
+              kind: "video_like",
+            }).catch(() => { /* ignore */ });
+          }
+        }
       } else {
         await query("UPDATE reels_videos SET dislike_count = dislike_count + 1 WHERE id = $1", [videoId]);
       }
@@ -2229,6 +2248,13 @@ router.post("/videos/:videoId/comments", async (req: Request, res: Response) => 
       `UPDATE reels_channels SET total_comments = total_comments + 1 WHERE id = $1`,
       [channelId],
     );
+    void notifyChannelOwnerEngagement({
+      channelId,
+      videoId,
+      actorUserId: userId,
+      kind: "video_comment",
+      detail: text,
+    }).catch(() => { /* ignore */ });
     res.json({ success: true, comment: inserted.rows[0] });
   } catch (err) {
     req.log.error({ err }, "reels comment");
@@ -2324,6 +2350,11 @@ router.post("/subscribe/:channelId", async (req: Request, res: Response) => {
        ) WHERE id = $1`,
       [channelId],
     );
+    void notifyChannelOwnerEngagement({
+      channelId,
+      actorUserId: userId,
+      kind: "channel_connect",
+    }).catch(() => { /* ignore */ });
     res.json({ success: true, subscribed: true });
   } catch (err) {
     req.log.error({ err }, "reels subscribe");
@@ -2356,6 +2387,18 @@ router.post("/videos/:videoId/share", async (req: Request, res: Response) => {
        FROM reels_videos v WHERE v.id = $1 AND c.id = v.channel_id`,
       [videoId],
     );
+    if (userId) {
+      const shareMeta = await query(`SELECT channel_id FROM reels_videos WHERE id = $1`, [videoId]);
+      const channelId = Number(shareMeta.rows[0]?.channel_id ?? 0);
+      if (channelId > 0) {
+        void notifyChannelOwnerEngagement({
+          channelId,
+          videoId,
+          actorUserId: userId,
+          kind: "video_share",
+        }).catch(() => { /* ignore */ });
+      }
+    }
     const row = meta.rows[0] as { share_slug?: string; video_format?: string };
     const slug = reelsVideoSlugOnlyRef(row);
     const shareRef = reelsVideoPublicShareRef({ id: videoId, share_slug: row.share_slug });

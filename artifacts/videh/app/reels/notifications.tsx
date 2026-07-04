@@ -39,22 +39,62 @@ type GroupedNotification = {
 };
 
 function channelLabel(n: ReelsVideoNotification): string {
+  if (n.actorLabel?.trim()) return n.actorLabel.trim();
   return n.channelDisplayName ?? (n.channelHandle ? `@${n.channelHandle}` : "Channel");
+}
+
+function notificationSummary(n: ReelsVideoNotification): string {
+  const actor = n.actorLabel?.trim() || "Someone";
+  switch (n.kind) {
+    case "video_like":
+      return `${actor} liked your video`;
+    case "video_comment":
+      return n.detailText?.trim()
+        ? `${actor} commented: ${n.detailText.trim()}`
+        : `${actor} commented on your video`;
+    case "video_share":
+      return `${actor} shared your video`;
+    case "channel_connect":
+      return `${actor} connected with your channel`;
+    case "new_video":
+    default:
+      return n.videoTitle?.trim() || "New video";
+  }
 }
 
 function groupNotifications(list: ReelsVideoNotification[]): GroupedNotification[] {
   const sorted = [...list].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
+
   const result: GroupedNotification[] = [];
   const dayMs = 24 * 60 * 60 * 1000;
-
   let i = 0;
+
   while (i < sorted.length) {
     const first = sorted[i];
+    const isUploadBatch = first.kind === "new_video";
+
+    if (!isUploadBatch) {
+      result.push({
+        key: String(first.id),
+        channelId: first.channelId,
+        channelLabel: channelLabel(first),
+        channelHandle: first.channelHandle,
+        channelAvatarUrl: first.channelAvatarUrl,
+        items: [first],
+        latestVideoId: first.videoId,
+        thumbnailUrl: first.thumbnailUrl,
+        createdAt: first.createdAt,
+        unread: !first.read,
+      });
+      i += 1;
+      continue;
+    }
+
     const batch: ReelsVideoNotification[] = [first];
     let j = i + 1;
-    while (j < sorted.length && sorted[j].channelId === first.channelId) {
+    while (j < sorted.length && sorted[j].kind === "new_video" && sorted[j].channelId === first.channelId) {
       const newer = new Date(sorted[j - 1].createdAt).getTime();
       const older = new Date(sorted[j].createdAt).getTime();
       if (newer - older > dayMs) break;
@@ -185,7 +225,7 @@ export default function ReelsNotificationsScreen() {
     if (group.items.length > 1) {
       return `Uploaded ${group.items.length} videos`;
     }
-    return group.items[0]?.videoTitle ?? "New video";
+    return notificationSummary(group.items[0]);
   };
 
   const renderItem = ({ item }: { item: GroupedNotification }) => (

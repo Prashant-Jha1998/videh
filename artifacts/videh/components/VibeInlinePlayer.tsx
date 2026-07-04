@@ -30,7 +30,6 @@ export function VibeInlinePlayer({
   preload = false,
   posterUrl,
   editorMetadata,
-  musicTitle,
 }: Props) {
   const safeUrl = videoUrl && videoUrl.trim().length > 0 ? videoUrl : null;
   const player = useVideoPlayer(safeUrl, (p) => {
@@ -53,14 +52,13 @@ export function VibeInlinePlayer({
     bufferedPosition: 0,
   });
   const currentTime = timeEvent?.currentTime ?? 0;
-  const bufferedPosition = timeEvent?.bufferedPosition ?? 0;
   const viewSentRef = useRef(false);
   const lastActiveRef = useRef(false);
   const [showPoster, setShowPoster] = useState(true);
 
   const status = statusEvent?.status ?? player?.status ?? "idle";
   const isReady = status === "readyToPlay";
-  const isBuffering = isActive && (!isReady || (currentTime > 0 && bufferedPosition - currentTime < 0.35));
+  const isLoading = status === "loading" || status === "idle";
   const effectiveDuration = Math.max(1, Number(durationSeconds) || 1);
 
   useEffect(() => {
@@ -98,7 +96,6 @@ export function VibeInlinePlayer({
 
   const filterTint = editorMetadata?.filter ? filterOverlayColor(editorMetadata.filter) : null;
   const overlays = editorMetadata?.textOverlays ?? [];
-  const caption = editorMetadata?.caption?.trim();
 
   if (!safeUrl || !player) {
     return null;
@@ -109,17 +106,17 @@ export function VibeInlinePlayer({
       <VideoView
         player={player}
         style={StyleSheet.absoluteFill}
-        contentFit="cover"
+        contentFit="contain"
         nativeControls={false}
         allowsFullscreen={false}
         allowsPictureInPicture={false}
       />
-      {(showPoster || isBuffering) && posterUrl ? (
-        <Image source={{ uri: posterUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
+      {(showPoster && isLoading) && posterUrl ? (
+        <Image source={{ uri: posterUrl }} style={StyleSheet.absoluteFill} contentFit="contain" />
       ) : null}
-      {isActive && isBuffering ? (
+      {isActive && isLoading ? (
         <View style={styles.buffering} pointerEvents="none">
-          <ActivityIndicator color="#fff" size="large" />
+          <ActivityIndicator color="#fff" size="small" />
         </View>
       ) : null}
       {status === "error" ? (
@@ -150,45 +147,16 @@ export function VibeInlinePlayer({
           {o.text}
         </Text>
       ))}
-      {caption ? (
-        <View style={styles.caption} pointerEvents="none">
-          <Text style={styles.captionText} numberOfLines={2}>{caption}</Text>
-        </View>
-      ) : null}
-      {musicTitle ? (
-        <View style={styles.music} pointerEvents="none">
-          <Text style={styles.musicText} numberOfLines={1}>♪ {musicTitle}</Text>
-        </View>
-      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   buffering: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.2)",
+    position: "absolute",
+    top: "45%",
+    alignSelf: "center",
   },
   error: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.5)" },
   errorText: { color: "#fff", fontFamily: "Inter_600SemiBold" },
-  caption: {
-    position: "absolute",
-    left: 14,
-    right: 80,
-    bottom: 100,
-    backgroundColor: "rgba(0,0,0,0.35)",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  captionText: { color: "#fff", fontSize: 13 },
-  music: {
-    position: "absolute",
-    top: 56,
-    left: 14,
-    right: 80,
-  },
-  musicText: { color: "#fff", fontSize: 12, fontFamily: "Inter_600SemiBold" },
 });

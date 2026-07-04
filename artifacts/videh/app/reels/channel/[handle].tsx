@@ -49,8 +49,12 @@ import {
 import { addToPlayQueue, addToWatchLater } from "@/lib/reelsLibrary";
 import { shareReelsChannelLink, shareReelsVideoLink } from "@/lib/reelsShare";
 import { downloadReelsVideoToApp, saveReelsVideoToDevice } from "@/lib/reelsVideoDownload";
+import { isVibeVideo, isWatchVideo, VIBE_BRAND_NAME } from "@/lib/vibeVideo";
 
 const SCREEN_W = Dimensions.get("window").width;
+const VIBE_GRID_COLS = 3;
+const VIBE_CELL_W = Math.floor(SCREEN_W / VIBE_GRID_COLS);
+const VIBE_CELL_H = Math.round((VIBE_CELL_W * 16) / 9);
 const COVER_H = 120;
 const COVER_H_MARGIN = 16;
 const COVER_RADIUS = 12;
@@ -62,7 +66,7 @@ const PLAYLIST_THUMB_H = Math.round((PLAYLIST_THUMB_W * 9) / 16);
 const OWNER_THUMB_W = 168;
 const OWNER_THUMB_H = Math.round((OWNER_THUMB_W * 9) / 16);
 
-type ChannelTab = "home" | "videos" | "playlists";
+type ChannelTab = "home" | "videos" | "vibe" | "playlists";
 type VideoSort = "latest" | "popular" | "oldest";
 
 export default function ReelsChannelScreen() {
@@ -130,7 +134,16 @@ export default function ReelsChannelScreen() {
     return list;
   }, [videos, videoSort]);
 
-  const homeVideos = useMemo(() => sortedVideos.slice(0, 6), [sortedVideos]);
+  const watchVideos = useMemo(
+    () => sortedVideos.filter((v) => isWatchVideo(v.durationSeconds, v.videoFormat)),
+    [sortedVideos],
+  );
+  const vibeVideos = useMemo(
+    () => sortedVideos.filter((v) => isVibeVideo(v.durationSeconds, v.videoFormat)),
+    [sortedVideos],
+  );
+
+  const homeVideos = useMemo(() => watchVideos.slice(0, 6), [watchVideos]);
 
   const confirmDeleteVideo = (item: ReelsVideo) => {
     if (!user?.dbId || !channel?.isOwner) return;
@@ -329,14 +342,19 @@ export default function ReelsChannelScreen() {
     tab === "home"
       ? homeVideos
       : tab === "videos"
-        ? sortedVideos
-        : [];
+        ? watchVideos
+        : tab === "vibe"
+          ? vibeVideos
+          : [];
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <FlatList
         data={listData}
+        key={tab === "vibe" ? "vibe-grid" : "video-list"}
         keyExtractor={(v) => String(v.id)}
+        numColumns={tab === "vibe" ? VIBE_GRID_COLS : 1}
+        columnWrapperStyle={tab === "vibe" ? styles.vibeGridRow : undefined}
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         ListHeaderComponent={
           <>
@@ -380,6 +398,10 @@ export default function ReelsChannelScreen() {
               <VideoSortChips sort={videoSort} onSort={setVideoSort} colors={colors} />
             ) : null}
 
+            {tab === "vibe" && vibeVideos.length > 0 ? (
+              <Text style={[styles.section, { color: colors.foreground }]}>{VIBE_BRAND_NAME}</Text>
+            ) : null}
+
             {tab === "playlists" ? (
               <PlaylistsSection
                 playlists={playlists}
@@ -408,32 +430,53 @@ export default function ReelsChannelScreen() {
         ListEmptyComponent={
           tab === "playlists" ? null : (
             <View style={{ alignItems: "center", padding: 24, gap: 10 }}>
-              <Ionicons name="videocam-outline" size={44} color={colors.mutedForeground} />
+              <Ionicons name={tab === "vibe" ? "flash-outline" : "videocam-outline"} size={44} color={colors.mutedForeground} />
               <Text style={{ color: colors.mutedForeground, textAlign: "center" }}>
-                {channel.isOwner ? t("reels.noChannelVideosOwner") : t("reels.noChannelVideos")}
+                {tab === "vibe"
+                  ? (channel.isOwner
+                    ? `No ${VIBE_BRAND_NAME} clips yet. Upload a short vertical clip.`
+                    : `No ${VIBE_BRAND_NAME} clips on this channel yet.`)
+                  : (channel.isOwner ? t("reels.noChannelVideosOwner") : t("reels.noChannelVideos"))}
               </Text>
               {channel.isOwner ? (
                 <TouchableOpacity
                   style={{ marginTop: 8, backgroundColor: colors.primary, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20 }}
-                  onPress={() => router.push("/reels/upload" as never)}
+                  onPress={() => router.push((tab === "vibe" ? "/reels/vibe-upload" : "/reels/upload") as never)}
                 >
-                  <Text style={{ color: "#fff", fontFamily: "Inter_600SemiBold" }}>{t("reels.uploadVideo")}</Text>
+                  <Text style={{ color: "#fff", fontFamily: "Inter_600SemiBold" }}>
+                    {tab === "vibe" ? `Upload ${VIBE_BRAND_NAME}` : t("reels.uploadVideo")}
+                  </Text>
                 </TouchableOpacity>
               ) : null}
             </View>
           )
         }
-        renderItem={({ item }) => (
-          <VideoCard
-            item={item}
-            channel={channel}
-            colors={colors}
-            isOwner={Boolean(channel.isOwner)}
-            ownerCompact={Boolean(channel.isOwner) && tab === "videos"}
-            onPress={() => router.push({ pathname: "/reels/watch/[id]", params: { id: String(item.id) } })}
-            onMenu={() => setMenuVideo(item)}
-          />
-        )}
+        renderItem={({ item }) =>
+          tab === "vibe" ? (
+            <VibeGridCell
+              item={item}
+              colors={colors}
+              isOwner={Boolean(channel.isOwner)}
+              onPress={() => {
+                router.push({
+                  pathname: "/(tabs)/video",
+                  params: { section: "vibe" },
+                } as never);
+              }}
+              onMenu={() => setMenuVideo(item)}
+            />
+          ) : (
+            <VideoCard
+              item={item}
+              channel={channel}
+              colors={colors}
+              isOwner={Boolean(channel.isOwner)}
+              ownerCompact={Boolean(channel.isOwner) && tab === "videos"}
+              onPress={() => router.push({ pathname: "/reels/watch/[id]", params: { id: String(item.id) } })}
+              onMenu={() => setMenuVideo(item)}
+            />
+          )
+        }
       />
 
       <ReelsChannelAboutSheet
@@ -750,7 +793,7 @@ function ChannelHeader({
                 { color: channel.isSubscribed ? colors.foreground : colors.background },
               ]}
             >
-              {channel.isSubscribed ? "Subscribed" : "Subscribe"}
+              {channel.isSubscribed ? "Connected" : "Connect"}
             </Text>
           </TouchableOpacity>
         )}
@@ -771,6 +814,7 @@ function ChannelTabs({
   const tabs: { id: ChannelTab; label: string }[] = [
     { id: "home", label: "Home" },
     { id: "videos", label: "Videos" },
+    { id: "vibe", label: VIBE_BRAND_NAME },
     { id: "playlists", label: "Playlists" },
   ];
   return (
@@ -910,6 +954,46 @@ function PlaylistsSection({
         </TouchableOpacity>
       ))}
     </View>
+  );
+}
+
+function VibeGridCell({
+  item,
+  colors,
+  isOwner,
+  onPress,
+  onMenu,
+}: {
+  item: ReelsVideo;
+  colors: ReturnType<typeof useColors>;
+  isOwner: boolean;
+  onPress: () => void;
+  onMenu: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={styles.vibeGridCell}
+      activeOpacity={0.9}
+      onPress={onPress}
+      onLongPress={isOwner ? onMenu : undefined}
+    >
+      {item.thumbnailUrl ? (
+        <Image source={{ uri: item.thumbnailUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.muted, alignItems: "center", justifyContent: "center" }]}>
+          <Ionicons name="flash-outline" size={22} color={colors.mutedForeground} />
+        </View>
+      )}
+      <View style={styles.vibeGridViews}>
+        <Ionicons name="eye-outline" size={11} color="#fff" />
+        <Text style={styles.vibeGridViewsText}>{formatViewCount(item.viewCount)}</Text>
+      </View>
+      {isOwner ? (
+        <TouchableOpacity style={styles.vibeGridMenu} onPress={onMenu} hitSlop={6}>
+          <Ionicons name="ellipsis-vertical" size={14} color="#fff" />
+        </TouchableOpacity>
+      ) : null}
+    </TouchableOpacity>
   );
 }
 
@@ -1159,4 +1243,29 @@ const styles = StyleSheet.create({
   modalInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 16, marginTop: 16 },
   modalBtn: { paddingVertical: 8, paddingHorizontal: 4, minWidth: 64, alignItems: "center" },
+  vibeGridRow: { gap: 1 },
+  vibeGridCell: {
+    width: VIBE_CELL_W,
+    height: VIBE_CELL_H,
+    backgroundColor: "#111",
+    overflow: "hidden",
+    marginBottom: 1,
+  },
+  vibeGridViews: {
+    position: "absolute",
+    left: 6,
+    bottom: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  vibeGridViewsText: { color: "#fff", fontSize: 11, fontFamily: "Inter_600SemiBold" },
+  vibeGridMenu: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    padding: 4,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    borderRadius: 10,
+  },
 });
