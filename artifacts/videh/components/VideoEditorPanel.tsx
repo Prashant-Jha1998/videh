@@ -169,7 +169,7 @@ export function VideoEditorPanel({
             <Text style={styles.captionText} numberOfLines={2}>{editor.caption}</Text>
           </View>
         ) : null}
-        {selectedSound ? (
+        {selectedSound && !isVibeFormat ? (
           <View style={styles.soundChip} pointerEvents="none">
             <Ionicons name="musical-notes" size={14} color="#fff" />
             <Text style={styles.soundChipText} numberOfLines={1}>{selectedSound.title}</Text>
@@ -178,10 +178,12 @@ export function VideoEditorPanel({
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.toolRow} contentContainerStyle={{ gap: 8 }}>
-        <TouchableOpacity style={[styles.toolBtn, { backgroundColor: colors.muted }]} onPress={onOpenSounds}>
-          <Ionicons name="musical-notes-outline" size={20} color={colors.foreground} />
-          <Text style={[styles.toolLabel, { color: colors.foreground }]}>Sound</Text>
-        </TouchableOpacity>
+        {!isVibeFormat ? (
+          <TouchableOpacity style={[styles.toolBtn, { backgroundColor: colors.muted }]} onPress={onOpenSounds}>
+            <Ionicons name="musical-notes-outline" size={20} color={colors.foreground} />
+            <Text style={[styles.toolLabel, { color: colors.foreground }]}>Sound</Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity style={[styles.toolBtn, { backgroundColor: colors.muted }]} onPress={addText}>
           <Ionicons name="text-outline" size={20} color={colors.foreground} />
           <Text style={[styles.toolLabel, { color: colors.foreground }]}>Text</Text>

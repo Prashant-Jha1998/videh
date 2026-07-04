@@ -56,6 +56,9 @@ function notificationSummary(n: ReelsVideoNotification): string {
       return `${actor} shared your video`;
     case "channel_connect":
       return `${actor} connected with your channel`;
+    case "content_warning":
+      return n.detailText?.trim()
+        ?? "Strict warning: your content was removed after community reports.";
     case "new_video":
     default:
       return n.videoTitle?.trim() || "New video";

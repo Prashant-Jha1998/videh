@@ -1,8 +1,10 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useEvent } from "expo";
 import { Image } from "expo-image";
 import { useVideoPlayer, VideoView } from "expo-video";
-import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { useFocusEffect } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { filterOverlayColor, type VideoEditorMetadata } from "@/lib/videoEditor";
 import { recordReelsView } from "@/lib/reelsApi";
 
@@ -13,11 +15,11 @@ type Props = {
   userId?: number;
   sessionToken?: string | null;
   isActive: boolean;
-  /** Buffer next clip without playing it. */
+  /** Pause while comments sheet is open. */
+  playbackSuppressed?: boolean;
   preload?: boolean;
   posterUrl?: string | null;
   editorMetadata?: VideoEditorMetadata | null;
-  musicTitle?: string | null;
 };
 
 export function VibeInlinePlayer({
@@ -27,6 +29,7 @@ export function VibeInlinePlayer({
   userId,
   sessionToken,
   isActive,
+  playbackSuppressed = false,
   preload = false,
   posterUrl,
   editorMetadata,
@@ -54,45 +57,108 @@ export function VibeInlinePlayer({
   const currentTime = timeEvent?.currentTime ?? 0;
   const viewSentRef = useRef(false);
   const lastActiveRef = useRef(false);
+  const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showPoster, setShowPoster] = useState(true);
+  const [tapPaused, setTapPaused] = useState(false);
+  const [hintIcon, setHintIcon] = useState<"play" | "pause" | null>(null);
+  const [screenFocused, setScreenFocused] = useState(true);
 
   const status = statusEvent?.status ?? player?.status ?? "idle";
   const isReady = status === "readyToPlay";
   const isLoading = status === "loading" || status === "idle";
   const effectiveDuration = Math.max(1, Number(durationSeconds) || 1);
+  const shouldPlay = isActive && screenFocused && isReady && !playbackSuppressed && !tapPaused;
+
+  const stopPlayback = useCallback(() => {
+    if (!player) return;
+    try {
+      player.pause();
+      player.muted = true;
+      player.volume = 0;
+    } catch { /* ignore */ }
+  }, [player]);
+
+  const startPlayback = useCallback(() => {
+    if (!player) return;
+    try {
+      player.muted = false;
+      player.volume = 1;
+      player.play();
+    } catch { /* ignore */ }
+  }, [player]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setScreenFocused(true);
+      return () => {
+        setScreenFocused(false);
+        stopPlayback();
+      };
+    }, [stopPlayback]),
+  );
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background" || state === "inactive") {
+        stopPlayback();
+      }
+    });
+    return () => sub.remove();
+  }, [stopPlayback]);
+
+  useEffect(() => {
+    setTapPaused(false);
+    setHintIcon(null);
+  }, [videoId]);
 
   useEffect(() => {
     if (!player) return;
-    if (isActive && isReady) {
+    if (shouldPlay) {
       setShowPoster(false);
       if (!lastActiveRef.current) viewSentRef.current = false;
-      try { player.play(); } catch { /* ignore */ }
+      startPlayback();
     } else {
-      try { player.pause(); } catch { /* ignore */ }
-      if (!isActive) setShowPoster(true);
+      stopPlayback();
+      if (!isActive || !screenFocused) setShowPoster(true);
     }
-    lastActiveRef.current = isActive;
-  }, [isActive, isReady, player]);
+    lastActiveRef.current = isActive && screenFocused;
+  }, [shouldPlay, isActive, screenFocused, player, startPlayback, stopPlayback]);
 
   useEffect(() => {
     if (!preload || !player || isActive) return;
-    try { player.pause(); } catch { /* ignore */ }
-  }, [preload, player, isActive]);
+    stopPlayback();
+  }, [preload, player, isActive, stopPlayback]);
 
   useEffect(() => {
     return () => {
-      try { player?.pause(); } catch { /* ignore */ }
+      if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
+      stopPlayback();
     };
-  }, [player]);
+  }, [stopPlayback]);
 
   useEffect(() => {
-    if (!isActive || !userId || viewSentRef.current) return;
+    if (!isActive || !screenFocused || !userId || viewSentRef.current) return;
     const watched = Math.floor(currentTime);
     if (watched >= Math.min(3, effectiveDuration)) {
       viewSentRef.current = true;
       void recordReelsView(videoId, userId, watched, sessionToken).catch(() => { /* ignore */ });
     }
-  }, [isActive, userId, sessionToken, videoId, effectiveDuration, currentTime]);
+  }, [isActive, screenFocused, userId, sessionToken, videoId, effectiveDuration, currentTime]);
+
+  const flashHint = (icon: "play" | "pause") => {
+    setHintIcon(icon);
+    if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
+    hintTimerRef.current = setTimeout(() => setHintIcon(null), 550);
+  };
+
+  const onVideoTap = () => {
+    if (!isActive || playbackSuppressed || !isReady) return;
+    setTapPaused((prev) => {
+      const next = !prev;
+      flashHint(next ? "pause" : "play");
+      return next;
+    });
+  };
 
   const filterTint = editorMetadata?.filter ? filterOverlayColor(editorMetadata.filter) : null;
   const overlays = editorMetadata?.textOverlays ?? [];
@@ -111,12 +177,20 @@ export function VibeInlinePlayer({
         allowsFullscreen={false}
         allowsPictureInPicture={false}
       />
+      <Pressable style={StyleSheet.absoluteFill} onPress={onVideoTap} accessibilityLabel="Play or pause video" />
       {(showPoster && isLoading) && posterUrl ? (
-        <Image source={{ uri: posterUrl }} style={StyleSheet.absoluteFill} contentFit="contain" />
+        <Image source={{ uri: posterUrl }} style={StyleSheet.absoluteFill} contentFit="contain" pointerEvents="none" />
       ) : null}
       {isActive && isLoading ? (
         <View style={styles.buffering} pointerEvents="none">
           <ActivityIndicator color="#fff" size="small" />
+        </View>
+      ) : null}
+      {hintIcon ? (
+        <View style={styles.hintWrap} pointerEvents="none">
+          <View style={styles.hintCircle}>
+            <Ionicons name={hintIcon} size={38} color="#fff" />
+          </View>
         </View>
       ) : null}
       {status === "error" ? (
@@ -156,6 +230,19 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: "45%",
     alignSelf: "center",
+  },
+  hintWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  hintCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   error: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.5)" },
   errorText: { color: "#fff", fontFamily: "Inter_600SemiBold" },

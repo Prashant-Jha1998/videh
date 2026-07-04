@@ -2,9 +2,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { useEvent } from "expo";
 import { Image } from "expo-image";
 import { useVideoPlayer, VideoView } from "expo-video";
+import { useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useRef } from "react";
 import {
   Alert,
+  AppState,
   Dimensions,
   Linking,
   Platform,
@@ -90,6 +92,30 @@ export function VibeAdCard({ ad, height, bottomPad, isActive }: Props) {
     ? Math.max(0, Math.ceil(ad.skipAfterSeconds - currentTime))
     : null;
 
+  const stopPlayback = useCallback(() => {
+    if (!player) return;
+    try {
+      player.pause();
+      player.muted = true;
+      player.volume = 0;
+    } catch { /* ignore */ }
+  }, [player]);
+
+  useFocusEffect(
+    useCallback(() => () => {
+      stopPlayback();
+    }, [stopPlayback]),
+  );
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background" || state === "inactive") {
+        stopPlayback();
+      }
+    });
+    return () => sub.remove();
+  }, [stopPlayback]);
+
   const recordImpression = useCallback(async (opts: { watchedSeconds: number; skipped: boolean; completed: boolean }) => {
     if (impressedRef.current || !user?.dbId || ad.id <= 0) return;
     impressedRef.current = true;
@@ -114,26 +140,26 @@ export function VibeAdCard({ ad, height, bottomPad, isActive }: Props) {
       completed,
     });
     try {
-      player?.pause();
+      stopPlayback();
     } catch { /* ignore */ }
-  }, [player, recordImpression]);
+  }, [stopPlayback, recordImpression]);
 
   useEffect(() => {
     if (!videoAd || !player) return;
     if (!isActive) {
-      try {
-        player.pause();
-      } catch { /* ignore */ }
+      stopPlayback();
       return;
     }
     impressedRef.current = false;
     if (status === "readyToPlay") {
       try {
+        player.muted = false;
+        player.volume = 1;
         player.currentTime = 0;
         player.play();
       } catch { /* ignore */ }
     }
-  }, [isActive, videoAd, player, status, ad.id]);
+  }, [isActive, videoAd, player, status, ad.id, stopPlayback]);
 
   useEffect(() => {
     if (!videoAd || !isActive) return;
@@ -161,6 +187,10 @@ export function VibeAdCard({ ad, height, bottomPad, isActive }: Props) {
       completed: currentTimeRef.current >= duration * 0.9,
     });
   }, [isActive, videoAd, duration, recordImpression]);
+
+  useEffect(() => () => {
+    stopPlayback();
+  }, [stopPlayback]);
 
   const onTap = async (target: "cta" | "play_store" | "app_store" | "destination", url?: string | null) => {
     if (user?.dbId && ad.id > 0) {

@@ -1,12 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   FlatList,
   Platform,
+  RefreshControl,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -16,6 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReelsCommentsSheet } from "@/components/ReelsCommentsSheet";
 import { VibeAdCard } from "@/components/VibeAdCard";
+import { VibeDetailsSheet } from "@/components/VibeDetailsSheet";
 import { VibeInlinePlayer } from "@/components/VibeInlinePlayer";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -41,6 +44,9 @@ type Props = {
   onLoadMore?: () => void;
   loadingMore?: boolean;
   onUpload?: () => void;
+  refreshing?: boolean;
+  onRefresh?: () => void | Promise<void>;
+  onReport?: (video: ReelsVideo) => void;
 };
 
 type VibeRow =
@@ -99,11 +105,15 @@ function VibeCard({
   isActive,
   liked,
   subscribed,
+  commentsOpen,
+  detailsOpen,
   userId,
   sessionToken,
   onLike,
   onComment,
   onShare,
+  onMore,
+  onReport,
   onFollow,
   onOpenChannel,
 }: {
@@ -113,24 +123,25 @@ function VibeCard({
   isActive: boolean;
   liked: boolean;
   subscribed: boolean;
+  commentsOpen: boolean;
+  detailsOpen: boolean;
   userId?: number;
   sessionToken?: string | null;
   onLike: () => void;
   onComment: () => void;
   onShare: () => void;
+  onMore: () => void;
+  onReport?: () => void;
   onFollow: () => void;
   onOpenChannel: () => void;
 }) {
   const colors = useColors();
-  const [captionExpanded, setCaptionExpanded] = useState(false);
   const channel = item.channelDisplayName ?? (item.channelHandle ? `@${item.channelHandle}` : "Channel");
   const handle = item.channelHandle ? `@${item.channelHandle}` : channel;
   const editorMeta = parseEditorMeta(item.editorMetadata);
   const canPlay = Boolean(item.videoUrl && item.videoUrl.trim().length > 0);
   const likeCount = item.likeCount + (liked && item.myReaction !== "like" ? 1 : 0);
   const caption = editorMeta?.caption?.trim() || item.title;
-  const description = item.description?.trim();
-  const musicLabel = [item.musicTitle, item.musicArtist].filter(Boolean).join(" · ");
 
   return (
     <View style={[styles.card, { height, backgroundColor: "#000" }]}>
@@ -148,6 +159,7 @@ function VibeCard({
           userId={userId}
           sessionToken={sessionToken}
           isActive
+          playbackSuppressed={commentsOpen || detailsOpen}
           posterUrl={item.thumbnailUrl}
           editorMetadata={editorMeta}
         />
@@ -183,11 +195,15 @@ function VibeCard({
             <Text style={styles.sideLabel}>{formatActionCount(item.shareCount ?? 0)}</Text>
           </TouchableOpacity>
         ) : null}
-        {musicLabel ? (
-          <View style={styles.musicDisc}>
-            <Ionicons name="musical-notes" size={14} color="#fff" />
-          </View>
+        {onReport ? (
+          <TouchableOpacity style={styles.sideBtn} onPress={onReport} hitSlop={8}>
+            <Ionicons name="flag-outline" size={26} color="#fff" />
+            <Text style={styles.sideLabel}>Report</Text>
+          </TouchableOpacity>
         ) : null}
+        <TouchableOpacity style={styles.sideBtn} onPress={onMore} hitSlop={8}>
+          <Ionicons name="ellipsis-horizontal" size={28} color="#fff" />
+        </TouchableOpacity>
       </View>
 
       <View style={[styles.bottomMeta, { paddingBottom: bottomChrome + 8 }]}>
@@ -214,44 +230,49 @@ function VibeCard({
         </View>
 
         {caption ? (
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={() => setCaptionExpanded((v) => !v)}
-          >
-            <Text style={styles.caption} numberOfLines={captionExpanded ? undefined : 2}>
+          <TouchableOpacity activeOpacity={0.9} onPress={onMore}>
+            <Text style={styles.caption} numberOfLines={2}>
               {caption}
-              {!captionExpanded && description && description !== caption ? " …" : ""}
             </Text>
-            {captionExpanded && description && description !== caption ? (
-              <Text style={styles.captionSub}>{description}</Text>
-            ) : null}
           </TouchableOpacity>
-        ) : null}
-
-        {musicLabel ? (
-          <View style={styles.musicRow}>
-            <Ionicons name="musical-notes" size={13} color="#fff" />
-            <Text style={styles.musicText} numberOfLines={1}>{musicLabel}</Text>
-          </View>
         ) : null}
       </View>
     </View>
   );
 }
 
-export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMore, onUpload }: Props) {
+export function VibeSwipeFeed({
+  videos,
+  adPlacements = [],
+  onLoadMore,
+  loadingMore,
+  onUpload,
+  refreshing = false,
+  onRefresh,
+  onReport,
+}: Props) {
   const insets = useSafeAreaInsets();
   const colors = useColors();
   const router = useRouter();
   const { user } = useApp();
   const cardH = SCREEN_H;
   const bottomChrome = insets.bottom + TAB_BAR_H;
+  const listRef = useRef<FlatList<VibeRow>>(null);
   const viewConfig = useRef({ viewAreaCoveragePercentThreshold: 80 }).current;
   const [activeIndex, setActiveIndex] = useState(0);
   const [likedMap, setLikedMap] = useState<Record<number, boolean>>({});
   const [subscribedMap, setSubscribedMap] = useState<Record<number, boolean>>({});
   const [commentVideo, setCommentVideo] = useState<ReelsVideo | null>(null);
+  const [detailsVideo, setDetailsVideo] = useState<ReelsVideo | null>(null);
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
+  const [screenFocused, setScreenFocused] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      setScreenFocused(true);
+      return () => setScreenFocused(false);
+    }, []),
+  );
 
   const rows = React.useMemo(() => buildVibeRows(videos, adPlacements), [videos, adPlacements]);
 
@@ -312,6 +333,13 @@ export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMo
     }
   };
 
+  const handleRefresh = useCallback(async () => {
+    if (!onRefresh) return;
+    await onRefresh();
+    setActiveIndex(0);
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, [onRefresh]);
+
   if (videos.length === 0) {
     return (
       <View style={[styles.empty, { backgroundColor: "#000" }]}>
@@ -332,7 +360,13 @@ export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMo
 
   return (
     <>
+      {refreshing ? (
+        <View style={[styles.refreshBadge, { top: insets.top + 52 }]} pointerEvents="none">
+          <ActivityIndicator color="#fff" size="small" />
+        </View>
+      ) : null}
       <FlatList
+        ref={listRef}
         data={rows}
         keyExtractor={(row) => row.key}
         pagingEnabled
@@ -347,6 +381,18 @@ export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMo
         maxToRenderPerBatch={2}
         windowSize={3}
         removeClippedSubviews={Platform.OS !== "android"}
+        refreshControl={
+          onRefresh ? (
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => void handleRefresh()}
+              tintColor="#fff"
+              colors={["#ffffff"]}
+              progressBackgroundColor="rgba(0,0,0,0.35)"
+              progressViewOffset={insets.top + 56}
+            />
+          ) : undefined
+        }
         renderItem={({ item, index }) => {
           if (item.kind === "ad") {
             return (
@@ -354,24 +400,35 @@ export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMo
                 ad={item.ad}
                 height={cardH}
                 bottomPad={bottomChrome}
-                isActive={index === activeIndex}
+                isActive={screenFocused && index === activeIndex}
               />
             );
           }
           const video = item.video;
+          const cardActive = screenFocused && index === activeIndex;
           return (
             <VibeCard
               item={video}
               height={cardH}
               bottomChrome={bottomChrome}
-              isActive={index === activeIndex}
+              isActive={cardActive}
               liked={likedMap[video.id] ?? video.myReaction === "like"}
               subscribed={subscribedMap[video.channelId] ?? false}
+              commentsOpen={commentVideo?.id === video.id}
+              detailsOpen={detailsVideo?.id === video.id}
               userId={user?.dbId}
               sessionToken={user?.sessionToken}
               onLike={() => void like(video)}
-              onComment={() => setCommentVideo(video)}
+              onComment={() => {
+                setDetailsVideo(null);
+                setCommentVideo(video);
+              }}
               onShare={() => share(video)}
+              onMore={() => {
+                setCommentVideo(null);
+                setDetailsVideo(video);
+              }}
+              onReport={onReport ? () => onReport(video) : undefined}
               onFollow={() => void follow(video)}
               onOpenChannel={() => openChannel(video)}
             />
@@ -382,18 +439,38 @@ export function VibeSwipeFeed({ videos, adPlacements = [], onLoadMore, loadingMo
       {commentVideo && user?.dbId ? (
         <ReelsCommentsSheet
           visible
+          variant="vibe"
           onClose={() => setCommentVideo(null)}
           videoId={commentVideo.id}
           commentCount={commentCounts[commentVideo.id] ?? commentVideo.commentCount}
           userId={user.dbId}
           sessionToken={user.sessionToken}
           userAvatarUrl={user.avatar}
+          channelLabel={
+            commentVideo.channelDisplayName
+            ?? (commentVideo.channelHandle ? `@${commentVideo.channelHandle}` : "this clip")
+          }
           onCommentPosted={() => {
             setCommentCounts((m) => ({
               ...m,
               [commentVideo.id]: (m[commentVideo.id] ?? commentVideo.commentCount) + 1,
             }));
           }}
+        />
+      ) : null}
+      {detailsVideo ? (
+        <VibeDetailsSheet
+          visible
+          onClose={() => setDetailsVideo(null)}
+          video={detailsVideo}
+          editorMeta={parseEditorMeta(detailsVideo.editorMetadata)}
+          subscribed={subscribedMap[detailsVideo.channelId] ?? false}
+          onFollow={() => void follow(detailsVideo)}
+          onOpenChannel={() => openChannel(detailsVideo)}
+          onReport={onReport ? () => {
+            setDetailsVideo(null);
+            onReport(detailsVideo);
+          } : undefined}
         />
       ) : null}
     </>
@@ -420,17 +497,6 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0,0,0,0.75)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
-  },
-  musicDisc: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.85)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 4,
-    backgroundColor: "rgba(0,0,0,0.35)",
   },
   bottomMeta: {
     position: "absolute",
@@ -472,23 +538,6 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
-  captionSub: {
-    color: "rgba(255,255,255,0.85)",
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    lineHeight: 18,
-    marginTop: 4,
-  },
-  musicRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
-  musicText: {
-    flex: 1,
-    color: "#fff",
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-    textShadowColor: "rgba(0,0,0,0.5)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32, gap: 10 },
   emptyTitle: { fontSize: 17, fontFamily: "Inter_700Bold", textAlign: "center", color: "#fff" },
   emptyHint: { fontSize: 14, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 20, color: "rgba(255,255,255,0.65)" },
@@ -503,4 +552,15 @@ const styles = StyleSheet.create({
     backgroundColor: "#059669",
   },
   emptyUploadText: { color: "#fff", fontSize: 15, fontFamily: "Inter_700Bold" },
+  refreshBadge: {
+    position: "absolute",
+    alignSelf: "center",
+    zIndex: 40,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });

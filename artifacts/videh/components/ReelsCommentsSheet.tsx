@@ -5,12 +5,15 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardStickyView } from "react-native-keyboard-controller";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { useColors } from "@/hooks/useColors";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
@@ -34,6 +37,10 @@ type Props = {
   sessionToken?: string | null;
   userAvatarUrl?: string | null;
   onCommentPosted?: () => void;
+  /** Instagram-style dark sheet for Vibe feed. */
+  variant?: "watch" | "vibe";
+  channelLabel?: string | null;
+  captionPreview?: string | null;
 };
 
 function ytTimeAgo(iso: string): string {
@@ -92,9 +99,22 @@ export function ReelsCommentsSheet({
   sessionToken,
   userAvatarUrl,
   onCommentPosted,
+  variant = "watch",
+  channelLabel,
+  captionPreview,
 }: Props) {
   const colors = useColors();
   const { t } = useUiPreferences();
+  const insets = useSafeAreaInsets();
+  const isVibe = variant === "vibe";
+  const sheetBg = isVibe ? "#141414" : colors.background;
+  const fg = isVibe ? "#fff" : colors.foreground;
+  const muted = isVibe ? "rgba(255,255,255,0.55)" : colors.mutedForeground;
+  const border = isVibe ? "rgba(255,255,255,0.12)" : colors.border;
+  const inputBg = isVibe ? "rgba(255,255,255,0.1)" : colors.muted;
+  const chipBg = isVibe ? "rgba(255,255,255,0.14)" : colors.card;
+  const chipActiveBg = isVibe ? "#fff" : colors.foreground;
+  const chipActiveFg = isVibe ? "#111" : colors.background;
   const [comments, setComments] = useState<ReelsComment[]>([]);
   const [sort, setSort] = useState<ReelsCommentSort>("top");
   const [loading, setLoading] = useState(false);
@@ -117,7 +137,11 @@ export function ReelsCommentsSheet({
   useEffect(() => {
     if (!visible) return;
     void loadComments();
-  }, [visible, loadComments]);
+    if (isVibe) {
+      const t = setTimeout(() => inputRef.current?.focus(), 320);
+      return () => clearTimeout(t);
+    }
+  }, [visible, loadComments, isVibe]);
 
   const loadReplies = useCallback(async (commentId: number) => {
     if (loadingReplies.has(commentId) || repliesMap[commentId]) return;
@@ -222,10 +246,10 @@ export function ReelsCommentsSheet({
         <Ionicons
           name={item.myReaction === "like" ? "thumbs-up" : "thumbs-up-outline"}
           size={compact ? 16 : 18}
-          color={item.myReaction === "like" ? colors.primary : colors.mutedForeground}
+          color={item.myReaction === "like" ? (isVibe ? "#fff" : colors.primary) : muted}
         />
         {item.likeCount > 0 ? (
-          <Text style={[styles.actionCount, { color: colors.mutedForeground }]}>
+          <Text style={[styles.actionCount, { color: muted }]}>
             {formatViewCount(item.likeCount)}
           </Text>
         ) : null}
@@ -238,14 +262,14 @@ export function ReelsCommentsSheet({
         <Ionicons
           name={item.myReaction === "dislike" ? "thumbs-down" : "thumbs-down-outline"}
           size={compact ? 16 : 18}
-          color={item.myReaction === "dislike" ? colors.primary : colors.mutedForeground}
+          color={item.myReaction === "dislike" ? (isVibe ? "#fff" : colors.primary) : muted}
         />
       </TouchableOpacity>
       <TouchableOpacity style={styles.actionBtn} onPress={() => startReply(item)}>
         {compact ? (
-          <Text style={[styles.replyLink, { color: colors.mutedForeground }]}>Reply</Text>
+          <Text style={[styles.replyLink, { color: muted }]}>Reply</Text>
         ) : (
-          <Ionicons name="chatbubble-outline" size={18} color={colors.mutedForeground} />
+          <Ionicons name="chatbubble-outline" size={18} color={muted} />
         )}
       </TouchableOpacity>
     </View>
@@ -263,15 +287,15 @@ export function ReelsCommentsSheet({
         />
         <View style={styles.commentBody}>
           <View style={styles.metaRow}>
-            <Text style={[styles.handle, { color: colors.foreground }]} numberOfLines={1}>
+            <Text style={[styles.handle, { color: fg }]} numberOfLines={1}>
               {handle}
             </Text>
-            <Text style={[styles.dot, { color: colors.mutedForeground }]}> · </Text>
-            <Text style={[styles.time, { color: colors.mutedForeground }]}>
+            <Text style={[styles.dot, { color: muted }]}> · </Text>
+            <Text style={[styles.time, { color: muted }]}>
               {ytTimeAgo(item.createdAt)}
             </Text>
           </View>
-          <Text style={[styles.commentText, { color: colors.foreground }]}>{item.content}</Text>
+          <Text style={[styles.commentText, { color: fg }]}>{item.content}</Text>
           {renderActions(item, nested)}
         </View>
       </View>
@@ -292,7 +316,7 @@ export function ReelsCommentsSheet({
           <View style={[styles.replyLineV, { backgroundColor: colors.border }]} />
           <View style={[styles.replyLineH, { backgroundColor: colors.border }]} />
         </View>
-        <Text style={[styles.replyToggleText, { color: colors.primary }]}>
+        <Text style={[styles.replyToggleText, { color: isVibe ? "#fff" : colors.primary }]}>
           {expanded ? "Hide replies" : `${label} ›`}
         </Text>
       </TouchableOpacity>
@@ -320,60 +344,125 @@ export function ReelsCommentsSheet({
     );
   };
 
+  const inputBar = (
+    <>
+      {replyTarget ? (
+        <View style={[styles.replyBanner, { backgroundColor: inputBg, borderColor: border }]}>
+          <Text style={{ color: muted, flex: 1 }} numberOfLines={1}>
+            Replying to {replyTarget.channelHandle ? `@${replyTarget.channelHandle}` : replyTarget.displayName}
+          </Text>
+          <TouchableOpacity onPress={() => setReplyTarget(null)}>
+            <Ionicons name="close-circle" size={20} color={muted} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      <View style={[styles.inputBar, { borderTopColor: border, backgroundColor: sheetBg }]}>
+        <CommentAvatar
+          uri={userAvatarUrl}
+          size={32}
+          fallbackColor={colors.primary}
+          label="You"
+        />
+        <TextInput
+          ref={inputRef}
+          style={[styles.input, { color: fg, backgroundColor: inputBg }]}
+          placeholder={
+            isVibe && channelLabel
+              ? `Add a comment for ${channelLabel}...`
+              : (replyTarget ? "Add a reply..." : "Add a comment...")
+          }
+          placeholderTextColor={muted}
+          value={commentText}
+          onChangeText={setCommentText}
+          multiline
+        />
+        <TouchableOpacity onPress={() => void sendComment()} disabled={!commentText.trim() || sending}>
+          {sending ? (
+            <ActivityIndicator size="small" color={isVibe ? "#fff" : colors.primary} />
+          ) : (
+            <Ionicons name="send" size={22} color={commentText.trim() ? (isVibe ? "#fff" : colors.primary) : muted} />
+          )}
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
   return (
-    <DismissibleModal visible={visible} onClose={onClose} animationType="slide">
+    <DismissibleModal
+      visible={visible}
+      onClose={onClose}
+      animationType="slide"
+      backdropOpacity={isVibe ? 0.15 : 0.45}
+    >
       <View style={styles.sheetRoot}>
-        <View style={[styles.sheet, { backgroundColor: colors.background }]}>
-          <View style={styles.sheetHandle} />
+        <View style={[styles.sheet, isVibe && styles.vibeSheet, { backgroundColor: sheetBg }]}>
+          <View style={[styles.sheetHandle, isVibe && { backgroundColor: "rgba(255,255,255,0.35)" }]} />
           <View style={styles.sheetHeader}>
-            <Text style={[styles.sheetTitle, { color: colors.foreground }]}>
+            <Text style={[styles.sheetTitle, { color: fg }]}>
               Comments{commentCount > 0 ? ` · ${formatViewCount(commentCount)}` : ""}
             </Text>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-              <Ionicons name="close" size={26} color={colors.foreground} />
+              <Ionicons name="close" size={26} color={fg} />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.sortRow}>
-            {(["top", "newest"] as ReelsCommentSort[]).map((s) => {
-              const active = sort === s;
-              return (
-                <TouchableOpacity
-                  key={s}
-                  style={[
-                    styles.sortChip,
-                    {
-                      backgroundColor: active ? colors.foreground : colors.card,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                  onPress={() => setSort(s)}
-                >
-                  <Text
-                    style={{
-                      color: active ? colors.background : colors.foreground,
-                      fontFamily: "Inter_600SemiBold",
-                      fontSize: 13,
-                    }}
+          {isVibe && channelLabel && !captionPreview ? (
+            <View style={[styles.vibePreview, { borderBottomColor: border }]}>
+              <Text style={styles.vibePreviewUser} numberOfLines={1}>{channelLabel}</Text>
+            </View>
+          ) : null}
+          {isVibe && captionPreview ? (
+            <View style={[styles.vibePreview, { borderBottomColor: border }]}>
+              {channelLabel ? (
+                <Text style={styles.vibePreviewUser} numberOfLines={1}>{channelLabel}</Text>
+              ) : null}
+              <Text style={styles.vibePreviewCaption} numberOfLines={2}>{captionPreview}</Text>
+            </View>
+          ) : null}
+
+          {!isVibe ? (
+            <View style={styles.sortRow}>
+              {(["top", "newest"] as ReelsCommentSort[]).map((s) => {
+                const active = sort === s;
+                return (
+                  <TouchableOpacity
+                    key={s}
+                    style={[
+                      styles.sortChip,
+                      {
+                        backgroundColor: active ? chipActiveBg : chipBg,
+                        borderColor: border,
+                      },
+                    ]}
+                    onPress={() => setSort(s)}
                   >
-                    {s === "top" ? "Top" : "Newest"}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+                    <Text
+                      style={{
+                        color: active ? chipActiveFg : fg,
+                        fontFamily: "Inter_600SemiBold",
+                        fontSize: 13,
+                      }}
+                    >
+                      {s === "top" ? "Top" : "Newest"}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
 
           {loading ? (
-            <ActivityIndicator style={{ marginVertical: 24 }} color={colors.primary} />
+            <ActivityIndicator style={{ marginVertical: 24 }} color={isVibe ? "#fff" : colors.primary} />
           ) : (
             <FlatList
               data={comments}
               keyExtractor={(c) => String(c.id)}
-              style={styles.list}
+              style={[styles.list, isVibe && styles.vibeList]}
               contentContainerStyle={styles.listContent}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
               ListEmptyComponent={
-                <Text style={{ color: colors.mutedForeground, textAlign: "center", padding: 32 }}>
+                <Text style={{ color: muted, textAlign: "center", padding: 32 }}>
                   No comments yet
                 </Text>
               }
@@ -386,43 +475,13 @@ export function ReelsCommentsSheet({
               )}
             />
           )}
-
-          {replyTarget ? (
-            <View style={[styles.replyBanner, { backgroundColor: colors.muted, borderColor: colors.border }]}>
-              <Text style={{ color: colors.mutedForeground, flex: 1 }} numberOfLines={1}>
-                Replying to {replyTarget.channelHandle ? `@${replyTarget.channelHandle}` : replyTarget.displayName}
-              </Text>
-              <TouchableOpacity onPress={() => setReplyTarget(null)}>
-                <Ionicons name="close-circle" size={20} color={colors.mutedForeground} />
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          <View style={[styles.inputBar, { borderTopColor: colors.border, backgroundColor: colors.background }]}>
-            <CommentAvatar
-              uri={userAvatarUrl}
-              size={32}
-              fallbackColor={colors.primary}
-              label="You"
-            />
-            <TextInput
-              ref={inputRef}
-              style={[styles.input, { color: colors.foreground, backgroundColor: colors.muted }]}
-              placeholder={replyTarget ? "Add a reply..." : "Add a comment..."}
-              placeholderTextColor={colors.mutedForeground}
-              value={commentText}
-              onChangeText={setCommentText}
-              multiline
-            />
-            <TouchableOpacity onPress={() => void sendComment()} disabled={!commentText.trim() || sending}>
-              {sending ? (
-                <ActivityIndicator size="small" color={colors.primary} />
-              ) : (
-                <Ionicons name="send" size={22} color={commentText.trim() ? colors.primary : colors.mutedForeground} />
-              )}
-            </TouchableOpacity>
-          </View>
         </View>
+
+        <KeyboardStickyView offset={{ closed: insets.bottom, opened: 0 }}>
+          <View style={{ backgroundColor: sheetBg, paddingBottom: Platform.OS === "ios" ? 0 : 4 }}>
+            {inputBar}
+          </View>
+        </KeyboardStickyView>
       </View>
     </DismissibleModal>
   );
@@ -433,10 +492,19 @@ const styles = StyleSheet.create({
   sheet: {
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
-    maxHeight: "88%",
+    maxHeight: "72%",
     paddingTop: 8,
-    paddingBottom: 8,
+    paddingBottom: 4,
   },
+  vibeSheet: { maxHeight: "52%", minHeight: 220 },
+  vibePreview: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 4,
+  },
+  vibePreviewUser: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 14 },
+  vibePreviewCaption: { color: "rgba(255,255,255,0.8)", fontSize: 13, lineHeight: 18 },
   sheetHandle: {
     width: 36,
     height: 4,
@@ -461,6 +529,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   list: { flexGrow: 0, maxHeight: 420 },
+  vibeList: { flexGrow: 1, maxHeight: undefined },
   listContent: { paddingHorizontal: 16, paddingBottom: 8 },
   commentBlock: { marginBottom: 18 },
   commentRow: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
@@ -494,6 +563,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     marginHorizontal: 16,
+    marginTop: 6,
     marginBottom: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -502,7 +572,7 @@ const styles = StyleSheet.create({
   },
   inputBar: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-end",
     gap: 10,
     paddingHorizontal: 16,
     paddingTop: 10,
@@ -512,9 +582,11 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 15,
-    borderRadius: 20,
+    fontFamily: "Inter_400Regular",
+    borderRadius: 22,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    maxHeight: 80,
+    paddingVertical: 10,
+    minHeight: 42,
+    maxHeight: 100,
   },
 });

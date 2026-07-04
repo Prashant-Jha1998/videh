@@ -9,7 +9,8 @@ export type ReelsEngagementNotificationKind =
   | "video_like"
   | "video_comment"
   | "video_share"
-  | "channel_connect";
+  | "channel_connect"
+  | "content_warning";
 
 async function ensureEngagementColumns(): Promise<void> {
   await query(`
@@ -32,6 +33,11 @@ async function ensureEngagementColumns(): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_reels_notif_new_video_dedup
       ON reels_video_notifications (user_id, video_id)
       WHERE kind = 'new_video'
+  `);
+  await query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_reels_notif_content_warning_dedup
+      ON reels_video_notifications (user_id, video_id)
+      WHERE kind = 'content_warning'
   `);
 }
 
@@ -92,6 +98,58 @@ async function resolveLatestChannelVideoId(channelId: number): Promise<number | 
   );
   const id = Number(res.rows[0]?.id ?? 0);
   return id > 0 ? id : null;
+}
+
+/** Strict warning when a Vibe is removed after 20+ community reports. */
+export async function notifyChannelOwnerContentWarning(opts: {
+  channelId: number;
+  videoId: number;
+  videoTitle: string;
+  reportCount: number;
+}): Promise<void> {
+  const ownerUserId = await resolveChannelOwnerUserId(opts.channelId);
+  if (!ownerUserId) return;
+
+  await ensureReelsVideoNotificationsTable();
+  const detail = [
+    `STRICT WARNING: Your Vibe "${opts.videoTitle.slice(0, 80)}" was removed after ${opts.reportCount} community reports.`,
+    "Repeated violations may lead to channel restrictions. Review Videh community guidelines before posting again.",
+  ].join(" ");
+
+  await query(
+    `INSERT INTO reels_video_notifications
+       (user_id, video_id, channel_id, kind, actor_label, detail_text)
+     SELECT $1, $2, $3, 'content_warning', 'Videh Safety', $4
+     WHERE NOT EXISTS (
+       SELECT 1 FROM reels_video_notifications
+       WHERE user_id = $1 AND video_id = $2 AND kind = 'content_warning'
+     )`,
+    [ownerUserId, opts.videoId, opts.channelId, detail],
+  );
+
+  const cfg = await getReelsPlatformConfig();
+  if (!cfg.notifications.notifySubscribersOnNewVideo) return;
+
+  const owner = await query(`SELECT push_token FROM users WHERE id = $1`, [ownerUserId]);
+  const pushToken = owner.rows[0]?.push_token as string | null | undefined;
+  if (!pushToken?.trim()) return;
+
+  await sendChatPushToMembers(
+    [{ user_id: ownerUserId, push_token: pushToken }],
+    "Strict warning — content removed",
+    detail.slice(0, 180),
+    {
+      type: "reels_content_warning",
+      videoId: String(opts.videoId),
+      channelId: String(opts.channelId),
+      notificationKind: "content_warning",
+    },
+    {
+      isGroup: false,
+      chatId: `reels-channel-${opts.channelId}`,
+      threadId: `reels-warn-${opts.videoId}`,
+    },
+  );
 }
 
 /** Notify channel owner about like, comment, share, or connect. */
@@ -232,8 +290,10 @@ export async function fetchReelsVideoNotifications(
      JOIN reels_videos v ON v.id = n.video_id
      JOIN reels_channels c ON c.id = n.channel_id
      WHERE n.user_id = $1
-       AND v.status = 'published'
-       AND v.play_enabled IS NOT FALSE
+       AND (
+         (v.status = 'published' AND v.play_enabled IS NOT FALSE)
+         OR n.kind = 'content_warning'
+       )
      ORDER BY n.created_at DESC
      LIMIT $2`,
     [userId, Math.min(100, Math.max(1, limit))],
@@ -264,8 +324,10 @@ export async function countUnreadReelsVideoNotifications(userId: number): Promis
      FROM reels_video_notifications n
      JOIN reels_videos v ON v.id = n.video_id
      WHERE n.user_id = $1 AND n.read_at IS NULL
-       AND v.status = 'published'
-       AND v.play_enabled IS NOT FALSE`,
+       AND (
+         (v.status = 'published' AND v.play_enabled IS NOT FALSE)
+         OR n.kind = 'content_warning'
+       )`,
     [userId],
   );
   return Number(res.rows[0]?.c ?? 0);

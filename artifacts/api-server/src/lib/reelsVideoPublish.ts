@@ -6,6 +6,7 @@ import { resolveStoredMediaUrl } from "./mediaStorage";
 import {
   applyVideoModerationResult,
   moderateReelsUpload,
+  scanReelsText,
   type ModerationScanResult,
 } from "./reelsContentModeration";
 import { evaluateChannelMonetization } from "./reelsMonetization";
@@ -107,6 +108,39 @@ async function runModerationAndNotify(
   return modResult;
 }
 
+/** Vibe clips go live immediately; full scan runs in background (hard block only). */
+async function runVibePostModeration(
+  input: PublishReelsVideoInput,
+  videoId: number,
+  channelId: number,
+  channelHandle: string,
+  title: string,
+  videoPublicUrl: string,
+): Promise<void> {
+  const modResult = await moderateReelsUpload({
+    videoId,
+    title: input.title,
+    description: input.description,
+    hashtags: input.hashtags,
+    thumbnailPath: input.thumbPath,
+    thumbnailUrl: input.thumbnailUrl,
+    videoPublicUrl,
+    durationSeconds: input.durationSeconds,
+  });
+  if (modResult.action === "reject") {
+    await applyVideoModerationResult(videoId, modResult);
+    return;
+  }
+  if (modResult.action === "approve") {
+    await query(
+      `UPDATE reels_videos SET
+         moderation_scanned_at = NOW(), nsfw_score = $2, moderation_details = $3
+       WHERE id = $1`,
+      [videoId, modResult.nsfwScore, JSON.stringify(modResult.details)],
+    );
+  }
+}
+
 export async function publishReelsVideo(input: PublishReelsVideoInput): Promise<PublishReelsVideoResult> {
   const ch = await query("SELECT id FROM reels_channels WHERE user_id = $1", [input.userId]);
   if (ch.rows.length === 0) {
@@ -125,6 +159,14 @@ export async function publishReelsVideo(input: PublishReelsVideoInput): Promise<
   const musicArtist = input.musicArtist?.trim().slice(0, 200) || null;
   const musicUrl = input.musicUrl?.trim().slice(0, 2000) || null;
 
+  const combinedText = [input.title, input.description, ...input.hashtags.map((h) => `#${h}`)].join(" ");
+  const textScan = scanReelsText(combinedText);
+  if (textScan.blocked) {
+    throw new Error(`TEXT_BLOCKED:${textScan.reason ?? "Sexual or nudity content is not allowed."}`);
+  }
+
+  const vibeInstantPublish = videoFormat === "vibe";
+
   await ensureReelsShareSlugs();
   let row: Record<string, unknown> | undefined;
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -136,8 +178,9 @@ export async function publishReelsVideo(input: PublishReelsVideoInput): Promise<
            status, play_enabled, moderation_status, share_slug,
            video_format, comments_enabled, shares_enabled,
            editor_metadata, music_title, music_artist, music_url
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_review', FALSE, 'pending_scan', $8,
-           $9, $10, $11, $12::jsonb, $13, $14, $15) RETURNING *`,
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7,
+           $8, $9, $10, $11,
+           $12, $13, $14, $15::jsonb, $16, $17, $18) RETURNING *`,
         [
           channelId,
           input.title.slice(0, 200),
@@ -146,6 +189,9 @@ export async function publishReelsVideo(input: PublishReelsVideoInput): Promise<
           input.videoUrl,
           input.thumbnailUrl,
           input.durationSeconds,
+          vibeInstantPublish ? "published" : "pending_review",
+          vibeInstantPublish,
+          vibeInstantPublish ? "approved" : "pending_scan",
           shareSlug,
           videoFormat,
           commentsEnabled,
@@ -202,6 +248,21 @@ export async function publishReelsVideo(input: PublishReelsVideoInput): Promise<
 
   void linkS3UploadEntity(input.videoUrl, "reels_video", videoId);
   if (input.thumbnailUrl) void linkS3UploadEntity(input.thumbnailUrl, "reels_video", videoId);
+
+  if (vibeInstantPublish) {
+    void notifySubscribersNewVideo(channelId, videoId, title, channelHandle);
+    void evaluateChannelMonetization(channelId);
+    void runVibePostModeration(input, videoId, channelId, channelHandle, title, videoPublicUrl);
+    return {
+      videoId,
+      channelId,
+      channelHandle,
+      row,
+      chRow,
+      modResult: { action: "approve", nsfwScore: 0, details: { vibeInstantPublish: true } },
+      pending: false,
+    };
+  }
 
   if (input.deferModeration) {
     void runModerationAndNotify(input, videoId, channelId, channelHandle, title, videoPublicUrl);

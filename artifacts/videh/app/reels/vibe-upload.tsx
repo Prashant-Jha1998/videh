@@ -18,7 +18,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { VideoEditorPanel, defaultEditorMetadata } from "@/components/VideoEditorPanel";
-import { VibeSoundPicker } from "@/components/VibeSoundPicker";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import {
@@ -33,7 +32,7 @@ import {
 import { showUploadShareDialog } from "@/lib/reelsShare";
 import { ensureUploadableFileUri } from "@/lib/prepareFileUpload";
 import { VIBE_BRAND_NAME, VIBE_MAX_DURATION_SECONDS } from "@/lib/vibeVideo";
-import type { SelectedSound, VideoEditorMetadata } from "@/lib/videoEditor";
+import type { VideoEditorMetadata } from "@/lib/videoEditor";
 
 const SCREEN_W = Dimensions.get("window").width;
 
@@ -100,8 +99,6 @@ export default function VibeUploadScreen() {
   const [commentsEnabled, setCommentsEnabled] = useState(true);
   const [sharesEnabled, setSharesEnabled] = useState(true);
   const [editor, setEditor] = useState<VideoEditorMetadata>(defaultEditorMetadata());
-  const [selectedSound, setSelectedSound] = useState<SelectedSound | null>(null);
-  const [soundPickerVisible, setSoundPickerVisible] = useState(false);
 
   useEffect(() => {
     if (!hashtagFocused) {
@@ -201,9 +198,6 @@ export default function VibeUploadScreen() {
         commentsEnabled,
         sharesEnabled,
         editorMetadata: editor,
-        musicTitle: selectedSound?.title ?? null,
-        musicArtist: selectedSound?.artist ?? null,
-        musicUrl: selectedSound?.audioUrl ?? null,
       });
       if (!res.success) {
         Alert.alert(
@@ -222,15 +216,6 @@ export default function VibeUploadScreen() {
           } as never);
         });
       };
-      if (res.pending) {
-        showUploadShareDialog(res.video, {
-          pending: true,
-          pendingMessage: res.message ?? "Your clip is being checked. It will go public when approved.",
-          onWatch: goVibe,
-          onDone: goVibe,
-        });
-        return;
-      }
       showUploadShareDialog(res.video, { onWatch: goVibe });
     } catch (e) {
       Alert.alert("Upload failed", e instanceof Error ? e.message : "Try again.");
@@ -277,9 +262,9 @@ export default function VibeUploadScreen() {
           durationSec={durationSec}
           isVibeFormat
           editor={editor}
-          selectedSound={selectedSound}
+          selectedSound={null}
           onChange={setEditor}
-          onOpenSounds={() => setSoundPickerVisible(true)}
+          onOpenSounds={() => {}}
         />
       ) : (
         <TouchableOpacity style={[styles.pickBox, { borderColor: colors.border }]} onPress={pickVideo}>
@@ -375,14 +360,6 @@ export default function VibeUploadScreen() {
           <Text style={styles.postText}>Post {VIBE_BRAND_NAME}</Text>
         )}
       </TouchableOpacity>
-
-      <VibeSoundPicker
-        visible={soundPickerVisible}
-        sessionToken={user?.sessionToken}
-        selected={selectedSound}
-        onClose={() => setSoundPickerVisible(false)}
-        onSelect={setSelectedSound}
-      />
     </KeyboardAwareScrollViewCompat>
   );
 }

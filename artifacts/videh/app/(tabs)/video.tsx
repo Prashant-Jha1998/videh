@@ -885,6 +885,9 @@ export default function VideoTabScreen() {
           onLoadMore={() => void loadMore()}
           loadingMore={loadingMore}
           onUpload={hasChannel ? openVibeUpload : undefined}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          onReport={promptReport}
         />
         <LinearGradient
           colors={["rgba(0,0,0,0.55)", "rgba(0,0,0,0.2)", "transparent"]}

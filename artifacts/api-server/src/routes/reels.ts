@@ -46,6 +46,7 @@ import {
   markReelsVideoNotificationsRead,
   notifyChannelOwnerEngagement,
 } from "../lib/reelsNotifications";
+import { submitReelsVideoReport } from "../lib/reelsVideoReports";
 import {
   cdnDeliveryEnabled,
   createPresignedUploadUrl,
@@ -1850,6 +1851,10 @@ router.post("/videos/complete", async (req: Request, res: Response) => {
       res.status(400).json({ success: false, message: err.message.replace("FORMAT_INVALID:", "") });
       return;
     }
+    if (err instanceof Error && err.message.startsWith("TEXT_BLOCKED:")) {
+      res.status(403).json({ success: false, message: err.message.replace("TEXT_BLOCKED:", ""), moderationStatus: "rejected" });
+      return;
+    }
     req.log.error({ err }, "reels complete upload");
     res.status(500).json({ success: false, message: "Could not publish video." });
   }
@@ -2543,27 +2548,17 @@ router.post("/videos/:videoId/report", async (req: Request, res: Response) => {
   }
   try {
     await ensureReelsTables();
-    await query(`
-      CREATE TABLE IF NOT EXISTS reels_video_reports (
-        id SERIAL PRIMARY KEY,
-        video_id INTEGER NOT NULL REFERENCES reels_videos(id) ON DELETE CASCADE,
-        reporter_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        reason VARCHAR(120) NOT NULL,
-        details TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `);
-    const exists = await query(`SELECT id FROM reels_videos WHERE id = $1`, [videoId]);
-    if (!exists.rows.length) {
-      res.status(404).json({ success: false, message: "Video not found" });
+    const result = await submitReelsVideoReport({
+      videoId,
+      reporterUserId: userId,
+      reason: reportReason,
+      details: details ? String(details).trim().slice(0, 2000) : null,
+    });
+    if (!result.success) {
+      res.status(404).json(result);
       return;
     }
-    await query(
-      `INSERT INTO reels_video_reports (video_id, reporter_user_id, reason, details)
-       VALUES ($1, $2, $3, $4)`,
-      [videoId, userId, reportReason, details ? String(details).trim().slice(0, 2000) : null],
-    );
-    res.json({ success: true, message: "Report submitted. Thank you." });
+    res.json(result);
   } catch (err) {
     req.log.error({ err, videoId }, "reels report video");
     res.status(500).json({ success: false, message: "Could not submit report." });
