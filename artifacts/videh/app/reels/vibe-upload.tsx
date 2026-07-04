@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -32,11 +31,53 @@ import {
   type ReelsHashtagStat,
 } from "@/lib/reelsApi";
 import { showUploadShareDialog } from "@/lib/reelsShare";
+import { ensureUploadableFileUri } from "@/lib/prepareFileUpload";
 import { VIBE_BRAND_NAME, VIBE_MAX_DURATION_SECONDS } from "@/lib/vibeVideo";
 import type { SelectedSound, VideoEditorMetadata } from "@/lib/videoEditor";
 
 const SCREEN_W = Dimensions.get("window").width;
-const VIBE_PREVIEW_H = Math.round(SCREEN_W * (16 / 9));
+
+/** expo-image-picker duration is ms; some Android builds return seconds. */
+function normalizePickerDurationSec(duration: number | null | undefined): number {
+  if (duration == null || !Number.isFinite(duration) || duration <= 0) return 0;
+  if (duration > 1000) return Math.round(duration / 1000);
+  return Math.round(duration);
+}
+
+async function applyPickedAsset(
+  asset: ImagePicker.ImagePickerAsset,
+  setters: {
+    setVideoUri: (v: string) => void;
+    setVideoMime: (v: string) => void;
+    setDurationSec: (v: number) => void;
+    setThumbUri: (v: string | null) => void;
+    setThumbPreparing: (v: boolean) => void;
+  },
+): Promise<void> {
+  const durSec = normalizePickerDurationSec(asset.duration);
+  if (durSec > VIBE_MAX_DURATION_SECONDS) {
+    Alert.alert("Too long", `${VIBE_BRAND_NAME} clips must be ${VIBE_MAX_DURATION_SECONDS} seconds or shorter.`);
+    return;
+  }
+  setters.setThumbPreparing(true);
+  try {
+    const stableUri = await ensureUploadableFileUri(asset.uri, `vibe_${Date.now()}.mp4`);
+    setters.setVideoUri(stableUri);
+    setters.setVideoMime(asset.mimeType ?? "video/mp4");
+    setters.setDurationSec(durSec > 0 ? durSec : VIBE_MAX_DURATION_SECONDS);
+    setters.setThumbPreparing(false);
+    InteractionManager.runAfterInteractions(() => {
+      void autoThumbnailFromVideo(stableUri, durSec > 0 ? durSec : 1)
+        .then((auto) => { if (auto) setters.setThumbUri(auto); });
+    });
+  } catch (e) {
+    setters.setThumbPreparing(false);
+    Alert.alert(
+      "Could not open video",
+      e instanceof Error ? e.message : "Try another clip or record with the camera.",
+    );
+  }
+}
 
 export default function VibeUploadScreen() {
   const colors = useColors();
@@ -96,28 +137,16 @@ export default function VibeUploadScreen() {
       mediaTypes: ["videos"],
       quality: 1,
       videoMaxDuration: VIBE_MAX_DURATION_SECONDS,
+      copyToCacheDirectory: true,
     });
     if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    const durSec = Math.round((asset.duration ?? 0) / 1000);
-    if (durSec > VIBE_MAX_DURATION_SECONDS) {
-      Alert.alert("Too long", `${VIBE_BRAND_NAME} clips must be ${VIBE_MAX_DURATION_SECONDS} seconds or shorter.`);
-      return;
-    }
-    if (durSec < 1) {
-      Alert.alert("Too short", "Pick a clip at least 1 second long.");
-      return;
-    }
-    setVideoUri(asset.uri);
-    setVideoMime(asset.mimeType ?? "video/mp4");
-    setDurationSec(durSec);
-    setThumbPreparing(true);
-    try {
-      const auto = await autoThumbnailFromVideo(asset.uri, durSec);
-      if (auto) setThumbUri(auto);
-    } finally {
-      setThumbPreparing(false);
-    }
+    await applyPickedAsset(result.assets[0], {
+      setVideoUri,
+      setVideoMime,
+      setDurationSec,
+      setThumbUri,
+      setThumbPreparing,
+    });
   };
 
   const recordVideo = async () => {
@@ -132,22 +161,13 @@ export default function VibeUploadScreen() {
       videoMaxDuration: VIBE_MAX_DURATION_SECONDS,
     });
     if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    const durSec = Math.round((asset.duration ?? 0) / 1000);
-    if (durSec > VIBE_MAX_DURATION_SECONDS) {
-      Alert.alert("Too long", `${VIBE_BRAND_NAME} clips must be ${VIBE_MAX_DURATION_SECONDS} seconds or shorter.`);
-      return;
-    }
-    setVideoUri(asset.uri);
-    setVideoMime(asset.mimeType ?? "video/mp4");
-    setDurationSec(durSec);
-    setThumbPreparing(true);
-    try {
-      const auto = await autoThumbnailFromVideo(asset.uri, durSec);
-      if (auto) setThumbUri(auto);
-    } finally {
-      setThumbPreparing(false);
-    }
+    await applyPickedAsset(result.assets[0], {
+      setVideoUri,
+      setVideoMime,
+      setDurationSec,
+      setThumbUri,
+      setThumbPreparing,
+    });
   };
 
   const post = async () => {
@@ -252,25 +272,6 @@ export default function VibeUploadScreen() {
       </View>
 
       {videoUri ? (
-        <View style={[styles.previewWrap, { borderColor: colors.border }]}>
-          <Video
-            source={{ uri: videoUri }}
-            style={styles.preview}
-            useNativeControls
-            resizeMode={ResizeMode.COVER}
-            isLooping
-          />
-          <Text style={styles.durationBadge}>{durationSec}s · 9:16</Text>
-        </View>
-      ) : (
-        <TouchableOpacity style={[styles.pickBox, { borderColor: colors.border }]} onPress={pickVideo}>
-          <Ionicons name="flash-outline" size={40} color={colors.primary} />
-          <Text style={{ color: colors.foreground, marginTop: 8, fontFamily: "Inter_600SemiBold" }}>Select vertical clip</Text>
-          <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4 }}>Max {VIBE_MAX_DURATION_SECONDS} seconds</Text>
-        </TouchableOpacity>
-      )}
-
-      {videoUri ? (
         <VideoEditorPanel
           videoUri={videoUri}
           durationSec={durationSec}
@@ -280,6 +281,19 @@ export default function VibeUploadScreen() {
           onChange={setEditor}
           onOpenSounds={() => setSoundPickerVisible(true)}
         />
+      ) : (
+        <TouchableOpacity style={[styles.pickBox, { borderColor: colors.border }]} onPress={pickVideo}>
+          <Ionicons name="flash-outline" size={40} color={colors.primary} />
+          <Text style={{ color: colors.foreground, marginTop: 8, fontFamily: "Inter_600SemiBold" }}>Select vertical clip</Text>
+          <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4 }}>Max {VIBE_MAX_DURATION_SECONDS} seconds</Text>
+        </TouchableOpacity>
+      )}
+
+      {thumbPreparing ? (
+        <View style={styles.thumbLoading}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={{ color: colors.mutedForeground, marginTop: 8, fontSize: 13 }}>Preparing clip…</Text>
+        </View>
       ) : null}
 
       <TextInput
@@ -392,32 +406,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderStyle: "dashed",
     borderRadius: 16,
-    height: VIBE_PREVIEW_H,
+    height: Math.round(SCREEN_W * (16 / 9)),
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16,
   },
-  previewWrap: {
-    borderWidth: 1,
-    borderRadius: 16,
-    overflow: "hidden",
-    marginBottom: 16,
-    height: VIBE_PREVIEW_H,
-  },
-  preview: { width: "100%", height: "100%" },
-  durationBadge: {
-    position: "absolute",
-    bottom: 8,
-    right: 10,
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-    backgroundColor: "rgba(0,0,0,0.55)",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    overflow: "hidden",
-    color: "#fff",
-  },
+  thumbLoading: { alignItems: "center", marginBottom: 12 },
   sectionLabel: { fontFamily: "Inter_600SemiBold", fontSize: 14, marginBottom: 8 },
   input: {
     borderWidth: 1,

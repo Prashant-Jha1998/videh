@@ -145,9 +145,10 @@ export function VideoEditorPanel({
             source={{ uri: videoUri }}
             style={StyleSheet.absoluteFill}
             resizeMode={isVibeFormat ? ResizeMode.COVER : ResizeMode.CONTAIN}
-            shouldPlay
-            isLooping
+            shouldPlay={false}
+            isLooping={false}
             isMuted
+            useNativeControls={isVibeFormat}
             onError={() => { /* swallow preview errors */ }}
           />
         ) : null}

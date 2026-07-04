@@ -4,3 +4,6 @@ expo-go-qr.png
 android/
 ios/
 .git/
+../../*.apk
+../../eas-build*.log
+../../videh-v*.apk
