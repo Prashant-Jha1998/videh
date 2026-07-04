@@ -183,7 +183,7 @@ import {
 import { downloadUrlToDevice } from "@/lib/web/webDownload";
 import { formatPresenceSubtitle, type PresenceView } from "@/lib/presence";
 import { setAssistantChatInputFocused } from "@/lib/assistantPause";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getStoredSessionToken } from "@/lib/secureUserStorage";
 import Svg, { Path } from "react-native-svg";
 
 const BASE_URL = getApiUrl();
@@ -1437,8 +1437,7 @@ export default function ChatScreen() {
           return;
         }
         try {
-          const stored = await AsyncStorage.getItem("videh_user");
-          const token = safeJsonParse<{ sessionToken?: string } | null>(stored, null)?.sessionToken;
+          const token = await getStoredSessionToken();
           const res = await fetch(`${BASE_URL}/api/users/${peerId}/presence`, {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
           });
@@ -1550,8 +1549,29 @@ export default function ChatScreen() {
 
   const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
   const listExtraData = useMemo(
-    () => `${selectedIds.length}|${flashMessageId ?? ""}|${readingHistory ? 1 : 0}`,
-    [selectedIds.length, flashMessageId, readingHistory],
+    () =>
+      [
+        selectedIds.length,
+        flashMessageId ?? "",
+        readingHistory ? 1 : 0,
+        chatLook.chatBubbleSent,
+        chatLook.chatBubbleReceived,
+        chatLook.chatBackground,
+        chatLook.appearance.id,
+        chatFontScale,
+        chatLook.isDark ? 1 : 0,
+      ].join("|"),
+    [
+      selectedIds.length,
+      flashMessageId,
+      readingHistory,
+      chatLook.chatBubbleSent,
+      chatLook.chatBubbleReceived,
+      chatLook.chatBackground,
+      chatLook.appearance.id,
+      chatFontScale,
+      chatLook.isDark,
+    ],
   );
   const flashAnim = useRef(new Animated.Value(0)).current;
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

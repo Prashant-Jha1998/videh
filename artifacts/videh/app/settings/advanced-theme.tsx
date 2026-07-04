@@ -111,7 +111,7 @@ export default function AdvancedThemeScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Advanced Theme</Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]}>Advanced Theme</Text>
         <View style={{ width: 40 }} />
       </ThemedHeader>
 
@@ -337,7 +337,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingBottom: 12 },
   backBtn: { padding: 8 },
-  headerTitle: { flex: 1, textAlign: "center", color: "#fff", fontSize: 18, fontFamily: "Inter_700Bold" },
+  headerTitle: { flex: 1, textAlign: "center", fontSize: 18, fontFamily: "Inter_700Bold" },
   hero: { margin: 16, borderRadius: 16, padding: 20 },
   heroTitle: { color: "#fff", fontSize: 22, fontFamily: "Inter_700Bold" },
   heroSub: { color: "rgba(255,255,255,0.9)", fontSize: 13, marginTop: 8, lineHeight: 20 },

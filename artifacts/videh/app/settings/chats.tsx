@@ -170,7 +170,7 @@ export default function ChatsSettingsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t("chats.title")}</Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]}>{t("chats.title")}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -182,7 +182,7 @@ export default function ChatsSettingsScreen() {
             label={t("chats.theme")}
             value={themeLabel}
             onPress={() =>
-              Alert.alert(t("chats.theme"), "", [
+              Alert.alert(t("chats.theme"), "Choose light, dark, or follow your phone.", [
                 ...THEMES.map((x) => ({ text: x, onPress: () => pickTheme(x) })),
                 { text: t("common.cancel"), style: "cancel" },
               ])
@@ -205,7 +205,7 @@ export default function ChatsSettingsScreen() {
             label={t("chats.wallpaper")}
             value={chatWallpaperLabel}
             onPress={() =>
-              Alert.alert(t("chats.wallpaper"), "", [
+              Alert.alert(t("chats.wallpaper"), "Pick a chat background color.", [
                 ...WALLPAPERS.map((w) => ({
                   text: w,
                   onPress: () => { void setChatWallpaperLabel(w); },
@@ -219,7 +219,7 @@ export default function ChatsSettingsScreen() {
             label={t("chats.fontSize")}
             value={chatFontLabel}
             onPress={() =>
-              Alert.alert(t("chats.fontSize"), "", [
+              Alert.alert(t("chats.fontSize"), "Choose message text size in chats.", [
                 ...FONT_SIZES.map((f) => ({
                   text: f,
                   onPress: () => { void setChatFontLabel(f); },
@@ -398,7 +398,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 8, paddingBottom: 12 },
   backBtn: { padding: 8 },
-  headerTitle: { flex: 1, color: "#fff", fontSize: 18, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  headerTitle: { flex: 1, fontSize: 18, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   section: { marginBottom: 10, paddingHorizontal: 16, paddingVertical: 12 },
   sectionLabel: { fontSize: 11, fontFamily: "Inter_600SemiBold", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 },
   switchRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 12 },

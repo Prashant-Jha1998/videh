@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getApiUrl } from "@/lib/api";
+import { getStoredSessionToken } from "@/lib/secureUserStorage";
 import {
   LAST_SEEN_PRIVACY_OPTIONS,
   ONLINE_PRIVACY_OPTIONS,
@@ -61,10 +62,7 @@ export default function LastSeenOnlineSettingsScreen() {
     if (!user?.dbId) return;
     setLoading(true);
     try {
-      const stored = await import("@react-native-async-storage/async-storage").then((m) =>
-        m.default.getItem("videh_user"),
-      );
-      const token = stored ? JSON.parse(stored).sessionToken : undefined;
+      const token = await getStoredSessionToken();
       const res = await fetch(`${BASE_URL}/api/users/${user.dbId}/privacy`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -92,10 +90,7 @@ export default function LastSeenOnlineSettingsScreen() {
     if (patch.lastSeenPrivacy) setLastSeenPrivacy(patch.lastSeenPrivacy);
     if (patch.onlinePrivacy) setOnlinePrivacy(patch.onlinePrivacy);
     try {
-      const stored = await import("@react-native-async-storage/async-storage").then((m) =>
-        m.default.getItem("videh_user"),
-      );
-      const token = stored ? JSON.parse(stored).sessionToken : undefined;
+      const token = await getStoredSessionToken();
       await fetch(`${BASE_URL}/api/users/${user.dbId}/privacy`, {
         method: "PATCH",
         headers: {

@@ -84,7 +84,7 @@ export default function AppThemeSettingsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>App Theme</Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]}>App Theme</Text>
         <View style={{ width: 40 }} />
       </ThemedHeader>
 
@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 8, paddingBottom: 12 },
   backBtn: { padding: 8 },
-  headerTitle: { flex: 1, color: "#fff", fontSize: 18, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  headerTitle: { flex: 1, fontSize: 18, fontFamily: "Inter_600SemiBold", textAlign: "center" },
   hero: { margin: 16, borderRadius: 24, padding: 22, minHeight: 150, justifyContent: "flex-end" },
   heroLabel: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Inter_600SemiBold", textTransform: "uppercase", letterSpacing: 0.8 },
   heroTitle: { color: "#fff", fontSize: 28, fontFamily: "Inter_700Bold", marginTop: 8 },

@@ -54,13 +54,10 @@ export default function ChatThemeScreen() {
 
   const save = async () => {
     if (!chatId) return;
-    const prev = await getPerChatTheme(chatId);
     await setPerChatTheme(chatId, {
-      ...prev,
       themeId,
-      bubbleSent: bubbleSent ?? undefined,
-      bubbleReceived: bubbleReceived ?? undefined,
-      animatedWallpaper: animated !== "none" ? animated : undefined,
+      ...(bubbleSent && bubbleReceived ? { bubbleSent, bubbleReceived } : {}),
+      ...(animated !== "none" ? { animatedWallpaper: animated } : {}),
       label: appearance.name,
     });
     refreshPerChatThemes();
@@ -81,9 +78,9 @@ export default function ChatThemeScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>Chat theme</Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]} numberOfLines={1}>Chat theme</Text>
         <TouchableOpacity onPress={() => void save()} style={styles.saveBtn}>
-          <Text style={styles.saveTxt}>Save</Text>
+          <Text style={[styles.saveTxt, { color: colors.primary }]}>Save</Text>
         </TouchableOpacity>
       </ThemedHeader>
 
@@ -177,9 +174,9 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingBottom: 10 },
   backBtn: { padding: 8 },
-  headerTitle: { flex: 1, textAlign: "center", color: "#fff", fontSize: 17, fontFamily: "Inter_700Bold" },
+  headerTitle: { flex: 1, textAlign: "center", fontSize: 17, fontFamily: "Inter_700Bold" },
   saveBtn: { padding: 8 },
-  saveTxt: { color: "#fff", fontFamily: "Inter_700Bold" },
+  saveTxt: { fontFamily: "Inter_700Bold" },
   chatName: { fontSize: 20, fontFamily: "Inter_700Bold" },
   sub: { fontSize: 13, marginTop: 6, marginBottom: 16, lineHeight: 20 },
   label: { fontSize: 14, fontFamily: "Inter_700Bold", marginTop: 12, marginBottom: 8 },

@@ -1,6 +1,6 @@
-import { useColorScheme } from "react-native";
 import colors from "@/constants/colors";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { useResolvedColorScheme } from "@/hooks/useResolvedColorScheme";
 import { resolveBubbles } from "@/lib/themeAppearance";
 
 type ColorScheme = typeof colors.light;
@@ -15,7 +15,7 @@ export function useColors(): ColorScheme & {
   headerIconColor: string;
   headerSearchPlaceholder: string;
 } {
-  const scheme = useColorScheme();
+  const scheme = useResolvedColorScheme();
   const { appTheme, themeAppearance, customBubbleOverride } = useUiPreferences();
   const isDark = scheme === "dark";
   const palette = isDark && "dark" in colors

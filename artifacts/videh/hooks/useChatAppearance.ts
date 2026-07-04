@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
-import { useColorScheme } from "react-native";
+import { useFocusEffect } from "expo-router";
+import { useCallback, useMemo, useState } from "react";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
+import { useResolvedColorScheme } from "@/hooks/useResolvedColorScheme";
 import { getPerChatTheme, type PerChatThemeOverride } from "@/lib/perChatTheme";
 import {
   getThemeAppearanceById,
   resolveBubbles,
   resolveChatBackground,
   type AnimatedWallpaperId,
+  type BubbleOverride,
   type ThemeAppearance,
 } from "@/lib/themeAppearance";
 
@@ -20,8 +22,18 @@ export type ChatAppearance = {
   isDark: boolean;
 };
 
+function perChatBubbleOverride(perChat: PerChatThemeOverride | null): BubbleOverride | null {
+  if (!perChat?.bubbleSent && !perChat?.bubbleReceived) return null;
+  return {
+    sentLight: perChat.bubbleSent,
+    receivedLight: perChat.bubbleReceived,
+    sentDark: perChat.bubbleSent,
+    receivedDark: perChat.bubbleReceived,
+  };
+}
+
 export function useChatAppearance(chatId: string | null | undefined): ChatAppearance {
-  const scheme = useColorScheme();
+  const scheme = useResolvedColorScheme();
   const isDark = scheme === "dark";
   const {
     appThemeId,
@@ -33,32 +45,26 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
 
   const [perChat, setPerChat] = useState<PerChatThemeOverride | null>(null);
 
-  useEffect(() => {
+  const reloadPerChat = useCallback(() => {
     if (!chatId) {
       setPerChat(null);
       return;
     }
-    let cancelled = false;
     void getPerChatTheme(chatId).then((v) => {
-      if (!cancelled) setPerChat(v);
+      setPerChat(v);
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [chatId, perChatRevision]);
+  }, [chatId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      reloadPerChat();
+    }, [reloadPerChat, perChatRevision]),
+  );
 
   return useMemo(() => {
     const themeId = perChat?.themeId ?? appThemeId;
     const appearance = getThemeAppearanceById(themeId);
-    const bubbleOverride = customBubbleOverride
-      ?? (perChat?.bubbleSent || perChat?.bubbleReceived
-        ? {
-            sentLight: perChat.bubbleSent,
-            receivedLight: perChat.bubbleReceived,
-            sentDark: perChat.bubbleSent,
-            receivedDark: perChat.bubbleReceived,
-          }
-        : null);
+    const bubbleOverride = perChatBubbleOverride(perChat) ?? customBubbleOverride;
 
     const { sent, received } = resolveBubbles(appearance, isDark, bubbleOverride);
     const animatedWallpaper =
@@ -83,6 +89,5 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
     globalAnimatedWallpaper,
     customBubbleOverride,
     isDark,
-    perChatRevision,
   ]);
 }

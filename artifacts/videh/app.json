@@ -2,7 +2,7 @@
   "expo": {
     "name": "Videh",
     "slug": "videh",
-    "version": "1.0.85",
+    "version": "1.0.86",
     "orientation": "portrait",
     "icon": "./assets/images/videh_icon_foreground.png",
     "scheme": "videh",
@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 159,
+      "versionCode": 160,
       "androidStatusBar": {
         "backgroundColor": "#FFFFFF",
         "barStyle": "dark-content",
@@ -145,7 +145,10 @@
           "android": {
             "minSdkVersion": 24,
             "compileSdkVersion": 35,
-            "targetSdkVersion": 35
+            "targetSdkVersion": 35,
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "extraProguardRules": "-keep class org.webrtc.** { *; }\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class io.invertase.firebase.** { *; }\n-keepattributes *Annotation*\n-keepclassmembers class * { @com.facebook.react.uimanager.annotations.ReactProp *; }\n-keepclassmembers class * { @com.facebook.react.uimanager.annotations.ReactPropGroup *; }\n"
           }
         }
       ],
@@ -156,6 +159,7 @@
         }
       ],
       "expo-font",
+      "expo-secure-store",
       "expo-web-browser",
       "expo-contacts",
       [
@@ -218,6 +222,7 @@
         }
       ],
       "./plugins/withAndroidAdjustResize.js",
+      "./plugins/withNetworkSecurity.js",
       "./plugins/withIncomingCallAndroid.js",
       "./plugins/withHeyFriendWakeModule.js",
       "@config-plugins/react-native-callkeep",

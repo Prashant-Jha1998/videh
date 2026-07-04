@@ -3,6 +3,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
 import { agentDebugLog } from "@/lib/agentDebugLog";
+import { clearStoredUser, loadStoredUser, persistStoredUser } from "@/lib/secureUserStorage";
 import { albumSendLog } from "@/lib/albumSendLog";
 import { connectChatEventStream } from "@/lib/connectChatEventStream";
 import {
@@ -1184,10 +1185,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const loadUser = async () => {
       try {
-        const stored = await AsyncStorage.getItem("videh_user");
-        if (stored) {
-          const parsed = safeJsonParse<UserProfile | null>(stored, null);
-          if (!parsed?.id) return;
+        const parsed = await loadStoredUser<UserProfile>();
+        if (parsed?.id) {
           authSessionToken = parsed.sessionToken ?? null;
           setUserState(parsed);
           setIsAuthenticated(true);
@@ -1288,7 +1287,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     authSessionToken = u.sessionToken ?? null;
     setUserState(u);
     setIsAuthenticated(true);
-    await AsyncStorage.setItem("videh_user", JSON.stringify(u));
+    await persistStoredUser(u);
 
     if (u.dbId) {
       const [msgCache, listRows, outbox] = await Promise.all([
@@ -1443,7 +1442,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!u.dbId) {
       const updated = { ...u, avatar: `data:${mimeType};base64,${base64}` };
       setUserState(updated);
-      await AsyncStorage.setItem("videh_user", JSON.stringify(updated));
+      await persistStoredUser(updated);
       return;
     }
     try {
@@ -1455,12 +1454,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (data.success && data.avatarUrl) {
         const updated = { ...u, avatar: data.avatarUrl };
         setUserState(updated);
-        await AsyncStorage.setItem("videh_user", JSON.stringify(updated));
+        await persistStoredUser(updated);
       }
     } catch {
       const updated = { ...u, avatar: `data:${mimeType};base64,${base64}` };
       setUserState(updated);
-      await AsyncStorage.setItem("videh_user", JSON.stringify(updated));
+      await persistStoredUser(updated);
     }
   }, []);
 
@@ -1495,7 +1494,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     chatDeletedAtRef.current = {};
     setChatDeletedAtMap({});
     serverHistoryClearedRef.current = {};
-    await AsyncStorage.removeItem("videh_user");
+    await clearStoredUser();
   }, []);
 
   // Create or get a direct chat in DB and return its ID

@@ -1,9 +1,8 @@
 import Constants from "expo-constants";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getStoredSessionToken } from "./secureUserStorage";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { getApiUrl } from "@/lib/api";
-import { safeJsonParse } from "@/lib/safeJson";
 import { encodeWebPushToken, getWebPushSubscriptionJson } from "@/lib/vapidPush";
 
 export const VIDEH_PUSH_CHANNEL_ID = "messages";
@@ -126,8 +125,7 @@ export async function registerPushTokenWithServer(dbId: number): Promise<void> {
   }
 
   const base = getApiUrl();
-  const stored = await AsyncStorage.getItem("videh_user");
-  const sessionToken = safeJsonParse<{ sessionToken?: string } | null>(stored, null)?.sessionToken;
+  const sessionToken = await getStoredSessionToken();
   const res = await fetch(`${base}/api/users/${dbId}/push-token`, {
     method: "PUT",
     headers: {

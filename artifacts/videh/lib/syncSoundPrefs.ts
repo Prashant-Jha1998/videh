@@ -1,8 +1,6 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import { getApiUrl } from "./api";
-import { agentDebugLog } from "./agentDebugLog";
-import { safeJsonParse } from "./safeJson";
+import { loadStoredUser } from "./secureUserStorage";
 import { getSoundPrefs, type SoundPrefs } from "./soundPrefs";
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -19,11 +17,10 @@ export function scheduleSoundPrefsSync(): void {
 export async function syncSoundPrefsToServer(): Promise<void> {
   if (Platform.OS === "web") return;
   try {
-    const stored = await AsyncStorage.getItem("videh_user");
-    const user = safeJsonParse<{ dbId?: number; sessionToken?: string } | null>(stored, null);
+    const user = await loadStoredUser<{ dbId?: number; sessionToken?: string }>();
     if (!user?.dbId || !user.sessionToken) return;
     const prefs = await getSoundPrefs();
-    const res = await fetch(`${getApiUrl()}/api/users/${user.dbId}/sound-prefs`, {
+    await fetch(`${getApiUrl()}/api/users/${user.dbId}/sound-prefs`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
@@ -31,15 +28,8 @@ export async function syncSoundPrefsToServer(): Promise<void> {
       },
       body: JSON.stringify(prefsBody(prefs)),
     });
-    agentDebugLog(
-      "syncSoundPrefs.ts:sync",
-      "server sound prefs sync",
-      { ok: res.ok, status: res.status, globalMessage: prefs.globalMessageSound },
-      "H6",
-      "post-fix",
-    );
-  } catch (e) {
-    agentDebugLog("syncSoundPrefs.ts:sync", "sync failed", { err: String(e) }, "H6", "post-fix");
+  } catch {
+    /* ignore — prefs stay local */
   }
 }
 
