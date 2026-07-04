@@ -57,7 +57,7 @@ import {
 import { shareReelsVideoLink } from "@/lib/reelsShare";
 import { pushWatchHistory } from "@/lib/reelsLibrary";
 import { reelsWatchPlayerSize, reelsWatchTopInset } from "@/lib/reelsWatchLayout";
-import { isVibeVideo } from "@/lib/vibeVideo";
+import { isVibeVideo, isWatchVideo } from "@/lib/vibeVideo";
 
 const SCREEN_W = Dimensions.get("window").width;
 const THUMB_H = Math.round((SCREEN_W * 9) / 16);
@@ -255,6 +255,14 @@ export default function ReelsWatchScreen() {
     ]);
 
     if (res.success && res.video) {
+      if (isVibeVideo(res.video.durationSeconds, res.video.videoFormat)) {
+        router.replace({
+          pathname: "/(tabs)/video",
+          params: { section: "vibe" },
+        } as never);
+        setInitialLoading(false);
+        return;
+      }
       setVideo(res.video);
       void pushWatchHistory(res.video);
       setPlayAllowed(res.playAllowed !== false);
@@ -271,7 +279,9 @@ export default function ReelsWatchScreen() {
       }
     }
 
-    const list = (feed.videos ?? []).filter((v) => v.id !== res.video?.id);
+    const list = (feed.videos ?? [])
+      .filter((v) => v.id !== res.video?.id)
+      .filter((v) => isWatchVideo(v.durationSeconds, v.videoFormat));
     const sameChannel = list.filter((v) => v.channelId === res.video?.channelId);
     const other = list.filter((v) => v.channelId !== res.video?.channelId);
     setRelated([...sameChannel, ...other].slice(0, 20));
@@ -297,7 +307,7 @@ export default function ReelsWatchScreen() {
     }
 
     setInitialLoading(false);
-  }, [id, user?.dbId, user?.sessionToken]);
+  }, [id, user?.dbId, user?.sessionToken, router]);
 
   useEffect(() => {
     void load();
@@ -363,6 +373,13 @@ export default function ReelsWatchScreen() {
   };
 
   const openRelated = (v: ReelsVideo) => {
+    if (isVibeVideo(v.durationSeconds, v.videoFormat)) {
+      router.replace({
+        pathname: "/(tabs)/video",
+        params: { section: "vibe" },
+      } as never);
+      return;
+    }
     router.replace({ pathname: "/reels/watch/[id]", params: { id: String(v.id) } });
   };
 

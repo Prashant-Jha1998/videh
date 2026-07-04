@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
@@ -37,7 +38,7 @@ type Props = {
   sessionToken?: string | null;
   userAvatarUrl?: string | null;
   onCommentPosted?: () => void;
-  /** Instagram-style dark sheet for Vibe feed. */
+  /** Vibe feed uses same light sheet; shows channel caption preview. */
   variant?: "watch" | "vibe";
   channelLabel?: string | null;
   captionPreview?: string | null;
@@ -106,15 +107,17 @@ export function ReelsCommentsSheet({
   const colors = useColors();
   const { t } = useUiPreferences();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const isVibe = variant === "vibe";
-  const sheetBg = isVibe ? "#141414" : colors.background;
-  const fg = isVibe ? "#fff" : colors.foreground;
-  const muted = isVibe ? "rgba(255,255,255,0.55)" : colors.mutedForeground;
-  const border = isVibe ? "rgba(255,255,255,0.12)" : colors.border;
-  const inputBg = isVibe ? "rgba(255,255,255,0.1)" : colors.muted;
-  const chipBg = isVibe ? "rgba(255,255,255,0.14)" : colors.card;
-  const chipActiveBg = isVibe ? "#fff" : colors.foreground;
-  const chipActiveFg = isVibe ? "#111" : colors.background;
+  const sheetHeight = Math.round(windowHeight * (isVibe ? 0.68 : 0.78));
+  const sheetBg = colors.background;
+  const fg = colors.foreground;
+  const muted = colors.mutedForeground;
+  const border = colors.border;
+  const inputBg = colors.muted;
+  const chipBg = colors.card;
+  const chipActiveBg = colors.foreground;
+  const chipActiveFg = colors.background;
   const [comments, setComments] = useState<ReelsComment[]>([]);
   const [sort, setSort] = useState<ReelsCommentSort>("top");
   const [loading, setLoading] = useState(false);
@@ -137,11 +140,7 @@ export function ReelsCommentsSheet({
   useEffect(() => {
     if (!visible) return;
     void loadComments();
-    if (isVibe) {
-      const t = setTimeout(() => inputRef.current?.focus(), 320);
-      return () => clearTimeout(t);
-    }
-  }, [visible, loadComments, isVibe]);
+  }, [visible, loadComments]);
 
   const loadReplies = useCallback(async (commentId: number) => {
     if (loadingReplies.has(commentId) || repliesMap[commentId]) return;
@@ -246,7 +245,7 @@ export function ReelsCommentsSheet({
         <Ionicons
           name={item.myReaction === "like" ? "thumbs-up" : "thumbs-up-outline"}
           size={compact ? 16 : 18}
-          color={item.myReaction === "like" ? (isVibe ? "#fff" : colors.primary) : muted}
+          color={item.myReaction === "like" ? colors.primary : muted}
         />
         {item.likeCount > 0 ? (
           <Text style={[styles.actionCount, { color: muted }]}>
@@ -262,7 +261,7 @@ export function ReelsCommentsSheet({
         <Ionicons
           name={item.myReaction === "dislike" ? "thumbs-down" : "thumbs-down-outline"}
           size={compact ? 16 : 18}
-          color={item.myReaction === "dislike" ? (isVibe ? "#fff" : colors.primary) : muted}
+          color={item.myReaction === "dislike" ? colors.primary : muted}
         />
       </TouchableOpacity>
       <TouchableOpacity style={styles.actionBtn} onPress={() => startReply(item)}>
@@ -316,7 +315,7 @@ export function ReelsCommentsSheet({
           <View style={[styles.replyLineV, { backgroundColor: colors.border }]} />
           <View style={[styles.replyLineH, { backgroundColor: colors.border }]} />
         </View>
-        <Text style={[styles.replyToggleText, { color: isVibe ? "#fff" : colors.primary }]}>
+        <Text style={[styles.replyToggleText, { color: colors.primary }]}>
           {expanded ? "Hide replies" : `${label} ›`}
         </Text>
       </TouchableOpacity>
@@ -378,9 +377,9 @@ export function ReelsCommentsSheet({
         />
         <TouchableOpacity onPress={() => void sendComment()} disabled={!commentText.trim() || sending}>
           {sending ? (
-            <ActivityIndicator size="small" color={isVibe ? "#fff" : colors.primary} />
+            <ActivityIndicator size="small" color={colors.primary} />
           ) : (
-            <Ionicons name="send" size={22} color={commentText.trim() ? (isVibe ? "#fff" : colors.primary) : muted} />
+            <Ionicons name="send" size={22} color={commentText.trim() ? colors.primary : muted} />
           )}
         </TouchableOpacity>
       </View>
@@ -392,11 +391,20 @@ export function ReelsCommentsSheet({
       visible={visible}
       onClose={onClose}
       animationType="slide"
-      backdropOpacity={isVibe ? 0.15 : 0.45}
+      backdropOpacity={0.45}
     >
       <View style={styles.sheetRoot}>
-        <View style={[styles.sheet, isVibe && styles.vibeSheet, { backgroundColor: sheetBg }]}>
-          <View style={[styles.sheetHandle, isVibe && { backgroundColor: "rgba(255,255,255,0.35)" }]} />
+        <View
+          style={[
+            styles.sheet,
+            {
+              backgroundColor: sheetBg,
+              height: sheetHeight,
+              paddingBottom: Math.max(insets.bottom, Platform.OS === "android" ? 8 : 0),
+            },
+          ]}
+        >
+          <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
             <Text style={[styles.sheetTitle, { color: fg }]}>
               Comments{commentCount > 0 ? ` · ${formatViewCount(commentCount)}` : ""}
@@ -408,15 +416,15 @@ export function ReelsCommentsSheet({
 
           {isVibe && channelLabel && !captionPreview ? (
             <View style={[styles.vibePreview, { borderBottomColor: border }]}>
-              <Text style={styles.vibePreviewUser} numberOfLines={1}>{channelLabel}</Text>
+              <Text style={[styles.vibePreviewUser, { color: fg }]} numberOfLines={1}>{channelLabel}</Text>
             </View>
           ) : null}
           {isVibe && captionPreview ? (
             <View style={[styles.vibePreview, { borderBottomColor: border }]}>
               {channelLabel ? (
-                <Text style={styles.vibePreviewUser} numberOfLines={1}>{channelLabel}</Text>
+                <Text style={[styles.vibePreviewUser, { color: fg }]} numberOfLines={1}>{channelLabel}</Text>
               ) : null}
-              <Text style={styles.vibePreviewCaption} numberOfLines={2}>{captionPreview}</Text>
+              <Text style={[styles.vibePreviewCaption, { color: muted }]} numberOfLines={2}>{captionPreview}</Text>
             </View>
           ) : null}
 
@@ -451,37 +459,39 @@ export function ReelsCommentsSheet({
             </View>
           ) : null}
 
-          {loading ? (
-            <ActivityIndicator style={{ marginVertical: 24 }} color={isVibe ? "#fff" : colors.primary} />
-          ) : (
-            <FlatList
-              data={comments}
-              keyExtractor={(c) => String(c.id)}
-              style={[styles.list, isVibe && styles.vibeList]}
-              contentContainerStyle={styles.listContent}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="interactive"
-              ListEmptyComponent={
-                <Text style={{ color: muted, textAlign: "center", padding: 32 }}>
-                  No comments yet
-                </Text>
-              }
-              renderItem={({ item }) => (
-                <View style={styles.commentBlock}>
-                  {renderCommentBody(item)}
-                  {renderReplyToggle(item)}
-                  {renderReplies(item.id)}
-                </View>
-              )}
-            />
-          )}
-        </View>
-
-        <KeyboardStickyView offset={{ closed: insets.bottom, opened: 0 }}>
-          <View style={{ backgroundColor: sheetBg, paddingBottom: Platform.OS === "ios" ? 0 : 4 }}>
-            {inputBar}
+          <View style={styles.listWrap}>
+            {loading ? (
+              <ActivityIndicator style={styles.listLoader} color={colors.primary} />
+            ) : (
+              <FlatList
+                data={comments}
+                keyExtractor={(c) => String(c.id)}
+                style={styles.list}
+                contentContainerStyle={styles.listContent}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="interactive"
+                ListEmptyComponent={
+                  <View style={styles.emptyWrap}>
+                    <Text style={{ color: muted, textAlign: "center" }}>
+                      No comments yet
+                    </Text>
+                  </View>
+                }
+                renderItem={({ item }) => (
+                  <View style={styles.commentBlock}>
+                    {renderCommentBody(item)}
+                    {renderReplyToggle(item)}
+                    {renderReplies(item.id)}
+                  </View>
+                )}
+              />
+            )}
           </View>
-        </KeyboardStickyView>
+
+          <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
+            {inputBar}
+          </KeyboardStickyView>
+        </View>
       </View>
     </DismissibleModal>
   );
@@ -490,21 +500,20 @@ export function ReelsCommentsSheet({
 const styles = StyleSheet.create({
   sheetRoot: { flex: 1, justifyContent: "flex-end" },
   sheet: {
+    width: "100%",
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
-    maxHeight: "72%",
     paddingTop: 8,
-    paddingBottom: 4,
+    overflow: "hidden",
   },
-  vibeSheet: { maxHeight: "52%", minHeight: 220 },
   vibePreview: {
     paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 4,
   },
-  vibePreviewUser: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 14 },
-  vibePreviewCaption: { color: "rgba(255,255,255,0.8)", fontSize: 13, lineHeight: 18 },
+  vibePreviewUser: { fontFamily: "Inter_700Bold", fontSize: 14 },
+  vibePreviewCaption: { fontSize: 13, lineHeight: 18 },
   sheetHandle: {
     width: 36,
     height: 4,
@@ -528,9 +537,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
   },
-  list: { flexGrow: 0, maxHeight: 420 },
-  vibeList: { flexGrow: 1, maxHeight: undefined },
-  listContent: { paddingHorizontal: 16, paddingBottom: 8 },
+  listWrap: { flex: 1, minHeight: 0 },
+  listLoader: { marginVertical: 24 },
+  list: { flex: 1 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 8, flexGrow: 1 },
+  emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 32 },
   commentBlock: { marginBottom: 18 },
   commentRow: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
   replyRow: { marginLeft: 48, marginTop: 12 },
