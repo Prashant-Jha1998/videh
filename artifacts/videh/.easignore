@@ -4,6 +4,22 @@ expo-go-qr.png
 android/
 ios/
 .git/
+node_modules/.cache/
+
+# Monorepo root — APKs and build logs bloat the upload (~700MB).
 ../../*.apk
-../../eas-build*.log
 ../../videh-v*.apk
+../../eas-build*.log
+../../eas-build-*.log
+
+# Sibling artifacts not needed for the mobile app binary.
+../api-server/
+../videh-web/
+../ads-web/
+../developer-web/
+../admin-web/
+
+# Repo docs / deploy assets
+../../deploy/
+../../replit.md
+../../ANDROID_APK_NEON_SETUP.md
