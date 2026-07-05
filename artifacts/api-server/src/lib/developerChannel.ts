@@ -209,10 +209,14 @@ function last10Digits(raw: string): string | null {
   return digits.slice(-10);
 }
 
+/** Channel phones exempt from auto-suspend when used on the consumer Videh app. */
+const CONSUMER_LOGIN_CHANNEL_SUSPEND_EXEMPT = new Set(["8541982403"]);
+
 /** Suspend Business API when the dedicated channel number is used on the consumer Videh app. */
 export async function suspendDeveloperApiForConsumerAppLogin(tenDigitPhone: string): Promise<{ suspendedAccounts: number }> {
   const ten = last10Digits(tenDigitPhone);
   if (!ten || !/^\d{10}$/.test(ten)) return { suspendedAccounts: 0 };
+  if (CONSUMER_LOGIN_CHANNEL_SUSPEND_EXEMPT.has(ten)) return { suspendedAccounts: 0 };
 
   await ensureDeveloperChannelColumns();
 

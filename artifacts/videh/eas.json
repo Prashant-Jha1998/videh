@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v165-security-vibe-fixes"
+        "key": "apk-release-v166-business-api-fixes"
       }
     },
     "production": {
