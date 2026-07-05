@@ -2,9 +2,37 @@ import crypto from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
 
 const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const DEV_FALLBACK_SECRET = "videh-dev-session-secret";
+const MIN_PRODUCTION_SECRET_LEN = 16;
+
+function envSessionSecret(): string | undefined {
+  const raw = process.env["SESSION_SECRET"]?.trim() || process.env["JWT_SECRET"]?.trim();
+  return raw || undefined;
+}
+
+/** Fail fast at startup when production is misconfigured. */
+export function assertSessionSecretConfigured(): void {
+  const isProd = process.env["NODE_ENV"] === "production";
+  const envSecret = envSessionSecret();
+  if (!isProd) return;
+  if (!envSecret) {
+    throw new Error("SESSION_SECRET or JWT_SECRET must be set in production.");
+  }
+  if (envSecret === DEV_FALLBACK_SECRET) {
+    throw new Error("Production must not use the default dev session secret.");
+  }
+  if (envSecret.length < MIN_PRODUCTION_SECRET_LEN) {
+    throw new Error(`SESSION_SECRET must be at least ${MIN_PRODUCTION_SECRET_LEN} characters in production.`);
+  }
+}
 
 function secret(): string {
-  return process.env["SESSION_SECRET"] || process.env["JWT_SECRET"] || "videh-dev-session-secret";
+  const envSecret = envSessionSecret();
+  if (envSecret) return envSecret;
+  if (process.env["NODE_ENV"] === "production") {
+    throw new Error("SESSION_SECRET is not configured.");
+  }
+  return DEV_FALLBACK_SECRET;
 }
 
 function b64url(input: Buffer | string): string {

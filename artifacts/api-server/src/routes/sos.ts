@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { assertSameUser } from "../lib/auth";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { query } from "../lib/db";
 import { stateGetJson, stateSetJson } from "../lib/sharedState";
@@ -13,6 +14,12 @@ function normalizePhone(raw: string): string {
 function singleParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? "";
   return value ?? "";
+}
+
+function requireSosOwner(req: Request, res: Response): string | null {
+  const userId = singleParam(req.params.userId);
+  if (!assertSameUser(req, res, userId)) return null;
+  return userId;
 }
 
 async function findOrCreateDirectChat(userId: string | number, otherUserId: number): Promise<number> {
@@ -36,6 +43,8 @@ async function findOrCreateDirectChat(userId: string | number, otherUserId: numb
 
 // Get SOS contacts for a user
 router.get("/:userId/contacts", async (req: Request, res: Response) => {
+  const userId = requireSosOwner(req, res);
+  if (!userId) return;
   try {
     const result = await query(
       `SELECT sc.*, u.name as linked_name, u.phone as linked_phone
@@ -43,7 +52,7 @@ router.get("/:userId/contacts", async (req: Request, res: Response) => {
        LEFT JOIN users u ON u.id = sc.contact_user_id
        WHERE sc.user_id = $1
        ORDER BY sc.created_at ASC`,
-      [req.params.userId]
+      [userId]
     );
     res.json({ success: true, contacts: result.rows });
   } catch (err) {
@@ -53,7 +62,13 @@ router.get("/:userId/contacts", async (req: Request, res: Response) => {
 
 // Add SOS contact
 router.post("/:userId/contacts", async (req: Request, res: Response) => {
-  const { contactName, contactPhone, contactUserId } = req.body as any;
+  const ownerUserId = requireSosOwner(req, res);
+  if (!ownerUserId) return;
+  const { contactName, contactPhone, contactUserId } = req.body as {
+    contactName?: string;
+    contactPhone?: string;
+    contactUserId?: number;
+  };
   const trimmedName = String(contactName ?? "").trim();
   if (!trimmedName) {
     res.status(400).json({ success: false, message: "contactName required" });
@@ -65,7 +80,7 @@ router.post("/:userId/contacts", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const countResult = await query("SELECT COUNT(*)::int AS count FROM sos_contacts WHERE user_id = $1", [req.params.userId]);
+    const countResult = await query("SELECT COUNT(*)::int AS count FROM sos_contacts WHERE user_id = $1", [ownerUserId]);
     if ((countResult.rows[0]?.count ?? 0) >= MAX_SOS_CONTACTS) {
       res.status(400).json({ success: false, message: `Maximum ${MAX_SOS_CONTACTS} SOS contacts allowed` });
       return;
@@ -73,7 +88,7 @@ router.post("/:userId/contacts", async (req: Request, res: Response) => {
 
     const duplicateResult = await query(
       "SELECT id FROM sos_contacts WHERE user_id = $1 AND lower(contact_name) = lower($2) AND coalesce(contact_phone, '') = coalesce($3, '') LIMIT 1",
-      [req.params.userId, trimmedName, normalizedPhone]
+      [ownerUserId, trimmedName, normalizedPhone]
     );
     if (duplicateResult.rows.length > 0) {
       res.status(409).json({ success: false, message: "Contact already added" });
@@ -81,15 +96,15 @@ router.post("/:userId/contacts", async (req: Request, res: Response) => {
     }
 
     // If phone given, try to find user in DB
-    let userId: number | null = contactUserId ?? null;
-    if (!userId && normalizedPhone) {
+    let linkedUserId: number | null = contactUserId ?? null;
+    if (!linkedUserId && normalizedPhone) {
       const found = await query("SELECT id FROM users WHERE phone = $1", [normalizedPhone]);
-      if (found.rows.length > 0) userId = found.rows[0].id;
+      if (found.rows.length > 0) linkedUserId = found.rows[0].id;
     }
     const result = await query(
       `INSERT INTO sos_contacts (user_id, contact_name, contact_phone, contact_user_id)
        VALUES ($1,$2,$3,$4) RETURNING *`,
-      [req.params.userId, trimmedName, normalizedPhone, userId]
+      [ownerUserId, trimmedName, normalizedPhone, linkedUserId]
     );
     res.json({ success: true, contact: result.rows[0] });
   } catch (err) {
@@ -100,8 +115,10 @@ router.post("/:userId/contacts", async (req: Request, res: Response) => {
 
 // Delete SOS contact
 router.delete("/:userId/contacts/:contactId", async (req: Request, res: Response) => {
+  const userId = requireSosOwner(req, res);
+  if (!userId) return;
   try {
-    await query("DELETE FROM sos_contacts WHERE id = $1 AND user_id = $2", [req.params.contactId, req.params.userId]);
+    await query("DELETE FROM sos_contacts WHERE id = $1 AND user_id = $2", [req.params.contactId, userId]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
@@ -110,8 +127,9 @@ router.delete("/:userId/contacts/:contactId", async (req: Request, res: Response
 
 // Trigger SOS — sends emergency message to all SOS contacts who use the app
 router.post("/:userId/trigger", async (req: Request, res: Response) => {
+  const userId = requireSosOwner(req, res);
+  if (!userId) return;
   const { latitude, longitude, address } = req.body as any;
-  const userId = singleParam(req.params.userId);
   try {
     const user = await query("SELECT * FROM users WHERE id = $1", [userId]);
     if (user.rows.length === 0) { res.status(404).json({ success: false }); return; }
@@ -122,7 +140,7 @@ router.post("/:userId/trigger", async (req: Request, res: Response) => {
       `SELECT sc.*, u.id as linked_id, u.push_token FROM sos_contacts sc
        LEFT JOIN users u ON u.id = sc.contact_user_id
        WHERE sc.user_id = $1`,
-      [req.params.userId]
+      [userId]
     );
 
     if (contacts.rows.length === 0) {
@@ -139,7 +157,7 @@ router.post("/:userId/trigger", async (req: Request, res: Response) => {
         if (contact.contact_phone) smsFallbackNumbers.push(contact.contact_phone);
         continue;
       }
-      const chatId = await findOrCreateDirectChat(userId, contact.linked_id);
+      const chatId = await findOrCreateDirectChat(userId, Number(contact.linked_id));
 
       await query(
         "INSERT INTO messages (chat_id, sender_id, content, type) VALUES ($1,$2,$3,'text')",
@@ -168,8 +186,9 @@ router.post("/:userId/trigger", async (req: Request, res: Response) => {
 
 // Periodic live-location update after SOS trigger
 router.post("/:userId/location-update", async (req: Request, res: Response) => {
+  const userId = requireSosOwner(req, res);
+  if (!userId) return;
   const { latitude, longitude } = req.body as { latitude?: number; longitude?: number };
-  const userId = singleParam(req.params.userId);
   if (typeof latitude !== "number" || typeof longitude !== "number") {
     res.status(400).json({ success: false, message: "latitude and longitude are required" });
     return;
@@ -211,7 +230,8 @@ router.post("/:userId/location-update", async (req: Request, res: Response) => {
 
 // Trusted contact verification ping
 router.post("/:userId/contacts/:contactId/verify", async (req: Request, res: Response) => {
-  const userId = singleParam(req.params.userId);
+  const userId = requireSosOwner(req, res);
+  if (!userId) return;
   try {
     const contactResult = await query(
       "SELECT sc.*, u.name AS linked_name FROM sos_contacts sc LEFT JOIN users u ON u.id = sc.contact_user_id WHERE sc.id = $1 AND sc.user_id = $2",

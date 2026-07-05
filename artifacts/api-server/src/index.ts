@@ -1,7 +1,10 @@
 import app from "./app";
+import { assertSessionSecretConfigured } from "./lib/auth";
 import { logger } from "./lib/logger";
 import { isRedisBusEnabled } from "./lib/redisBus";
 import { initRealtimeBus } from "./lib/realtime";
+
+assertSessionSecretConfigured();
 
 const rawPort = process.env["PORT"];
 

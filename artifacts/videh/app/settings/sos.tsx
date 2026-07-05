@@ -45,6 +45,14 @@ export default function SosScreen() {
   const verifiedKey = `videh_sos_verified_${user?.dbId ?? "anon"}`;
   const liveTrackerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const authHeaders = useCallback(
+    (withJson = false): Record<string, string> => ({
+      ...(withJson ? { "Content-Type": "application/json" } : {}),
+      ...(user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+    }),
+    [user?.sessionToken],
+  );
+
   const normalizePhone = (raw: string): string => raw.replace(/[^\d+]/g, "").trim();
   const validatePhone = (raw: string): boolean => {
     if (!raw.trim()) return true;
@@ -55,12 +63,14 @@ export default function SosScreen() {
   const load = useCallback(async () => {
     if (!user?.dbId) return;
     try {
-      const r = await fetch(`${BASE_URL}/api/sos/${user.dbId}/contacts`);
+      const r = await fetch(`${BASE_URL}/api/sos/${user.dbId}/contacts`, {
+        headers: authHeaders(),
+      });
       const d = await r.json();
       if (d.success) setContacts(d.contacts);
     } catch {}
     setLoading(false);
-  }, [user?.dbId]);
+  }, [user?.dbId, authHeaders]);
 
   const queueRetryPayload = useCallback(async (payload: { latitude?: number; longitude?: number; createdAt: number }) => {
     const existingRaw = await AsyncStorage.getItem(retryQueueKey);
@@ -79,7 +89,7 @@ export default function SosScreen() {
       try {
         const resp = await fetch(`${BASE_URL}/api/sos/${user.dbId}/trigger`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders(true),
           body: JSON.stringify({ latitude: item.latitude, longitude: item.longitude }),
         });
         const data = await resp.json();
@@ -89,7 +99,7 @@ export default function SosScreen() {
       }
     }
     await AsyncStorage.setItem(retryQueueKey, JSON.stringify(remaining));
-  }, [retryQueueKey, user?.dbId]);
+  }, [retryQueueKey, user?.dbId, authHeaders]);
 
   useEffect(() => {
     load();
@@ -135,7 +145,7 @@ export default function SosScreen() {
     try {
       const r = await fetch(`${BASE_URL}/api/sos/${user?.dbId}/contacts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(true),
         body: JSON.stringify({ contactName: cName.trim(), contactPhone: normalizePhone(cPhone) || null }),
       });
       const d = await r.json();
@@ -151,7 +161,10 @@ export default function SosScreen() {
   const removeContact = (id: number, name: string) => {
     Alert.alert("Remove contact?", `Remove ${name} from SOS contacts?`, [
       { text: "Remove", style: "destructive", onPress: async () => {
-        await fetch(`${BASE_URL}/api/sos/${user?.dbId}/contacts/${id}`, { method: "DELETE" });
+        await fetch(`${BASE_URL}/api/sos/${user?.dbId}/contacts/${id}`, {
+          method: "DELETE",
+          headers: authHeaders(),
+        });
         load();
       }},
       { text: "Cancel" },
@@ -204,7 +217,7 @@ export default function SosScreen() {
     try {
       const r = await fetch(`${BASE_URL}/api/sos/${user?.dbId}/trigger`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(true),
         body: JSON.stringify({ latitude, longitude }),
       });
       const d = await r.json();
@@ -248,13 +261,13 @@ export default function SosScreen() {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         await fetch(`${BASE_URL}/api/sos/${user.dbId}/location-update`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders(true),
           body: JSON.stringify({ latitude: loc.coords.latitude, longitude: loc.coords.longitude }),
         });
         sentCount++;
       } catch {}
     }, 30000);
-  }, [user?.dbId]);
+  }, [user?.dbId, authHeaders]);
 
   const stopLiveLocationUpdates = () => {
     if (liveTrackerRef.current) clearInterval(liveTrackerRef.current);
@@ -269,7 +282,7 @@ export default function SosScreen() {
     try {
       const resp = await fetch(`${BASE_URL}/api/sos/${user.dbId}/contacts/${contact.id}/verify`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
       });
       const data = await resp.json();
       if (!data.success) {
