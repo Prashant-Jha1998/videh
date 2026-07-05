@@ -1046,6 +1046,10 @@ export function OnboardingWizard({ onClose, onNeedAuth }: Props) {
                   <li>Must not be registered on any personal messaging app already</li>
                   <li>New SIM or landline — OTP verification on that number</li>
                   <li>Number is hard to migrate later — choose carefully</li>
+                  <li>
+                    <strong>Do not log into the Videh consumer app with this number.</strong> If you do, Business API
+                    access is automatically suspended (messaging-only channel).
+                  </li>
                 </ul>
               </div>
               {!channelVerified ? (

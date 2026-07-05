@@ -203,6 +203,53 @@ export async function copyChannelToAccount(leadId: number, accountId: number): P
   );
 }
 
+function last10Digits(raw: string): string | null {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length < 10) return null;
+  return digits.slice(-10);
+}
+
+/** Suspend Business API when the dedicated channel number is used on the consumer Videh app. */
+export async function suspendDeveloperApiForConsumerAppLogin(tenDigitPhone: string): Promise<{ suspendedAccounts: number }> {
+  const ten = last10Digits(tenDigitPhone);
+  if (!ten || !/^\d{10}$/.test(ten)) return { suspendedAccounts: 0 };
+
+  await ensureDeveloperChannelColumns();
+
+  const accounts = await query(
+    `UPDATE developer_api_accounts
+     SET channel_status = 'suspended',
+         billing_status = 'suspended',
+         updated_at = NOW()
+     WHERE channel_phone IS NOT NULL
+       AND channel_status IN ('verified', 'otp_pending')
+       AND RIGHT(REGEXP_REPLACE(channel_phone, '\\D', '', 'g'), 10) = $1
+     RETURNING id, lead_id`,
+    [ten],
+  );
+
+  const leadIds = [...new Set(accounts.rows.map((r) => (r as { lead_id: number }).lead_id))];
+  if (leadIds.length) {
+    await query(
+      `UPDATE developer_leads
+       SET channel_status = 'suspended', updated_at = NOW()
+       WHERE id = ANY($1::int[])
+         AND channel_phone IS NOT NULL
+         AND RIGHT(REGEXP_REPLACE(channel_phone, '\\D', '', 'g'), 10) = $2`,
+      [leadIds, ten],
+    );
+  }
+
+  if (accounts.rows.length) {
+    logger.warn(
+      { ten: `***${ten.slice(-3)}`, count: accounts.rows.length },
+      "Developer API suspended: channel phone used on consumer Videh app",
+    );
+  }
+
+  return { suspendedAccounts: accounts.rows.length };
+}
+
 export async function assertChannelVerifiedForAccount(accountId: number): Promise<{ ok: boolean; reason?: string }> {
   const r = await query(
     `SELECT channel_status, videh_phone_number_id FROM developer_api_accounts WHERE id = $1`,
@@ -210,6 +257,9 @@ export async function assertChannelVerifiedForAccount(accountId: number): Promis
   );
   const row = r.rows[0] as { channel_status?: string; videh_phone_number_id?: string } | undefined;
   if (!row) return { ok: false, reason: "account_not_found" };
+  if (row.channel_status === "suspended") {
+    return { ok: false, reason: "channel_suspended_consumer_use" };
+  }
   if (row.channel_status !== "verified" || !row.videh_phone_number_id) {
     return { ok: false, reason: "channel_not_verified" };
   }

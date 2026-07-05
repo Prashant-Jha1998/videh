@@ -3745,8 +3745,8 @@ export default function ChatScreen() {
             </>
           )}
 
-          {/* Footer: time + edited + ticks (compact short text uses inline row above) */}
-          {!isDeleted && !compactTextBubble ? (
+          {/* Footer: time + edited + ticks (compact short text uses inline row above; templates use templateMetaRow) */}
+          {!isDeleted && !compactTextBubble && !isTemplate ? (
             <View style={[styles.msgMeta, (isImage || isVideo || isAlbum || isLocation) && styles.msgMetaOnMedia, isCall && styles.msgMetaCall]}>
               {item.isEdited && <Text style={[styles.editedLabel, { color: bubbleMutedTextColor }]}>edited </Text>}
               <Text style={[styles.msgTime, { color: metaTextColor }]}>
@@ -4855,20 +4855,24 @@ export default function ChatScreen() {
           <View style={styles.headerActions}>
             {!searching && (
               <>
-                <TouchableOpacity
-                  style={[styles.headerBtn, (chat?.isGroup || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))) && { opacity: 0.45 }]}
-                  disabled={Boolean(chat?.isGroup) || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))}
-                  onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })}
-                >
-                  <Ionicons name="videocam-outline" size={22} color={headerIcon} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.headerBtn, (chat?.isGroup || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))) && { opacity: 0.45 }]}
-                  disabled={Boolean(chat?.isGroup) || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))}
-                  onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })}
-                >
-                  <Ionicons name="call-outline" size={22} color={headerIcon} />
-                </TouchableOpacity>
+                {!businessChannelInfo ? (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.headerBtn, (chat?.isGroup || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))) && { opacity: 0.45 }]}
+                      disabled={Boolean(chat?.isGroup) || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))}
+                      onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })}
+                    >
+                      <Ionicons name="videocam-outline" size={22} color={headerIcon} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.headerBtn, (chat?.isGroup || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))) && { opacity: 0.45 }]}
+                      disabled={Boolean(chat?.isGroup) || (!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe))}
+                      onPress={() => chatId && router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })}
+                    >
+                      <Ionicons name="call-outline" size={22} color={headerIcon} />
+                    </TouchableOpacity>
+                  </>
+                ) : null}
                 <TouchableOpacity style={styles.headerBtn} onPress={() => setMenuOpen(true)}>
                   <Ionicons name="ellipsis-vertical" size={22} color={headerIcon} />
                 </TouchableOpacity>
@@ -4940,12 +4944,12 @@ export default function ChatScreen() {
                 groupHintLabel={t("chat.emptyGroupHint")}
                 callsDisabled={Boolean(blockState.iBlockedThem || blockState.theyBlockedMe)}
                 onVoiceCall={
-                  chatId && !chat?.isGroup
+                  chatId && !chat?.isGroup && !businessChannelInfo
                     ? () => router.push({ pathname: "/call/[id]", params: { id: chatId, type: "audio", name: displayName } })
                     : undefined
                 }
                 onVideoCall={
-                  chatId && !chat?.isGroup
+                  chatId && !chat?.isGroup && !businessChannelInfo
                     ? () => router.push({ pathname: "/call/[id]", params: { id: chatId, type: "video", name: displayName } })
                     : undefined
                 }

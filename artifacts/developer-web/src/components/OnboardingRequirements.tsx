@@ -62,7 +62,7 @@ const PHASES = [
       {
         icon: Phone,
         title: "Dedicated phone number",
-        detail: "Personal numbers are not used. New SIM or landline → OTP verification → register on the channel.",
+        detail: "Personal numbers are not used. New SIM or landline → OTP verification → register on the channel. If this same number is used to log into the Videh consumer app, Business API access is automatically suspended.",
       },
     ],
   },

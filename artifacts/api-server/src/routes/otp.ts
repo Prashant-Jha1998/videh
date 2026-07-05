@@ -17,6 +17,7 @@ import {
   playStoreDemoOtp,
   playStoreDemoOtpMatches,
 } from "../lib/playStoreDemo";
+import { suspendDeveloperApiForConsumerAppLogin } from "../lib/developerChannel";
 import { stateDelete, stateGetJson, stateSetJson } from "../lib/sharedState";
 
 const router = Router();
@@ -221,6 +222,7 @@ router.post("/verify", async (req: Request, res: Response) => {
       dbUser = { ...result.rows[0], is_new: true };
     }
     const twoStepRequired = existing.rows.length > 0 && !!existing.rows[0].two_step_pin;
+    await suspendDeveloperApiForConsumerAppLogin(phone);
     res.json({
       success: true,
       message: "OTP verified",

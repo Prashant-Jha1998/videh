@@ -74,12 +74,16 @@ export async function sendBusinessMessage(
 
   const channel = await assertChannelVerifiedForAccount(accountId);
   if (!channel.ok) {
+    const channelMessage =
+      channel.reason === "channel_suspended_consumer_use"
+        ? "This business channel number was used to log into the Videh consumer app. API access is suspended — register a separate dedicated number for Business API."
+        : "Business channel not verified. Complete phone OTP in the developer console.";
     return {
       ok: false,
       status: 403,
       body: {
         success: false,
-        error: { code: channel.reason, message: "Business channel not verified. Complete phone OTP in the developer console." },
+        error: { code: channel.reason, message: channelMessage },
       },
     };
   }

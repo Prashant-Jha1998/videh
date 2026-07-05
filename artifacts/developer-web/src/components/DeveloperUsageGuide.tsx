@@ -65,6 +65,7 @@ const ERRORS = [
   { code: "unauthorized", http: "401", fix: "Check Bearer token: vsk_KEY:vsec_SECRET or vsec_SECRET only" },
   { code: "phone_number_id_mismatch", http: "403", fix: "Use YOUR Phone Number ID in the Videh API URL — not a third-party messaging API path" },
   { code: "channel_not_verified", http: "403", fix: "Complete phone OTP under Business channel" },
+  { code: "channel_suspended_consumer_use", http: "403", fix: "Channel number was used on the Videh consumer app — API suspended. Register a separate dedicated number and contact support to re-enable." },
   { code: "template_not_approved", http: "400", fix: "Submit template and wait for Videh approval" },
   { code: "language_mismatch", http: "400", fix: "Use exact language from template (e.g. en)" },
   { code: "recipient_not_on_videh", http: "404", fix: "User must install Videh and sign up with same mobile" },
@@ -206,6 +207,11 @@ export function DeveloperUsageGuide({ variant = "public", snippetCtx = {} }: Pro
               <code className="text-xs">components</code> with <code className="text-xs">type: &quot;body&quot;</code>{" "}
               parameters. TEXT headers with variables need <code className="text-xs">type: &quot;header&quot;</code>{" "}
               parameters too.
+            </li>
+            <li>
+              <strong>Dedicated channel phone:</strong> Do not use your Business API number to log into the Videh
+              consumer app. If you do, API access is automatically suspended (
+              <code className="text-xs bg-white/60 px-1 rounded">channel_suspended_consumer_use</code>).
             </li>
           </ul>
         </div>

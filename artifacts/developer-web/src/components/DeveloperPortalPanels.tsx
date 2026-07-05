@@ -52,6 +52,15 @@ export function DeveloperChannelPanel({ data, busy, error, onRefresh }: PanelPro
 
       {error ? <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p> : null}
 
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
+        <p className="font-semibold">Dedicated number policy</p>
+        <p className="text-xs leading-relaxed">
+          Your channel phone is for Business API messaging only — not for personal Videh app use. If anyone logs into
+          the consumer Videh app with this same number, API access is <strong>automatically suspended</strong>. Use a
+          separate SIM for the business channel.
+        </p>
+      </div>
+
       <button
         type="button"
         disabled={busy}
