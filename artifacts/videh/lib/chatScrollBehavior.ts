@@ -24,10 +24,7 @@ export const CHAT_BACK_TO_BOTTOM_PX = 48;
 export const SCROLL_PIN_DEBOUNCE_MS = 48;
 
 /** After finger lift, block auto-pin until momentum scroll events settle (poll race fix). */
-export const CHAT_SCROLL_MOMENTUM_MS = 400;
-
-/** Ignore spurious scroll-to-bottom right after list data changes (FlatList reset). */
-export const CHAT_CONTENT_MUTATION_GUARD_MS = 1500;
+export const CHAT_SCROLL_MOMENTUM_MS = 800;
 
 /** MVCP: block tail autoscroll while user reads history (inverted list). */
 export const CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD = 10;

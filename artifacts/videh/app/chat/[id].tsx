@@ -117,9 +117,8 @@ import {
   CHAT_NEAR_BOTTOM_PX,
   CHAT_COMPOSER_CLEARANCE_PX,
   CHAT_TYPING_FOOTER_PX,
-  CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
+  CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
   CHAT_SCROLL_MOMENTUM_MS,
-  CHAT_CONTENT_MUTATION_GUARD_MS,
 } from "@/lib/chatScrollBehavior";
 import {
   linkColorForBubbleBackground,
@@ -1343,9 +1342,8 @@ export default function ChatScreen() {
   useEffect(() => {
     if (!chatId) return;
     markAsRead(chatId);
-    const existingCount = chats.find((c) => c.id === chatId)?.messages?.length ?? 0;
-    void loadMessages(chatId, { incremental: existingCount > 0 });
-  }, [chatId, markAsRead, loadMessages, chats]);
+    void loadMessages(chatId);
+  }, [chatId, markAsRead, loadMessages]);
 
   useEffect(() => {
     if (!chatId || !user?.dbId) return;
@@ -1369,7 +1367,6 @@ export default function ChatScreen() {
       void loadEnterIsSend().then(setEnterIsSend);
       if (!chatId) return;
       const wasReadingHistory = chatScrollMemoryRef.current.get(chatId) === true;
-      followingTailRef.current = !wasReadingHistory;
       pendingScrollToEndRef.current = !wasReadingHistory;
       openChatPinDoneRef.current = wasReadingHistory;
       userScrolledUpRef.current = wasReadingHistory;
@@ -1383,7 +1380,6 @@ export default function ChatScreen() {
         chatScrollMemoryRef.current.set(chatId, snap.readingHistory);
         lastScrollOffsetRef.current = snap.scrollOffset;
         if (!snap.readingHistory && snap.scrollOffset <= CHAT_NEAR_BOTTOM_PX) return;
-        followingTailRef.current = !snap.readingHistory;
         pendingScrollToEndRef.current = !snap.readingHistory;
         openChatPinDoneRef.current = snap.readingHistory;
         userScrolledUpRef.current = snap.readingHistory;
@@ -1398,8 +1394,7 @@ export default function ChatScreen() {
         }
       });
       setActiveChatId(chatId);
-      const existingCount = chats.find((x) => x.id === chatId)?.messages?.length ?? 0;
-      void loadMessages(chatId, { incremental: existingCount > 0 });
+      void loadMessages(chatId, { incremental: wasReadingHistory });
       const syncDisappearTimer = async () => {
         try {
           const res = await fetch(`${BASE_URL}/api/chats/${chatId}/details`);
@@ -1436,11 +1431,11 @@ export default function ChatScreen() {
         void loadMessages(chatId, { incremental: reading || !force });
       };
       const msgTimer = setInterval(() => pollMessages(false), OPEN_CHAT_MESSAGE_POLL_MS);
-      void pollMessages(true);
+      void pollMessages(false);
       void pollTyping();
       const typingTimer = setInterval(pollTyping, 4000);
       const appStateSub = AppState.addEventListener("change", (state) => {
-        if (state === "active") pollMessages(true);
+        if (state === "active") pollMessages(false);
       });
       const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
       const loadPresence = async () => {
@@ -1475,7 +1470,7 @@ export default function ChatScreen() {
           scrollOffset: lastScrollOffsetRef.current,
         });
       };
-    }, [chatId, user?.dbId, user?.sessionToken, setActiveChatId, loadMessages, clearTyping, reportRemoteTyping, chats])
+    }, [chatId, user?.dbId, user?.sessionToken, setActiveChatId, loadMessages, clearTyping, reportRemoteTyping])
   );
 
   const enterSendActive = enterIsSend;
@@ -1889,10 +1884,6 @@ export default function ChatScreen() {
   /** Block auto pin-to-bottom while older pages load (prevents jump to latest). */
   const suppressAutoPinUntilRef = useRef(0);
   const dragSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** WhatsApp-style: only auto-scroll while user is following the latest tail. */
-  const followingTailRef = useRef(true);
-  const contentMutationAtRef = useRef(0);
-  const scrollOffsetBeforeMutationRef = useRef(0);
 
   const clearDragSettleTimer = useCallback(() => {
     if (dragSettleTimerRef.current) {
@@ -1910,31 +1901,6 @@ export default function ChatScreen() {
     }, CHAT_SCROLL_MOMENTUM_MS);
   }, [clearDragSettleTimer]);
 
-  const restoreScrollIfReadingHistory = useCallback((source = "restore") => {
-    if (!readingHistoryRef.current && !userScrolledUpRef.current) return;
-    const offset = scrollOffsetBeforeMutationRef.current || lastScrollOffsetRef.current;
-    if (offset <= CHAT_NEAR_BOTTOM_PX) return;
-    if (__DEV__) {
-      console.log(`[chat-scroll] restore offset=${offset} source=${source}`);
-    }
-    requestAnimationFrame(() => {
-      listRef.current?.scrollToOffset({ offset, animated: false });
-      lastScrollOffsetRef.current = offset;
-      lastNearBottomRef.current = false;
-    });
-  }, []);
-
-  const noteListContentMutation = useCallback(() => {
-    if (lastScrollOffsetRef.current > CHAT_NEAR_BOTTOM_PX) {
-      scrollOffsetBeforeMutationRef.current = lastScrollOffsetRef.current;
-    }
-    contentMutationAtRef.current = Date.now();
-    suppressAutoPinUntilRef.current = Math.max(
-      suppressAutoPinUntilRef.current,
-      Date.now() + CHAT_CONTENT_MUTATION_GUARD_MS,
-    );
-  }, []);
-
   type ChatScrollIntent = "auto" | "fab" | "open" | "quote";
 
   const applyReadingHistoryMode = useCallback((on: boolean) => {
@@ -1944,12 +1910,12 @@ export default function ChatScreen() {
 
   const blocksAutoScroll = useCallback(() => {
     return (
-      !followingTailRef.current
-      || userScrolledUpRef.current
+      userScrolledUpRef.current
       || readingHistoryRef.current
       || loadingOlderRef.current
       || userDraggingRef.current
       || Date.now() < suppressAutoPinUntilRef.current
+      || !lastNearBottomRef.current
     );
   }, []);
 
@@ -1982,7 +1948,8 @@ export default function ChatScreen() {
   ) => {
     const intent = opts?.intent ?? "auto";
     const source = opts?.source ?? "forceScrollToLatest";
-    const autoBlocked = intent === "auto" && blocksAutoScroll();
+    const userInitiated = intent === "fab" || intent === "quote";
+    const autoBlocked = !userInitiated && blocksAutoScroll();
     logScrollRequest(source, intent, autoBlocked);
     if (autoBlocked) return;
     if (!opts?.bypassDrag && userDraggingRef.current) return;
@@ -2039,7 +2006,6 @@ export default function ChatScreen() {
     openChatPinDoneRef.current = true;
     cancelAllScrollPins();
     pendingScrollToEndRef.current = false;
-    followingTailRef.current = true;
     userScrolledUpRef.current = false;
     applyReadingHistoryMode(false);
     lastNearBottomRef.current = true;
@@ -2051,7 +2017,6 @@ export default function ChatScreen() {
     if (userScrolledUpRef.current) return;
     cancelAllScrollPins();
     pendingScrollToEndRef.current = false;
-    followingTailRef.current = false;
     userScrolledUpRef.current = true;
     applyReadingHistoryMode(true);
     lastNearBottomRef.current = false;
@@ -2064,7 +2029,6 @@ export default function ChatScreen() {
       cancelAllScrollPins();
       userDraggingRef.current = false;
       scrollLockRef.current = false;
-      followingTailRef.current = true;
       userScrolledUpRef.current = false;
       applyReadingHistoryMode(false);
       lastNearBottomRef.current = true;
@@ -2072,7 +2036,6 @@ export default function ChatScreen() {
       setUnreadBelowCount((p) => (p > 0 ? 0 : p));
       frozenMessageCountRef.current = messages.length;
       pendingScrollToEndRef.current = false;
-      scrollOffsetBeforeMutationRef.current = 0;
       if (chatId) chatScrollMemoryRef.current.set(chatId, false);
       forceScrollToLatest(animated, { bypassDrag: true, intent: "fab", source: "pinChatToBottom" });
     },
@@ -2087,16 +2050,12 @@ export default function ChatScreen() {
   scheduleOpenChatPinRef.current = scheduleOpenChatPin;
   const syncScrollAwayFromBottom = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
-      const recentMutation = Date.now() - contentMutationAtRef.current < CHAT_CONTENT_MUTATION_GUARD_MS;
-      const reading = userScrolledUpRef.current || readingHistoryRef.current;
       const away = searching
         ? isChatScrolledUp(contentOffsetY, contentHeight, layoutHeight, userScrolledUpRef.current)
         : isInvertedChatScrolledUp(contentOffsetY, userScrolledUpRef.current);
-      if (!(recentMutation && reading)) {
-        lastNearBottomRef.current = searching
-          ? isChatNearBottom(contentOffsetY, contentHeight, layoutHeight)
-          : isInvertedChatNearBottom(contentOffsetY);
-      }
+      lastNearBottomRef.current = searching
+        ? isChatNearBottom(contentOffsetY, contentHeight, layoutHeight)
+        : isInvertedChatNearBottom(contentOffsetY);
       if (
         !searching
         && contentOffsetY > CHAT_NEAR_BOTTOM_PX
@@ -2114,23 +2073,20 @@ export default function ChatScreen() {
   const tryClearReadingHistory = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
       if (!userScrolledUpRef.current) return;
-      if (Date.now() - contentMutationAtRef.current < CHAT_CONTENT_MUTATION_GUARD_MS) return;
       const backAtBottom = searching
         ? isChatBackAtBottom(contentOffsetY, contentHeight, layoutHeight)
         : isInvertedChatBackAtBottom(contentOffsetY);
       if (!backAtBottom) return;
       cancelAllScrollPins();
-      followingTailRef.current = true;
       userScrolledUpRef.current = false;
       applyReadingHistoryMode(false);
       lastNearBottomRef.current = true;
       frozenMessageCountRef.current = messages.length;
       setShowJumpToLatest((p) => (p ? false : p));
       setUnreadBelowCount((p) => (p > 0 ? 0 : p));
-      scrollOffsetBeforeMutationRef.current = 0;
       if (chatId) chatScrollMemoryRef.current.set(chatId, false);
     },
-    [messages.length, cancelAllScrollPins, applyReadingHistoryMode, chatId, searching],
+    [messages.length, cancelAllScrollPins, applyReadingHistoryMode, chatId],
   );
   const finishScrollInteraction = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
@@ -2160,25 +2116,7 @@ export default function ChatScreen() {
   }, [chatId, loadOlderMessages, messages, searching, markUserScrolledUp]);
   const handleListScroll = useCallback(
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
-      const reading = userScrolledUpRef.current || readingHistoryRef.current;
-      const saved = scrollOffsetBeforeMutationRef.current;
-      const recentMutation = Date.now() - contentMutationAtRef.current < CHAT_CONTENT_MUTATION_GUARD_MS;
-
-      if (
-        !searching
-        && reading
-        && recentMutation
-        && saved > CHAT_NEAR_BOTTOM_PX
-        && contentOffsetY <= CHAT_NEAR_BOTTOM_PX
-      ) {
-        restoreScrollIfReadingHistory("spurious-bottom");
-        return;
-      }
-
       lastScrollOffsetRef.current = contentOffsetY;
-      if (contentOffsetY > CHAT_NEAR_BOTTOM_PX) {
-        scrollOffsetBeforeMutationRef.current = contentOffsetY;
-      }
       syncScrollAwayFromBottom(contentOffsetY, contentHeight, layoutHeight);
       const nearOlderEdge = searching
         ? contentOffsetY < 140
@@ -2196,7 +2134,7 @@ export default function ChatScreen() {
         void tryLoadOlderMessages();
       }
     },
-    [syncScrollAwayFromBottom, tryLoadOlderMessages, searching, markUserScrolledUp, restoreScrollIfReadingHistory],
+    [syncScrollAwayFromBottom, tryLoadOlderMessages, searching, markUserScrolledUp],
   );
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevMessageCountRef = useRef(0);
@@ -2206,7 +2144,6 @@ export default function ChatScreen() {
   useEffect(() => {
     cancelAllScrollPins();
     const wasReading = chatId ? chatScrollMemoryRef.current.get(chatId) === true : false;
-    followingTailRef.current = !wasReading;
     pendingScrollToEndRef.current = !wasReading;
     openChatPinDoneRef.current = wasReading;
     userScrolledUpRef.current = wasReading;
@@ -2246,9 +2183,9 @@ export default function ChatScreen() {
   }, []);
   const onKeyboardAnimEnd = useCallback(() => {
     keyboardAnimatingRef.current = false;
-    if (searching || !followingTailRef.current || blocksAutoScroll()) return;
-    pinToLatest(false, { source: "keyboard-open-end" });
-  }, [searching, blocksAutoScroll, pinToLatest]);
+    if (searching || blocksAutoScroll() || !lastNearBottomRef.current) return;
+    pinChatToBottom(false);
+  }, [searching, blocksAutoScroll, pinChatToBottom]);
 
   /** Videh: track keyboard animation without forcing scroll (composer uses KeyboardStickyView). */
   useGenericKeyboardHandler(
@@ -2380,8 +2317,7 @@ export default function ChatScreen() {
     }
     const tailUnchanged = newestId === prevNewestMessageIdRef.current;
     const shouldPinNewTail =
-      followingTailRef.current
-      && count > prevMessageCountRef.current
+      count > prevMessageCountRef.current
       && !blocksAutoScroll()
       && !userDraggingRef.current
       && !grewFromOlderLoad
@@ -4069,12 +4005,24 @@ export default function ChatScreen() {
   }, [messagesForDisplay]);
 
   /** Keep viewport fixed while reading history across poll/merge refreshes. */
+  const restoreScrollIfReadingHistory = useCallback(() => {
+    if (searching || !messageListInverted) return;
+    if (!userScrolledUpRef.current && !readingHistoryRef.current) return;
+    const offset = lastScrollOffsetRef.current;
+    if (offset <= CHAT_NEAR_BOTTOM_PX) return;
+    listRef.current?.scrollToOffset({ offset, animated: false });
+  }, [searching, messageListInverted]);
+
   useEffect(() => {
     if (searching || !messageListInverted) return;
     if (!readingHistoryRef.current && !userScrolledUpRef.current) return;
-    noteListContentMutation();
-    restoreScrollIfReadingHistory("messages-anchor");
-  }, [messagesScrollAnchorKey, searching, messageListInverted, noteListContentMutation, restoreScrollIfReadingHistory]);
+    const offset = lastScrollOffsetRef.current;
+    if (offset <= CHAT_NEAR_BOTTOM_PX) return;
+    const frame = requestAnimationFrame(() => {
+      restoreScrollIfReadingHistory();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [messagesScrollAnchorKey, searching, messageListInverted, restoreScrollIfReadingHistory]);
 
   useFocusEffect(
     useCallback(() => {
@@ -5117,21 +5065,17 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS !== "web"}
           maintainVisibleContentPosition={
-            searching || !messageListInverted
+            searching || !messageListInverted || readingHistory
               ? undefined
               : {
                   minIndexForVisible: 0,
-                  autoscrollToTopThreshold: CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
+                  autoscrollToTopThreshold: CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
                 }
           }
           initialNumToRender={12}
           maxToRenderPerBatch={8}
           windowSize={7}
           updateCellsBatchingPeriod={100}
-          onContentSizeChange={() => {
-            if (!readingHistoryRef.current && !userScrolledUpRef.current) return;
-            restoreScrollIfReadingHistory("content-size");
-          }}
           onScrollBeginDrag={(e) => {
             clearDragSettleTimer();
             scrollLockRef.current = true;
@@ -5155,10 +5099,16 @@ export default function ChatScreen() {
           }}
           onScrollEndDrag={(e) => {
             scrollLockRef.current = false;
+            const { contentOffset, contentSize, layoutMeasurement, velocity } = e.nativeEvent;
+            const y = contentOffset.y;
+            if (!searching && messageListInverted) {
+              const vy = velocity?.y ?? 0;
+              const upwardIntent = y > CHAT_NEAR_BOTTOM_PX || vy > 0.2;
+              if (upwardIntent) markUserScrolledUp();
+            }
             armScrollMomentumGuard();
-            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
             finishScrollInteraction(
-              contentOffset.y,
+              y,
               contentSize.height,
               layoutMeasurement.height,
             );
@@ -5178,6 +5128,9 @@ export default function ChatScreen() {
             if (searching) return;
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
             handleListScroll(contentOffset.y, contentSize.height, layoutMeasurement.height);
+          }}
+          onContentSizeChange={() => {
+            restoreScrollIfReadingHistory();
           }}
           scrollEventThrottle={96}
           onScrollToIndexFailed={(info) => {
