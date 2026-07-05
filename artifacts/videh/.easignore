@@ -7,10 +7,12 @@ ios/
 node_modules/.cache/
 
 # Monorepo root — APKs and build logs bloat the upload (~700MB).
-../../*.apk
-../../videh-v*.apk
+../../**/*.apk
 ../../eas-build*.log
 ../../eas-build-*.log
+../../videh-v*.apk
+../../artifacts/videh/build/**
+../../artifacts/videh/dist-export/**
 
 # Sibling artifacts not needed for the mobile app binary.
 ../api-server/

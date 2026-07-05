@@ -16,15 +16,11 @@ export const CHAT_COMPOSER_CLEARANCE_PX = 14;
 /** Room for the typing indicator row above the composer. */
 export const CHAT_TYPING_FOOTER_PX = 38;
 export const CHAT_NEAR_BOTTOM_PX = 80;
-/** Legacy hysteresis — keep in sync with near-bottom for inverted lists. */
-export const CHAT_SCROLL_AWAY_PX = 80;
+export const CHAT_SCROLL_AWAY_PX = 110;
 export const CHAT_BACK_TO_BOTTOM_PX = 48;
 
 /** Coalesce duplicate pin requests within the same frame / burst. */
 export const SCROLL_PIN_DEBOUNCE_MS = 48;
-
-/** After finger lift, block auto-pin until momentum scroll events settle (poll race fix). */
-export const CHAT_SCROLL_MOMENTUM_MS = 800;
 
 /** MVCP: block tail autoscroll while user reads history (inverted list). */
 export const CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD = 10;
