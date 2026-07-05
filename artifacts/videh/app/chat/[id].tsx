@@ -118,8 +118,7 @@ import {
   CHAT_NEAR_BOTTOM_PX,
   CHAT_COMPOSER_CLEARANCE_PX,
   CHAT_TYPING_FOOTER_PX,
-  CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
-  CHAT_SCROLL_MOMENTUM_MS,
+  CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
 } from "@/lib/chatScrollBehavior";
 import {
   linkColorForBubbleBackground,
@@ -1395,7 +1394,7 @@ export default function ChatScreen() {
         }
       });
       setActiveChatId(chatId);
-      void loadMessages(chatId, { incremental: wasReadingHistory });
+      void loadMessages(chatId);
       const chatAuthHeaders: Record<string, string> = {};
       if (user?.sessionToken) chatAuthHeaders.Authorization = `Bearer ${user.sessionToken}`;
       const syncDisappearTimer = async () => {
@@ -1432,15 +1431,14 @@ export default function ChatScreen() {
         }
       };
       const pollMessages = (force = false) => {
-        const reading = readingHistoryRef.current || userScrolledUpRef.current;
-        void loadMessages(chatId, { incremental: reading || !force });
+        void loadMessages(chatId, { incremental: !force });
       };
       const msgTimer = setInterval(() => pollMessages(false), OPEN_CHAT_MESSAGE_POLL_MS);
-      void pollMessages(false);
+      void pollMessages(true);
       void pollTyping();
       const typingTimer = setInterval(pollTyping, 4000);
       const appStateSub = AppState.addEventListener("change", (state) => {
-        if (state === "active") pollMessages(false);
+        if (state === "active") pollMessages(true);
       });
       const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
       const loadPresence = async () => {
@@ -1565,6 +1563,7 @@ export default function ChatScreen() {
       [
         selectedIds.length,
         flashMessageId ?? "",
+        readingHistory ? 1 : 0,
         chatLook.chatBubbleSent,
         chatLook.chatBubbleReceived,
         chatLook.chatBackground,
@@ -1575,6 +1574,7 @@ export default function ChatScreen() {
     [
       selectedIds.length,
       flashMessageId,
+      readingHistory,
       chatLook.chatBubbleSent,
       chatLook.chatBubbleReceived,
       chatLook.chatBackground,
@@ -1597,7 +1597,18 @@ export default function ChatScreen() {
       console.log(`[chat-scroll] scrollToQuotedMessage intent=quote blocked=false index=${index}`);
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    const scrollToQuote = () => {
+      try {
+        listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+      } catch {
+        const avgLen = 72;
+        listRef.current?.scrollToOffset({ offset: Math.max(0, avgLen * index), animated: false });
+        requestAnimationFrame(() => {
+          listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+        });
+      }
+    };
+    scrollToQuote();
     if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
     setFlashMessageId(quotedId);
     flashAnim.setValue(0);
@@ -1888,23 +1899,6 @@ export default function ChatScreen() {
   const composerPinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Block auto pin-to-bottom while older pages load (prevents jump to latest). */
   const suppressAutoPinUntilRef = useRef(0);
-  const dragSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clearDragSettleTimer = useCallback(() => {
-    if (dragSettleTimerRef.current) {
-      clearTimeout(dragSettleTimerRef.current);
-      dragSettleTimerRef.current = null;
-    }
-  }, []);
-
-  const armScrollMomentumGuard = useCallback(() => {
-    suppressAutoPinUntilRef.current = Date.now() + CHAT_SCROLL_MOMENTUM_MS;
-    clearDragSettleTimer();
-    dragSettleTimerRef.current = setTimeout(() => {
-      dragSettleTimerRef.current = null;
-      userDraggingRef.current = false;
-    }, CHAT_SCROLL_MOMENTUM_MS);
-  }, [clearDragSettleTimer]);
 
   type ChatScrollIntent = "auto" | "fab" | "open" | "quote";
 
@@ -1918,9 +1912,7 @@ export default function ChatScreen() {
       userScrolledUpRef.current
       || readingHistoryRef.current
       || loadingOlderRef.current
-      || userDraggingRef.current
       || Date.now() < suppressAutoPinUntilRef.current
-      || !lastNearBottomRef.current
     );
   }, []);
 
@@ -1936,7 +1928,6 @@ export default function ChatScreen() {
   );
 
   const cancelAllScrollPins = useCallback(() => {
-    clearDragSettleTimer();
     if (composerPinTimerRef.current) {
       clearTimeout(composerPinTimerRef.current);
       composerPinTimerRef.current = null;
@@ -1946,15 +1937,14 @@ export default function ChatScreen() {
       scrollCoalesceRef.current = null;
     }
     pendingPinAnimatedRef.current = false;
-  }, [clearDragSettleTimer]);
+  }, []);
   const forceScrollToLatest = useCallback((
     animated = false,
     opts?: { bypassDrag?: boolean; intent?: ChatScrollIntent; source?: string },
   ) => {
     const intent = opts?.intent ?? "auto";
     const source = opts?.source ?? "forceScrollToLatest";
-    const userInitiated = intent === "fab" || intent === "quote";
-    const autoBlocked = !userInitiated && blocksAutoScroll();
+    const autoBlocked = intent === "auto" && blocksAutoScroll();
     logScrollRequest(source, intent, autoBlocked);
     if (autoBlocked) return;
     if (!opts?.bypassDrag && userDraggingRef.current) return;
@@ -2061,14 +2051,6 @@ export default function ChatScreen() {
       lastNearBottomRef.current = searching
         ? isChatNearBottom(contentOffsetY, contentHeight, layoutHeight)
         : isInvertedChatNearBottom(contentOffsetY);
-      if (
-        !searching
-        && contentOffsetY > CHAT_NEAR_BOTTOM_PX
-        && !userScrolledUpRef.current
-      ) {
-        markUserScrolledUp();
-        return;
-      }
       if (away && !userScrolledUpRef.current) {
         markUserScrolledUp();
       }
@@ -2097,8 +2079,11 @@ export default function ChatScreen() {
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
       syncScrollAwayFromBottom(contentOffsetY, contentHeight, layoutHeight);
       tryClearReadingHistory(contentOffsetY, contentHeight, layoutHeight);
+      if (!blocksAutoScroll() && !searching && lastNearBottomRef.current) {
+        pinToLatest(false, { source: "finishScrollInteraction" });
+      }
     },
-    [syncScrollAwayFromBottom, tryClearReadingHistory],
+    [syncScrollAwayFromBottom, tryClearReadingHistory, searching, blocksAutoScroll, pinToLatest],
   );
   const tryLoadOlderMessages = useCallback(async () => {
     if (loadingOlderRef.current || !hasMoreOlderRef.current || searching || !chatId) return;
@@ -4005,24 +3990,15 @@ export default function ChatScreen() {
   }, [messagesForDisplay]);
 
   /** Keep viewport fixed while reading history across poll/merge refreshes. */
-  const restoreScrollIfReadingHistory = useCallback(() => {
-    if (searching || !messageListInverted) return;
-    if (!userScrolledUpRef.current && !readingHistoryRef.current) return;
-    const offset = lastScrollOffsetRef.current;
-    if (offset <= CHAT_NEAR_BOTTOM_PX) return;
-    listRef.current?.scrollToOffset({ offset, animated: false });
-  }, [searching, messageListInverted]);
-
   useEffect(() => {
-    if (searching || !messageListInverted) return;
-    if (!readingHistoryRef.current && !userScrolledUpRef.current) return;
+    if (searching || !readingHistory || !messageListInverted) return;
     const offset = lastScrollOffsetRef.current;
     if (offset <= CHAT_NEAR_BOTTOM_PX) return;
     const frame = requestAnimationFrame(() => {
-      restoreScrollIfReadingHistory();
+      listRef.current?.scrollToOffset({ offset, animated: false });
     });
     return () => cancelAnimationFrame(frame);
-  }, [messagesScrollAnchorKey, searching, messageListInverted, restoreScrollIfReadingHistory]);
+  }, [messagesScrollAnchorKey, readingHistory, searching, messageListInverted]);
 
   useFocusEffect(
     useCallback(() => {
@@ -4535,6 +4511,19 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
       )}
+
+      {chat?.messagesLoadError ? (
+        <TouchableOpacity
+          style={[styles.groupLockBanner, { backgroundColor: colors.card, borderTopColor: colors.border }]}
+          onPress={() => chatId && void loadMessages(chatId)}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="cloud-offline-outline" size={18} color={colors.mutedForeground} />
+          <Text style={[styles.groupLockBannerText, { color: colors.foreground }]}>
+            Could not refresh messages. Tap to retry.
+          </Text>
+        </TouchableOpacity>
+      ) : null}
 
       {!chat?.isGroup && (blockState.iBlockedThem || blockState.theyBlockedMe) && !editTarget && (
         <View style={[styles.groupLockBanner, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
@@ -5069,11 +5058,11 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS !== "web"}
           maintainVisibleContentPosition={
-            searching || !messageListInverted || readingHistory
+            searching || !messageListInverted
               ? undefined
               : {
                   minIndexForVisible: 0,
-                  autoscrollToTopThreshold: CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
+                  autoscrollToTopThreshold: CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
                 }
           }
           initialNumToRender={12}
@@ -5081,7 +5070,6 @@ export default function ChatScreen() {
           windowSize={7}
           updateCellsBatchingPeriod={100}
           onScrollBeginDrag={(e) => {
-            clearDragSettleTimer();
             scrollLockRef.current = true;
             userDraggingRef.current = true;
             cancelAllScrollPins();
@@ -5103,22 +5091,15 @@ export default function ChatScreen() {
           }}
           onScrollEndDrag={(e) => {
             scrollLockRef.current = false;
-            const { contentOffset, contentSize, layoutMeasurement, velocity } = e.nativeEvent;
-            const y = contentOffset.y;
-            if (!searching && messageListInverted) {
-              const vy = velocity?.y ?? 0;
-              const upwardIntent = y > CHAT_NEAR_BOTTOM_PX || vy > 0.2;
-              if (upwardIntent) markUserScrolledUp();
-            }
-            armScrollMomentumGuard();
+            userDraggingRef.current = false;
+            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
             finishScrollInteraction(
-              y,
+              contentOffset.y,
               contentSize.height,
               layoutMeasurement.height,
             );
           }}
           onMomentumScrollEnd={(e) => {
-            clearDragSettleTimer();
             userDraggingRef.current = false;
             scrollLockRef.current = false;
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
@@ -5132,9 +5113,6 @@ export default function ChatScreen() {
             if (searching) return;
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
             handleListScroll(contentOffset.y, contentSize.height, layoutMeasurement.height);
-          }}
-          onContentSizeChange={() => {
-            restoreScrollIfReadingHistory();
           }}
           scrollEventThrottle={96}
           onScrollToIndexFailed={(info) => {

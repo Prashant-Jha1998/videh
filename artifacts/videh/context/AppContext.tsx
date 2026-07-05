@@ -4,6 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { Alert, AppState, Platform, type AppStateStatus } from "react-native";
 import { agentDebugLog } from "@/lib/agentDebugLog";
 import { clearStoredUser, loadStoredUser, persistStoredUser } from "@/lib/secureUserStorage";
+import { clearAllPerChatThemes } from "@/lib/perChatTheme";
 import { albumSendLog } from "@/lib/albumSendLog";
 import { connectChatEventStream } from "@/lib/connectChatEventStream";
 import {
@@ -406,6 +407,8 @@ export interface Chat {
   disappearAfterSeconds?: number | null;
   /** Group: auto-translate incoming messages to each member's language */
   autoTranslateEnabled?: boolean;
+  /** True when the last messages sync failed (shows retry in chat). */
+  messagesLoadError?: boolean;
 }
 
 export interface Status {
@@ -1494,6 +1497,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     chatDeletedAtRef.current = {};
     setChatDeletedAtMap({});
     serverHistoryClearedRef.current = {};
+    await clearAllPerChatThemes();
     await clearStoredUser();
   }, []);
 
@@ -1832,9 +1836,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         { headers: authHeaders(), signal: aborter.signal },
         incremental ? 6000 : 12_000,
       );
+      if (!res.ok) {
+        throw new Error(`messages HTTP ${res.status}`);
+      }
       const data = await res.json() as { success: boolean; messages: any[] };
       const translationPrefs = await translationPrefsPromise;
-      if (!data.success || !data.messages) return;
+      if (!data.success || !data.messages) {
+        throw new Error("messages payload invalid");
+      }
+      patchChatInList(cid, { messagesLoadError: false });
 
       const clearedAt = getClearCutoff(chatId);
       const rawMessages = clearedAt > 0
@@ -2018,9 +2028,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
+      patchChatInList(cid, { messagesLoadError: true });
       setTimeout(() => void loadMessagesRef.current?.(chatId, { incremental: true }), 1500);
     }
-  }, [patchChatMessage, persistChatMessagesForUser, supplementGroupMessageTranslations, getClearCutoff]);
+  }, [patchChatInList, patchChatMessage, persistChatMessagesForUser, supplementGroupMessageTranslations, getClearCutoff]);
 
   loadMessagesRef.current = loadMessages;
 
@@ -2296,7 +2307,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           );
           const uid = userRef.current?.dbId;
           if (uid && activeChatIdRef.current === cid) {
-            void loadMessages(cid, { incremental: true });
+            void loadMessages(cid);
           }
           return;
         }

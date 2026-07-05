@@ -281,6 +281,7 @@ function mapVideoRow(row: Record<string, unknown>, req?: Request) {
       ? resolveChannelBrandingPublicUrl(req, Number(row.channel_id), avatar, "avatar", row.channel_updated_at ?? row.updated_at)
       : (avatar ?? null),
     myReaction: row.my_reaction ?? null,
+    isSubscribed: Boolean(row.is_subscribed),
     createdAt: row.created_at,
     shareSlug: String(row.share_slug ?? "").trim() || undefined,
     shareUrl: buildReelsVideoShareUrl(reelsVideoPublicShareRef(row)),
@@ -2368,8 +2369,8 @@ router.post("/subscribe/:channelId", async (req: Request, res: Response) => {
       res.status(429).json({ success: false, message: "Subscribe blocked — suspicious activity.", reason: fraud.reason });
       return;
     }
-    await query(
-      `INSERT INTO reels_subscriptions (subscriber_user_id, channel_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+    const insertRes = await query(
+      `INSERT INTO reels_subscriptions (subscriber_user_id, channel_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING subscriber_user_id`,
       [userId, channelId],
     );
     await query(
@@ -2378,11 +2379,13 @@ router.post("/subscribe/:channelId", async (req: Request, res: Response) => {
        ) WHERE id = $1`,
       [channelId],
     );
-    void notifyChannelOwnerEngagement({
-      channelId,
-      actorUserId: userId,
-      kind: "channel_connect",
-    }).catch(() => { /* ignore */ });
+    if (insertRes.rows.length > 0) {
+      void notifyChannelOwnerEngagement({
+        channelId,
+        actorUserId: userId,
+        kind: "channel_connect",
+      }).catch(() => { /* ignore */ });
+    }
     res.json({ success: true, subscribed: true });
   } catch (err) {
     req.log.error({ err }, "reels subscribe");

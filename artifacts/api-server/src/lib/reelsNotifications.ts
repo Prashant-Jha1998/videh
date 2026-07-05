@@ -39,6 +39,12 @@ async function ensureEngagementColumns(): Promise<void> {
       ON reels_video_notifications (user_id, video_id)
       WHERE kind = 'content_warning'
   `);
+  await query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_reels_notif_engagement_actor_dedup
+      ON reels_video_notifications (user_id, video_id, kind, actor_user_id)
+      WHERE kind IN ('video_like', 'video_comment', 'video_share', 'channel_connect')
+      AND actor_user_id IS NOT NULL
+  `);
 }
 
 export async function ensureReelsVideoNotificationsTable(): Promise<void> {
@@ -174,7 +180,8 @@ export async function notifyChannelOwnerEngagement(opts: {
   await query(
     `INSERT INTO reels_video_notifications
        (user_id, video_id, channel_id, kind, actor_user_id, actor_label, detail_text)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT DO NOTHING`,
     [
       ownerUserId,
       videoId,

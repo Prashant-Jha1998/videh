@@ -37,6 +37,7 @@ import {
   formatDuration,
   formatTimeAgo,
   formatViewCount,
+  computeLocalAdPlacements,
   reportReelsVideo,
   type ReelsChannel,
   type ReelsFeedAdPlacement,
@@ -200,6 +201,10 @@ export default function VideoTabScreen() {
   const [videos, setVideos] = useState<ReelsVideo[]>([]);
   const [adPlacements, setAdPlacements] = useState<ReelsFeedAdPlacement[]>([]);
   const [vibeAdPlacements, setVibeAdPlacements] = useState<ReelsVibeAdPlacement[]>([]);
+  const [feedAdPool, setFeedAdPool] = useState<ReelsFeedAdPlacement["ad"][]>([]);
+  const [vibeAdPool, setVibeAdPool] = useState<ReelsVibeAdPlacement["ad"][]>([]);
+  const [feedAdGap, setFeedAdGap] = useState({ min: 2, max: 7 });
+  const [vibeAdGap, setVibeAdGap] = useState({ min: 3, max: 6 });
   const videoCountRef = useRef(0);
   const vibeCountRef = useRef(0);
   const [nextCursor, setNextCursor] = useState<ReelsFeedCursor | null>(null);
@@ -245,17 +250,69 @@ export default function VideoTabScreen() {
     }
   }, [user?.dbId, user?.sessionToken]);
 
+  const mergeFeedAds = useCallback((incoming: ReelsFeedAdPlacement["ad"][]) => {
+    setFeedAdPool((prev) => {
+      const seen = new Set(prev.map((a) => a.id));
+      const next = [...prev];
+      for (const ad of incoming) {
+        if (!seen.has(ad.id)) {
+          seen.add(ad.id);
+          next.push(ad);
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const mergeVibeAds = useCallback((incoming: ReelsVibeAdPlacement["ad"][]) => {
+    setVibeAdPool((prev) => {
+      const seen = new Set(prev.map((a) => a.id));
+      const next = [...prev];
+      for (const ad of incoming) {
+        if (!seen.has(ad.id)) {
+          seen.add(ad.id);
+          next.push(ad);
+        }
+      }
+      return next;
+    });
+  }, []);
+
   const applyFeed = useCallback((feed: {
     videos?: ReelsVideo[];
     feedAdPlacements?: ReelsFeedAdPlacement[];
     vibeAdPlacements?: ReelsVibeAdPlacement[];
+    feedAdMinGap?: number;
+    feedAdMaxGap?: number;
+    vibeAdMinGap?: number;
+    vibeAdMaxGap?: number;
     nextCursor?: ReelsFeedCursor | null;
+    resetAds?: boolean;
   }) => {
     setVideos(feed.videos ?? []);
     setAdPlacements(feed.feedAdPlacements ?? []);
     setVibeAdPlacements(feed.vibeAdPlacements ?? []);
+    if (feed.feedAdMinGap != null || feed.feedAdMaxGap != null) {
+      setFeedAdGap({
+        min: feed.feedAdMinGap ?? 2,
+        max: feed.feedAdMaxGap ?? Math.max((feed.feedAdMinGap ?? 2) + 3, 7),
+      });
+    }
+    if (feed.vibeAdMinGap != null || feed.vibeAdMaxGap != null) {
+      setVibeAdGap({
+        min: feed.vibeAdMinGap ?? 3,
+        max: feed.vibeAdMaxGap ?? Math.max((feed.vibeAdMinGap ?? 3) + 3, 6),
+      });
+    }
+    if (feed.resetAds) {
+      setFeedAdPool((feed.feedAdPlacements ?? []).map((p) => p.ad));
+      setVibeAdPool((feed.vibeAdPlacements ?? []).map((p) => p.ad));
+    } else {
+      mergeFeedAds((feed.feedAdPlacements ?? []).map((p) => p.ad));
+      mergeVibeAds((feed.vibeAdPlacements ?? []).map((p) => p.ad));
+    }
     setNextCursor(feed.nextCursor ?? null);
-  }, []);
+  }, [mergeFeedAds, mergeVibeAds]);
 
   const loadInitial = useCallback(async (opts?: { silent?: boolean }) => {
     const uid = user?.dbId;
@@ -273,6 +330,7 @@ export default function VideoTabScreen() {
           feedAdPlacements: cached.adPlacements,
           vibeAdPlacements: cached.vibeAdPlacements,
           nextCursor: cached.nextCursor,
+          resetAds: true,
         });
         loadedOnceRef.current = true;
         setLoading(false);
@@ -286,7 +344,7 @@ export default function VideoTabScreen() {
 
     try {
       const feed = await feedPromise;
-      applyFeed(feed);
+      applyFeed({ ...feed, resetAds: true });
       loadedOnceRef.current = true;
       setFeedError(false);
       setLoading(false);
@@ -449,9 +507,19 @@ export default function VideoTabScreen() {
     vibeCountRef.current = videos.filter((v) => isVibeVideo(v.durationSeconds, v.videoFormat)).length;
   }, [videos]);
 
+  const localFeedAdPlacements = useMemo(
+    () => computeLocalAdPlacements(visibleVideos.length, feedAdPool, feedAdGap.min, feedAdGap.max),
+    [visibleVideos.length, feedAdPool, feedAdGap],
+  );
+
+  const localVibeAdPlacements = useMemo(
+    () => computeLocalAdPlacements(vibeVideos.length, vibeAdPool, vibeAdGap.min, vibeAdGap.max),
+    [vibeVideos.length, vibeAdPool, vibeAdGap],
+  );
+
   const feedRows = useMemo(
-    () => buildFeedRows(visibleVideos, adPlacements),
-    [visibleVideos, adPlacements],
+    () => buildFeedRows(visibleVideos, localFeedAdPlacements),
+    [visibleVideos, localFeedAdPlacements],
   );
 
   const hideVideoFromFeed = (videoId: number) => {
@@ -881,7 +949,7 @@ export default function VideoTabScreen() {
         <StatusBar style="light" backgroundColor="#000" translucent={Platform.OS === "android"} />
         <VibeSwipeFeed
           videos={vibeVideos}
-          adPlacements={vibeAdPlacements}
+          adPlacements={localVibeAdPlacements}
           onLoadMore={() => void loadMore()}
           loadingMore={loadingMore}
           onUpload={hasChannel ? openVibeUpload : undefined}

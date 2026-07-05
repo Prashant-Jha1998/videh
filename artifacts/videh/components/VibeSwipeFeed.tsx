@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useFocusEffect } from "expo-router";
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -116,6 +116,7 @@ function VibeCard({
   onReport,
   onFollow,
   onOpenChannel,
+  likeCount,
 }: {
   item: ReelsVideo;
   height: number;
@@ -134,18 +135,13 @@ function VibeCard({
   onReport?: () => void;
   onFollow: () => void;
   onOpenChannel: () => void;
+  likeCount: number;
 }) {
   const colors = useColors();
   const channel = item.channelDisplayName ?? (item.channelHandle ? `@${item.channelHandle}` : "Channel");
   const handle = item.channelHandle ? `@${item.channelHandle}` : channel;
   const editorMeta = parseEditorMeta(item.editorMetadata);
   const canPlay = Boolean(item.videoUrl && item.videoUrl.trim().length > 0);
-  const likeCount = Math.max(
-    0,
-    item.likeCount
-      + (liked && item.myReaction !== "like" ? 1 : 0)
-      - (!liked && item.myReaction === "like" ? 1 : 0),
-  );
   const caption = editorMeta?.caption?.trim() || item.title;
 
   return (
@@ -267,6 +263,7 @@ export function VibeSwipeFeed({
   const [activeIndex, setActiveIndex] = useState(0);
   const [likedMap, setLikedMap] = useState<Record<number, boolean>>({});
   const [subscribedMap, setSubscribedMap] = useState<Record<number, boolean>>({});
+  const [likeCountMap, setLikeCountMap] = useState<Record<number, number>>({});
   const [commentVideo, setCommentVideo] = useState<ReelsVideo | null>(null);
   const [detailsVideo, setDetailsVideo] = useState<ReelsVideo | null>(null);
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
@@ -278,6 +275,32 @@ export function VibeSwipeFeed({
       return () => setScreenFocused(false);
     }, []),
   );
+
+  useEffect(() => {
+    setLikedMap((prev) => {
+      const next = { ...prev };
+      for (const v of videos) {
+        if (next[v.id] === undefined) {
+          next[v.id] = v.myReaction === "like";
+        }
+      }
+      return next;
+    });
+    setSubscribedMap((prev) => {
+      const next = { ...prev };
+      for (const v of videos) {
+        if (v.isSubscribed) next[v.channelId] = true;
+      }
+      return next;
+    });
+    setLikeCountMap((prev) => {
+      const next = { ...prev };
+      for (const v of videos) {
+        if (next[v.id] === undefined) next[v.id] = v.likeCount;
+      }
+      return next;
+    });
+  }, [videos]);
 
   const rows = React.useMemo(() => buildVibeRows(videos, adPlacements), [videos, adPlacements]);
 
@@ -300,26 +323,39 @@ export function VibeSwipeFeed({
   const like = async (video: ReelsVideo) => {
     if (!user?.dbId) return;
     const wasLiked = likedMap[video.id] ?? video.myReaction === "like";
+    const prevCount = likeCountMap[video.id] ?? video.likeCount;
     if (wasLiked) {
       setLikedMap((m) => ({ ...m, [video.id]: false }));
+      setLikeCountMap((m) => ({ ...m, [video.id]: Math.max(0, prevCount - 1) }));
       try {
-        await reactReelsVideo(video.id, user.dbId, "like", user.sessionToken);
+        const res = await reactReelsVideo(video.id, user.dbId, "like", user.sessionToken);
+        if (res.reaction === "like") {
+          setLikedMap((m) => ({ ...m, [video.id]: true }));
+          setLikeCountMap((m) => ({ ...m, [video.id]: prevCount }));
+        }
       } catch {
         setLikedMap((m) => ({ ...m, [video.id]: true }));
+        setLikeCountMap((m) => ({ ...m, [video.id]: prevCount }));
       }
       return;
     }
     setLikedMap((m) => ({ ...m, [video.id]: true }));
+    setLikeCountMap((m) => ({ ...m, [video.id]: prevCount + 1 }));
     try {
-      await reactReelsVideo(video.id, user.dbId, "like", user.sessionToken);
+      const res = await reactReelsVideo(video.id, user.dbId, "like", user.sessionToken);
+      if (res.reaction !== "like") {
+        setLikedMap((m) => ({ ...m, [video.id]: false }));
+        setLikeCountMap((m) => ({ ...m, [video.id]: prevCount }));
+      }
     } catch {
       setLikedMap((m) => ({ ...m, [video.id]: false }));
+      setLikeCountMap((m) => ({ ...m, [video.id]: prevCount }));
     }
   };
 
   const follow = async (video: ReelsVideo) => {
     if (!user?.dbId) return;
-    const wasSubscribed = subscribedMap[video.channelId] ?? false;
+    const wasSubscribed = subscribedMap[video.channelId] ?? Boolean(video.isSubscribed);
     setSubscribedMap((m) => ({ ...m, [video.channelId]: !wasSubscribed }));
     try {
       if (wasSubscribed) {
@@ -423,7 +459,8 @@ export function VibeSwipeFeed({
               bottomChrome={bottomChrome}
               isActive={cardActive}
               liked={likedMap[video.id] ?? video.myReaction === "like"}
-              subscribed={subscribedMap[video.channelId] ?? false}
+              subscribed={subscribedMap[video.channelId] ?? Boolean(video.isSubscribed)}
+              likeCount={likeCountMap[video.id] ?? video.likeCount}
               commentsOpen={commentVideo?.id === video.id}
               detailsOpen={detailsVideo?.id === video.id}
               userId={user?.dbId}
@@ -474,7 +511,7 @@ export function VibeSwipeFeed({
           onClose={() => setDetailsVideo(null)}
           video={detailsVideo}
           editorMeta={parseEditorMeta(detailsVideo.editorMetadata)}
-          subscribed={subscribedMap[detailsVideo.channelId] ?? false}
+          subscribed={subscribedMap[detailsVideo.channelId] ?? Boolean(detailsVideo.isSubscribed)}
           onFollow={() => void follow(detailsVideo)}
           onOpenChannel={() => openChannel(detailsVideo)}
           onReport={onReport ? () => {

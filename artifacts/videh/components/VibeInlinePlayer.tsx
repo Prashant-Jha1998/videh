@@ -115,7 +115,6 @@ export function VibeInlinePlayer({
     if (!player) return;
     if (shouldPlay) {
       setShowPoster(false);
-      if (!lastActiveRef.current) viewSentRef.current = false;
       startPlayback();
     } else {
       stopPlayback();
@@ -123,6 +122,10 @@ export function VibeInlinePlayer({
     }
     lastActiveRef.current = isActive && screenFocused;
   }, [shouldPlay, isActive, screenFocused, player, startPlayback, stopPlayback]);
+
+  useEffect(() => {
+    viewSentRef.current = false;
+  }, [videoId]);
 
   useEffect(() => {
     if (!preload || !player || isActive) return;

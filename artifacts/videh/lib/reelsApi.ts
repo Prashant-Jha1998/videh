@@ -111,6 +111,7 @@ export type ReelsVideo = {
   channelDisplayName?: string | null;
   channelAvatarUrl: string | null;
   myReaction?: "like" | "dislike" | null;
+  isSubscribed?: boolean;
   createdAt?: string;
   /** Native upload height in px; drives per-video quality menu. */
   sourceHeight?: number | null;
@@ -1209,10 +1210,37 @@ export async function uploadVibeVideo(opts: UploadReelsVideoOpts): Promise<{
   }
 }
 
-export function formatViewCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
+export function formatViewCount(n: number | null | undefined): string {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < 0) return "0";
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return String(Math.floor(v));
+}
+
+/** Recompute ad slots from the videos actually shown (after client-side filters). */
+export function computeLocalAdPlacements<T>(
+  videoCount: number,
+  ads: T[],
+  minGap: number,
+  maxGap: number,
+): Array<{ insertAfterIndex: number; ad: T }> {
+  if (videoCount <= 0 || !ads.length) return [];
+  const min = Math.max(1, minGap);
+  const max = Math.max(min, maxGap);
+  const placements: Array<{ insertAfterIndex: number; ad: T }> = [];
+  let adIdx = 0;
+  let videosSinceAd = 0;
+  let nextGap = min + (videoCount % Math.max(1, max - min + 1));
+  for (let i = 0; i < videoCount && adIdx < ads.length; i++) {
+    videosSinceAd++;
+    if (videosSinceAd >= nextGap) {
+      placements.push({ insertAfterIndex: i, ad: ads[adIdx++] });
+      videosSinceAd = 0;
+      nextGap = min + ((i + adIdx) % Math.max(1, max - min + 1));
+    }
+  }
+  return placements;
 }
 
 export function formatDuration(seconds: number): string {

@@ -18,6 +18,10 @@ const sseConnectionCounts = new Map<number, number>();
 
 let redisBusActive = false;
 
+export function isRedisBusActive(): boolean {
+  return redisBusActive;
+}
+
 export function isUserSseConnected(userId: number): boolean {
   return (sseConnectionCounts.get(userId) ?? 0) > 0;
 }
@@ -41,8 +45,12 @@ export async function initRealtimeBus(): Promise<void> {
       }
     });
     redisBusActive = true;
+    logger.info("Realtime bus: Redis connected");
   } catch (err) {
-    logger.warn({ err }, "Redis bus unavailable — falling back to single-process SSE");
+    logger.error({ err }, "Redis bus unavailable — multi-worker SSE/calls will not sync");
+    if (process.env["NODE_ENV"] === "production") {
+      throw err;
+    }
   }
 }
 

@@ -4,7 +4,6 @@ import { getApiUrl } from "@/lib/api";
 export type ChatStreamHandler = (eventType: string, data: string) => void;
 
 const STALE_SSE_MS = 120_000;
-const AUTH_FAIL_RETRY_MS = 30_000;
 const NORMAL_RETRY_MS = 300;
 
 function parseSseBlocks(buffer: string): { events: Array<{ type: string; data: string }>; rest: string } {
@@ -35,17 +34,33 @@ export function connectChatEventStream(
   token: string | null,
   onEvent: ChatStreamHandler,
 ): () => void {
-  const base = `${getApiUrl()}/api/chats/user/${userId}/events`;
-  const url = token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  if (!token?.trim()) {
+    return () => { /* no session — skip SSE to avoid 401 retry loops */ };
+  }
 
-  if (Platform.OS === "web" && typeof globalThis.EventSource !== "undefined") {
+  const base = `${getApiUrl()}/api/chats/user/${userId}/events`;
+  const useWebEventSource = Platform.OS === "web" && typeof globalThis.EventSource !== "undefined";
+  // Web EventSource cannot set Authorization; token in query is required there only.
+  const url = useWebEventSource
+    ? `${base}?token=${encodeURIComponent(token)}`
+    : base;
+
+  if (useWebEventSource) {
     const es = new globalThis.EventSource(url);
+    let authStopped = false;
     const bind = (type: string) => (ev: MessageEvent) => onEvent(type, String(ev.data ?? ""));
     es.addEventListener("message", bind("message") as EventListener);
     es.addEventListener("typing", bind("typing") as EventListener);
     es.addEventListener("call", bind("call") as EventListener);
     es.addEventListener("read", bind("read") as EventListener);
     es.addEventListener("group_deleted", bind("group_deleted") as EventListener);
+    es.onerror = () => {
+      if (authStopped) return;
+      if (es.readyState === globalThis.EventSource.CLOSED) {
+        authStopped = true;
+        es.close();
+      }
+    };
     return () => es.close();
   }
 
@@ -73,26 +88,25 @@ export function connectChatEventStream(
   };
 
   const scheduleReconnect = (delayMs = NORMAL_RETRY_MS) => {
-    if (cancelled) return;
+    if (cancelled || authFailed) return;
     if (retryTimer) clearTimeout(retryTimer);
     retryTimer = setTimeout(connect, delayMs);
   };
 
   const connect = () => {
-    if (cancelled) return;
+    if (cancelled || authFailed) return;
     xhr?.abort();
     xhr = new XMLHttpRequest();
     lastLen = 0;
     buf = "";
     xhr.open("GET", url);
     xhr.setRequestHeader("Accept", "text/event-stream");
-    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     xhr.onreadystatechange = () => {
       if (!xhr || xhr.readyState !== XMLHttpRequest.HEADERS_RECEIVED) return;
       if (xhr.status === 401 || xhr.status === 403) {
         authFailed = true;
         xhr.abort();
-        scheduleReconnect(AUTH_FAIL_RETRY_MS);
       }
     };
     xhr.onprogress = () => {
@@ -119,7 +133,7 @@ export function connectChatEventStream(
   connect();
 
   staleTimer = setInterval(() => {
-    if (cancelled) return;
+    if (cancelled || authFailed) return;
     if (Date.now() - lastEventAt < STALE_SSE_MS) return;
     lastEventAt = Date.now();
     xhr?.abort();

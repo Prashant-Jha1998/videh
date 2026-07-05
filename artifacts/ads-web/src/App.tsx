@@ -827,7 +827,7 @@ export default function App() {
                         <td className="ads-td">
                           <StatusBadge status={cr.moderation_status} reason={cr.moderation_reason} />
                         </td>
-                        <td className="ads-td">{cr.impressions}</td>
+                        <td className="ads-td">{fmtStatNumber(cr.impressions)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1249,11 +1249,21 @@ function fmtDate(iso?: string | null): string {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
+function fmtStatNumber(value: string | number | null | undefined): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString("en-IN");
+}
+
 function Stat({ label, value }: { label: string; value: string }) {
+  const trimmed = value.trim();
+  const display = /^\d+$/.test(trimmed) ? fmtStatNumber(trimmed) : value;
   return (
     <div className="ads-stat">
       <div className="ads-stat-label">{label}</div>
-      <div className="ads-stat-value">{value}</div>
+      <div className="ads-stat-value">{display}</div>
     </div>
   );
 }

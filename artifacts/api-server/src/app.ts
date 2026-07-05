@@ -42,7 +42,26 @@ app.use(
     },
   }),
 );
-app.use(cors());
+app.use(
+  cors({
+    origin(origin, callback) {
+      const allowed = (process.env["VIDEH_CORS_ORIGINS"] ?? process.env["CDN_BASE_URL"] ?? process.env["EXPO_PUBLIC_DOMAIN"] ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .flatMap((entry) => {
+          if (entry.startsWith("http")) return [entry];
+          return [`https://${entry}`, `http://${entry}`];
+        });
+      if (!origin || allowed.length === 0 || allowed.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error("CORS blocked"));
+    },
+    credentials: true,
+  }),
+);
 app.use(cookieParser());
 app.use(express.json({ limit: "80mb" }));
 app.use(express.urlencoded({ extended: true, limit: "80mb" }));

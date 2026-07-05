@@ -1,5 +1,5 @@
 import { useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { useResolvedColorScheme } from "@/hooks/useResolvedColorScheme";
 import { getPerChatTheme, type PerChatThemeOverride } from "@/lib/perChatTheme";
@@ -44,16 +44,32 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
   } = useUiPreferences();
 
   const [perChat, setPerChat] = useState<PerChatThemeOverride | null>(null);
+  const loadSeqRef = useRef(0);
 
   const reloadPerChat = useCallback(() => {
     if (!chatId) {
       setPerChat(null);
       return;
     }
+    const seq = ++loadSeqRef.current;
     void getPerChatTheme(chatId).then((v) => {
+      if (seq !== loadSeqRef.current) return;
       setPerChat(v);
     });
   }, [chatId]);
+
+  useEffect(() => {
+    loadSeqRef.current += 1;
+    if (!chatId) {
+      setPerChat(null);
+      return;
+    }
+    const seq = loadSeqRef.current;
+    void getPerChatTheme(chatId).then((v) => {
+      if (seq !== loadSeqRef.current) return;
+      setPerChat(v);
+    });
+  }, [chatId, perChatRevision]);
 
   useFocusEffect(
     useCallback(() => {

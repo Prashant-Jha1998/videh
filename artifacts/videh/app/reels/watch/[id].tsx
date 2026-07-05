@@ -349,7 +349,29 @@ export default function ReelsWatchScreen() {
     }
     setVideo({ ...video, myReaction: nextReaction, likeCount, dislikeCount });
     try {
-      await reactReelsVideo(video.id, user.dbId, reaction, user.sessionToken);
+      const res = await reactReelsVideo(video.id, user.dbId, reaction, user.sessionToken);
+      const serverReaction = res.reaction === "like" || res.reaction === "dislike" ? res.reaction : null;
+      let syncedLike = prevLike;
+      let syncedDislike = prevDislike;
+      if (serverReaction === reaction) {
+        syncedLike = likeCount;
+        syncedDislike = dislikeCount;
+      } else if (serverReaction === null && prevReaction === reaction) {
+        syncedLike = Math.max(0, prevLike - (reaction === "like" ? 1 : 0));
+        syncedDislike = Math.max(0, prevDislike - (reaction === "dislike" ? 1 : 0));
+      } else if (serverReaction === "like") {
+        syncedLike = prevLike + (prevReaction === "like" ? 0 : 1);
+        syncedDislike = Math.max(0, prevDislike - (prevReaction === "dislike" ? 1 : 0));
+      } else if (serverReaction === "dislike") {
+        syncedDislike = prevDislike + (prevReaction === "dislike" ? 0 : 1);
+        syncedLike = Math.max(0, prevLike - (prevReaction === "like" ? 1 : 0));
+      }
+      setVideo({
+        ...video,
+        myReaction: serverReaction,
+        likeCount: syncedLike,
+        dislikeCount: syncedDislike,
+      });
     } catch {
       setVideo({ ...video, myReaction: prevReaction, likeCount: prevLike, dislikeCount: prevDislike });
     }

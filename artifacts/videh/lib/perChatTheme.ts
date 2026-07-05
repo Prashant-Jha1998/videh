@@ -44,3 +44,7 @@ export async function setPerChatTheme(chatId: string, override: PerChatThemeOver
   }
   await saveAllPerChatThemes(all);
 }
+
+export async function clearAllPerChatThemes(): Promise<void> {
+  await AsyncStorage.removeItem(PER_CHAT_THEMES_KEY);
+}
