@@ -2296,7 +2296,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           );
           const uid = userRef.current?.dbId;
           if (uid && activeChatIdRef.current === cid) {
-            void loadMessages(cid);
+            void loadMessages(cid, { incremental: true });
           }
           return;
         }

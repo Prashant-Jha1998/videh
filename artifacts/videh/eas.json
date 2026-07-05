@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v162-scroll-momentum"
+        "key": "apk-release-v163-following-tail"
       }
     },
     "production": {
