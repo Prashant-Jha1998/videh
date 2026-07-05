@@ -3495,6 +3495,7 @@ export default function ChatScreen() {
                 payload={item.templatePayload}
                 isDark={colors.isDark}
                 sessionToken={user?.sessionToken}
+                timestampLabel={formatChatBubbleTime(item.timestamp)}
                 onOpenImage={(uri) => {
                   setMediaPreview({
                     uri,
@@ -3509,11 +3510,6 @@ export default function ChatScreen() {
                   if (chatId) void sendMessage(chatId, text);
                 }}
               />
-              <View style={styles.templateMetaRow}>
-                <Text style={[styles.msgTime, { color: colors.mutedForeground }]}>
-                  {formatChatBubbleTime(item.timestamp)}
-                </Text>
-              </View>
             </View>
           ) : isAlbum && albumUrls ? (
             <>
@@ -5740,12 +5736,6 @@ const styles = StyleSheet.create({
   templateBubbleWrap: {
     padding: 2,
     maxWidth: 300,
-  },
-  templateMetaRow: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    paddingTop: 2,
-    paddingRight: 4,
   },
   replyStrip: {
     borderLeftWidth: 4,

@@ -24,6 +24,7 @@ type Props = {
   isDark?: boolean;
   sessionToken?: string;
   maxWidth?: number;
+  timestampLabel?: string;
   onOpenImage?: (uri: string) => void;
   onOpenVideo?: (uri: string) => void;
   onOpenDocument?: (uri: string, name?: string) => void;
@@ -139,6 +140,7 @@ export function TemplateMessageCard({
   isDark,
   sessionToken,
   maxWidth = 300,
+  timestampLabel,
   onOpenImage,
   onOpenVideo,
   onOpenDocument,
@@ -199,6 +201,12 @@ export function TemplateMessageCard({
 
       {payload.footer ? (
         <Text style={[styles.footer, { color: mutedColor }]}>{payload.footer}</Text>
+      ) : null}
+
+      {timestampLabel ? (
+        <View style={styles.timeRow}>
+          <Text style={[styles.timeText, { color: mutedColor }]}>{timestampLabel}</Text>
+        </View>
       ) : null}
 
       {hasButtons ? (
@@ -334,8 +342,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Inter_400Regular",
     paddingHorizontal: 10,
-    paddingBottom: 8,
+    paddingBottom: 4,
     lineHeight: 16,
+  },
+  timeRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingHorizontal: 10,
+    paddingBottom: 6,
+    marginTop: -2,
+  },
+  timeText: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
   },
   buttonsWrap: {
     borderTopWidth: StyleSheet.hairlineWidth,
