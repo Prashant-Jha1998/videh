@@ -23,6 +23,9 @@ export const CHAT_BACK_TO_BOTTOM_PX = 48;
 /** Coalesce duplicate pin requests within the same frame / burst. */
 export const SCROLL_PIN_DEBOUNCE_MS = 48;
 
+/** After finger lift, block auto-pin until momentum scroll events settle (poll race fix). */
+export const CHAT_SCROLL_MOMENTUM_MS = 400;
+
 /** MVCP: block tail autoscroll while user reads history (inverted list). */
 export const CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD = 10;
 export const CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD = 1_000_000;

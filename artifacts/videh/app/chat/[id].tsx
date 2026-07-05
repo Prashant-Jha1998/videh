@@ -118,6 +118,7 @@ import {
   CHAT_COMPOSER_CLEARANCE_PX,
   CHAT_TYPING_FOOTER_PX,
   CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
+  CHAT_SCROLL_MOMENTUM_MS,
 } from "@/lib/chatScrollBehavior";
 import {
   linkColorForBubbleBackground,
@@ -1882,6 +1883,23 @@ export default function ChatScreen() {
   const composerPinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Block auto pin-to-bottom while older pages load (prevents jump to latest). */
   const suppressAutoPinUntilRef = useRef(0);
+  const dragSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearDragSettleTimer = useCallback(() => {
+    if (dragSettleTimerRef.current) {
+      clearTimeout(dragSettleTimerRef.current);
+      dragSettleTimerRef.current = null;
+    }
+  }, []);
+
+  const armScrollMomentumGuard = useCallback(() => {
+    suppressAutoPinUntilRef.current = Date.now() + CHAT_SCROLL_MOMENTUM_MS;
+    clearDragSettleTimer();
+    dragSettleTimerRef.current = setTimeout(() => {
+      dragSettleTimerRef.current = null;
+      userDraggingRef.current = false;
+    }, CHAT_SCROLL_MOMENTUM_MS);
+  }, [clearDragSettleTimer]);
 
   type ChatScrollIntent = "auto" | "fab" | "open" | "quote";
 
@@ -1895,6 +1913,7 @@ export default function ChatScreen() {
       userScrolledUpRef.current
       || readingHistoryRef.current
       || loadingOlderRef.current
+      || userDraggingRef.current
       || Date.now() < suppressAutoPinUntilRef.current
       || !lastNearBottomRef.current
     );
@@ -1912,6 +1931,7 @@ export default function ChatScreen() {
   );
 
   const cancelAllScrollPins = useCallback(() => {
+    clearDragSettleTimer();
     if (composerPinTimerRef.current) {
       clearTimeout(composerPinTimerRef.current);
       composerPinTimerRef.current = null;
@@ -1921,7 +1941,7 @@ export default function ChatScreen() {
       scrollCoalesceRef.current = null;
     }
     pendingPinAnimatedRef.current = false;
-  }, []);
+  }, [clearDragSettleTimer]);
   const forceScrollToLatest = useCallback((
     animated = false,
     opts?: { bypassDrag?: boolean; intent?: ChatScrollIntent; source?: string },
@@ -5048,6 +5068,7 @@ export default function ChatScreen() {
           windowSize={7}
           updateCellsBatchingPeriod={100}
           onScrollBeginDrag={(e) => {
+            clearDragSettleTimer();
             scrollLockRef.current = true;
             userDraggingRef.current = true;
             cancelAllScrollPins();
@@ -5069,7 +5090,7 @@ export default function ChatScreen() {
           }}
           onScrollEndDrag={(e) => {
             scrollLockRef.current = false;
-            userDraggingRef.current = false;
+            armScrollMomentumGuard();
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
             finishScrollInteraction(
               contentOffset.y,
@@ -5078,6 +5099,7 @@ export default function ChatScreen() {
             );
           }}
           onMomentumScrollEnd={(e) => {
+            clearDragSettleTimer();
             userDraggingRef.current = false;
             scrollLockRef.current = false;
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;

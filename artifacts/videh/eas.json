@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v161-groups-theme-scroll"
+        "key": "apk-release-v162-scroll-momentum"
       }
     },
     "production": {
