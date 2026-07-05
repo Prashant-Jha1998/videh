@@ -250,7 +250,9 @@ export default function ChatInfoScreen() {
   const fetchContactInfo = useCallback(async () => {
     if (!id || isGroup) return;
     try {
-      const res = await fetch(`${BASE_URL}/api/chats/${id}/members`);
+      const headers: Record<string, string> = {};
+      if (user?.sessionToken) headers.Authorization = `Bearer ${user.sessionToken}`;
+      const res = await fetch(`${BASE_URL}/api/chats/${id}/members`, { headers });
       const data = await res.json();
       if (data.success && data.members) {
         const other = data.members.find((m: GroupMember) => m.id !== user?.dbId);
@@ -267,7 +269,7 @@ export default function ChatInfoScreen() {
         }
       }
     } catch { }
-  }, [id, isGroup, user?.dbId]);
+  }, [id, isGroup, user?.dbId, user?.sessionToken]);
 
   const fetchMembers = useCallback(async () => {
     if (!id) return;

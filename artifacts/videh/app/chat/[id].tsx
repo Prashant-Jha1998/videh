@@ -72,6 +72,7 @@ import { ChatMessageText, renderChatMentionParts } from "@/components/ChatMessag
 import { ChatComposerField } from "@/components/ChatComposerField";
 import { DocumentMessageBubble } from "@/components/DocumentMessageBubble";
 import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/chatMessageText";
+import { translateMessageText } from "@/lib/translateClient";
 import { ContactMessageBubble } from "@/components/ContactMessageBubble";
 import { openChatDocument } from "@/lib/openChatDocument";
 import { launchChatPhotoCamera, launchChatVideoCamera } from "@/lib/openChatCamera";
@@ -1395,9 +1396,13 @@ export default function ChatScreen() {
       });
       setActiveChatId(chatId);
       void loadMessages(chatId, { incremental: wasReadingHistory });
+      const chatAuthHeaders: Record<string, string> = {};
+      if (user?.sessionToken) chatAuthHeaders.Authorization = `Bearer ${user.sessionToken}`;
       const syncDisappearTimer = async () => {
         try {
-          const res = await fetch(`${BASE_URL}/api/chats/${chatId}/details`);
+          const res = await fetch(`${BASE_URL}/api/chats/${chatId}/details`, {
+            headers: chatAuthHeaders,
+          });
           const data = await res.json() as {
             success?: boolean;
             chat?: { disappear_after_seconds?: number | null };
@@ -2997,21 +3002,16 @@ export default function ChatScreen() {
   const translateMsg = useCallback(async (msg: Message, toLang: string) => {
     if (!msg.text?.trim()) return;
     try {
-      const r = await fetch(`${BASE_URL}/api/translate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: msg.text, to: toLang }),
-      });
-      const d = await r.json();
-      if (d.success) {
-        setTranslatedMsgs(prev => ({ ...prev, [msg.id]: d.translated }));
+      const d = await translateMessageText(msg.text, toLang, user?.sessionToken);
+      if (d.success && d.translated) {
+        setTranslatedMsgs(prev => ({ ...prev, [msg.id]: d.translated! }));
       } else {
         Alert.alert("Translation failed", "Could not translate this message. Please try again.");
       }
     } catch {
       Alert.alert("Error", "Network error");
     }
-  }, []);
+  }, [user?.sessionToken]);
 
   const openTranslatePicker = useCallback((msg: Message) => {
     if (!msg.text?.trim()) return;
@@ -4042,9 +4042,11 @@ export default function ChatScreen() {
             return;
           }
 
+          const authHeaders: Record<string, string> = {};
+          if (user.sessionToken) authHeaders.Authorization = `Bearer ${user.sessionToken}`;
           const [detailsRes, membersRes] = await Promise.all([
-            fetch(`${BASE_URL}/api/chats/${chatId}/details`),
-            fetch(`${BASE_URL}/api/chats/${chatId}/members`),
+            fetch(`${BASE_URL}/api/chats/${chatId}/details`, { headers: authHeaders }),
+            fetch(`${BASE_URL}/api/chats/${chatId}/members`, { headers: authHeaders }),
           ]);
           const detailsData = await detailsRes.json();
           const membersData = await membersRes.json();
@@ -4189,8 +4191,10 @@ export default function ChatScreen() {
       let cancelled = false;
       (async () => {
         try {
+          const authHeaders: Record<string, string> = {};
+          if (user.sessionToken) authHeaders.Authorization = `Bearer ${user.sessionToken}`;
           const [membersRes, statusRes] = await Promise.all([
-            fetch(`${BASE_URL}/api/chats/${chatId}/members`),
+            fetch(`${BASE_URL}/api/chats/${chatId}/members`, { headers: authHeaders }),
             fetch(`${BASE_URL}/api/users/${user.dbId}/block-status?otherUserId=${directContactId}`),
           ]);
           const membersData = await membersRes.json();

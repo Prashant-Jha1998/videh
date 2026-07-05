@@ -1,4 +1,6 @@
 import { Router, type Request, type Response } from "express";
+import { getAuthUserId } from "../lib/auth";
+import { assertSafePublicHttpUrl } from "../lib/safeFetchUrl";
 
 const router = Router();
 
@@ -22,15 +24,20 @@ function titleFromHtml(html: string): string | undefined {
 }
 
 router.get("/link-preview", async (req: Request, res: Response) => {
+  if (!getAuthUserId(req)) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return;
+  }
   const raw = String(req.query.url ?? "").trim();
-  if (!raw.startsWith("http://") && !raw.startsWith("https://")) {
-    res.status(400).json({ success: false, message: "Invalid URL" });
+  const safe = await assertSafePublicHttpUrl(raw);
+  if (!safe.ok) {
+    res.status(400).json({ success: false, message: "URL not allowed" });
     return;
   }
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 4500);
-    const response = await fetch(raw, {
+    const response = await fetch(safe.url.href, {
       signal: controller.signal,
       headers: { "User-Agent": "VidehLinkPreview/1.0", Accept: "text/html" },
       redirect: "follow",

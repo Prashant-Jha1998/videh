@@ -206,6 +206,20 @@ async function directChatBlocked(chatId: string | string[], senderId: number): P
   return Boolean(r.rows[0]?.blocked);
 }
 
+async function assertChatMember(
+  res: Response,
+  chatId: string | string[],
+  userId: number,
+): Promise<boolean> {
+  const id = Array.isArray(chatId) ? chatId[0] : chatId;
+  const r = await query("SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2", [id, userId]);
+  if (!r.rows[0]) {
+    res.status(403).json({ success: false, message: "Not a member of this chat" });
+    return false;
+  }
+  return true;
+}
+
 /** Resolves whether a user may post in this chat (direct chats always allowed). */
 async function evaluateGroupSendPermission(chatId: string | string[], userId: number): Promise<GroupSendEval | null> {
   const id = Array.isArray(chatId) ? chatId[0] : chatId;
@@ -834,6 +848,7 @@ router.post("/:chatId/typing", async (req: Request, res: Response) => {
   if (!userId) { res.status(400).json({ success: false }); return; }
   if (!assertSameUser(req, res, userId)) return;
   try {
+    if (!(await assertChatMember(res, chatId, userId))) return;
     await query(
       `INSERT INTO typing_sessions (chat_id, user_id, updated_at) VALUES ($1, $2, NOW())
        ON CONFLICT (chat_id, user_id) DO UPDATE SET updated_at = NOW()`,
@@ -858,6 +873,7 @@ router.delete("/:chatId/typing", async (req: Request, res: Response) => {
   if (!userId) { res.json({ success: false }); return; }
   if (!assertSameUser(req, res, userId)) return;
   try {
+    if (!(await assertChatMember(res, chatId, userId))) return;
     await query("DELETE FROM typing_sessions WHERE chat_id = $1 AND user_id = $2", [chatId, userId]);
     const memberRes = await query("SELECT user_id FROM chat_members WHERE chat_id = $1", [chatId]);
     const nameRes = await query("SELECT name FROM users WHERE id = $1", [userId]);
@@ -876,7 +892,9 @@ router.get("/:chatId/typing", async (req: Request, res: Response) => {
   const { chatId } = req.params;
   const { userId } = req.query as { userId?: string };
   if (!assertSameUser(req, res, userId)) return;
+  const viewerNum = Number(userId);
   try {
+    if (!(await assertChatMember(res, chatId, viewerNum))) return;
     const result = await query(
       `SELECT u.name FROM typing_sessions ts JOIN users u ON u.id = ts.user_id
        WHERE ts.chat_id = $1 AND ts.user_id != $2 AND ts.updated_at > NOW() - INTERVAL '4 seconds'`,
@@ -1621,7 +1639,12 @@ router.put("/:chatId/wallpaper", async (req: Request, res: Response) => {
 router.get("/:chatId/details", async (req: Request, res: Response) => {
   const { chatId } = req.params;
   const viewerId = getAuthUserId(req);
+  if (!viewerId) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return;
+  }
   try {
+    if (!(await assertChatMember(res, chatId, viewerId))) return;
     await ensureGroupMetadataColumns();
     const result = await query(`
       SELECT id, is_group, group_name, group_avatar_url, group_description, disappear_after_seconds,
@@ -1632,14 +1655,11 @@ router.get("/:chatId/details", async (req: Request, res: Response) => {
     `, [chatId]);
     if (result.rows.length === 0) { res.status(404).json({ success: false }); return; }
     const chat = result.rows[0] as Record<string, unknown>;
-    let viewerIsAdmin = false;
-    if (viewerId) {
-      const adminRes = await query(
-        "SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2",
-        [chatId, viewerId],
-      );
-      viewerIsAdmin = Boolean(adminRes.rows[0]?.is_admin);
-    }
+    const adminRes = await query(
+      "SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, viewerId],
+    );
+    const viewerIsAdmin = Boolean(adminRes.rows[0]?.is_admin);
     res.json({ success: true, chat: { ...chat, viewer_is_admin: viewerIsAdmin } });
   } catch { res.status(500).json({ success: false }); }
 });
@@ -1647,8 +1667,13 @@ router.get("/:chatId/details", async (req: Request, res: Response) => {
 // Get group members (with real data)
 router.get("/:chatId/members", async (req: Request, res: Response) => {
   const { chatId } = req.params;
-  const viewerId = getAuthUserId(req) ?? Number((req.query as { userId?: string }).userId);
+  const viewerId = getAuthUserId(req);
+  if (!viewerId) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return;
+  }
   try {
+    if (!(await assertChatMember(res, chatId, viewerId))) return;
     const result = await query(`
       SELECT u.id, u.name, u.phone, u.avatar_url, u.about, u.is_online, u.last_seen,
              cm.is_admin, cm.joined_at, COALESCE(cm.can_send_messages, TRUE) AS can_send_messages,
@@ -1658,13 +1683,11 @@ router.get("/:chatId/members", async (req: Request, res: Response) => {
       ORDER BY cm.is_admin DESC, u.name ASC
     `, [chatId]);
     const members = result.rows;
-    if (viewerId) {
-      for (const m of members) {
-        if (Number(m.id) === viewerId) continue;
-        const presence = await getPresenceForViewer(viewerId, Number(m.id));
-        m.is_online = presence.canSee && presence.isOnline;
-        m.last_seen = presence.canSee ? presence.lastSeen : null;
-      }
+    for (const m of members) {
+      if (Number(m.id) === viewerId) continue;
+      const presence = await getPresenceForViewer(viewerId, Number(m.id));
+      m.is_online = presence.canSee && presence.isOnline;
+      m.last_seen = presence.canSee ? presence.lastSeen : null;
     }
     res.json({ success: true, members });
   } catch { res.status(500).json({ success: false }); }

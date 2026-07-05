@@ -238,12 +238,16 @@ router.get("/:id/presence", async (req: Request, res: Response) => {
 // Get user profile
 router.get("/:id", async (req: Request, res: Response) => {
   try {
+    const viewerId = getAuthUserId(req);
+    if (!viewerId) {
+      res.status(401).json({ success: false, message: "Authentication required" });
+      return;
+    }
     const result = await query("SELECT id, phone, name, about, avatar_url, is_online, last_seen FROM users WHERE id = $1", [req.params.id]);
     if (result.rows.length === 0) { res.status(404).json({ success: false, message: "User not found" }); return; }
-    const viewerId = getAuthUserId(req);
     let user = result.rows[0];
-    if (viewerId && viewerId !== Number(req.params.id)) {
-      const targetId = Number(req.params.id);
+    const targetId = Number(req.params.id);
+    if (viewerId !== targetId) {
       const [presence, seePhoto, seeAbout] = await Promise.all([
         getPresenceForViewer(viewerId, targetId),
         canSeeUserField(viewerId, targetId, "profile_photo_privacy"),
@@ -251,6 +255,7 @@ router.get("/:id", async (req: Request, res: Response) => {
       ]);
       user = {
         ...user,
+        phone: undefined,
         is_online: presence.canSee ? presence.isOnline : false,
         last_seen: presence.canSee ? presence.lastSeen : null,
         avatar_url: seePhoto ? user.avatar_url : null,

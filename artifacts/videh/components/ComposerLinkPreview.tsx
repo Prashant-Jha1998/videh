@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { getApiUrl } from "@/lib/api";
 import { linkPreviewHostname } from "@/lib/chatUrls";
+import { useApp } from "@/context/AppContext";
 
 export type LinkPreviewData = {
   url: string;
@@ -25,6 +26,8 @@ type Props = {
 };
 
 export function ComposerLinkPreview({ url, colors, onDismiss }: Props) {
+  const { user } = useApp();
+  const sessionToken = user?.sessionToken;
   const [data, setData] = useState<LinkPreviewData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -36,6 +39,9 @@ export function ComposerLinkPreview({ url, colors, onDismiss }: Props) {
       try {
         const res = await fetch(
           `${getApiUrl()}/api/link-preview?url=${encodeURIComponent(url)}`,
+          {
+            headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {},
+          },
         );
         const json = (await res.json()) as {
           success?: boolean;
@@ -56,7 +62,7 @@ export function ComposerLinkPreview({ url, colors, onDismiss }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [url, sessionToken]);
 
   const host = linkPreviewHostname(url);
   const title = data?.title?.trim() || host;

@@ -90,23 +90,30 @@ router.post("/send", async (req: Request, res: Response) => {
       res.json({ success: true, message: "OTP sent successfully", demo: true });
       return;
     }
-    if (apiKey) {
-      const url = `https://www.fast2sms.com/dev/bulkV2?authorization=${apiKey}&sender_id=${senderId}&message=${messageId}&variables_values=${otp}&route=dlt&numbers=${phone}`;
-      const response = await fetch(url);
-      const data = (await response.json()) as { return?: boolean; message?: string[] };
-
-      req.log.info({ phone: `***${phone.slice(-3)}`, success: data.return }, "OTP send result");
-
-      if (!data.return) {
-        req.log.warn({ data }, "Fast2SMS returned failure");
+    if (!apiKey) {
+      if (process.env.NODE_ENV === "production") {
+        res.status(503).json({ success: false, message: "SMS service not configured. Please try again later." });
+        return;
       }
-    } else {
       req.log.warn({ phone: `***${phone.slice(-3)}` }, "FAST2SMS_API_KEY not set — OTP stored server-side only");
+      res.json({ success: true, message: "OTP sent successfully" });
+      return;
+    }
+    const url = `https://www.fast2sms.com/dev/bulkV2?authorization=${apiKey}&sender_id=${senderId}&message=${messageId}&variables_values=${otp}&route=dlt&numbers=${phone}`;
+    const response = await fetch(url);
+    const data = (await response.json()) as { return?: boolean; message?: string[] };
+
+    req.log.info({ phone: `***${phone.slice(-3)}`, success: data.return }, "OTP send result");
+
+    if (!response.ok || !data.return) {
+      req.log.warn({ data, status: response.status }, "Fast2SMS returned failure");
+      res.status(502).json({ success: false, message: "Could not send OTP SMS. Please try again." });
+      return;
     }
     res.json({ success: true, message: "OTP sent successfully" });
   } catch (err) {
     req.log.error({ err }, "OTP send error");
-    res.json({ success: true, message: "OTP sent" });
+    res.status(502).json({ success: false, message: "Could not send OTP. Please try again." });
   }
 });
 

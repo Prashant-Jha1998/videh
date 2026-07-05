@@ -336,13 +336,18 @@ export default function ReelsWatchScreen() {
     const prevDislike = video.dislikeCount ?? 0;
     let likeCount = prevLike;
     let dislikeCount = prevDislike;
-    if (prevReaction !== reaction) {
+    let nextReaction: "like" | "dislike" | null = reaction;
+    if (prevReaction === reaction) {
+      nextReaction = null;
+      if (reaction === "like") likeCount = Math.max(0, likeCount - 1);
+      else dislikeCount = Math.max(0, dislikeCount - 1);
+    } else {
       if (prevReaction === "like") likeCount = Math.max(0, likeCount - 1);
       if (prevReaction === "dislike") dislikeCount = Math.max(0, dislikeCount - 1);
       if (reaction === "like") likeCount += 1;
       else dislikeCount += 1;
     }
-    setVideo({ ...video, myReaction: reaction, likeCount, dislikeCount });
+    setVideo({ ...video, myReaction: nextReaction, likeCount, dislikeCount });
     try {
       await reactReelsVideo(video.id, user.dbId, reaction, user.sessionToken);
     } catch {

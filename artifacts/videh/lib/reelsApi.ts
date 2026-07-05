@@ -738,7 +738,7 @@ export async function reactReelsVideo(
   reaction: "like" | "dislike",
   sessionToken?: string | null,
 ) {
-  return reelsJson<{ success: boolean; reaction: string }>(`/videos/${videoId}/react`, {
+  return reelsJson<{ success: boolean; reaction: string | null }>(`/videos/${videoId}/react`, {
     method: "POST",
     body: { userId, reaction },
     sessionToken,

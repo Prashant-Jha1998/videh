@@ -2092,6 +2092,24 @@ router.post("/videos/:videoId/react", async (req: Request, res: Response) => {
       [userId, videoId],
     );
     const prevReaction = prev.rows[0]?.reaction as string | undefined;
+    if (prevReaction === reaction) {
+      await query(
+        "DELETE FROM reels_video_reactions WHERE user_id = $1 AND video_id = $2",
+        [userId, videoId],
+      );
+      if (reaction === "like") {
+        await query("UPDATE reels_videos SET like_count = GREATEST(0, like_count - 1) WHERE id = $1", [videoId]);
+        await query(
+          `UPDATE reels_channels c SET total_likes = GREATEST(0, total_likes - 1)
+           FROM reels_videos v WHERE v.id = $1 AND c.id = v.channel_id`,
+          [videoId],
+        );
+      } else {
+        await query("UPDATE reels_videos SET dislike_count = GREATEST(0, dislike_count - 1) WHERE id = $1", [videoId]);
+      }
+      res.json({ success: true, reaction: null });
+      return;
+    }
     await query(
       `INSERT INTO reels_video_reactions (user_id, video_id, reaction)
        VALUES ($1, $2, $3)

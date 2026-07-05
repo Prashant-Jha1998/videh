@@ -140,7 +140,12 @@ function VibeCard({
   const handle = item.channelHandle ? `@${item.channelHandle}` : channel;
   const editorMeta = parseEditorMeta(item.editorMetadata);
   const canPlay = Boolean(item.videoUrl && item.videoUrl.trim().length > 0);
-  const likeCount = item.likeCount + (liked && item.myReaction !== "like" ? 1 : 0);
+  const likeCount = Math.max(
+    0,
+    item.likeCount
+      + (liked && item.myReaction !== "like" ? 1 : 0)
+      - (!liked && item.myReaction === "like" ? 1 : 0),
+  );
   const caption = editorMeta?.caption?.trim() || item.title;
 
   return (
@@ -297,6 +302,11 @@ export function VibeSwipeFeed({
     const wasLiked = likedMap[video.id] ?? video.myReaction === "like";
     if (wasLiked) {
       setLikedMap((m) => ({ ...m, [video.id]: false }));
+      try {
+        await reactReelsVideo(video.id, user.dbId, "like", user.sessionToken);
+      } catch {
+        setLikedMap((m) => ({ ...m, [video.id]: true }));
+      }
       return;
     }
     setLikedMap((m) => ({ ...m, [video.id]: true }));

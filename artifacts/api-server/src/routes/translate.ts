@@ -22,6 +22,10 @@ router.get("/languages", (_req: Request, res: Response) => {
 
 router.post("/", async (req: Request, res: Response) => {
   const authUserId = getAuthUserId(req);
+  if (!authUserId) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return;
+  }
   const { text, to, from = "auto", messageId } = req.body as {
     text?: string;
     to?: string;
