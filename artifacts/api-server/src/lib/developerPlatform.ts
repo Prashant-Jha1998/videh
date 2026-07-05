@@ -171,6 +171,7 @@ export async function ensureDeveloperPlatformTables(): Promise<void> {
     `ALTER TABLE developer_api_accounts ADD COLUMN IF NOT EXISTS conv_free_user_used_month INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE developer_api_accounts ADD COLUMN IF NOT EXISTS usage_billing_month_inr INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE developer_api_accounts ADD COLUMN IF NOT EXISTS billing_month_key TEXT`,
+    `ALTER TABLE developer_api_accounts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
   ];
   for (const sql of accountAlters) await query(sql);
 
