@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
+import { ThemedHeader } from "@/components/ThemedHeader";
 import { useApp } from "@/context/AppContext";
 import { backupChatsToFile, exportChatsToFile } from "@/lib/chatExport";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
@@ -166,13 +167,13 @@ export default function ChatsSettingsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { backgroundColor: colors.headerBg, paddingTop: topPad }]}>
+      <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>{t("chats.title")}</Text>
+        <Text style={[styles.headerTitle, { color: colors.headerTitleColor }]}>{t("chats.title")}</Text>
         <View style={{ width: 40 }} />
-      </View>
+      </ThemedHeader>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 60 }}>
         {/* Display */}

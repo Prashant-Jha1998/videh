@@ -18,7 +18,8 @@ export function ThemedHeader({ children, style, accentColors }: ThemedHeaderProp
   const themeColors = accentColors ?? colors.appThemeColors;
   const [start, end] = themeColors;
   const isGradient = start.toLowerCase() !== end.toLowerCase();
-  const headerBg = accentColors ? start : colors.headerBg;
+  const useThemeHeader = accentColors != null || colors.shellThemed;
+  const headerBg = useThemeHeader ? start : colors.headerBg;
 
   const flat = StyleSheet.flatten(style) ?? {};
   const passedTop = typeof flat.paddingTop === "number" ? flat.paddingTop : 0;
@@ -28,6 +29,10 @@ export function ThemedHeader({ children, style, accentColors }: ThemedHeaderProp
 
   if (!isGradient) {
     return <View style={[{ backgroundColor: headerBg }, resolvedStyle]}>{children}</View>;
+  }
+
+  if (!useThemeHeader) {
+    return <View style={[{ backgroundColor: colors.headerBg }, resolvedStyle]}>{children}</View>;
   }
 
   return (

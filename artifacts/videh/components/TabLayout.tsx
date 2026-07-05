@@ -4,7 +4,7 @@ import { Tabs } from "expo-router";
 import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Platform, StyleSheet, View, useColorScheme, useWindowDimensions } from "react-native";
+import { Platform, StyleSheet, View, useWindowDimensions } from "react-native";
 import { WEB_DESKTOP_MIN_WIDTH } from "@/lib/web/webDesktop";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
@@ -38,8 +38,7 @@ function NativeTabLayout() {
 export function ClassicTabLayout() {
   const { t, locale } = useUiPreferences();
   const colors = useColors();
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
+  const isDark = colors.isDark;
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();

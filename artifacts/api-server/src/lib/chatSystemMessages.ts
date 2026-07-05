@@ -1,6 +1,12 @@
 import { query } from "./db";
 import { publishChatEvent } from "./realtime";
 
+export async function userDisplayName(userId: number): Promise<string> {
+  const r = await query("SELECT name FROM users WHERE id = $1", [userId]);
+  const name = String(r.rows[0]?.name ?? "").trim();
+  return name || "Someone";
+}
+
 export async function insertChatSystemMessage(
   chatId: string | number,
   senderId: number,

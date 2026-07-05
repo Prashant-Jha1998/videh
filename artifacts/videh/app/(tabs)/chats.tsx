@@ -438,14 +438,14 @@ export default function ChatsScreen() {
             <TouchableOpacity onPress={clearSelection} style={styles.archivedBackBtn}>
               <Ionicons name="arrow-back" size={23} color={colors.headerIconColor} />
             </TouchableOpacity>
-            <Text style={[styles.headerTitle, { color: colors.foreground }]}>{selectedIds.length}</Text>
+            <Text style={[styles.headerTitle, { color: colors.headerTitleColor }]}>{selectedIds.length}</Text>
           </View>
         ) : showArchived ? (
           <View style={styles.archivedHeaderTitleRow}>
             <TouchableOpacity onPress={() => setShowArchived(false)} style={styles.archivedBackBtn}>
               <Ionicons name="arrow-back" size={23} color={colors.headerIconColor} />
             </TouchableOpacity>
-            <Text style={[styles.headerTitle, { color: colors.foreground }]}>{t("chats.archived")}</Text>
+            <Text style={[styles.headerTitle, { color: colors.headerTitleColor }]}>{t("chats.archived")}</Text>
           </View>
         ) : (
           <Text style={[styles.headerTitle, { color: colors.headerTitleColor }]}>{t("settings.header")}</Text>

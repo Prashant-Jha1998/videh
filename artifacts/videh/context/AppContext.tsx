@@ -2203,6 +2203,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           } catch {
             /* ignore */
           }
+        } else if (eventType === "group_deleted") {
+          try {
+            const parsed = JSON.parse(raw ?? "") as { chatId?: string | number };
+            const cid = parsed.chatId != null ? String(parsed.chatId) : null;
+            if (!cid) return;
+            setChats((prev) => prev.filter((c) => String(c.id) !== cid));
+            if (activeChatIdRef.current === cid) {
+              activeChatIdRef.current = null;
+            }
+          } catch {
+            /* ignore */
+          }
         } else if (eventType === "call") {
           try {
             const parsed = JSON.parse(raw ?? "") as { payload?: unknown };
@@ -2319,6 +2331,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             if (isMediaMessageType(messageType)) {
               scheduleDebouncedLoadMessages(cid, { media: true });
             }
+          } else if (messageType === "system") {
+            scheduleDebouncedLoadMessages(cid);
           }
           emitChatMessageSignal(signal);
         }

@@ -68,7 +68,7 @@ import {
   fetchChatDisappearSeconds,
   messageDisappearVisibleSql,
 } from "../lib/disappearingMessages";
-import { insertChatSystemMessage } from "../lib/chatSystemMessages";
+import { insertChatSystemMessage, userDisplayName } from "../lib/chatSystemMessages";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -523,6 +523,24 @@ router.post("/group", async (req: Request, res: Response) => {
         "INSERT INTO chat_members (chat_id, user_id, is_admin, can_send_messages) VALUES ($1, $2, $3, TRUE)",
         [chatId, memberId, memberId === creatorId],
       );
+    }
+    const creatorName = await userDisplayName(creatorId);
+    await insertChatSystemMessage(chatId, creatorId, {
+      kind: "group_created",
+      actorUserId: creatorId,
+      actorUserName: creatorName,
+      groupName: trimmedName,
+    });
+    for (const memberId of allMembers) {
+      if (memberId === creatorId) continue;
+      const targetName = await userDisplayName(memberId);
+      await insertChatSystemMessage(chatId, creatorId, {
+        kind: "member_added",
+        actorUserId: creatorId,
+        actorUserName: creatorName,
+        targetUserId: memberId,
+        targetUserName: targetName,
+      });
     }
     res.json({ success: true, chatId });
   } catch (err) {
@@ -1689,6 +1707,15 @@ router.post("/:chatId/members", async (req: Request, res: Response) => {
          joined_at = NOW()`,
       [chatId, userId, canSendDefault],
     );
+    const actorName = await userDisplayName(Number(requesterId));
+    const targetName = await userDisplayName(userId);
+    await insertChatSystemMessage(chatId, Number(requesterId), {
+      kind: "member_added",
+      actorUserId: Number(requesterId),
+      actorUserName: actorName,
+      targetUserId: userId,
+      targetUserName: targetName,
+    });
     res.json({ success: true });
   } catch { res.status(500).json({ success: false }); }
 });
@@ -1784,6 +1811,15 @@ router.post("/:chatId/pending-joins/:memberId/approve", async (req: Request, res
       res.status(404).json({ success: false, message: "No pending request for this member." });
       return;
     }
+    const actorName = await userDisplayName(Number(requesterId));
+    const targetName = await userDisplayName(Number(memberId));
+    await insertChatSystemMessage(chatId, Number(requesterId), {
+      kind: "member_added",
+      actorUserId: Number(requesterId),
+      actorUserName: actorName,
+      targetUserId: Number(memberId),
+      targetUserName: targetName,
+    });
     res.json({ success: true, canSendMessages: canSend });
   } catch (err) {
     req.log.error({ err }, "approve pending join");
@@ -1821,16 +1857,79 @@ router.post("/:chatId/pending-joins/:memberId/reject", async (req: Request, res:
   }
 });
 
+// Delete group for all members (admin only)
+router.delete("/:chatId/group", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { requesterId } = req.body as { requesterId?: number };
+  if (!requesterId || !assertSameUser(req, res, requesterId)) return;
+  try {
+    const group = await query("SELECT is_group FROM chats WHERE id = $1", [chatId]);
+    if (!group.rows[0]?.is_group) {
+      res.status(400).json({ success: false, message: "Not a group chat." });
+      return;
+    }
+    const adminCheck = await query(
+      "SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, requesterId],
+    );
+    if (!adminCheck.rows[0]?.is_admin) {
+      res.status(403).json({ success: false, message: "Only admins can delete this group." });
+      return;
+    }
+    const members = await query("SELECT user_id FROM chat_members WHERE chat_id = $1", [chatId]);
+    const memberIds = members.rows.map((r: { user_id: number }) => Number(r.user_id)).filter(Boolean);
+    await query("DELETE FROM chat_members WHERE chat_id = $1", [chatId]);
+    publishChatEvent({
+      type: "group_deleted",
+      chatId: String(chatId),
+      userIds: memberIds,
+      payload: { chatId: Number(chatId) },
+    });
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "delete group");
+    res.status(500).json({ success: false });
+  }
+});
+
 // Remove member from group
 router.delete("/:chatId/members/:memberId", async (req: Request, res: Response) => {
   const { chatId, memberId } = req.params;
   const { requesterId } = req.body as { requesterId?: number };
   if (!assertSameUser(req, res, requesterId)) return;
   try {
+    const memberRow = await query(
+      "SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+      [chatId, memberId],
+    );
+    if (!memberRow.rows[0]) {
+      res.status(404).json({ success: false, message: "Member not in group." });
+      return;
+    }
     // Admin or self-leave
     const adminCheck = await query("SELECT is_admin FROM chat_members WHERE chat_id = $1 AND user_id = $2", [chatId, requesterId]);
     if (!adminCheck.rows[0]?.is_admin && String(requesterId) !== memberId) {
       res.status(403).json({ success: false, message: "Not admin" }); return;
+    }
+    const rid = Number(requesterId);
+    const mid = Number(memberId);
+    if (rid === mid) {
+      const userName = await userDisplayName(mid);
+      await insertChatSystemMessage(chatId, rid, {
+        kind: "member_left",
+        userId: mid,
+        userName,
+      });
+    } else {
+      const actorName = await userDisplayName(rid);
+      const targetName = await userDisplayName(mid);
+      await insertChatSystemMessage(chatId, rid, {
+        kind: "member_removed",
+        actorUserId: rid,
+        actorUserName: actorName,
+        targetUserId: mid,
+        targetUserName: targetName,
+      });
     }
     await query("DELETE FROM chat_members WHERE chat_id = $1 AND user_id = $2", [chatId, memberId]);
     res.json({ success: true });

@@ -6,6 +6,11 @@ import {
   parseChatSystemPayload,
   promotedAdminMessageCopy,
   businessMarketingStoppedCopy,
+  groupCreatedMessageCopy,
+  memberAddedMessageCopy,
+  memberJoinedMessageCopy,
+  memberLeftMessageCopy,
+  memberRemovedMessageCopy,
 } from "@/lib/chatSystemMessage";
 
 type Props = {
@@ -30,7 +35,62 @@ export function ChatSystemMessageBubble({ text, isDark, viewerUserId, onChangeTi
     return (
       <View style={styles.wrap}>
         <View style={[styles.card, { backgroundColor: bg }]}>
-          <Text style={[styles.body, { color: fg }]}>{copy}</Text>
+          <Text style={[styles.body, { color: fg, textAlign: "center" }]}>{copy}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (payload.kind === "group_created") {
+    const copy = groupCreatedMessageCopy(payload, viewerUserId);
+    return (
+      <View style={styles.wrap}>
+        <View style={[styles.card, { backgroundColor: bg }, !isDark && styles.cardLight]}>
+          <Text style={[styles.body, { color: fg, textAlign: "center" }]}>{copy}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (payload.kind === "member_added") {
+    const copy = memberAddedMessageCopy(payload, viewerUserId);
+    return (
+      <View style={styles.wrap}>
+        <View style={[styles.card, { backgroundColor: bg }, !isDark && styles.cardLight]}>
+          <Text style={[styles.body, { color: fg, textAlign: "center" }]}>{copy}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (payload.kind === "member_joined") {
+    const copy = memberJoinedMessageCopy(payload, viewerUserId);
+    return (
+      <View style={styles.wrap}>
+        <View style={[styles.card, { backgroundColor: bg }, !isDark && styles.cardLight]}>
+          <Text style={[styles.body, { color: fg, textAlign: "center" }]}>{copy}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (payload.kind === "member_left") {
+    const copy = memberLeftMessageCopy(payload, viewerUserId);
+    return (
+      <View style={styles.wrap}>
+        <View style={[styles.card, { backgroundColor: bg }, !isDark && styles.cardLight]}>
+          <Text style={[styles.body, { color: fg, textAlign: "center" }]}>{copy}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (payload.kind === "member_removed") {
+    const copy = memberRemovedMessageCopy(payload, viewerUserId);
+    return (
+      <View style={styles.wrap}>
+        <View style={[styles.card, { backgroundColor: bg }, !isDark && styles.cardLight]}>
+          <Text style={[styles.body, { color: fg, textAlign: "center" }]}>{copy}</Text>
         </View>
       </View>
     );

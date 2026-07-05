@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { assertSameUser, requireAuth } from "../lib/auth";
 import { query } from "../lib/db";
 import { publishChatEvent } from "../lib/realtime";
+import { insertChatSystemMessage } from "../lib/chatSystemMessages";
 import { canAddUserToGroup } from "../lib/userPrivacySettings";
 import {
   canSendAfterInviteApproval,
@@ -137,6 +138,13 @@ router.post("/:token/join", requireAuth, async (req: Request, res: Response) => 
       });
       return;
     }
+
+    await insertChatSystemMessage(info.chatId, joinerId, {
+      kind: "member_joined",
+      userId: joinerId,
+      userName: joinerName,
+      viaInvite: true,
+    });
 
     res.json({
       success: true,

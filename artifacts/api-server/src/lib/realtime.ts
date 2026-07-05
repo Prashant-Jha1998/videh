@@ -4,7 +4,7 @@ import { logger } from "./logger";
 import { initRedisBus, isRedisBusEnabled, publishRedisBus } from "./redisBus";
 
 export type ChatEvent = {
-  type: "message" | "read" | "archive" | "typing" | "call" | "group_join_request";
+  type: "message" | "read" | "archive" | "typing" | "call" | "group_join_request" | "group_deleted";
   chatId: string | number;
   userIds: Array<string | number>;
   payload?: unknown;

@@ -78,9 +78,9 @@ export default function ChatThemeScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]} numberOfLines={1}>Chat theme</Text>
+        <Text style={[styles.headerTitle, { color: colors.headerTitleColor }]} numberOfLines={1}>Chat theme</Text>
         <TouchableOpacity onPress={() => void save()} style={styles.saveBtn}>
-          <Text style={[styles.saveTxt, { color: colors.primary }]}>Save</Text>
+          <Text style={[styles.saveTxt, { color: colors.shellThemed ? "#FFFFFF" : colors.primary }]}>Save</Text>
         </TouchableOpacity>
       </ThemedHeader>
 

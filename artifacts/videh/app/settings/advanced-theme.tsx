@@ -111,7 +111,7 @@ export default function AdvancedThemeScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={colors.headerIconColor} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>Advanced Theme</Text>
+        <Text style={[styles.headerTitle, { color: colors.headerTitleColor }]}>Advanced Theme</Text>
         <View style={{ width: 40 }} />
       </ThemedHeader>
 

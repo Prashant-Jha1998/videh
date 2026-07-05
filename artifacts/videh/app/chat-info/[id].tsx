@@ -150,7 +150,7 @@ export default function ChatInfoScreen() {
   const { id: rawId, name: rawName } = useLocalSearchParams<{ id: string; name: string }>();
   const id = normalizeRouteParam(rawId);
   const name = normalizeRouteParam(rawName);
-  const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, reportUser, createDirectChat, updateGroupAvatar, patchChatInList, loadMessages } = useApp();
+  const { chats, pinChat, muteChat, archiveChat, user, blockUser, unblockUser, reportUser, createDirectChat, updateGroupAvatar, patchChatInList, loadMessages, refreshChats } = useApp();
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
   const authedJsonHeaders = useCallback(() => ({
@@ -878,6 +878,7 @@ export default function ChatInfoScreen() {
               body: JSON.stringify({ requesterId: user?.dbId }),
             });
             fetchMembers();
+            void loadMessages(String(id));
           } catch { }
         }
       }
@@ -1338,6 +1339,44 @@ export default function ChatInfoScreen() {
               </Text>
             </TouchableOpacity>
           )}
+          {isGroup && isAdmin && (
+            <TouchableOpacity
+              style={styles.dangerRow}
+              onPress={() => Alert.alert(
+                "Delete group?",
+                "This will remove the group for all members. This cannot be undone.",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete group",
+                    style: "destructive",
+                    onPress: async () => {
+                      if (!user?.dbId || !id) return;
+                      try {
+                        const res = await fetch(`${BASE_URL}/api/chats/${id}/group`, {
+                          method: "DELETE",
+                          headers: authedJsonHeaders(),
+                          body: JSON.stringify({ requesterId: user.dbId }),
+                        });
+                        if (!res.ok) {
+                          Alert.alert("Error", "Could not delete this group.");
+                          return;
+                        }
+                        await refreshChats();
+                        router.replace("/(tabs)/chats");
+                      } catch {
+                        Alert.alert("Error", "Could not delete this group.");
+                      }
+                    },
+                  },
+                ],
+              )}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="trash-outline" size={20} color={colors.destructive} />
+              <Text style={[styles.dangerText, { color: colors.destructive }]}>Delete group</Text>
+            </TouchableOpacity>
+          )}
           {isGroup && (
             <TouchableOpacity
               style={styles.dangerRow}
@@ -1349,6 +1388,7 @@ export default function ChatInfoScreen() {
                     method: "DELETE", headers: authedJsonHeaders(),
                     body: JSON.stringify({ requesterId: user.dbId }),
                   }).catch(() => {});
+                  await refreshChats();
                   router.replace("/(tabs)/chats");
                 }}
               ])}

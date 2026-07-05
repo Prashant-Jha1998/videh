@@ -1234,7 +1234,7 @@ export default function ChatScreen() {
     editMessage, reactToMessage, starMessage, keepMessage, muteChat, createDirectChat,
     blockUser, unblockUser, reportUser,
     loadMessages, loadOlderMessages, updateLocationOnServer, stopLiveLocationSession, setActiveChatId,
-    typingByChatId, reportRemoteTyping, patchChatMessage, getChatClearCutoff, refreshGroupTranslations,
+    typingByChatId, reportRemoteTyping, patchChatMessage, getChatClearCutoff, refreshGroupTranslations, refreshChats,
   } = useApp();
 
   const [chatId, setChatId] = useState<string | null>(rawId?.startsWith("new_") ? null : rawId ?? null);
@@ -1296,14 +1296,15 @@ export default function ChatScreen() {
   const colors = useMemo(() => {
     const accent = chatLook.appearance.accent[0];
     const accentPair = chatLook.appearance.accent;
+    const themedHeader = baseColors.shellThemed || chatLook.isDark;
     return {
       ...baseColors,
       primary: accent,
       accent: chatLook.isDark ? accent : baseColors.accent,
       tint: accent,
-      headerBg: baseColors.headerBg,
-      headerTitleColor: chatLook.isDark ? baseColors.headerTitleColor : baseColors.foreground,
-      headerIconColor: baseColors.headerIconColor,
+      headerBg: themedHeader ? accent : baseColors.headerBg,
+      headerTitleColor: themedHeader ? "#FFFFFF" : baseColors.headerTitleColor,
+      headerIconColor: themedHeader ? "#FFFFFF" : baseColors.headerIconColor,
       statusRing: accent,
       onlineGreen: accent,
       appThemeColors: accentPair,
@@ -1312,10 +1313,14 @@ export default function ChatScreen() {
       chatBackground: chatLook.chatBackground,
     };
   }, [baseColors, chatLook]);
-  const headerAccent = chatLook.isDark ? chatLook.appearance.accent : (["#FFFFFF", "#FFFFFF"] as [string, string]);
+  const headerAccent =
+    baseColors.shellThemed || chatLook.isDark
+      ? chatLook.appearance.accent
+      : (["#FFFFFF", "#FFFFFF"] as [string, string]);
   const headerIcon = colors.headerIconColor;
-  const chatHeaderTitleColor = chatLook.isDark ? "#fff" : colors.foreground;
-  const chatHeaderStatusColor = chatLook.isDark ? "rgba(255,255,255,0.75)" : colors.mutedForeground;
+  const chatHeaderTitleColor = baseColors.shellThemed || chatLook.isDark ? "#fff" : colors.foreground;
+  const chatHeaderStatusColor =
+    baseColors.shellThemed || chatLook.isDark ? "rgba(255,255,255,0.75)" : colors.mutedForeground;
   const { chatFontScale, t } = useUiPreferences();
   const messageFallback = t("common.message");
   const insets = useSafeAreaInsets();
@@ -1421,7 +1426,8 @@ export default function ChatScreen() {
         }
       };
       const pollMessages = (force = false) => {
-        void loadMessages(chatId, { incremental: !force });
+        const reading = readingHistoryRef.current || userScrolledUpRef.current;
+        void loadMessages(chatId, { incremental: reading || !force });
       };
       const msgTimer = setInterval(() => pollMessages(false), OPEN_CHAT_MESSAGE_POLL_MS);
       void pollMessages(true);
@@ -1553,7 +1559,6 @@ export default function ChatScreen() {
       [
         selectedIds.length,
         flashMessageId ?? "",
-        readingHistory ? 1 : 0,
         chatLook.chatBubbleSent,
         chatLook.chatBubbleReceived,
         chatLook.chatBackground,
@@ -1564,7 +1569,6 @@ export default function ChatScreen() {
     [
       selectedIds.length,
       flashMessageId,
-      readingHistory,
       chatLook.chatBubbleSent,
       chatLook.chatBubbleReceived,
       chatLook.chatBackground,
@@ -1892,6 +1896,7 @@ export default function ChatScreen() {
       || readingHistoryRef.current
       || loadingOlderRef.current
       || Date.now() < suppressAutoPinUntilRef.current
+      || !lastNearBottomRef.current
     );
   }, []);
 
@@ -2030,6 +2035,14 @@ export default function ChatScreen() {
       lastNearBottomRef.current = searching
         ? isChatNearBottom(contentOffsetY, contentHeight, layoutHeight)
         : isInvertedChatNearBottom(contentOffsetY);
+      if (
+        !searching
+        && contentOffsetY > CHAT_NEAR_BOTTOM_PX
+        && !userScrolledUpRef.current
+      ) {
+        markUserScrolledUp();
+        return;
+      }
       if (away && !userScrolledUpRef.current) {
         markUserScrolledUp();
       }
@@ -2058,11 +2071,8 @@ export default function ChatScreen() {
     (contentOffsetY: number, contentHeight: number, layoutHeight: number) => {
       syncScrollAwayFromBottom(contentOffsetY, contentHeight, layoutHeight);
       tryClearReadingHistory(contentOffsetY, contentHeight, layoutHeight);
-      if (!blocksAutoScroll() && !searching && lastNearBottomRef.current) {
-        pinToLatest(false, { source: "finishScrollInteraction" });
-      }
     },
-    [syncScrollAwayFromBottom, tryClearReadingHistory, searching, blocksAutoScroll, pinToLatest],
+    [syncScrollAwayFromBottom, tryClearReadingHistory],
   );
   const tryLoadOlderMessages = useCallback(async () => {
     if (loadingOlderRef.current || !hasMoreOlderRef.current || searching || !chatId) return;
@@ -3975,14 +3985,15 @@ export default function ChatScreen() {
 
   /** Keep viewport fixed while reading history across poll/merge refreshes. */
   useEffect(() => {
-    if (searching || !readingHistory || !messageListInverted) return;
+    if (searching || !messageListInverted) return;
+    if (!readingHistoryRef.current && !userScrolledUpRef.current) return;
     const offset = lastScrollOffsetRef.current;
     if (offset <= CHAT_NEAR_BOTTOM_PX) return;
     const frame = requestAnimationFrame(() => {
       listRef.current?.scrollToOffset({ offset, animated: false });
     });
     return () => cancelAnimationFrame(frame);
-  }, [messagesScrollAnchorKey, readingHistory, searching, messageListInverted]);
+  }, [messagesScrollAnchorKey, searching, messageListInverted]);
 
   useFocusEffect(
     useCallback(() => {
@@ -4070,6 +4081,7 @@ export default function ChatScreen() {
               body: JSON.stringify({ requesterId: user.dbId }),
             });
             void dismissGroupWelcome(chatId);
+            await refreshChats();
             router.replace("/(tabs)/chats");
           } catch {
             Alert.alert("Error", "Could not leave this group.");
@@ -4077,7 +4089,7 @@ export default function ChatScreen() {
         },
       },
     ]);
-  }, [chatId, displayName, router, user?.dbId, user?.sessionToken]);
+  }, [chatId, displayName, router, user?.dbId, user?.sessionToken, refreshChats]);
 
   const handleReportGroup = useCallback(() => {
     Alert.alert("Report sent", "Thank you. We will review this group.");

@@ -4,10 +4,11 @@ import React, { useEffect } from "react";
 import { Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
 
-/** Light headers use dark status-bar icons on white; dark mode keeps light icons. */
+/** Light headers use dark status-bar icons on white; themed/dark headers use light icons. */
 export function AppStatusBar() {
   const colors = useColors();
   const barBg = colors.headerBg ?? colors.background;
+  const iconStyle = colors.shellThemed || colors.isDark ? "light" : "dark";
 
   useEffect(() => {
     void SystemUI.setBackgroundColorAsync(barBg);
@@ -15,7 +16,7 @@ export function AppStatusBar() {
 
   return (
     <StatusBar
-      style={colors.isDark ? "light" : "dark"}
+      style={iconStyle}
       backgroundColor={barBg}
       translucent={Platform.OS === "android"}
     />
