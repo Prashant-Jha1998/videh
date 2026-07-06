@@ -303,7 +303,21 @@ router.post("/google", async (req, res) => {
       token,
       advertiser: { id: row.id, email: row.email, company_name: row.company_name, balance_inr: row.balance_inr },
     });
-  } catch {
+  } catch (err) {
+    const pgCode = (err as { code?: string })?.code;
+    const pgMsg = String((err as { message?: string })?.message ?? "");
+    if (pgCode === "23505") {
+      res.status(409).json({ success: false, message: "This Google account is already linked to another ads account." });
+      return;
+    }
+    if (pgCode === "42703" || pgMsg.includes("google_sub") || pgMsg.includes("auth_provider")) {
+      res.status(503).json({
+        success: false,
+        message: "Google sign-in database schema is not ready. Contact support or run ads portal DB migrations.",
+      });
+      return;
+    }
+    req.log?.error({ err }, "ads google auth");
     res.status(500).json({ success: false, message: "Google sign-in failed" });
   }
 });

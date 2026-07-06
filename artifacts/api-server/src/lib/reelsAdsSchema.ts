@@ -17,16 +17,12 @@ export async function ensureReelsAdsTables(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  try {
-    await query(`ALTER TABLE reels_advertisers ADD COLUMN IF NOT EXISTS google_sub TEXT`);
-    await query(`ALTER TABLE reels_advertisers ADD COLUMN IF NOT EXISTS auth_provider TEXT DEFAULT 'password'`);
-    await query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_reels_advertisers_google_sub
-        ON reels_advertisers (google_sub) WHERE google_sub IS NOT NULL
-    `);
-  } catch {
-    /* ignore */
-  }
+  await query(`ALTER TABLE reels_advertisers ADD COLUMN IF NOT EXISTS google_sub TEXT`);
+  await query(`ALTER TABLE reels_advertisers ADD COLUMN IF NOT EXISTS auth_provider TEXT DEFAULT 'password'`);
+  await query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_reels_advertisers_google_sub
+      ON reels_advertisers (google_sub) WHERE google_sub IS NOT NULL
+  `);
   await query(`
     CREATE TABLE IF NOT EXISTS reels_ad_campaigns (
       id SERIAL PRIMARY KEY,

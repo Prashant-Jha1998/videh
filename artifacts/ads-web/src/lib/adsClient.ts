@@ -26,7 +26,17 @@ export async function adsRequest<T>(path: string, opts?: RequestInit): Promise<T
     credentials: "same-origin",
     headers: { ...headers, ...(opts?.headers as Record<string, string> | undefined) },
   });
-  const data = (await res.json()) as T & { success?: boolean; message?: string };
+  const raw = await res.text();
+  let data: T & { success?: boolean; message?: string };
+  try {
+    data = JSON.parse(raw) as T & { success?: boolean; message?: string };
+  } catch {
+    throw new Error(
+      res.ok
+        ? "Invalid server response"
+        : `Request failed (${res.status}). Try again or use email sign-in.`,
+    );
+  }
   if (!res.ok && data && typeof data === "object" && "message" in data && !data.success) {
     return data as T;
   }
@@ -34,7 +44,7 @@ export async function adsRequest<T>(path: string, opts?: RequestInit): Promise<T
     throw new Error(
       typeof data === "object" && data && "message" in data && typeof data.message === "string"
         ? data.message
-        : "Request failed",
+        : `Request failed (${res.status})`,
     );
   }
   return data as T;

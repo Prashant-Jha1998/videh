@@ -36,6 +36,10 @@ export async function ensureDeveloperPortalUsersTable(): Promise<void> {
   } catch {
     /* ignore */
   }
+  await ensurePortalGoogleAuthColumns();
+}
+
+export async function ensurePortalGoogleAuthColumns(): Promise<void> {
   await query(`ALTER TABLE developer_portal_users ADD COLUMN IF NOT EXISTS google_sub TEXT`);
   await query(`ALTER TABLE developer_portal_users ADD COLUMN IF NOT EXISTS auth_provider TEXT DEFAULT 'password'`);
   await query(`

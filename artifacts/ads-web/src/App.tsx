@@ -319,7 +319,7 @@ export default function App() {
     setAuthBusy(true);
     setError("");
     try {
-      const res = await api<{ success: boolean; message?: string; token?: string }>("/google", {
+      const res = await api<{ success: boolean; message?: string }>("/google", {
         method: "POST",
         body: JSON.stringify({ credential }),
       });
@@ -327,7 +327,17 @@ export default function App() {
         setError(res.message ?? "Google sign-in failed");
         return;
       }
-      await loadDash();
+      try {
+        await loadDash();
+      } catch (e) {
+        setError(
+          e instanceof Error
+            ? e.message
+            : "Signed in but session could not be loaded. Refresh the page or try email sign-in.",
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Google sign-in failed");
     } finally {
       setAuthBusy(false);
     }

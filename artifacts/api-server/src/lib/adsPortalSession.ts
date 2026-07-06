@@ -62,6 +62,8 @@ function verifySignedPayload(token: string | undefined): { ok: true; payload: Se
 function readToken(req: Request): string | undefined {
   const auth = req.headers.authorization;
   if (auth?.startsWith("Bearer ")) return auth.slice(7).trim();
+  const fromParser = req.cookies?.[ADS_PORTAL_COOKIE];
+  if (typeof fromParser === "string" && fromParser) return fromParser;
   const cookie = req.headers.cookie ?? "";
   const match = cookie.match(new RegExp(`${ADS_PORTAL_COOKIE}=([^;]+)`));
   return match?.[1] ? decodeURIComponent(match[1]) : undefined;

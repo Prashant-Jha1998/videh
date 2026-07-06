@@ -22,7 +22,6 @@ import {
   updatePortalUserPassword,
   verifyPortalUserPassword,
 } from "../lib/developerPortalUsers";
-import { ensureDeveloperPlatformTables } from "../lib/developerPlatform";
 import { resolveGoogleOAuthClientId, verifyGoogleIdToken } from "../lib/googleIdTokenVerify";
 import { stateDelete, stateGetJson, stateSetJson } from "../lib/sharedState";
 
@@ -140,7 +139,6 @@ router.post("/google", async (req: Request, res: Response) => {
 
   try {
     await ensureDeveloperPortalUsersTable();
-    await ensureDeveloperPlatformTables();
 
     const profile = await verifyGoogleIdToken(credential, clientId);
     if (!profile) {
@@ -191,10 +189,18 @@ router.post("/google", async (req: Request, res: Response) => {
     });
   } catch (err) {
     const pgCode = (err as { code?: string })?.code;
+    const pgMsg = String((err as { message?: string })?.message ?? "");
     if (pgCode === "23505") {
       res.status(409).json({
         success: false,
         message: "This Google account or email is already linked to another developer account.",
+      });
+      return;
+    }
+    if (pgCode === "42703" || pgMsg.includes("google_sub") || pgMsg.includes("auth_provider")) {
+      res.status(503).json({
+        success: false,
+        message: "Google sign-in database schema is not ready. Run migration 076_developer_portal_google_auth.sql on the server.",
       });
       return;
     }
