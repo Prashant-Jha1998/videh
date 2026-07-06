@@ -45,6 +45,11 @@ jobs:
 
           pnpm install --frozen-lockfile
           pnpm --filter @workspace/api-server run build:api
+
+          cd /var/www/videh/artifacts/api-server
+          bash scripts/apply-sql-migrations.sh
+
+          cd /var/www/videh
           BASE_PATH=/ pnpm --filter @workspace/admin-web build
           BASE_PATH=/ pnpm --filter @workspace/ads-web build
           BASE_PATH=/ pnpm --filter @workspace/videh-web build
