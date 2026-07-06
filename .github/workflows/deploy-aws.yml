@@ -52,19 +52,6 @@ jobs:
           BASE_PATH=/ pnpm --filter @workspace/video-web build
 
           cd /var/www/videh/artifacts/api-server
-          if [ -f .env ]; then
-            set -a
-            # shellcheck disable=SC1091
-            source .env
-            set +a
-            if [ -n "${DATABASE_URL:-}" ] && command -v psql >/dev/null; then
-              echo "Running portal Google-auth SQL migrations..."
-              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f sql/076_developer_portal_google_auth.sql
-              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f sql/077_reels_advertisers_google_auth.sql
-            else
-              echo "Skip SQL migrations (DATABASE_URL or psql not available on EC2)."
-            fi
-          fi
           pm2 startOrRestart ecosystem.config.cjs --update-env
           pm2 save
 
