@@ -18,6 +18,27 @@ import { enforceAllOverdueBillingHolds } from "./lib/developerBilling";
 
 const app: Express = express();
 app.set("trust proxy", 1);
+
+function isVidehWebOrigin(origin: string): boolean {
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    return host === "videh.co.in" || host.endsWith(".videh.co.in");
+  } catch {
+    return false;
+  }
+}
+
+function buildCorsAllowlist(): string[] {
+  return (process.env["VIDEH_CORS_ORIGINS"] ?? process.env["CDN_BASE_URL"] ?? process.env["EXPO_PUBLIC_DOMAIN"] ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .flatMap((entry) => {
+      if (entry.startsWith("http")) return [entry];
+      return [`https://${entry}`, `http://${entry}`];
+    });
+}
+
 // Disable ETag globally: polling endpoints (WebRTC signaling, call status) must
 // never return 304 with an empty body, which would hide the SDP offer/answer and
 // stall call setup. APIs do not benefit from conditional GET caching here.
@@ -45,15 +66,8 @@ app.use(
 app.use(
   cors({
     origin(origin, callback) {
-      const allowed = (process.env["VIDEH_CORS_ORIGINS"] ?? process.env["CDN_BASE_URL"] ?? process.env["EXPO_PUBLIC_DOMAIN"] ?? "")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .flatMap((entry) => {
-          if (entry.startsWith("http")) return [entry];
-          return [`https://${entry}`, `http://${entry}`];
-        });
-      if (!origin || allowed.length === 0 || allowed.includes(origin)) {
+      const allowed = buildCorsAllowlist();
+      if (!origin || allowed.length === 0 || allowed.includes(origin) || isVidehWebOrigin(origin)) {
         callback(null, true);
         return;
       }
