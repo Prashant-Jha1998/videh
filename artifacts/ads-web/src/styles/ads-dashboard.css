@@ -109,10 +109,18 @@
 }
 
 .ads-nav-icon {
-  width: 1.25rem;
-  text-align: center;
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
   opacity: 0.85;
+}
+
+.ads-nav-btn--on .ads-nav-icon {
+  opacity: 1;
+  color: var(--ads-brand);
 }
 
 .ads-sidebar-foot {
@@ -418,9 +426,79 @@
   letter-spacing: 0.05em;
   color: var(--ads-brand-dark);
   background: var(--ads-brand-soft);
-  padding: 5px 10px;
+  padding: 5px 10px 5px 8px;
   border-radius: 999px;
   margin-bottom: 12px;
+}
+
+.ads-auth-badge::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='5' y='11' width='14' height='10' rx='2'/%3E%3Cpath d='M8 11V7a4 4 0 118 0v4'/%3E%3C/svg%3E") center / contain no-repeat;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='5' y='11' width='14' height='10' rx='2'/%3E%3Cpath d='M8 11V7a4 4 0 118 0v4'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.ads-rate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.ads-rate-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: #f8f9fb;
+  border: 1px solid #e8eaed;
+  border-radius: 10px;
+}
+
+.ads-rate-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ads-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ads-rate-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--ads-ink);
+  line-height: 1.2;
+}
+
+.ads-rate-unit {
+  font-size: 0.8rem;
+  color: var(--ads-muted);
+}
+
+.ads-rate-scope {
+  font-size: 0.75rem;
+  color: #80868b;
+  margin-top: 4px;
+}
+
+.ads-policy-note {
+  margin: 14px 0 0;
+  font-size: 0.85rem;
+  color: var(--ads-muted);
+  line-height: 1.5;
+}
+
+.ads-billing-model-table .ads-td {
+  font-size: 0.88rem;
+  vertical-align: top;
+}
+
+.ads-billing-model-table .ads-td:first-child {
+  font-weight: 600;
+  color: var(--ads-ink);
+  white-space: nowrap;
 }
 
 /* ——— Desktop: sidebar always visible ——— */

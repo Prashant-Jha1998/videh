@@ -6,7 +6,7 @@ import { ensureReelsAdsTables } from "./reelsAdsSchema";
 
 export type ReelsAdFormat = "video" | "image" | "app_install" | "shopping" | "bumper" | "shorts_video" | "carousel" | "lead_form";
 export type ReelsAdCta = "shop_now" | "install" | "learn_more" | "watch_now" | "play_store" | "app_store";
-export type ReelsAdObjective = "brand_awareness" | "video_views" | "app_promotion" | "shopping";
+export type ReelsAdObjective = "brand_awareness" | "video_views" | "app_promotion" | "shopping" | "vibe_reach";
 export type ReelsAdBidModel = "cpm" | "cpc" | "cpv" | "cpi";
 
 export type ReelsFeedAdItem = {
@@ -408,7 +408,43 @@ function clickCostInr(bidModel: string, bidAmount: number, ads: ReelsAdsRules, p
     const cpiDefault = isVibe ? ads.vibeCpiInr : ads.appInstallCpiInr;
     return bidAmount > 0 ? bidAmount : cpiDefault;
   }
-  return isVibe ? ads.vibeCpcInr : ads.feedCpcInr;
+  return 0;
+}
+
+function computeImpressionBilling(opts: {
+  placement: string;
+  completed: boolean;
+}, bidModel: string, bidAmount: number, ads: ReelsAdsRules): number {
+  const pl = opts.placement;
+  const isFeedLike = pl === "feed_instream" || pl === "vibe_feed" || pl === "shorts_feed";
+  const isWatchRoll = pl === "pre_roll" || pl === "mid_roll";
+
+  if (isFeedLike) {
+    if (bidModel === "cpm") {
+      return impressionCostInr("cpm", bidAmount, ads, pl);
+    }
+    if (bidModel === "cpv") {
+      if (opts.completed) {
+        const defaultCpv = pl === "vibe_feed" ? vibeCpvDefault(ads) : ads.videoCpvInr;
+        return bidAmount > 0 ? bidAmount : defaultCpv;
+      }
+      if (pl !== "feed_instream") {
+        return impressionCostInr("cpm", bidAmount, ads, pl);
+      }
+    }
+    return 0;
+  }
+
+  if (isWatchRoll) {
+    if (bidModel === "cpm") {
+      return impressionCostInr("cpm", bidAmount, ads, pl);
+    }
+    if (bidModel === "cpv" && opts.completed) {
+      return bidAmount > 0 ? bidAmount : ads.videoCpvInr;
+    }
+  }
+
+  return 0;
 }
 
 function fallbackAdBreakItem(
@@ -562,16 +598,12 @@ export async function recordReelsAdImpression(opts: {
   if (ctx?.campaign_id) {
     const bidModel = String(ctx.bid_model ?? "cpm");
     const bidAmt = Number(ctx.bid_amount_inr) || 0;
-    const pl = opts.placement;
-    if (pl === "feed_instream" || pl === "vibe_feed" || pl === "shorts_feed") {
-      if (bidModel === "cpm" || (pl !== "feed_instream" && bidModel === "cpv" && !opts.completed)) {
-        cost = impressionCostInr(bidModel === "cpv" ? "cpm" : bidModel, bidAmt, cfg.ads, pl);
-      } else if (opts.completed && bidModel === "cpv") {
-        cost = bidAmt > 0 ? bidAmt : (pl === "vibe_feed" ? vibeCpvDefault(cfg.ads) : cfg.ads.videoCpvInr);
-      }
-    } else if (opts.completed && bidModel === "cpv") {
-      cost = bidAmt > 0 ? bidAmt : cfg.ads.videoCpvInr;
-    }
+    cost = computeImpressionBilling(
+      { placement: opts.placement, completed: opts.completed },
+      bidModel,
+      bidAmt,
+      cfg.ads,
+    );
     if (cost > 0) {
       const ok = await chargeAdvertiser({ creativeId: opts.creativeId, campaignId: Number(ctx.campaign_id), costInr: cost });
       if (!ok) return;
@@ -657,6 +689,8 @@ export function defaultBidForObjective(objective: ReelsAdObjective, ads: ReelsAd
       return { bidModel: "cpc", bidAmount: ads.feedCpcInr };
     case "video_views":
       return { bidModel: "cpv", bidAmount: ads.videoCpvInr };
+    case "vibe_reach":
+      return { bidModel: "cpv", bidAmount: vibeCpvDefault(ads) };
     default:
       return { bidModel: "cpm", bidAmount: ads.feedCpmInr };
   }

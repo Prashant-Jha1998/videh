@@ -521,12 +521,12 @@ export default function App() {
     return (
       <div className="ads-auth-wrap">
         <div className="ads-auth-card">
-          <span className="ads-auth-badge">🔒 Secure advertiser portal</span>
+          <span className="ads-auth-badge">Secure advertiser portal</span>
           <div style={S.logoRow}>
             <VidehLogo size={40} />
             <div>
               <h1 style={S.h1}>Videh Ads</h1>
-              <p style={S.sub}>Professional ad campaigns for Videh Video</p>
+              <p style={S.sub}>Professional campaigns across Videh Watch, home feed, Vibe, and Shorts.</p>
             </div>
           </div>
           <div style={S.tabRow}>
@@ -589,7 +589,7 @@ export default function App() {
                 <Stat label="Wallet balance" value={`₹${balance.toLocaleString("en-IN")}`} />
               </div>
 
-              <Panel title={`Live campaigns (${dashboard?.summary.running_campaigns ?? 0} chal rahi hain)`}>
+              <Panel title={`Live campaigns (${dashboard?.summary.running_campaigns ?? 0} active)`}>
                 {(dashboard?.campaigns.filter((c) => c.is_running) ?? []).length === 0 ? (
                   <p style={S.sub}>No campaigns are live yet. Create a campaign, submit an ad, and it will run after admin approval.</p>
                 ) : (
@@ -657,7 +657,7 @@ export default function App() {
 
               <Panel title="Performance by city (last 30 days)">
                 {(dashboard?.byCity ?? []).length === 0 ? (
-                  <p style={S.sub}>Jab ads chalengi, yahan city-wise impressions dikhengi.</p>
+                  <p style={S.sub}>City-level impressions will appear here once your ads are running.</p>
                 ) : (
                   <div className="ads-table-wrap"><table className="ads-table">
                     <thead>
@@ -716,18 +716,50 @@ export default function App() {
                 onSelect={(id) => { setSelectedAdFormatId(id); setNav("ads"); }}
               />
 
-              <Panel title="Billing rates">
-                <ul style={S.list}>
-                  <li><strong>Watch CPM</strong> ₹{pricing?.feedCpmInr}/1,000 impressions (feed & bumper)</li>
-                  <li><strong>Watch CPC</strong> ₹{pricing?.feedCpcInr}/click (shopping, discovery, overlay)</li>
-                  <li><strong>Watch CPI</strong> ₹{pricing?.appInstallCpiInr}/app store tap</li>
-                  <li><strong>Watch CPV</strong> ₹{pricing?.videoCpvInr}/completed video view (pre-roll, mid-roll, shorts)</li>
-                  <li><strong>Vibe CPM</strong> ₹{pricing?.vibeCpmInr ?? "—"}/1,000 impressions (premium vertical)</li>
-                  <li><strong>Vibe CPC</strong> ₹{pricing?.vibeCpcInr ?? "—"}/click (Vibe shopping)</li>
-                  <li><strong>Vibe CPI</strong> ₹{pricing?.vibeCpiInr ?? "—"}/app install tap (Vibe)</li>
-                  <li><strong>Vibe CPV</strong> ₹{pricing?.vibeCpvInr ?? "—"}/completed view (Vibe video)</li>
-                  <li>Har ad <strong>Videh admin approve</strong> ke baad hi public hota hai</li>
-                </ul>
+              <BillingRatesPanel pricing={pricing} />
+
+              <Panel title="How you are charged">
+                <div className="ads-table-wrap">
+                  <table className="ads-table ads-billing-model-table">
+                    <thead>
+                      <tr>
+                        <th className="ads-th">Campaign objective</th>
+                        <th className="ads-th">Billing model</th>
+                        <th className="ads-th">When your wallet is charged</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="ads-td">Brand awareness</td>
+                        <td className="ads-td">CPM</td>
+                        <td className="ads-td">Each time your ad is shown (feed, Watch pre-roll, mid-roll, bumper)</td>
+                      </tr>
+                      <tr>
+                        <td className="ads-td">Video views</td>
+                        <td className="ads-td">CPV</td>
+                        <td className="ads-td">When a viewer completes your video ad on Watch or Shorts</td>
+                      </tr>
+                      <tr>
+                        <td className="ads-td">Shopping</td>
+                        <td className="ads-td">CPC</td>
+                        <td className="ads-td">When a viewer taps Shop now or your destination link</td>
+                      </tr>
+                      <tr>
+                        <td className="ads-td">App promotion</td>
+                        <td className="ads-td">CPI</td>
+                        <td className="ads-td">When a viewer taps Install or opens the app store</td>
+                      </tr>
+                      <tr>
+                        <td className="ads-td">Vibe reach</td>
+                        <td className="ads-td">CPV / CPM</td>
+                        <td className="ads-td">Completed Vibe video views (CPV); partial views may bill at CPM</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p className="ads-policy-note">
+                  Every ad is reviewed before going live. Clicks on awareness or video campaigns do not incur extra CPC charges.
+                </p>
               </Panel>
             </>
           )}
@@ -966,7 +998,7 @@ export default function App() {
                     </p>
                   ) : (
                     <p style={{ fontSize: 12, color: "#80868b", margin: "0 0 10px" }}>
-                      Paste Play Store link — rating, reviews, downloads, category auto-fill honge. Agar fetch fail ho to neeche manually bharo.
+                      Paste a Play Store link to auto-fill rating, reviews, downloads, and category. If lookup fails, enter details manually below.
                     </p>
                   )}
                   <div style={S.grid2}>
@@ -1111,8 +1143,9 @@ export default function App() {
           {nav === "billing" && (
             <Panel title="Billing & payments">
               <p style={S.sub}>
-                Pay upfront via Razorpay. Your balance is charged automatically when ads run (CPM / CPC / CPI / CPV).
+                Prepay into your wallet via Razorpay. Spend is deducted automatically when ads deliver impressions, completed views, clicks, or install taps.
               </p>
+              <BillingRatesPanel pricing={pricing} compact />
               {!walletConfig?.razorpayConfigured ? (
                 <p style={S.err}>Payment gateway is not configured on the server. Contact support@videh.co.in.</p>
               ) : null}
@@ -1169,6 +1202,41 @@ export default function App() {
             </Panel>
           )}
     </AdsShell>
+  );
+}
+
+function BillingRatesPanel({ pricing, compact }: { pricing: Pricing | null; compact?: boolean }) {
+  if (!pricing) return null;
+  const rates = [
+    { label: "Watch CPM", value: pricing.feedCpmInr, unit: "per 1,000 impressions", scope: "Home feed, bumper" },
+    { label: "Watch CPC", value: pricing.feedCpcInr, unit: "per click", scope: "Shopping & discovery" },
+    { label: "Watch CPI", value: pricing.appInstallCpiInr, unit: "per install tap", scope: "App install cards" },
+    { label: "Watch CPV", value: pricing.videoCpvInr, unit: "per completed view", scope: "Pre-roll, mid-roll, Shorts" },
+    { label: "Vibe CPM", value: pricing.vibeCpmInr, unit: "per 1,000 impressions", scope: "Vibe feed" },
+    { label: "Vibe CPC", value: pricing.vibeCpcInr, unit: "per click", scope: "Vibe shopping" },
+    { label: "Vibe CPI", value: pricing.vibeCpiInr, unit: "per install tap", scope: "Vibe app install" },
+    { label: "Vibe CPV", value: pricing.vibeCpvInr, unit: "per completed view", scope: "Vibe video" },
+  ];
+  return (
+    <Panel title={compact ? "Rate card" : "Billing rates"}>
+      <div className="ads-rate-grid">
+        {rates.map((r) => (
+          <div key={r.label} className="ads-rate-card">
+            <span className="ads-rate-label">{r.label}</span>
+            <strong className="ads-rate-value">
+              {r.value != null && r.value > 0 ? `₹${r.value}` : "—"}
+            </strong>
+            <span className="ads-rate-unit">{r.unit}</span>
+            {!compact ? <span className="ads-rate-scope">{r.scope}</span> : null}
+          </div>
+        ))}
+      </div>
+      {!compact ? (
+        <p className="ads-policy-note">
+          All creatives require admin approval before delivery. Minimum wallet top-up: ₹{pricing.minTopUpInr.toLocaleString("en-IN")}.
+        </p>
+      ) : null}
+    </Panel>
   );
 }
 

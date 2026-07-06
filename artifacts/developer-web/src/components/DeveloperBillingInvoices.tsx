@@ -130,6 +130,7 @@ export function DeveloperBillingInvoices({
     setDownloadingId(inv.id);
     onError("");
     try {
+      const qs = reference ? `?reference=${encodeURIComponent(reference)}` : "";
       const r = await devFetch(`/api/developer-leads/${leadId}/invoices/${inv.id}/download${qs}`);
       if (!r.ok) {
         const d = (await r.json().catch(() => ({}))) as { message?: string };

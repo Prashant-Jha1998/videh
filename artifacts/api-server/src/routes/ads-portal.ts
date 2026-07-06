@@ -552,7 +552,7 @@ router.post("/campaigns", async (req, res) => {
     });
     return;
   }
-  const objectives: ReelsAdObjective[] = ["brand_awareness", "video_views", "app_promotion", "shopping"];
+  const objectives: ReelsAdObjective[] = ["brand_awareness", "video_views", "app_promotion", "shopping", "vibe_reach"];
   const objective = objectives.includes(body.objective as ReelsAdObjective)
     ? (body.objective as ReelsAdObjective)
     : "brand_awareness";
