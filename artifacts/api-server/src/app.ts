@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
@@ -133,6 +133,16 @@ app.get("/", (_req, res) => {
 
 app.use("/v1", businessApiV1Router);
 app.use("/api", router);
+
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  logger.error({ err }, "Unhandled API error");
+  if (!res.headersSent) {
+    res.status(500).json({
+      success: false,
+      message: err instanceof Error ? err.message.slice(0, 200) : "Server error",
+    });
+  }
+});
 
 // Cron: every minute — check for due scheduled messages and send them
 cron.schedule("* * * * *", async () => {

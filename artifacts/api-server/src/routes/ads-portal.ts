@@ -91,12 +91,30 @@ function authJson(
   res.json(body);
 }
 
-router.get("/config", (_req, res) => {
+router.get("/config", async (_req, res) => {
   const googleClientId = resolveGoogleOAuthClientId();
+  let googleDbReady = false;
+  let googleDbDetail = "ok";
+  try {
+    await ensureReelsAdsTables();
+    const cols = await query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'reels_advertisers'
+         AND column_name IN ('google_sub', 'auth_provider')`,
+    );
+    googleDbReady = cols.rows.length >= 2;
+    if (!googleDbReady) {
+      googleDbDetail = "Run sql/077_reels_advertisers_google_auth.sql in pgAdmin";
+    }
+  } catch (err) {
+    googleDbDetail = String((err as { message?: string })?.message ?? "db_check_failed").slice(0, 160);
+  }
   res.json({
     success: true,
     googleSignInEnabled: Boolean(googleClientId),
     googleClientId: googleClientId ?? undefined,
+    googleDbReady,
+    googleDbDetail,
   });
 });
 

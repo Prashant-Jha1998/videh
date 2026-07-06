@@ -23,6 +23,7 @@ import {
   verifyPortalUserPassword,
 } from "../lib/developerPortalUsers";
 import { resolveGoogleOAuthClientId, verifyGoogleIdToken } from "../lib/googleIdTokenVerify";
+import { query } from "../lib/db";
 import { stateDelete, stateGetJson, stateSetJson } from "../lib/sharedState";
 
 const router = Router();
@@ -37,12 +38,31 @@ router.get("/password-rules", (_req, res) => {
   });
 });
 
-router.get("/config", (_req, res) => {
+router.get("/config", async (_req, res) => {
   const googleClientId = resolveGoogleOAuthClientId();
+  let googleDbReady = false;
+  let googleDbDetail = "ok";
+  try {
+    await ensureDeveloperPortalUsersTable();
+    const cols = await query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'developer_portal_users'
+         AND column_name IN ('google_sub', 'auth_provider')`,
+    );
+    googleDbReady = cols.rows.length >= 2;
+    if (!googleDbReady) {
+      googleDbDetail = "Run sql/076_developer_portal_google_auth.sql in pgAdmin";
+    }
+  } catch (err) {
+    googleDbDetail = String((err as { message?: string })?.message ?? "db_check_failed").slice(0, 160);
+  }
   res.json({
     success: true,
     googleSignInEnabled: Boolean(googleClientId),
     googleClientId: googleClientId ?? undefined,
+    sessionConfigured: developerPortalSessionConfigured(),
+    googleDbReady,
+    googleDbDetail,
   });
 });
 
