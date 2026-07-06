@@ -204,8 +204,12 @@ router.post("/google", async (req: Request, res: Response) => {
       });
       return;
     }
-    logger.error({ err }, "developer google auth");
-    res.status(500).json({ success: false, message: "Google sign-in failed" });
+    logger.error({ err, pgCode, pgMsg: pgMsg.slice(0, 200) }, "developer google auth");
+    const hint =
+      pgMsg.includes("does not exist") || pgCode === "42P01"
+        ? "Database tables/columns missing — redeploy or run SQL migration 076."
+        : "Google sign-in failed";
+    res.status(500).json({ success: false, message: hint });
   }
 });
 
