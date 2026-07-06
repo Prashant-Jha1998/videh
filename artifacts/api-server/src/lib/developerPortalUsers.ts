@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { query } from "./db";
 import { hashAdminPassword, verifyAdminPassword } from "./adminPassword";
+import { ensureDeveloperPlatformTables } from "./developerPlatform";
 
 export type DeveloperPortalUserRow = {
   id: number;
@@ -35,16 +36,12 @@ export async function ensureDeveloperPortalUsersTable(): Promise<void> {
   } catch {
     /* ignore */
   }
-  try {
-    await query(`ALTER TABLE developer_portal_users ADD COLUMN IF NOT EXISTS google_sub TEXT`);
-    await query(`ALTER TABLE developer_portal_users ADD COLUMN IF NOT EXISTS auth_provider TEXT DEFAULT 'password'`);
-    await query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_developer_portal_users_google_sub
-        ON developer_portal_users (google_sub) WHERE google_sub IS NOT NULL
-    `);
-  } catch {
-    /* ignore */
-  }
+  await query(`ALTER TABLE developer_portal_users ADD COLUMN IF NOT EXISTS google_sub TEXT`);
+  await query(`ALTER TABLE developer_portal_users ADD COLUMN IF NOT EXISTS auth_provider TEXT DEFAULT 'password'`);
+  await query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_developer_portal_users_google_sub
+      ON developer_portal_users (google_sub) WHERE google_sub IS NOT NULL
+  `);
 }
 
 const portalUserSelect = `id, email, password_hash, full_name, google_sub, auth_provider, created_at, last_login_at`;
@@ -123,6 +120,10 @@ export async function linkPortalUserGoogle(
   fullName?: string | null,
 ): Promise<DeveloperPortalUserRow | null> {
   await ensureDeveloperPortalUsersTable();
+  const taken = await findPortalUserByGoogleSub(googleSub);
+  if (taken && taken.id !== userId) {
+    throw Object.assign(new Error("google_sub_taken"), { code: "23505" });
+  }
   const r = await query(
     `UPDATE developer_portal_users
      SET google_sub = $2,
@@ -207,6 +208,7 @@ export async function getActiveLeadForPortalUser(
   email?: string,
 ): Promise<ActiveLeadSummary | null> {
   await ensureDeveloperPortalUsersTable();
+  await ensureDeveloperPlatformTables();
   const r = await query(
     `SELECT l.id, l.reference_code, l.wizard_step, l.status, l.company_name,
             COALESCE(l.payment_method_verified, false) AS payment_method_verified,

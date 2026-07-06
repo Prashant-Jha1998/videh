@@ -12,6 +12,7 @@ import {
 import {
   createPortalUser,
   createPortalUserFromGoogle,
+  ensureDeveloperPortalUsersTable,
   findPortalUserByEmail,
   findPortalUserByGoogleSub,
   getActiveLeadForPortalUser,
@@ -21,6 +22,7 @@ import {
   updatePortalUserPassword,
   verifyPortalUserPassword,
 } from "../lib/developerPortalUsers";
+import { ensureDeveloperPlatformTables } from "../lib/developerPlatform";
 import { resolveGoogleOAuthClientId, verifyGoogleIdToken } from "../lib/googleIdTokenVerify";
 import { stateDelete, stateGetJson, stateSetJson } from "../lib/sharedState";
 
@@ -137,6 +139,9 @@ router.post("/google", async (req: Request, res: Response) => {
   }
 
   try {
+    await ensureDeveloperPortalUsersTable();
+    await ensureDeveloperPlatformTables();
+
     const profile = await verifyGoogleIdToken(credential, clientId);
     if (!profile) {
       res.status(401).json({ success: false, message: "Invalid or expired Google sign-in. Try again." });
@@ -172,7 +177,12 @@ router.post("/google", async (req: Request, res: Response) => {
       return;
     }
     setDeveloperPortalCookie(res, token);
-    const activeLead = await getActiveLeadForPortalUser(user.id, user.email);
+    let activeLead = null;
+    try {
+      activeLead = await getActiveLeadForPortalUser(user.id, user.email);
+    } catch (leadErr) {
+      logger.warn({ err: leadErr, userId: user.id }, "developer google auth: active lead lookup failed");
+    }
     res.json({
       success: true,
       user: { id: user.id, email: user.email, fullName: user.full_name },
@@ -180,6 +190,14 @@ router.post("/google", async (req: Request, res: Response) => {
       isNewUser,
     });
   } catch (err) {
+    const pgCode = (err as { code?: string })?.code;
+    if (pgCode === "23505") {
+      res.status(409).json({
+        success: false,
+        message: "This Google account or email is already linked to another developer account.",
+      });
+      return;
+    }
     logger.error({ err }, "developer google auth");
     res.status(500).json({ success: false, message: "Google sign-in failed" });
   }

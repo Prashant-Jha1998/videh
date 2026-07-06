@@ -42,7 +42,17 @@ export function DeveloperAuth({ mode, onClose, onSuccess, onSwitchMode }: Props)
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ credential }),
         });
-        const d = (await r.json()) as { success?: boolean; message?: string };
+        const raw = await r.text();
+        let d: { success?: boolean; message?: string } = {};
+        try {
+          d = JSON.parse(raw) as { success?: boolean; message?: string };
+        } catch {
+          throw new Error(
+            r.ok
+              ? "Sign-in failed: invalid server response."
+              : `Sign-in failed (${r.status}). Try again or use email sign-in.`,
+          );
+        }
         if (!r.ok || !d.success) throw new Error(d.message ?? "Google sign-in failed");
         onSuccess();
       } catch (e) {
