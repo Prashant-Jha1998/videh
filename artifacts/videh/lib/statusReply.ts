@@ -1,5 +1,5 @@
 import type { Message, Status } from "@/context/AppContext";
-import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
+import { resolvePublicAssetUrl, withStatusMediaAuth } from "@/lib/publicAssetUrl";
 
 export type StatusReplyMeta = {
   statusId: string;
@@ -64,9 +64,11 @@ export function mapApiStatusRow(
   viewerDbId: number,
   viewerName?: string,
   viewerAvatar?: string,
+  sessionToken?: string | null,
 ): Status {
   const userId = Number(s.user_id);
   const isMe = userId === viewerDbId;
+  const rawMedia = s.media_url as string | undefined;
   return {
     id: String(s.id),
     userId: isMe ? "me" : String(userId),
@@ -76,7 +78,10 @@ export function mapApiStatusRow(
       : (s.user_avatar as string | undefined),
     content: String(s.content ?? ""),
     type: (s.type as Status["type"]) ?? "text",
-    mediaUrl: resolvePublicAssetUrl(s.media_url as string | undefined) ?? (s.media_url as string | undefined),
+    mediaUrl:
+      withStatusMediaAuth(rawMedia, sessionToken)
+      ?? resolvePublicAssetUrl(rawMedia)
+      ?? rawMedia,
     timestamp: new Date(String(s.created_at)).getTime(),
     expiresAt: s.expires_at ? new Date(String(s.expires_at)).getTime() : undefined,
     viewed: Boolean(s.viewed),

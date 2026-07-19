@@ -7,7 +7,12 @@ export function authPlaybackSource(uri: string, sessionToken?: string | null): A
   if (!absolute || absolute.startsWith("data:") || absolute.startsWith("file:") || absolute.startsWith("content:")) {
     return { uri: absolute || uri };
   }
-  if (!sessionToken || !absolute.includes("/api/chats/media/")) return { uri: absolute };
+  if (
+    !sessionToken
+    || (!absolute.includes("/api/chats/media/") && !absolute.includes("/api/statuses/media/"))
+  ) {
+    return { uri: absolute };
+  }
   return { uri: absolute, headers: { Authorization: `Bearer ${sessionToken}` } };
 }
 

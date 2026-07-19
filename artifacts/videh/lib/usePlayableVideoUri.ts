@@ -54,7 +54,9 @@ async function getCachedVideoFile(absoluteUrl: string, sessionToken?: string | n
     const existing = await FileSystem.getInfoAsync(target);
     if (existing.exists && (existing.size ?? 0) > 0) return target;
 
-    const needsAuth = absoluteUrl.includes("/api/chats/media/") && Boolean(sessionToken);
+    const needsAuth =
+      (absoluteUrl.includes("/api/chats/media/") || absoluteUrl.includes("/api/statuses/media/"))
+      && Boolean(sessionToken);
     const res = await FileSystem.downloadAsync(absoluteUrl, target, {
       headers: needsAuth ? (authFetchHeaders(sessionToken) as Record<string, string>) : undefined,
     });
@@ -136,11 +138,7 @@ export function usePlayableVideoUri(uri: string | undefined, sessionToken?: stri
     }
 
     if (absolute.startsWith("http://") || absolute.startsWith("https://")) {
-      const canStreamDirectly = absolute.includes("/api/statuses/media/");
-      if (canStreamDirectly) {
-        setPlayableUri(absolute);
-        return;
-      }
+      // Status media requires auth; download with Authorization (query-token streaming is unreliable on Android).
       const prepareRemote = async () => {
         try {
           const localUri = await getCachedVideoFile(absolute, sessionToken);

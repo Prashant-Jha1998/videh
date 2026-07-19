@@ -9,7 +9,10 @@ export async function saveVideoUriToLibrary(
   if (Platform.OS === "web") {
     const { downloadUrlToDevice } = await import("./web/webDownload");
     const headers: Record<string, string> = {};
-    if (sourceUri.includes("/api/chats/media/") && sessionToken) {
+    if (
+      (sourceUri.includes("/api/chats/media/") || sourceUri.includes("/api/statuses/media/"))
+      && sessionToken
+    ) {
       const { authFetchHeaders } = await import("./authenticatedMedia");
       Object.assign(headers, (authFetchHeaders(sessionToken) as Record<string, string>) ?? {});
     }
@@ -34,7 +37,10 @@ export async function saveVideoUriToLibrary(
       if (!cacheDir) return { ok: false, message: "Could not access app storage." };
       const path = `${cacheDir}download_video_${Date.now()}.mp4`;
       const headers: Record<string, string> = {};
-      if (sourceUri.includes("/api/chats/media/") && sessionToken) {
+      if (
+        (sourceUri.includes("/api/chats/media/") || sourceUri.includes("/api/statuses/media/"))
+        && sessionToken
+      ) {
         const { authFetchHeaders } = await import("./authenticatedMedia");
         Object.assign(headers, (authFetchHeaders(sessionToken) as Record<string, string>) ?? {});
       }

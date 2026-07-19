@@ -155,7 +155,7 @@ import {
   staticMapImageUrl,
 } from "@/lib/locationMessage";
 import { loadEnterIsSend, loadMediaVisibilityEnabled } from "@/lib/chatSettings";
-import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
+import { resolvePublicAssetUrl, withStatusMediaAuth } from "@/lib/publicAssetUrl";
 import {
   buildGroupSenderHeaderMap,
   filterGroupMentionMembers,
@@ -854,9 +854,12 @@ function StatusReplyStrip({
   sessionToken?: string | null;
   onPress: () => void;
 }) {
+  const colors = useColors();
   const accent = colors.primary;
   const subtitleColor = isMe ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.5)";
-  const resolvedThumb = thumbUri ? (resolvePublicAssetUrl(thumbUri) ?? thumbUri) : undefined;
+  const resolvedThumb = thumbUri
+    ? (withStatusMediaAuth(thumbUri, sessionToken) ?? resolvePublicAssetUrl(thumbUri) ?? thumbUri)
+    : undefined;
   return (
     <Pressable
       onPress={onPress}
@@ -883,7 +886,9 @@ function StatusReplyStrip({
         <Image
           source={{
             uri: resolvedThumb,
-            ...(sessionToken ? { headers: authFetchHeaders(sessionToken) } : {}),
+            ...(sessionToken
+              ? { headers: authFetchHeaders(sessionToken) as Record<string, string> }
+              : {}),
           }}
           style={styles.statusReplyThumb}
           contentFit="cover"
@@ -1295,36 +1300,50 @@ export default function ChatScreen() {
   const baseColors = useColors();
   const chatLook = useChatAppearance(chatId);
   const perChatThemed = Boolean(chatLook.perChatOverride?.themeId);
+  // Classic chat chrome (white/grey). App shell theme must NOT color every chat header.
+  const classicHeaderBg = chatLook.isDark ? "#1F2C34" : "#FFFFFF";
   const colors = useMemo(() => {
     const accent = chatLook.appearance.accent[0];
     const accentPair = chatLook.appearance.accent;
-    const themedHeader = baseColors.shellThemed || chatLook.isDark || perChatThemed;
     return {
       ...baseColors,
-      primary: accent,
-      accent: chatLook.isDark || perChatThemed ? accent : baseColors.accent,
-      tint: accent,
-      headerBg: themedHeader ? accent : baseColors.headerBg,
-      headerTitleColor: themedHeader ? "#FFFFFF" : baseColors.headerTitleColor,
-      headerIconColor: themedHeader ? "#FFFFFF" : baseColors.headerIconColor,
-      statusRing: accent,
-      onlineGreen: accent,
-      appThemeColors: accentPair,
+      primary: perChatThemed ? accent : baseColors.primary,
+      accent: perChatThemed ? accent : baseColors.accent,
+      tint: perChatThemed ? accent : baseColors.tint,
+      headerBg: perChatThemed ? accent : classicHeaderBg,
+      headerTitleColor: perChatThemed
+        ? "#FFFFFF"
+        : chatLook.isDark
+          ? "#E9EDEF"
+          : baseColors.foreground,
+      headerIconColor: perChatThemed
+        ? "#FFFFFF"
+        : chatLook.isDark
+          ? "#E9EDEF"
+          : "#111B21",
+      statusRing: perChatThemed ? accent : baseColors.statusRing,
+      onlineGreen: baseColors.onlineGreen,
+      appThemeColors: perChatThemed ? accentPair : baseColors.appThemeColors,
       chatBubbleSent: chatLook.chatBubbleSent,
       chatBubbleReceived: chatLook.chatBubbleReceived,
       chatBackground: chatLook.chatBackground,
+      // Prevent ThemedHeader from treating this screen as shell-themed.
+      shellThemed: perChatThemed ? true : false,
     };
-  }, [baseColors, chatLook, perChatThemed]);
-  const headerAccent =
-    baseColors.shellThemed || chatLook.isDark || perChatThemed
-      ? chatLook.appearance.accent
-      : (["#FFFFFF", "#FFFFFF"] as [string, string]);
+  }, [baseColors, chatLook, perChatThemed, classicHeaderBg]);
+  const headerAccent = perChatThemed
+    ? chatLook.appearance.accent
+    : ([classicHeaderBg, classicHeaderBg] as [string, string]);
   const headerIcon = colors.headerIconColor;
-  const chatHeaderTitleColor =
-    baseColors.shellThemed || chatLook.isDark || perChatThemed ? "#fff" : colors.foreground;
-  const chatHeaderStatusColor =
-    baseColors.shellThemed || chatLook.isDark || perChatThemed
-      ? "rgba(255,255,255,0.75)"
+  const chatHeaderTitleColor = perChatThemed
+    ? "#fff"
+    : chatLook.isDark
+      ? "#E9EDEF"
+      : colors.foreground;
+  const chatHeaderStatusColor = perChatThemed
+    ? "rgba(255,255,255,0.75)"
+    : chatLook.isDark
+      ? "rgba(255,255,255,0.65)"
       : colors.mutedForeground;
   const { chatFontScale, t } = useUiPreferences();
   const messageFallback = t("common.message");

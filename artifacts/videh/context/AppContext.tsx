@@ -258,13 +258,17 @@ function asDeletedMessage(m: Message): Message {
 
 function mapStatusReplyFields(m: any): Partial<Message> {
   if (!m.status_reply_id) return {};
+  const rawThumb = m.status_reply_media_url as string | undefined;
   return {
     statusReplyId: String(m.status_reply_id),
     statusReplyOwnerId: m.status_reply_owner_id != null ? String(m.status_reply_owner_id) : undefined,
     statusReplyOwnerName: m.status_reply_owner_name ?? undefined,
     statusReplyType: m.status_reply_type ?? undefined,
     statusReplyMediaUrl:
-      resolvePublicAssetUrl(m.status_reply_media_url) ?? m.status_reply_media_url ?? undefined,
+      withStatusMediaAuth(rawThumb, authSessionToken)
+      ?? resolvePublicAssetUrl(rawThumb)
+      ?? rawThumb
+      ?? undefined,
     statusReplyContent: m.status_reply_content ?? undefined,
     statusReplyBackgroundColor: m.status_reply_background_color ?? undefined,
   };
@@ -1551,6 +1555,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!data.success || !data.chatId) throw new Error("Failed to create chat");
 
     const realId = String(data.chatId);
+    // Ensure the chat exists in local state before navigation / sendMessage (story replies, new DMs).
+    setChats((prev) => {
+      if (prev.some((c) => String(c.id) === realId || (!c.isGroup && c.otherUserId === otherUserId))) {
+        return prev;
+      }
+      const placeholder: Chat = {
+        id: realId,
+        name: otherName || "Chat",
+        avatar: otherAvatar,
+        otherUserId,
+        isGroup: false,
+        messages: [],
+        unreadCount: 0,
+        lastMessageTime: Date.now(),
+      };
+      return [placeholder, ...prev];
+    });
     return realId;
   }, [chats]);
 

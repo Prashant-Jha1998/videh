@@ -20,12 +20,15 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DismissibleModal } from "@/components/DismissibleModal";
 import { useApp } from "@/context/AppContext";
 import type { Status } from "@/context/AppContext";
+import { useChatKeyboard } from "@/hooks/useChatKeyboard";
 import { mapApiStatusRow } from "@/lib/statusReply";
 import { getApiUrl } from "@/lib/api";
+import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { resolvePublicAssetUrl, withStatusMediaAuth } from "@/lib/publicAssetUrl";
 import { saveStatusToGalleryWithAlert } from "@/lib/saveStatusToLibrary";
 import { usePlayableAudioUri } from "@/lib/usePlayableAudioUri";
@@ -205,8 +208,12 @@ export default function ViewStatusScreen() {
   const params = useLocalSearchParams<{ ids?: string; id?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { keyboardVisible } = useChatKeyboard();
   const { statuses, user, createDirectChat, sendMessage, markStatusViewedLocally } = useApp();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+  const mediaAuthHeaders = user?.sessionToken
+    ? (authFetchHeaders(user.sessionToken) as Record<string, string>)
+    : undefined;
 
   const ids = params.ids
     ? params.ids.split(",").filter(Boolean)
@@ -257,7 +264,13 @@ export default function ViewStatusScreen() {
         .then((r) => r.json())
         .then((data: { success?: boolean; status?: Record<string, unknown> }) => {
           if (!data.success || !data.status) return;
-          const mapped = mapApiStatusRow(data.status, user.dbId!, user.name, user.avatar);
+          const mapped = mapApiStatusRow(
+            data.status,
+            user.dbId!,
+            user.name,
+            user.avatar,
+            user.sessionToken,
+          );
           setFetchedStatuses((prev) => ({ ...prev, [id]: mapped }));
         })
         .catch(() => {});
@@ -524,7 +537,8 @@ export default function ViewStatusScreen() {
       });
       setReply("");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.push({ pathname: "/chat/[id]", params: { id: chatId, name: currentStatus.userName ?? "Contact" } });
+      // Replace the story viewer so chat mounts cleanly (avoids nested-stack ErrorBoundary).
+      router.replace({ pathname: "/chat/[id]", params: { id: chatId, name: currentStatus.userName ?? "Contact" } });
     } catch {
       Alert.alert("Error", "Could not send reply.");
     }
@@ -667,14 +681,20 @@ export default function ViewStatusScreen() {
                 />
               ) : useNativeImageFallback ? (
                 <NativeImage
-                  source={{ uri: resolvedMediaUrl }}
+                  source={{
+                    uri: resolvedMediaUrl,
+                    ...(mediaAuthHeaders ? { headers: mediaAuthHeaders } : {}),
+                  }}
                   style={{ width: W, height: H * 0.75 }}
                   resizeMode="contain"
                   onError={() => setMediaLoadFailed(true)}
                 />
               ) : (
                 <Image
-                  source={{ uri: resolvedMediaUrl }}
+                  source={{
+                    uri: resolvedMediaUrl,
+                    ...(mediaAuthHeaders ? { headers: mediaAuthHeaders } : {}),
+                  }}
                   style={{ width: W, height: H * 0.75 }}
                   contentFit="contain"
                   onError={() => setUseNativeImageFallback(true)}
@@ -729,81 +749,83 @@ export default function ViewStatusScreen() {
         </Pressable>
       </View>
 
-      {/* ── BOTTOM ── */}
-      <View style={[styles.bottomSection, { paddingBottom: insets.bottom + 12 }]}>
+      {/* ── BOTTOM (sticky above keyboard) ── */}
+      <KeyboardStickyView enabled offset={{ closed: 0, opened: 0 }}>
+        <View style={[styles.bottomSection, { paddingBottom: keyboardVisible ? 12 : insets.bottom + 12 }]}>
 
-        {/* Reaction picker (others' status) */}
-        {showReactions && !isMyStatus && (
-          <View style={styles.reactionPicker}>
-            {REACTIONS.map((emoji) => (
-              <TouchableOpacity
-                key={emoji}
-                style={[styles.reactionBtn, myReaction === emoji && styles.reactionBtnActive]}
-                onPress={() => sendReaction(emoji)}
-              >
-                <Text style={styles.reactionEmoji}>{emoji}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {isMyStatus ? (
-          /* Own status: viewers bar */
-          <TouchableOpacity
-            style={styles.viewersBar}
-            onPress={() => router.push({ pathname: "/status/viewers", params: { statusId: currentStatus.id } })}
-            activeOpacity={0.8}
-          >
-            <View style={styles.viewersLeft}>
-              <Ionicons name="eye-outline" size={20} color="rgba(255,255,255,0.9)" />
-              <Text style={styles.viewersCount}>{viewCount}</Text>
-            </View>
-            {totalReactions > 0 && (
-              <View style={styles.reactionsSummary}>
-                {Object.entries(reactionSummary).map(([emoji, count]) => (
-                  <View key={emoji} style={styles.reactionChip}>
-                    <Text style={styles.reactionChipEmoji}>{emoji}</Text>
-                    <Text style={styles.reactionChipCount}>{count}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-            <Ionicons name="chevron-up" size={16} color="rgba(255,255,255,0.6)" />
-          </TouchableOpacity>
-        ) : (
-          /* Others' status: reply + reaction */
-          <View style={styles.replyRow}>
-            <View style={[styles.replyBar, { flex: 1 }]}>
-              <TextInput
-                style={styles.replyInput}
-                value={reply}
-                onChangeText={setReply}
-                placeholder={isBoostedStory ? "Reply to this boosted story..." : `Reply to ${currentStatus.userName}...`}
-                placeholderTextColor="rgba(20,19,31,0.45)"
-                cursorColor="#059669"
-                selectionColor="rgba(91,79,232,0.35)"
-                onFocus={pauseStory}
-                onBlur={resumeStory}
-                returnKeyType="send"
-                onSubmitEditing={sendReply}
-                autoCorrect
-                autoCapitalize="sentences"
-              />
-              {reply.length > 0 ? (
-                <TouchableOpacity onPress={sendReply} style={styles.sendBtn}>
-                  <Ionicons name="send" size={18} color="#fff" />
+          {/* Reaction picker (others' status) */}
+          {showReactions && !isMyStatus && (
+            <View style={styles.reactionPicker}>
+              {REACTIONS.map((emoji) => (
+                <TouchableOpacity
+                  key={emoji}
+                  style={[styles.reactionBtn, myReaction === emoji && styles.reactionBtnActive]}
+                  onPress={() => sendReaction(emoji)}
+                >
+                  <Text style={styles.reactionEmoji}>{emoji}</Text>
                 </TouchableOpacity>
-              ) : null}
+              ))}
             </View>
+          )}
+
+          {isMyStatus ? (
+            /* Own status: viewers bar */
             <TouchableOpacity
-              style={[styles.reactionToggle, myReaction ? styles.reactionToggleActive : {}]}
-              onPress={() => { Haptics.selectionAsync(); setShowReactions((v) => !v); }}
+              style={styles.viewersBar}
+              onPress={() => router.push({ pathname: "/status/viewers", params: { statusId: currentStatus.id } })}
+              activeOpacity={0.8}
             >
-              <Text style={styles.reactionToggleText}>{myReaction ?? "❤️"}</Text>
+              <View style={styles.viewersLeft}>
+                <Ionicons name="eye-outline" size={20} color="rgba(255,255,255,0.9)" />
+                <Text style={styles.viewersCount}>{viewCount}</Text>
+              </View>
+              {totalReactions > 0 && (
+                <View style={styles.reactionsSummary}>
+                  {Object.entries(reactionSummary).map(([emoji, count]) => (
+                    <View key={emoji} style={styles.reactionChip}>
+                      <Text style={styles.reactionChipEmoji}>{emoji}</Text>
+                      <Text style={styles.reactionChipCount}>{count}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              <Ionicons name="chevron-up" size={16} color="rgba(255,255,255,0.6)" />
             </TouchableOpacity>
-          </View>
-        )}
-      </View>
+          ) : (
+            /* Others' status: reply + reaction */
+            <View style={styles.replyRow}>
+              <View style={[styles.replyBar, { flex: 1 }]}>
+                <TextInput
+                  style={styles.replyInput}
+                  value={reply}
+                  onChangeText={setReply}
+                  placeholder={isBoostedStory ? "Reply to this boosted story..." : `Reply to ${currentStatus.userName}...`}
+                  placeholderTextColor="rgba(20,19,31,0.45)"
+                  cursorColor="#059669"
+                  selectionColor="rgba(91,79,232,0.35)"
+                  onFocus={pauseStory}
+                  onBlur={resumeStory}
+                  returnKeyType="send"
+                  onSubmitEditing={sendReply}
+                  autoCorrect
+                  autoCapitalize="sentences"
+                />
+                {reply.length > 0 ? (
+                  <TouchableOpacity onPress={sendReply} style={styles.sendBtn}>
+                    <Ionicons name="send" size={18} color="#fff" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              <TouchableOpacity
+                style={[styles.reactionToggle, myReaction ? styles.reactionToggleActive : {}]}
+                onPress={() => { Haptics.selectionAsync(); setShowReactions((v) => !v); }}
+              >
+                <Text style={styles.reactionToggleText}>{myReaction ?? "❤️"}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </KeyboardStickyView>
 
       {/* ── 3-DOT MENU MODAL ── */}
       <DismissibleModal

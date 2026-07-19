@@ -10,7 +10,10 @@ export async function saveImageUriToLibrary(
     const { downloadUrlToDevice } = await import("./web/webDownload");
     const ext = sourceUri.toLowerCase().includes(".png") ? "png" : sourceUri.toLowerCase().includes(".gif") ? "gif" : "jpg";
     const headers: Record<string, string> = {};
-    if (sourceUri.includes("/api/chats/media/") && sessionToken) {
+    if (
+      (sourceUri.includes("/api/chats/media/") || sourceUri.includes("/api/statuses/media/"))
+      && sessionToken
+    ) {
       const { authFetchHeaders } = await import("./authenticatedMedia");
       Object.assign(headers, (authFetchHeaders(sessionToken) as Record<string, string>) ?? {});
     }
@@ -36,7 +39,10 @@ export async function saveImageUriToLibrary(
       const ext = sourceUri.toLowerCase().includes(".gif") ? "gif" : sourceUri.toLowerCase().includes(".png") ? "png" : "jpg";
       const path = `${cacheDir}download_image_${Date.now()}.${ext}`;
       const headers: Record<string, string> = {};
-      if (sourceUri.includes("/api/chats/media/") && sessionToken) {
+      if (
+        (sourceUri.includes("/api/chats/media/") || sourceUri.includes("/api/statuses/media/"))
+        && sessionToken
+      ) {
         const { authFetchHeaders } = await import("./authenticatedMedia");
         Object.assign(headers, (authFetchHeaders(sessionToken) as Record<string, string>) ?? {});
       }

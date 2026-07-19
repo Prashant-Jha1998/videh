@@ -72,7 +72,9 @@ async function getCachedAudioFile(absoluteUrl: string, sessionToken?: string | n
     const existing = await FileSystem.getInfoAsync(target);
     if (existing.exists && (existing.size ?? 0) > 0) return target;
 
-    const needsAuth = absoluteUrl.includes("/api/chats/media/") && Boolean(sessionToken);
+    const needsAuth =
+      (absoluteUrl.includes("/api/chats/media/") || absoluteUrl.includes("/api/statuses/media/"))
+      && Boolean(sessionToken);
     const res = await FileSystem.downloadAsync(absoluteUrl, target, {
       headers: needsAuth ? (authFetchHeaders(sessionToken) as Record<string, string>) : undefined,
     });
