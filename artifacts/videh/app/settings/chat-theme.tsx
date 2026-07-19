@@ -54,13 +54,20 @@ export default function ChatThemeScreen() {
 
   const save = async () => {
     if (!chatId) return;
-    await setPerChatTheme(chatId, {
+    const payload = {
       themeId,
       ...(bubbleSent && bubbleReceived ? { bubbleSent, bubbleReceived } : {}),
       ...(animated !== "none" ? { animatedWallpaper: animated } : {}),
       label: appearance.name,
-    });
+    };
+    if (__DEV__) {
+      console.log(`[chat-theme] save chatId=${chatId}`, payload);
+    }
+    await setPerChatTheme(chatId, payload);
     refreshPerChatThemes();
+    if (__DEV__) {
+      console.log(`[chat-theme] saved OK chatId=${chatId} themeId=${themeId}`);
+    }
     Alert.alert("Saved", `Theme for ${name ?? "this chat"} updated.`);
     router.back();
   };

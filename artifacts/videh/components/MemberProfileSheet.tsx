@@ -64,12 +64,12 @@ export function MemberProfileSheet({
 
   const initials = (member.name || "?").slice(0, 2).toUpperCase();
   const hue = ((member.name ?? "?").charCodeAt(0) * 37) % 360;
-  const presence =
-    formatPresenceSubtitle({
-      canSee: true,
-      isOnline: Boolean(member.is_online),
-      lastSeen: member.last_seen ?? null,
-    }) || "last seen recently";
+  const presence = formatPresenceSubtitle({
+    canSee: true,
+    isOnline: Boolean(member.is_online),
+    lastSeen: member.last_seen ?? null,
+    canSeeLastSeen: member.last_seen != null,
+  });
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>

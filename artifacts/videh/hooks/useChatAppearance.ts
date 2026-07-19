@@ -5,6 +5,7 @@ import { useResolvedColorScheme } from "@/hooks/useResolvedColorScheme";
 import { getPerChatTheme, type PerChatThemeOverride } from "@/lib/perChatTheme";
 import {
   getThemeAppearanceById,
+  mixHex,
   resolveBubbles,
   resolveChatBackground,
   type AnimatedWallpaperId,
@@ -81,19 +82,38 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
     const themeId = perChat?.themeId ?? appThemeId;
     const appearance = getThemeAppearanceById(themeId);
     const bubbleOverride = perChatBubbleOverride(perChat) ?? customBubbleOverride;
+    const accent = appearance.accent[0];
+    const hasPerChatTheme = Boolean(perChat?.themeId);
 
-    const { sent, received } = resolveBubbles(appearance, isDark, bubbleOverride);
+    let { sent, received } = resolveBubbles(appearance, isDark, bubbleOverride);
+    // Accent-only per-chat save uses very pale derived bubbles — strengthen so the theme is visible.
+    if (hasPerChatTheme && !perChatBubbleOverride(perChat)) {
+      sent = isDark ? mixHex(accent, "#12101F", 0.42) : mixHex(accent, "#FFFFFF", 0.52);
+      received = isDark ? "#1E1D2E" : "#FFFFFF";
+    }
+
     const animatedWallpaper =
       perChat?.animatedWallpaper
       ?? appearance.animatedWallpaper
       ?? globalAnimatedWallpaper
       ?? "none";
 
+    // Per-chat accent must tint the background; do not let global wallpaper color override it.
+    const chatBackground = hasPerChatTheme
+      ? (isDark ? mixHex(accent, "#12101F", 0.82) : mixHex(accent, "#F7F5FF", 0.86))
+      : resolveChatBackground(appearance, isDark, chatWallpaperColor);
+
+    if (__DEV__) {
+      console.log(
+        `[chat-theme] apply chatId=${chatId ?? "null"} themeId=${themeId} perChat=${hasPerChatTheme} bg=${chatBackground} sent=${sent}`,
+      );
+    }
+
     return {
       appearance,
       chatBubbleSent: sent,
       chatBubbleReceived: received,
-      chatBackground: resolveChatBackground(appearance, isDark, chatWallpaperColor),
+      chatBackground,
       animatedWallpaper,
       perChatOverride: perChat,
       isDark,
@@ -105,5 +125,6 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
     globalAnimatedWallpaper,
     customBubbleOverride,
     isDark,
+    chatId,
   ]);
 }

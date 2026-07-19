@@ -1294,14 +1294,15 @@ export default function ChatScreen() {
 
   const baseColors = useColors();
   const chatLook = useChatAppearance(chatId);
+  const perChatThemed = Boolean(chatLook.perChatOverride?.themeId);
   const colors = useMemo(() => {
     const accent = chatLook.appearance.accent[0];
     const accentPair = chatLook.appearance.accent;
-    const themedHeader = baseColors.shellThemed || chatLook.isDark;
+    const themedHeader = baseColors.shellThemed || chatLook.isDark || perChatThemed;
     return {
       ...baseColors,
       primary: accent,
-      accent: chatLook.isDark ? accent : baseColors.accent,
+      accent: chatLook.isDark || perChatThemed ? accent : baseColors.accent,
       tint: accent,
       headerBg: themedHeader ? accent : baseColors.headerBg,
       headerTitleColor: themedHeader ? "#FFFFFF" : baseColors.headerTitleColor,
@@ -1313,15 +1314,18 @@ export default function ChatScreen() {
       chatBubbleReceived: chatLook.chatBubbleReceived,
       chatBackground: chatLook.chatBackground,
     };
-  }, [baseColors, chatLook]);
+  }, [baseColors, chatLook, perChatThemed]);
   const headerAccent =
-    baseColors.shellThemed || chatLook.isDark
+    baseColors.shellThemed || chatLook.isDark || perChatThemed
       ? chatLook.appearance.accent
       : (["#FFFFFF", "#FFFFFF"] as [string, string]);
   const headerIcon = colors.headerIconColor;
-  const chatHeaderTitleColor = baseColors.shellThemed || chatLook.isDark ? "#fff" : colors.foreground;
+  const chatHeaderTitleColor =
+    baseColors.shellThemed || chatLook.isDark || perChatThemed ? "#fff" : colors.foreground;
   const chatHeaderStatusColor =
-    baseColors.shellThemed || chatLook.isDark ? "rgba(255,255,255,0.75)" : colors.mutedForeground;
+    baseColors.shellThemed || chatLook.isDark || perChatThemed
+      ? "rgba(255,255,255,0.75)"
+      : colors.mutedForeground;
   const { chatFontScale, t } = useUiPreferences();
   const messageFallback = t("common.message");
   const insets = useSafeAreaInsets();
@@ -1448,8 +1452,8 @@ export default function ChatScreen() {
       const appStateSub = AppState.addEventListener("change", (state) => {
         if (state === "active") pollMessages(true);
       });
-      const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
       const loadPresence = async () => {
+        const { peerId, isGroup: isGroupChat } = chatMetaRef.current;
         if (!peerId || isGroupChat) {
           setPeerPresence(null);
           return;
@@ -1466,7 +1470,7 @@ export default function ChatScreen() {
         }
       };
       void loadPresence();
-      const presenceTimer = !isGroupChat && peerId ? setInterval(loadPresence, 12000) : null;
+      const presenceTimer = setInterval(loadPresence, 12000);
 
       return () => {
         appStateSub.remove();
@@ -1475,7 +1479,7 @@ export default function ChatScreen() {
         reportRemoteTyping(chatId, []);
         clearInterval(msgTimer);
         clearInterval(typingTimer);
-        if (presenceTimer) clearInterval(presenceTimer);
+        clearInterval(presenceTimer);
         void saveChatScrollSnapshot(user?.dbId, chatId, {
           readingHistory: readingHistoryRef.current,
           scrollOffset: lastScrollOffsetRef.current,
@@ -2451,14 +2455,29 @@ export default function ChatScreen() {
       .catch(() => {});
   }, [chatId, chat?.isGroup, user?.dbId, user?.sessionToken]);
 
-  // Fetch wallpaper for this chat
+  // Fetch wallpaper for this chat (always clear when switching chats / no wallpaper)
   useEffect(() => {
-    if (!chatId || !user?.dbId) return;
-    fetch(`${BASE_URL}/api/chats/${chatId}/wallpaper?userId=${user.dbId}`)
+    if (!chatId || !user?.dbId) {
+      setWallpaper(null);
+      return;
+    }
+    setWallpaper(null);
+    let cancelled = false;
+    fetch(`${BASE_URL}/api/chats/${chatId}/wallpaper?userId=${user.dbId}`, {
+      headers: user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {},
+    })
       .then((r) => r.json())
-      .then((d) => { if (d.success && d.wallpaper) setWallpaper(d.wallpaper); })
-      .catch(() => {});
-  }, [chatId, user?.dbId]);
+      .then((d) => {
+        if (cancelled) return;
+        if (d.success) setWallpaper(d.wallpaper ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setWallpaper(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [chatId, user?.dbId, user?.sessionToken]);
 
   const insertEmoji = useCallback((emoji: string) => {
     const current = editTarget ? editText : text;

@@ -16,6 +16,7 @@ import { useColors } from "@/hooks/useColors";
 import { ThemedHeader } from "@/components/ThemedHeader";
 import { useApp } from "@/context/AppContext";
 import { backupChatsToFile, exportChatsToFile } from "@/lib/chatExport";
+import { markBackupCompleted } from "@/lib/chatBackupSchedule";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import {
   CHAT_STORAGE,
@@ -118,6 +119,7 @@ export default function ChatsSettingsScreen() {
     setBusy("backup");
     try {
       const path = await backupChatsToFile(chats, myName);
+      await markBackupCompleted();
       Alert.alert(t("chats.backupNow"), `Backup saved.\n${path}`);
     } catch (e) {
       Alert.alert(t("chats.backupNow"), e instanceof Error ? e.message : "Backup failed.");
@@ -275,19 +277,28 @@ export default function ChatsSettingsScreen() {
             label={t("chats.backupLocal")}
             value={backup}
             onPress={() =>
-              Alert.alert(t("chats.backupLocal"), "", [
-                ...BACKUP_OPTIONS.map((b) => ({
-                  text: b,
-                  onPress: () => {
-                    setBackup(b);
-                    void saveOptionalString(CHAT_STORAGE.backup, b);
-                  },
-                })),
-                { text: t("common.cancel"), style: "cancel" },
-              ])
+              Alert.alert(
+                t("chats.backupLocal"),
+                "Auto-backup saves a local JSON file on this device when the app opens, on the schedule you pick.",
+                [
+                  ...BACKUP_OPTIONS.map((b) => ({
+                    text: b,
+                    onPress: () => {
+                      setBackup(b);
+                      void saveOptionalString(CHAT_STORAGE.backup, b);
+                    },
+                  })),
+                  { text: t("common.cancel"), style: "cancel" },
+                ],
+              )
             }
             colors={colors}
           />
+          <Text style={[styles.backupHint, { color: colors.mutedForeground }]}>
+            {backup === "Never"
+              ? "Auto-backup is off. Use Backup now anytime."
+              : `Auto-backup: ${backup.toLowerCase()} when you open the app.`}
+          </Text>
           <TouchableOpacity
             style={styles.backupBtn}
             onPress={handleBackupNow}
@@ -408,6 +419,7 @@ const styles = StyleSheet.create({
   rowHint: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
   rowRight: { flexDirection: "row", alignItems: "center", gap: 4, marginLeft: "auto" },
   rowValue: { fontSize: 14, fontFamily: "Inter_400Regular" },
+  backupHint: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 4, marginBottom: 4 },
   backupBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 10, borderTopWidth: 0.5 },
   backupBtnText: { fontSize: 15, fontFamily: "Inter_500Medium" },
   historyRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 },

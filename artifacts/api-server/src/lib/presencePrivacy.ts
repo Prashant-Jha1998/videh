@@ -135,6 +135,8 @@ export type PresencePayload = {
   canSee: boolean;
   isOnline: boolean;
   lastSeen: string | null;
+  /** False when viewer is not allowed to see last-seen (do not invent "recently"). */
+  canSeeLastSeen: boolean;
 };
 
 /** Clients heartbeat every ~45s; treat as offline after missing ~2 heartbeats. */
@@ -149,7 +151,7 @@ export function isEffectivelyOnline(isOnlineFlag: boolean, lastSeen: Date | stri
 }
 
 export async function getPresenceForViewer(viewerId: number, targetId: number): Promise<PresencePayload> {
-  const hidden: PresencePayload = { canSee: false, isOnline: false, lastSeen: null };
+  const hidden: PresencePayload = { canSee: false, isOnline: false, lastSeen: null, canSeeLastSeen: false };
   if (viewerId === targetId) {
     const r = await query(`SELECT is_online, last_seen FROM users WHERE id = $1`, [targetId]);
     const row = r.rows[0];
@@ -158,6 +160,7 @@ export async function getPresenceForViewer(viewerId: number, targetId: number): 
       canSee: true,
       isOnline: isEffectivelyOnline(Boolean(row?.is_online), lastSeen),
       lastSeen: lastSeen ? lastSeen.toISOString() : null,
+      canSeeLastSeen: true,
     };
   }
 
@@ -176,6 +179,7 @@ export async function getPresenceForViewer(viewerId: number, targetId: number): 
     canSee: true,
     isOnline: seeOnline ? isEffectivelyOnline(Boolean(row.is_online), lastSeen) : false,
     lastSeen: seeLastSeen && lastSeen ? lastSeen.toISOString() : null,
+    canSeeLastSeen: seeLastSeen,
   };
 }
 

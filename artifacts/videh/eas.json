@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v168-chat-scroll-fix"
+        "key": "apk-release-v169-audit-bugfixes"
       }
     },
     "production": {

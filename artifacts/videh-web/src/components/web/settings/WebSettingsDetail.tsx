@@ -608,9 +608,16 @@ function SosSection({ title, token }: { title: string; token: string }) {
 
   const addContact = async () => {
     if (!name.trim()) return;
+    const digits = phone.replace(/\D/g, "");
+    let local = digits;
+    if (digits.startsWith("91") && digits.length === 12) local = digits.slice(2);
+    if (!/^[6-9]\d{9}$/.test(local)) {
+      alert("Phone must be +91 followed by exactly 10 digits (Indian mobile).");
+      return;
+    }
     setAdding(true);
     try {
-      await webApi.addSosContact(token, { contactName: name.trim(), contactPhone: phone.trim() || undefined });
+      await webApi.addSosContact(token, { contactName: name.trim(), contactPhone: `+91${local}` });
       setName("");
       setPhone("");
       await load();
@@ -657,10 +664,15 @@ function SosSection({ title, token }: { title: string; token: string }) {
       <SettingsSection label="Add contact">
         <div className="vs-form">
           <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} className="vs-input" />
-          <input placeholder="Phone (optional)" value={phone} onChange={(e) => setPhone(e.target.value)} className="vs-input" />
+          <input
+            placeholder="+91 10-digit mobile"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            className="vs-input"
+          />
           <button
             type="button"
-            disabled={adding || !name.trim()}
+            disabled={adding || !name.trim() || !phone.trim()}
             onClick={() => void addContact()}
             className="vs-btn vs-btn--primary"
           >

@@ -100,6 +100,21 @@ export async function exportChatsToFile(chats: Chat[], myName: string): Promise<
   return writeAndShare(`videh-chats-${stamp}.txt`, text, "text/plain", "Export Videh chats");
 }
 
+async function writeBackupFile(filename: string, contents: string): Promise<string> {
+  const dir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? "";
+  if (!dir) throw new Error("No writable storage directory.");
+  const path = `${dir}${filename}`;
+  await FileSystem.writeAsStringAsync(path, contents, { encoding: FileSystem.EncodingType.UTF8 });
+  return path;
+}
+
+/** Writes a JSON backup locally without opening the share sheet (for scheduled auto-backup). */
+export async function backupChatsQuietly(chats: Chat[], myName: string): Promise<string> {
+  const json = buildChatsJsonBackup(chats, myName);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return writeBackupFile(`videh-backup-${stamp}.json`, json);
+}
+
 /** Writes a JSON backup of all chats to local storage and offers to share it. */
 export async function backupChatsToFile(chats: Chat[], myName: string): Promise<string> {
   const json = buildChatsJsonBackup(chats, myName);

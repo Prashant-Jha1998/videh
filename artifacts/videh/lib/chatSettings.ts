@@ -8,6 +8,7 @@ export const CHAT_STORAGE = {
   mediaVisibility: "mediaVisibility",
   emojiVariant: "emojiVariant",
   backup: "chatBackupFreq",
+  backupLastAt: "chatBackupLastAt",
 } as const;
 
 export type ChatThemeChoice = "system" | "light" | "dark";

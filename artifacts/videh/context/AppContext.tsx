@@ -48,6 +48,7 @@ import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
 import { encodeVoiceMessageText, stripWaveformMeta } from "@/lib/voiceWaveform";
 import { messageReplyPreviewText } from "@/lib/messageReplyPreview";
 import { messageFromStatusReplyMeta, type StatusReplyMeta } from "@/lib/statusReply";
+import { runScheduledChatBackupIfDue } from "@/lib/chatBackupSchedule";
 import {
   albumChatPreview,
   albumMessageDisplayText,
@@ -632,14 +633,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setChats((prev) => mergeOutboxIntoChats(prev, retryEntries));
 
     for (const entry of retryEntries) {
+      let resolvedReply: number | undefined;
+      if (entry.replyToId && !entry.replyToId.startsWith("tmp_")) {
+        if (/^[0-9a-f-]{36}$/i.test(entry.replyToId)) {
+          const chat = chatsForPersistRef.current.find((c) => c.id === entry.chatId);
+          const local = chat?.messages.find(
+            (m) => m.id === entry.replyToId || m.clientMessageId === entry.replyToId,
+          );
+          const serverId = local?.serverMessageId ? Number(local.serverMessageId) : NaN;
+          resolvedReply = Number.isFinite(serverId) ? serverId : undefined;
+        } else {
+          const n = Number(entry.replyToId);
+          resolvedReply = Number.isFinite(n) ? n : undefined;
+        }
+      }
       const payload = {
         senderId: userId,
         content: entry.text,
         type: "text",
         clientMessageId: entry.clientMessageId,
-        replyToId: entry.replyToId && !entry.replyToId.startsWith("tmp_") && !/^[0-9a-f-]{36}$/i.test(entry.replyToId)
-          ? Number(entry.replyToId)
-          : undefined,
+        replyToId: resolvedReply,
         statusReplyId: entry.statusReplyId ? Number(entry.statusReplyId) : undefined,
       };
 
@@ -1265,7 +1278,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           registerPushTokenWithServer(activeUid).catch(() => {});
         }
         void retryPendingTextOutbox(activeUid);
-      } else if (nextState === "background" || nextState === "inactive") {
+        const snapshot = chatsForPersistRef.current;
+        const myName = userRef.current?.name || "Me";
+        if (snapshot.length > 0) {
+          void runScheduledChatBackupIfDue(snapshot, myName).catch(() => {});
+        }
+      } else if (nextState === "background") {
+        // Do not mark offline on iOS/Android "inactive" (control center, pickers, brief blur).
         api(`/users/${activeUid}/offline`, { method: "POST" }).catch(() => {});
         const uid = userRef.current?.dbId;
         if (uid) schedulePersistChatListCache(uid, chatsForPersistRef.current);
@@ -1618,7 +1637,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ...c,
             lastMessage: preview || c.lastMessage,
             lastMessageTime: Date.now(),
-            unreadCount: Math.max(c.unreadCount ?? 0, 1),
+            unreadCount: (c.unreadCount ?? 0) + 1,
           };
         }),
       );
@@ -1705,7 +1724,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             messages: nextMsgs.sort((a, b) => a.timestamp - b.timestamp),
             lastMessage: preview || c.lastMessage,
             lastMessageTime: Date.now(),
-            unreadCount: Math.max(c.unreadCount ?? 0, 1),
+            unreadCount: (c.unreadCount ?? 0) + 1,
           };
         }
 
@@ -1727,7 +1746,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ...c,
             lastMessage: preview || c.lastMessage,
             lastMessageTime: Date.now(),
-            unreadCount: Math.max(c.unreadCount ?? 0, 1),
+            unreadCount: (c.unreadCount ?? 0) + 1,
           };
         }
 
@@ -1740,7 +1759,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           messages: merged,
           lastMessage: preview || c.lastMessage,
           lastMessageTime: now,
-          unreadCount: Math.max(c.unreadCount ?? 0, 1),
+          unreadCount: (c.unreadCount ?? 0) + 1,
         };
       }),
     );
@@ -2252,6 +2271,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             senderId?: string | number;
             senderName?: string;
             deleted?: boolean;
+            hiddenForMe?: boolean;
           };
         };
         const cid = parsed.chatId != null ? String(parsed.chatId) : null;
@@ -2284,6 +2304,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   }
                 : c,
             ),
+          );
+          return;
+        }
+
+        if (payload.hiddenForMe && cid && payload.messageId != null) {
+          const hiddenId = String(payload.messageId);
+          setChats((prev) =>
+            prev.map((c) => {
+              if (c.id !== cid) return c;
+              const messages = c.messages.filter((m) => m.id !== hiddenId);
+              const last = [...messages].reverse().find((m) => m.type !== "deleted");
+              return {
+                ...c,
+                messages,
+                lastMessage: messagePreviewText(last),
+                lastMessageTime: last?.timestamp ?? c.lastMessageTime,
+              };
+            }),
           );
           return;
         }
@@ -2548,9 +2586,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         schedulePersistChatListCache(u.dbId!, listSnapshot);
         void flushChatListCache();
 
-        const resolveReplyId = () => {
+        const resolveReplyId = (): number | undefined => {
           if (!replyToId) return undefined;
-          if (replyToId.startsWith("tmp_") || /^[0-9a-f-]{36}$/i.test(replyToId)) return undefined;
+          if (replyToId.startsWith("tmp_")) return undefined;
+          // Own messages keep UUID client ids locally — map to server id for the API.
+          if (/^[0-9a-f-]{36}$/i.test(replyToId)) {
+            const chat = chatsForPersistRef.current.find((c) => c.id === chatId);
+            const local = chat?.messages.find(
+              (m) => m.id === replyToId || m.clientMessageId === replyToId,
+            );
+            const serverId = local?.serverMessageId ? Number(local.serverMessageId) : NaN;
+            return Number.isFinite(serverId) ? serverId : undefined;
+          }
           const n = Number(replyToId);
           return Number.isFinite(n) ? n : undefined;
         };
@@ -3665,7 +3712,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [loadChats, loadMessages]);
 
   const pinChat = useCallback((chatId: string) => {
-    setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, isPinned: !c.isPinned } : c));
+    let nextPinned = false;
+    setChats((prev) => prev.map((c) => {
+      if (c.id !== chatId) return c;
+      nextPinned = !c.isPinned;
+      return { ...c, isPinned: nextPinned };
+    }));
+    const u = userRef.current;
+    if (u?.dbId) {
+      api(`/chats/${chatId}/pin`, {
+        method: "PATCH",
+        body: JSON.stringify({ userId: u.dbId, pinned: nextPinned }),
+      }).catch(() => {});
+    }
   }, []);
 
   const muteChat = useCallback((chatId: string) => {

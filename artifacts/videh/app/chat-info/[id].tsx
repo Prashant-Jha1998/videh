@@ -166,6 +166,10 @@ export default function ChatInfoScreen() {
   const isGroup = serverIsGroup ?? chat?.isGroup ?? false;
 
   const [muted, setMuted] = useState(chat?.isMuted ?? false);
+
+  useEffect(() => {
+    setMuted(chat?.isMuted ?? false);
+  }, [chat?.isMuted, id]);
   const [disappearing, setDisappearing] = useState<number | null>(
     bootCache?.disappearing ?? chat?.disappearAfterSeconds ?? null,
   );
@@ -482,7 +486,6 @@ export default function ChatInfoScreen() {
 
   const toggleMute = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setMuted((v) => !v);
     muteChat(id!);
   };
 
@@ -934,9 +937,11 @@ export default function ChatInfoScreen() {
   const getLastSeenText = (m: GroupMember) =>
     formatPresenceSubtitle({
       canSee: true,
-      isOnline: m.is_online,
+      isOnline: !!m.is_online,
       lastSeen: m.last_seen ?? null,
-    }) || "last seen recently";
+      // If the API omitted last_seen, do not invent "last seen recently".
+      canSeeLastSeen: m.last_seen != null,
+    });
 
   const chatLastSeen = members.find(m => m.id !== user?.dbId);
 
@@ -984,7 +989,7 @@ export default function ChatInfoScreen() {
           <Text style={[styles.contactName, { color: colors.foreground }]}>{name ?? chat?.name}</Text>
           {!isGroup && (
             <Text style={[styles.contactSub, { color: colors.mutedForeground }]}>
-              {chatLastSeen ? getLastSeenText(chatLastSeen) : (chat?.isOnline ? "online" : "last seen recently")}
+              {chatLastSeen ? getLastSeenText(chatLastSeen) : (chat?.isOnline ? "online" : "")}
             </Text>
           )}
           {isGroup && (
@@ -1226,9 +1231,14 @@ export default function ChatInfoScreen() {
           <InfoRow
             icon="pin-outline"
             iconBg="#2196F3"
-            label="Pin chat"
+            label={chat?.isPinned ? "Unpin chat" : "Pin chat"}
             colors={colors}
-            onPress={() => { pinChat(id!); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); Alert.alert("Pinned", "Chat has been pinned."); }}
+            onPress={() => {
+              const willPin = !chat?.isPinned;
+              pinChat(id!);
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              Alert.alert(willPin ? "Pinned" : "Unpinned", willPin ? "Chat has been pinned." : "Chat has been unpinned.");
+            }}
           />
           <InfoRow
             icon="archive-outline"

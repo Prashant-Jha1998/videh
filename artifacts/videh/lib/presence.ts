@@ -4,15 +4,18 @@ export type PresenceView = {
   canSee: boolean;
   isOnline: boolean;
   lastSeen: string | null;
+  /** When false, do not invent "last seen recently". */
+  canSeeLastSeen?: boolean;
 };
 
 /** Videh-style subtitle for chat header / contact info. */
 export function formatPresenceSubtitle(p: PresenceView | null | undefined): string {
   if (!p?.canSee) return "";
   if (p.isOnline) return "online";
-  if (!p.lastSeen) return "last seen recently";
+  if (p.canSeeLastSeen === false) return "";
+  if (!p.lastSeen) return "";
   const d = new Date(p.lastSeen);
-  if (Number.isNaN(d.getTime())) return "last seen recently";
+  if (Number.isNaN(d.getTime())) return "";
   const now = Date.now();
   const diffMs = now - d.getTime();
   const today = new Date();

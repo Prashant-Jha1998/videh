@@ -3,12 +3,21 @@ import { assertSameUser } from "../lib/auth";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { query } from "../lib/db";
 import { stateGetJson, stateSetJson } from "../lib/sharedState";
+import { normalizePhone } from "../lib/phoneNormalize";
 
 const router = Router();
 const MAX_SOS_CONTACTS = 5;
 
-function normalizePhone(raw: string): string {
-  return raw.replace(/[^\d+]/g, "").trim();
+/** India mobile stored as +91 + exactly 10 digits. */
+function toIndiaSosPhone(raw: string | null | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const normalized = normalizePhone(raw);
+  if (!normalized) return null;
+  const digits = normalized.replace(/\D/g, "");
+  if (digits.startsWith("91") && digits.length === 12 && /^91[6-9]\d{9}$/.test(digits)) {
+    return `+${digits}`;
+  }
+  return null;
 }
 
 function singleParam(value: string | string[] | undefined): string {
@@ -39,6 +48,25 @@ async function findOrCreateDirectChat(userId: string | number, otherUserId: numb
   const chatId = newChat.rows[0].id;
   await query("INSERT INTO chat_members (chat_id, user_id) VALUES ($1,$2),($1,$3)", [chatId, userId, otherUserId]);
   return chatId;
+}
+
+/** Link SOS contact to a Videh user by phone; persist link for future triggers. */
+async function resolveLinkedUserId(opts: {
+  contactId: number;
+  contactPhone: string | null;
+  contactUserId: number | null;
+}): Promise<number | null> {
+  if (opts.contactUserId) return Number(opts.contactUserId);
+  const phone = toIndiaSosPhone(opts.contactPhone);
+  if (!phone) return null;
+  const found = await query("SELECT id FROM users WHERE phone = $1", [phone]);
+  if (found.rows.length === 0) return null;
+  const linkedId = Number(found.rows[0].id);
+  await query(
+    "UPDATE sos_contacts SET contact_user_id = $1, contact_phone = $2 WHERE id = $3",
+    [linkedId, phone, opts.contactId],
+  );
+  return linkedId;
 }
 
 // Get SOS contacts for a user
@@ -74,9 +102,12 @@ router.post("/:userId/contacts", async (req: Request, res: Response) => {
     res.status(400).json({ success: false, message: "contactName required" });
     return;
   }
-  const normalizedPhone = contactPhone ? normalizePhone(String(contactPhone)) : null;
-  if (normalizedPhone && !/^\+?[1-9]\d{9,14}$/.test(normalizedPhone)) {
-    res.status(400).json({ success: false, message: "Invalid phone number format" });
+  const normalizedPhone = toIndiaSosPhone(contactPhone);
+  if (!normalizedPhone) {
+    res.status(400).json({
+      success: false,
+      message: "Phone must be a valid Indian mobile: +91 followed by exactly 10 digits",
+    });
     return;
   }
   try {
@@ -87,7 +118,7 @@ router.post("/:userId/contacts", async (req: Request, res: Response) => {
     }
 
     const duplicateResult = await query(
-      "SELECT id FROM sos_contacts WHERE user_id = $1 AND lower(contact_name) = lower($2) AND coalesce(contact_phone, '') = coalesce($3, '') LIMIT 1",
+      "SELECT id FROM sos_contacts WHERE user_id = $1 AND (lower(contact_name) = lower($2) OR contact_phone = $3) LIMIT 1",
       [ownerUserId, trimmedName, normalizedPhone]
     );
     if (duplicateResult.rows.length > 0) {
@@ -95,18 +126,18 @@ router.post("/:userId/contacts", async (req: Request, res: Response) => {
       return;
     }
 
-    // If phone given, try to find user in DB
-    let linkedUserId: number | null = contactUserId ?? null;
-    if (!linkedUserId && normalizedPhone) {
+    let linkedUserId: number | null =
+      typeof contactUserId === "number" && Number.isFinite(contactUserId) ? contactUserId : null;
+    if (!linkedUserId) {
       const found = await query("SELECT id FROM users WHERE phone = $1", [normalizedPhone]);
-      if (found.rows.length > 0) linkedUserId = found.rows[0].id;
+      if (found.rows.length > 0) linkedUserId = Number(found.rows[0].id);
     }
     const result = await query(
       `INSERT INTO sos_contacts (user_id, contact_name, contact_phone, contact_user_id)
        VALUES ($1,$2,$3,$4) RETURNING *`,
       [ownerUserId, trimmedName, normalizedPhone, linkedUserId]
     );
-    res.json({ success: true, contact: result.rows[0] });
+    res.json({ success: true, contact: result.rows[0], linked: Boolean(linkedUserId) });
   } catch (err) {
     req.log.error({ err }, "add sos contact error");
     res.status(500).json({ success: false, message: "Server error" });
@@ -135,7 +166,6 @@ router.post("/:userId/trigger", async (req: Request, res: Response) => {
     if (user.rows.length === 0) { res.status(404).json({ success: false }); return; }
     const sender = user.rows[0];
 
-    // Get all SOS contacts who have Videh accounts
     const contacts = await query(
       `SELECT sc.*, u.id as linked_id, u.push_token FROM sos_contacts sc
        LEFT JOIN users u ON u.id = sc.contact_user_id
@@ -153,22 +183,32 @@ router.post("/:userId/trigger", async (req: Request, res: Response) => {
     let sentCount = 0;
     const smsFallbackNumbers: string[] = [];
     for (const contact of contacts.rows) {
-      if (!contact.linked_id) {
-        if (contact.contact_phone) smsFallbackNumbers.push(contact.contact_phone);
+      let linkedId = contact.linked_id ? Number(contact.linked_id) : null;
+      if (!linkedId) {
+        linkedId = await resolveLinkedUserId({
+          contactId: Number(contact.id),
+          contactPhone: contact.contact_phone,
+          contactUserId: contact.contact_user_id ? Number(contact.contact_user_id) : null,
+        });
+      }
+      if (!linkedId) {
+        const phone = toIndiaSosPhone(contact.contact_phone) ?? contact.contact_phone;
+        if (phone) smsFallbackNumbers.push(phone);
         continue;
       }
-      const chatId = await findOrCreateDirectChat(userId, Number(contact.linked_id));
+
+      const chatId = await findOrCreateDirectChat(userId, linkedId);
 
       await query(
         "INSERT INTO messages (chat_id, sender_id, content, type) VALUES ($1,$2,$3,'text')",
         [chatId, userId, sosMsg]
       );
 
-      // Push notification if they have a push token
-      const contactUserId = Number(contact.linked_id);
-      if (contactUserId || isValidPushToken(contact.push_token)) {
+      const pushRow = await query("SELECT push_token FROM users WHERE id = $1", [linkedId]);
+      const pushToken = pushRow.rows[0]?.push_token ?? contact.push_token;
+      if (isValidPushToken(pushToken)) {
         await sendChatPush(
-          contact.push_token ?? [],
+          pushToken ?? [],
           `🚨 SOS — ${sender.name ?? sender.phone}`,
           locationText || "Emergency! Please help!",
           { chatId: String(chatId), sos: "true", notificationKind: "sos" },
@@ -210,18 +250,26 @@ router.post("/:userId/location-update", async (req: Request, res: Response) => {
     }
     const sender = user.rows[0];
     const contacts = await query(
-      `SELECT sc.contact_user_id
+      `SELECT sc.id, sc.contact_phone, sc.contact_user_id
        FROM sos_contacts sc
-       WHERE sc.user_id = $1 AND sc.contact_user_id IS NOT NULL`,
+       WHERE sc.user_id = $1`,
       [userId]
     );
     const msg = `📡 Live location update from ${sender.name ?? sender.phone}: https://maps.google.com/?q=${latitude},${longitude}`;
+    let sentTo = 0;
     for (const contact of contacts.rows) {
-      const chatId = await findOrCreateDirectChat(userId, contact.contact_user_id);
+      const linkedId = await resolveLinkedUserId({
+        contactId: Number(contact.id),
+        contactPhone: contact.contact_phone,
+        contactUserId: contact.contact_user_id ? Number(contact.contact_user_id) : null,
+      });
+      if (!linkedId) continue;
+      const chatId = await findOrCreateDirectChat(userId, linkedId);
       await query("INSERT INTO messages (chat_id, sender_id, content, type) VALUES ($1,$2,$3,'text')", [chatId, userId, msg]);
+      sentTo++;
     }
     await stateSetJson(throttleKey, now, 45_000);
-    res.json({ success: true, sentTo: contacts.rows.length });
+    res.json({ success: true, sentTo });
   } catch (err) {
     req.log.error({ err }, "sos location update error");
     res.status(500).json({ success: false, message: "Server error" });
@@ -242,13 +290,21 @@ router.post("/:userId/contacts/:contactId/verify", async (req: Request, res: Res
       return;
     }
     const contact = contactResult.rows[0];
-    if (!contact.contact_user_id) {
+    let linkedUserId = contact.contact_user_id ? Number(contact.contact_user_id) : null;
+    if (!linkedUserId) {
+      linkedUserId = await resolveLinkedUserId({
+        contactId: Number(contact.id),
+        contactPhone: contact.contact_phone,
+        contactUserId: null,
+      });
+    }
+    if (!linkedUserId) {
       res.status(400).json({ success: false, message: "Contact is not linked to Videh user" });
       return;
     }
     const senderResult = await query("SELECT name, phone FROM users WHERE id = $1", [userId]);
     const sender = senderResult.rows[0];
-    const chatId = await findOrCreateDirectChat(userId, contact.contact_user_id);
+    const chatId = await findOrCreateDirectChat(userId, linkedUserId);
     const verifyMessage = `✅ Trusted-contact verification request from ${sender?.name ?? sender?.phone ?? "Videh user"}. Please confirm in app chat.`;
     await query("INSERT INTO messages (chat_id, sender_id, content, type) VALUES ($1,$2,$3,'text')", [chatId, userId, verifyMessage]);
     res.json({ success: true, message: "Verification request sent" });

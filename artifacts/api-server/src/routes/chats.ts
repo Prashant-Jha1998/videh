@@ -38,6 +38,11 @@ import {
 } from "../lib/translationService";
 import { messageWithinRetentionSql } from "../lib/messageRetention";
 import { ensureMessageUserHidesTable, hideMessageForUser, messageVisibleToUserSql } from "../lib/messageUserHides";
+import {
+  ensureMessageUserStarsTable,
+  messageStarredByViewerSql,
+  toggleMessageStarForUser,
+} from "../lib/messageUserStars";
 import { getPresenceForViewer } from "../lib/presencePrivacy";
 import { canAddUserToGroup, getExtendedPrivacy } from "../lib/userPrivacySettings";
 import {
@@ -434,6 +439,33 @@ router.patch("/:chatId/archive", async (req: Request, res: Response) => {
   }
 });
 
+router.patch("/:chatId/pin", async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const { userId, pinned } = req.body as { userId?: number; pinned?: boolean };
+  if (!userId || typeof pinned !== "boolean") {
+    res.status(400).json({ success: false, message: "userId and pinned are required" });
+    return;
+  }
+  if (!assertSameUser(req, res, userId)) return;
+  try {
+    const r = await query(
+      `UPDATE chat_members
+       SET is_pinned = $3
+       WHERE chat_id = $1 AND user_id = $2
+       RETURNING is_pinned`,
+      [chatId, userId, pinned],
+    );
+    if (!r.rows[0]) {
+      res.status(404).json({ success: false, message: "Chat membership not found" });
+      return;
+    }
+    res.json({ success: true, isPinned: r.rows[0].is_pinned });
+  } catch (err) {
+    req.log.error({ err }, "pin chat error");
+    res.status(500).json({ success: false, message: "Could not update pin state" });
+  }
+});
+
 // Get or create a direct chat between two users
 router.post("/direct", async (req: Request, res: Response) => {
   const { userId, otherUserId } = req.body as { userId?: number; otherUserId?: number };
@@ -465,13 +497,19 @@ router.post("/direct", async (req: Request, res: Response) => {
       return;
     }
 
+    const privacy = await getExtendedPrivacy(userId);
+    const defaultDisappear =
+      privacy.default_disappear_seconds != null && privacy.default_disappear_seconds > 0
+        ? privacy.default_disappear_seconds
+        : null;
+
     const chat = await query(
-      "INSERT INTO chats (is_group, disappear_after_seconds) VALUES (FALSE, NULL) RETURNING id",
-      [],
+      "INSERT INTO chats (is_group, disappear_after_seconds) VALUES (FALSE, $1) RETURNING id",
+      [defaultDisappear],
     );
     const chatId = chat.rows[0].id;
     await query("INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2), ($1, $3)", [chatId, userId, otherUserId]);
-    res.json({ success: true, chatId });
+    res.json({ success: true, chatId, disappearAfterSeconds: defaultDisappear });
   } catch (err) {
     req.log.error({ err }, "direct chat error");
     res.status(500).json({ success: false });
@@ -689,6 +727,7 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
   if (!assertSameUser(req, res, userId)) return;
   try {
     await ensureMessageUserHidesTable();
+    await ensureMessageUserStarsTable();
     await ensureChatMemberHistoryClearedColumn();
     await ensureViewOnceColumns();
     await ensureDisappearingMessageColumns();
@@ -698,6 +737,7 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
     const viewerParam = before ? "$4" : "$3";
     const historySql = messageAfterHistoryClearedSql("cm");
     const retentionSql = messageWithinRetentionSql("m");
+    const starredSql = messageStarredByViewerSql(viewerParam);
     const result = await query(`
       SELECT
         m.id, m.chat_id, m.sender_id, m.content, m.type,
@@ -706,7 +746,7 @@ router.get("/:chatId/messages", async (req: Request, res: Response) => {
           ELSE m.media_url
         END AS media_url,
         m.reply_to_id, m.is_deleted, m.is_forwarded, m.forward_count,
-        m.is_starred, m.is_view_once, m.view_once_opened_at, m.edited_at, m.created_at,
+        (${starredSql}) AS is_starred, m.is_view_once, m.view_once_opened_at, m.edited_at, m.created_at,
         m.expires_at, m.is_kept, m.status_reply_id, m.client_message_id,
         u.name AS sender_name, u.avatar_url AS sender_avatar,
         rm.content AS reply_content,
@@ -1305,26 +1345,33 @@ router.delete("/:chatId/messages/:messageId", async (req: Request, res: Response
     }
 
     const isSender = Number(msg.sender_id) === Number(userId);
+    const chatIdNorm = Array.isArray(chatId) ? chatId[0] : chatId;
+
     if (deleteForEveryone && isSender) {
       await query(
         "UPDATE messages SET is_deleted = TRUE, content = 'This message was deleted', media_url = NULL WHERE id = $1 AND sender_id = $2",
         [messageId, userId],
       );
+      const peers = await query(
+        `SELECT user_id FROM chat_members WHERE chat_id = $1`,
+        [chatId],
+      );
+      publishChatEvent({
+        type: "message",
+        chatId: chatIdNorm,
+        userIds: peers.rows.map((r: { user_id: number }) => r.user_id),
+        payload: { messageId: Number(messageId), deleted: true, deleteForEveryone: true },
+      });
     } else {
+      // Delete-for-me: hide only for this user — do not tombstone peers.
       await hideMessageForUser(Number(messageId), userId);
+      publishChatEvent({
+        type: "message",
+        chatId: chatIdNorm,
+        userIds: [Number(userId)],
+        payload: { messageId: Number(messageId), hiddenForMe: true },
+      });
     }
-
-    const peers = await query(
-      `SELECT user_id FROM chat_members WHERE chat_id = $1`,
-      [chatId],
-    );
-    const chatIdNorm = Array.isArray(chatId) ? chatId[0] : chatId;
-    publishChatEvent({
-      type: "message",
-      chatId: chatIdNorm,
-      userIds: peers.rows.map((r: { user_id: number }) => r.user_id),
-      payload: { messageId: Number(messageId), deleted: true },
-    });
 
     res.json({
       success: true,
@@ -1398,30 +1445,26 @@ router.put("/:chatId/messages/:messageId", async (req: Request, res: Response) =
   }
 });
 
-// Star/unstar message
+// Star/unstar message (per-user)
 router.post("/:chatId/messages/:messageId/star", async (req: Request, res: Response) => {
   const { chatId } = req.params;
   const { messageId } = req.params;
   const { userId } = req.body as { userId?: number };
   if (!assertSameUser(req, res, userId)) return;
   try {
-    const result = await query(
-      `UPDATE messages m
-       SET is_starred = NOT is_starred
-       WHERE m.id = $1
-         AND m.chat_id = $2
-         AND EXISTS (
-           SELECT 1 FROM chat_members cm
-           WHERE cm.chat_id = m.chat_id AND cm.user_id = $3
-         )
-       RETURNING is_starred`,
-      [messageId, chatId, userId]
+    await ensureMessageUserStarsTable();
+    const member = await query(
+      `SELECT 1 FROM chat_members cm
+       JOIN messages m ON m.chat_id = cm.chat_id
+       WHERE m.id = $1 AND m.chat_id = $2 AND cm.user_id = $3`,
+      [messageId, chatId, userId],
     );
-    if (!result.rows[0]) {
+    if (!member.rows[0]) {
       res.status(404).json({ success: false, message: "Message not found" });
       return;
     }
-    res.json({ success: true, isStarred: result.rows[0]?.is_starred });
+    const isStarred = await toggleMessageStarForUser(Number(messageId), Number(userId));
+    res.json({ success: true, isStarred });
   } catch (err) {
     res.status(500).json({ success: false });
   }
@@ -1566,16 +1609,21 @@ router.post("/:chatId/read", async (req: Request, res: Response) => {
       "UPDATE chat_members SET last_read_at = NOW() WHERE chat_id = $1 AND user_id = $2",
       [chatIdNorm, userId]
     );
-    const privacy = userId ? await getExtendedPrivacy(userId) : null;
-    if (privacy?.read_receipts_enabled !== false && userId) {
-      await query(`
-        INSERT INTO message_status (message_id, user_id, status, updated_at)
-        SELECT m.id, $2, 'read', NOW()
-        FROM messages m
-        WHERE m.chat_id = $1 AND m.sender_id != $2
-        ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'read', updated_at = NOW()
-      `, [chatIdNorm, userId]);
-      void publishReadReceiptsForChat({ chatId: chatIdNorm, readerUserId: userId });
+    if (userId) {
+      const chatMeta = await query(`SELECT is_group FROM chats WHERE id = $1`, [chatIdNorm]);
+      const isGroup = Boolean(chatMeta.rows[0]?.is_group);
+      const privacy = await getExtendedPrivacy(userId);
+      // Groups always send read receipts; DMs respect privacy setting.
+      if (isGroup || privacy.read_receipts_enabled !== false) {
+        await query(`
+          INSERT INTO message_status (message_id, user_id, status, updated_at)
+          SELECT m.id, $2, 'read', NOW()
+          FROM messages m
+          WHERE m.chat_id = $1 AND m.sender_id != $2
+          ON CONFLICT (message_id, user_id) DO UPDATE SET status = 'read', updated_at = NOW()
+        `, [chatIdNorm, userId]);
+        void publishReadReceiptsForChat({ chatId: chatIdNorm, readerUserId: userId });
+      }
     }
     res.json({ success: true });
   } catch (err) {
@@ -1611,6 +1659,7 @@ router.patch("/:chatId/mute", async (req: Request, res: Response) => {
 router.get("/:chatId/wallpaper", async (req: Request, res: Response) => {
   const { chatId } = req.params;
   const { userId } = req.query as { userId?: string };
+  if (!userId || !assertSameUser(req, res, userId)) return;
   try {
     const result = await query(
       "SELECT wallpaper FROM chat_members WHERE chat_id = $1 AND user_id = $2",

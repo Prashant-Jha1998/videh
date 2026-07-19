@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { query } from "../lib/db";
+import { normalizePhone } from "../lib/phoneNormalize";
 import { enforceModerationForActivity } from "../lib/moderation";
 import { publicMediaUrl } from "../lib/mediaStorage";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
@@ -30,6 +31,11 @@ import {
   getExtendedPrivacy,
   type FieldPrivacy,
 } from "../lib/userPrivacySettings";
+import {
+  ensureMessageUserStarsTable,
+  messageStarredByViewerSql,
+  toggleMessageStarForUser,
+} from "../lib/messageUserStars";
 import {
   calculateBoostPlan,
   confirmBoostPaymentForStatus,
@@ -523,13 +529,15 @@ router.get("/:token/chats/:chatId/messages", async (req: Request, res: Response)
     const session = await requireLinkedSession(req, res);
     if (!session || !(await requireChatMember(session.userId, chatId, res))) return;
     await ensureDisappearingMessageColumns();
+    await ensureMessageUserStarsTable();
     const limit = Math.min(Number(req.query.limit ?? 80) || 80, 120);
     const before = typeof req.query.before === "string" ? req.query.before : undefined;
+    const starredSql = messageStarredByViewerSql("$3");
     const result = await query(
       `SELECT
         m.id, m.chat_id, m.sender_id, m.content, m.type, m.media_url,
         m.reply_to_id, m.is_deleted, m.is_forwarded, m.forward_count,
-        m.is_starred, m.is_view_once, m.edited_at, m.created_at,
+        (${starredSql}) AS is_starred, m.is_view_once, m.edited_at, m.created_at,
         m.expires_at, m.is_kept,
         u.name AS sender_name, u.avatar_url AS sender_avatar,
         rm.content AS reply_content,
@@ -554,10 +562,12 @@ router.get("/:token/chats/:chatId/messages", async (req: Request, res: Response)
       WHERE m.chat_id = $1
         AND m.is_deleted = FALSE
         AND ${messageDisappearVisibleSql()}
-        ${before ? "AND m.created_at < $3" : ""}
+        ${before ? "AND m.created_at < $4" : ""}
       ORDER BY m.created_at DESC
       LIMIT $2`,
-      before ? [chatId, limit, before] : [chatId, limit],
+      before
+        ? [chatId, limit, session.userId, before]
+        : [chatId, limit, session.userId],
     );
     res.json({ success: true, messages: result.rows.reverse() });
   } catch (err) {
@@ -685,16 +695,19 @@ router.post("/:token/chats/:chatId/messages/:messageId/star", async (req: Reques
   try {
     const session = await requireLinkedSession(req, res);
     if (!session || !(await requireChatMember(session.userId, chatId, res))) return;
-    const result = await query(
-      "UPDATE messages SET is_starred = NOT is_starred WHERE id = $1 AND chat_id = $2 RETURNING is_starred",
+    await ensureMessageUserStarsTable();
+    const member = await query(
+      `SELECT 1 FROM messages m
+       WHERE m.id = $1 AND m.chat_id = $2`,
       [messageId, chatId],
     );
-    if (!result.rows[0]) {
+    if (!member.rows[0]) {
       res.status(404).json({ success: false, message: "Message not found" });
       return;
     }
-    publishForChat("message", chatId, await getChatMemberIds(chatId), { messageId, starred: result.rows[0].is_starred });
-    res.json({ success: true, isStarred: result.rows[0].is_starred });
+    const isStarred = await toggleMessageStarForUser(Number(messageId), session.userId);
+    // Per-user star — do not broadcast to other chat members.
+    res.json({ success: true, isStarred });
   } catch (err) {
     req.log.error({ err }, "web star message error");
     res.status(500).json({ success: false });
@@ -1378,16 +1391,18 @@ router.get("/:token/starred", async (req: Request, res: Response) => {
   const session = await requireLinkedSession(req, res);
   if (!session) return;
   try {
+    await ensureMessageUserStarsTable();
     const result = await query(
       `SELECT m.id, m.chat_id, m.content, m.type, m.media_url, m.created_at,
               c.is_group, c.group_name,
               u.name AS sender_name
-       FROM messages m
+       FROM message_user_stars mus
+       JOIN messages m ON m.id = mus.message_id
        JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1
        JOIN chats c ON c.id = m.chat_id
        LEFT JOIN users u ON u.id = m.sender_id
-       WHERE m.is_starred = TRUE AND m.is_deleted = FALSE
-       ORDER BY m.created_at DESC
+       WHERE mus.user_id = $1 AND m.is_deleted = FALSE
+       ORDER BY mus.created_at DESC
        LIMIT 120`,
       [session.userId],
     );
@@ -1458,13 +1473,21 @@ router.post("/:token/chats/direct", async (req: Request, res: Response) => {
       res.json({ success: true, chatId: existing.rows[0].id });
       return;
     }
-    const chat = await query("INSERT INTO chats (is_group) VALUES (FALSE) RETURNING id", []);
+    const privacy = await getExtendedPrivacy(session.userId);
+    const defaultDisappear =
+      privacy.default_disappear_seconds != null && privacy.default_disappear_seconds > 0
+        ? privacy.default_disappear_seconds
+        : null;
+    const chat = await query(
+      "INSERT INTO chats (is_group, disappear_after_seconds) VALUES (FALSE, $1) RETURNING id",
+      [defaultDisappear],
+    );
     const chatId = chat.rows[0].id;
     await query(
       "INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2), ($1, $3)",
       [chatId, session.userId, otherUserId],
     );
-    res.json({ success: true, chatId });
+    res.json({ success: true, chatId, disappearAfterSeconds: defaultDisappear });
   } catch (err) {
     req.log.error({ err }, "web direct chat");
     res.status(500).json({ success: false });
@@ -1759,24 +1782,46 @@ router.get("/:token/sos/contacts", async (req: Request, res: Response) => {
 router.post("/:token/sos/contacts", async (req: Request, res: Response) => {
   const session = await requireLinkedSession(req, res);
   if (!session) return;
-  const { contactName, contactPhone } = req.body as { contactName?: string; contactPhone?: string };
+  const { contactName, contactPhone, contactUserId } = req.body as {
+    contactName?: string;
+    contactPhone?: string;
+    contactUserId?: number;
+  };
   const trimmedName = String(contactName ?? "").trim();
   if (!trimmedName) {
     res.status(400).json({ success: false, message: "contactName required" });
     return;
   }
-  const normalizedPhone = contactPhone ? contactPhone.replace(/[^\d+]/g, "").trim() : null;
+  const normalized = contactPhone ? normalizePhone(contactPhone) : null;
+  const digits = normalized?.replace(/\D/g, "") ?? "";
+  const sosPhone =
+    digits.startsWith("91") && digits.length === 12 && /^91[6-9]\d{9}$/.test(digits)
+      ? `+${digits}`
+      : null;
+  if (!sosPhone) {
+    res.status(400).json({
+      success: false,
+      message: "Phone must be a valid Indian mobile: +91 followed by exactly 10 digits",
+    });
+    return;
+  }
   try {
     const countResult = await query("SELECT COUNT(*)::int AS count FROM sos_contacts WHERE user_id = $1", [session.userId]);
     if ((countResult.rows[0]?.count ?? 0) >= 5) {
       res.status(400).json({ success: false, message: "Maximum 5 SOS contacts allowed" });
       return;
     }
+    let linkedUserId: number | null =
+      typeof contactUserId === "number" && Number.isFinite(contactUserId) ? contactUserId : null;
+    if (!linkedUserId) {
+      const found = await query("SELECT id FROM users WHERE phone = $1", [sosPhone]);
+      if (found.rows.length > 0) linkedUserId = Number(found.rows[0].id);
+    }
     await query(
-      "INSERT INTO sos_contacts (user_id, contact_name, contact_phone) VALUES ($1, $2, $3)",
-      [session.userId, trimmedName, normalizedPhone],
+      "INSERT INTO sos_contacts (user_id, contact_name, contact_phone, contact_user_id) VALUES ($1, $2, $3, $4)",
+      [session.userId, trimmedName, sosPhone, linkedUserId],
     );
-    res.json({ success: true });
+    res.json({ success: true, linked: Boolean(linkedUserId) });
   } catch (err) {
     req.log.error({ err }, "web add sos contact");
     res.status(500).json({ success: false });
