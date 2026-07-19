@@ -18,7 +18,7 @@ import { interpolate } from "@/lib/i18n";
 import { getApiUrl } from "@/lib/api";
 const API_URL = `${getApiUrl()}/api`;
 
-import { INDIAN_LANGUAGE_OPTIONS } from "@/lib/indianLanguages";
+import { UI_LANGUAGE_OPTIONS } from "@/lib/indianLanguages";
 
 export default function LanguageScreen() {
   const colors = useColors();
@@ -45,7 +45,7 @@ export default function LanguageScreen() {
         });
       } catch {}
     }
-    const lang = INDIAN_LANGUAGE_OPTIONS.find((l) => l.code === code);
+    const lang = UI_LANGUAGE_OPTIONS.find((l) => l.code === code);
     const body = interpolate(t("language.savedBody"), {
       name: lang?.name ?? code,
       native: lang?.native ?? "",
@@ -70,12 +70,12 @@ export default function LanguageScreen() {
         </View>
 
         <View style={[styles.section, { backgroundColor: colors.card }]}>
-          {INDIAN_LANGUAGE_OPTIONS.map((lang, i) => (
+          {UI_LANGUAGE_OPTIONS.map((lang, i) => (
             <TouchableOpacity
               key={lang.code}
               style={[
                 styles.langRow,
-                i < INDIAN_LANGUAGE_OPTIONS.length - 1 && { borderBottomWidth: 0.5, borderBottomColor: colors.border },
+                i < UI_LANGUAGE_OPTIONS.length - 1 && { borderBottomWidth: 0.5, borderBottomColor: colors.border },
               ]}
               onPress={() => selectLanguage(lang.code)}
               activeOpacity={0.7}

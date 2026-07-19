@@ -57,6 +57,14 @@ export async function presentIncomingCallFromPush(
   if (hasIncomingCallSurfaces(call.callId)) return;
 
   const inForeground = AppState.currentState === "active";
+  try {
+    const { loadNotificationPrefs } = await import("./notificationPrefs");
+    const prefs = await loadNotificationPrefs();
+    if (!prefs.calls) return;
+  } catch {
+    /* deliver by default */
+  }
+
   const presentSurfaces = shouldPresentIncomingCallSurfaces(call.callId);
   if (!presentSurfaces) return;
 

@@ -294,28 +294,42 @@ export default function SosScreen() {
     setShowSOS(false);
   };
 
+  const resolveSosCoordinates = async (): Promise<{ latitude: number; longitude: number } | null> => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        const lastKnown = await Location.getLastKnownPositionAsync();
+        if (lastKnown) {
+          return { latitude: lastKnown.coords.latitude, longitude: lastKnown.coords.longitude };
+        }
+        return null;
+      }
+      if (Platform.OS === "android") {
+        await Location.enableNetworkProviderAsync().catch(() => {});
+      }
+      try {
+        const loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        return { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+      } catch {
+        const lastKnown = await Location.getLastKnownPositionAsync();
+        if (lastKnown) {
+          return { latitude: lastKnown.coords.latitude, longitude: lastKnown.coords.longitude };
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  };
+
   const triggerSOS = async () => {
     setShowSOS(false);
     setTriggering(true);
-    let latitude: number | undefined;
-    let longitude: number | undefined;
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === "granted") {
-        if (Platform.OS === "android") {
-          await Location.enableNetworkProviderAsync();
-        }
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        latitude = loc.coords.latitude;
-        longitude = loc.coords.longitude;
-      } else {
-        const lastKnown = await Location.getLastKnownPositionAsync();
-        if (lastKnown) {
-          latitude = lastKnown.coords.latitude;
-          longitude = lastKnown.coords.longitude;
-        }
-      }
-    } catch {}
+    const coords = await resolveSosCoordinates();
+    const latitude = coords?.latitude;
+    const longitude = coords?.longitude;
 
     try {
       const r = await fetch(`${BASE_URL}/api/sos/${user?.dbId}/trigger`, {
@@ -323,20 +337,33 @@ export default function SosScreen() {
         headers: authHeaders(true),
         body: JSON.stringify({ latitude, longitude }),
       });
-      const d = await r.json();
+      const d = await r.json() as {
+        success?: boolean;
+        message?: string;
+        sentTo?: number;
+        smsFallbackNumbers?: string[];
+        locationIncluded?: boolean;
+      };
       if (d.success) {
-        // Primary path: backend sends SOS + location to Videh-linked contacts automatically.
-        const smsFallbackNumbers = Array.isArray(d.smsFallbackNumbers) ? d.smsFallbackNumbers as string[] : [];
-        const locationPart = latitude && longitude ? ` https://maps.google.com/?q=${latitude},${longitude}` : "";
+        // Primary path: backend sends SOS text + location bubble to Videh-linked contacts.
+        const smsFallbackNumbers = Array.isArray(d.smsFallbackNumbers) ? d.smsFallbackNumbers : [];
+        const locationPart = latitude != null && longitude != null
+          ? ` https://maps.google.com/?q=${latitude},${longitude}`
+          : "";
         const sosMessage = `SOS ALERT: I need immediate help.${locationPart}`;
         // Secondary path: only non-Videh numbers get manual platform options.
         openSosFallbackOptions(smsFallbackNumbers, sosMessage);
-        startLiveLocationUpdates();
+        if (d.locationIncluded) {
+          startLiveLocationUpdates();
+        }
+        const baseMsg = smsFallbackNumbers.length > 0
+          ? `Emergency alert sent on Videh. You can now send fallback text on other platforms for ${smsFallbackNumbers.length} non-Videh contact(s).`
+          : `Emergency alert delivered to ${d.sentTo ?? 0} Videh contact(s).`;
         Alert.alert(
           "SOS sent",
-          smsFallbackNumbers.length > 0
-            ? `Emergency alert sent on Videh. You can now send fallback text on other platforms for ${smsFallbackNumbers.length} non-Videh contact(s).`
-            : `Emergency alert delivered to ${d.sentTo} Videh contact(s).`
+          d.locationIncluded
+            ? `${baseMsg}\n\n📍 Live location was shared in chat.`
+            : `${baseMsg}\n\n⚠️ Location could not be attached. Enable GPS and try again so contacts get your map pin.`,
         );
       } else {
         Alert.alert("Error", d.message ?? "Failed to send SOS alert.");

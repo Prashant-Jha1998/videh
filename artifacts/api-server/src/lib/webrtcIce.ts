@@ -9,7 +9,10 @@ const STUN_FALLBACK: IceServerConfig[] = [
   { urls: "stun:stun1.l.google.com:19302" },
 ];
 
-/** Public TURN relay when TURN_URL is not configured — needed for many mobile NATs. */
+/**
+ * Dev-only public TURN. Production must set TURN_URL (+ credentials) or ICE_SERVERS_JSON.
+ * Opt-in with VIDEOH_USE_PUBLIC_TURN=1 outside production.
+ */
 const TURN_FALLBACK: IceServerConfig[] = [
   {
     urls: [
@@ -22,7 +25,12 @@ const TURN_FALLBACK: IceServerConfig[] = [
   },
 ];
 
-/** STUN-only by default (no TURN). Set TURN_URL or VIDEOH_DOMAIN for self-hosted coturn. */
+function allowPublicTurnFallback(): boolean {
+  if (process.env["NODE_ENV"] === "production") return false;
+  return process.env["VIDEOH_USE_PUBLIC_TURN"] === "1";
+}
+
+/** STUN + optional private TURN. Set TURN_URL / ICE_SERVERS_JSON for production. */
 export function getIceServers(): IceServerConfig[] {
   const servers: IceServerConfig[] = [...STUN_FALLBACK];
   let turnUrl = process.env["TURN_URL"]?.trim();
@@ -39,7 +47,7 @@ export function getIceServers(): IceServerConfig[] {
       username: process.env["TURN_USERNAME"]?.trim() || undefined,
       credential: process.env["TURN_CREDENTIAL"]?.trim() || undefined,
     });
-  } else if (process.env["VIDEOH_USE_PUBLIC_TURN"] !== "0") {
+  } else if (allowPublicTurnFallback()) {
     servers.push(...TURN_FALLBACK);
   }
   const extra = process.env["ICE_SERVERS_JSON"]?.trim();

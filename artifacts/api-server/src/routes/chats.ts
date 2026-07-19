@@ -1049,6 +1049,40 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     }
 
     const messageType = type ?? "text";
+    let safeStatusReplyId: number | null = null;
+    if (statusReplyId != null && Number.isFinite(Number(statusReplyId))) {
+      const { canViewerAccessStatus } = await import("../lib/statusVisibility");
+      const sid = Number(statusReplyId);
+      const allowed = await canViewerAccessStatus(senderId, sid, { allowExpired: true });
+      if (!allowed) {
+        res.status(403).json({
+          success: false,
+          message: "You cannot reply to this status.",
+        });
+        return;
+      }
+      // Status replies must go to a DM with the status owner (or a chat they share).
+      const owner = await query(`SELECT user_id FROM statuses WHERE id = $1`, [sid]);
+      const ownerId = Number(owner.rows[0]?.user_id);
+      if (!ownerId) {
+        res.status(404).json({ success: false, message: "Status not found." });
+        return;
+      }
+      if (ownerId !== senderId) {
+        const member = await query(
+          `SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2`,
+          [chatId, ownerId],
+        );
+        if (!member.rows[0]) {
+          res.status(403).json({
+            success: false,
+            message: "Status reply must be sent in a chat with the status owner.",
+          });
+          return;
+        }
+      }
+      safeStatusReplyId = sid;
+    }
     const clientMsgKey = clientMessageId ? String(clientMessageId).trim() : "";
     if (clientMsgKey) {
       const idempotent = await query(
@@ -1078,7 +1112,7 @@ router.post("/:chatId/messages", async (req: Request, res: Response) => {
     `, [chatId, senderId, content, type ?? "text", replyToId ?? null, mediaUrl ?? null,
         isForwarded ?? false, forwardCount ?? 0, isViewOnce ?? false,
         computeMessageExpiresAt(await fetchChatDisappearSeconds(chatId), type ?? "text"),
-        statusReplyId ?? null, clientMsgKey || null]);
+        safeStatusReplyId, clientMsgKey || null]);
 
     // Mark as delivered for all other members + gather push tokens
     const members = await query(

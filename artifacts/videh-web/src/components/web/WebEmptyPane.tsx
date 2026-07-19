@@ -28,18 +28,18 @@ const HERO_CONFIG: Record<
     ],
   },
   calls: {
-    title: "Calls on Videh Web",
-    subtitle: "Start voice or video calls from any chat. Your call history stays synced across devices.",
-    footer: "Calls use TLS encryption in transit",
+    title: "Call history",
+    subtitle: "See recent voice and video calls here. Live calling works in the Videh mobile app.",
+    footer: "Use the Videh Android/iOS app to place or answer calls",
     icon: Phone,
     features: [
-      { icon: Phone, label: "Voice & video" },
-      { icon: Shield, label: "Secure calls" },
+      { icon: Phone, label: "Synced call history" },
+      { icon: Shield, label: "Secure on mobile" },
     ],
     actions: [
       {
-        label: "Open a chat to call",
-        onClick: () => alert("Open a chat, then use the call button in the header."),
+        label: "Download Videh app",
+        onClick: () => window.open("https://videh.co.in/download.html", "_blank"),
       },
     ],
   },

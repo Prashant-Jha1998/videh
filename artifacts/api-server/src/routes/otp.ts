@@ -198,9 +198,11 @@ router.post("/verify", async (req: Request, res: Response) => {
   }
 
   try {
+    const { ensureNotificationPrefsColumn } = await import("../lib/notificationPrefs");
+    await ensureNotificationPrefsColumn();
     const fullPhone = `+91${phone}`;
     const existing = await query(
-      "SELECT id, name, about, avatar_url, two_step_pin FROM users WHERE phone = $1",
+      "SELECT id, name, about, avatar_url, two_step_pin, deleted_at FROM users WHERE phone = $1",
       [fullPhone],
     );
     let dbUser: {
@@ -212,6 +214,13 @@ router.post("/verify", async (req: Request, res: Response) => {
       is_new?: boolean;
     };
     if (existing.rows.length > 0) {
+      if (existing.rows[0].deleted_at) {
+        res.status(403).json({
+          success: false,
+          message: "This account was deleted. Register again with this number to create a new account.",
+        });
+        return;
+      }
       await query("UPDATE users SET is_online = TRUE, last_seen = NOW() WHERE id = $1", [existing.rows[0].id]);
       dbUser = existing.rows[0];
     } else {

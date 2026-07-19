@@ -1005,10 +1005,13 @@ router.get("/:token/statuses", async (req: Request, res: Response) => {
   if (!session) return;
   const userId = session.userId;
   try {
+    const { canViewerAccessStatus, ensureStatusAudienceSchema } = await import("../lib/statusVisibility");
+    const { canSeeUserField } = await import("../lib/userPrivacySettings");
+    await ensureStatusAudienceSchema();
     const result = await query(
       `SELECT
         s.id, s.user_id, s.content, s.type, s.background_color,
-        s.media_url, s.expires_at, s.created_at,
+        s.media_url, s.expires_at, s.created_at, s.audience_mode,
         u.name AS user_name, u.avatar_url AS user_avatar,
         EXISTS(
           SELECT 1 FROM status_views sv
@@ -1033,11 +1036,33 @@ router.get("/:token/statuses", async (req: Request, res: Response) => {
               AND cm_other.user_id != $1::int
               AND c.is_group = FALSE
           )
+          OR EXISTS (
+            SELECT 1 FROM status_boosts sb
+            WHERE sb.status_id = s.id
+              AND sb.status = 'active'
+              AND sb.ends_at > NOW()
+          )
+          OR EXISTS (
+            SELECT 1 FROM status_audience sa
+            WHERE sa.status_id = s.id AND sa.user_id = $1::int
+          )
         )
       ORDER BY s.created_at DESC`,
       [userId],
     );
-    res.json({ success: true, statuses: result.rows });
+    const visible = [];
+    for (const row of result.rows) {
+      const ownerId = Number(row.user_id);
+      const statusId = Number(row.id);
+      if (ownerId !== userId && !(await canViewerAccessStatus(userId, statusId))) continue;
+      const seePhoto =
+        ownerId === userId || (await canSeeUserField(userId, ownerId, "profile_photo_privacy"));
+      visible.push({
+        ...row,
+        user_avatar: seePhoto ? row.user_avatar : null,
+      });
+    }
+    res.json({ success: true, statuses: visible });
   } catch (err) {
     req.log.error({ err }, "web statuses");
     res.status(500).json({ success: false });
@@ -1053,6 +1078,11 @@ router.post("/:token/statuses/:statusId/view", async (req: Request, res: Respons
     return;
   }
   try {
+    const { canViewerAccessStatus } = await import("../lib/statusVisibility");
+    if (!(await canViewerAccessStatus(session.userId, statusId))) {
+      res.status(403).json({ success: false, message: "Not allowed to view this status." });
+      return;
+    }
     await query(
       `INSERT INTO status_views (status_id, viewer_id) VALUES ($1, $2)
        ON CONFLICT DO NOTHING`,
@@ -1672,12 +1702,13 @@ router.get("/:token/two-step-status", async (req: Request, res: Response) => {
   const session = await requireLinkedSession(req, res);
   if (!session) return;
   try {
+    const { isTwoStepEnabled } = await import("../lib/twoStepPin");
     const r = await query("SELECT two_step_pin FROM users WHERE id = $1", [session.userId]);
     if (r.rows.length === 0) {
       res.status(404).json({ success: false });
       return;
     }
-    res.json({ success: true, enabled: !!r.rows[0].two_step_pin });
+    res.json({ success: true, enabled: isTwoStepEnabled(r.rows[0].two_step_pin) });
   } catch (err) {
     req.log.error({ err }, "web two-step status");
     res.status(500).json({ success: false });
@@ -1693,7 +1724,9 @@ router.post("/:token/two-step-pin", async (req: Request, res: Response) => {
     return;
   }
   try {
-    await query("UPDATE users SET two_step_pin = $1 WHERE id = $2", [pin, session.userId]);
+    const { hashTwoStepPin } = await import("../lib/twoStepPin");
+    const hashed = await hashTwoStepPin(pin);
+    await query("UPDATE users SET two_step_pin = $1 WHERE id = $2", [hashed, session.userId]);
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "web set two-step");
@@ -1706,8 +1739,9 @@ router.delete("/:token/two-step-pin", async (req: Request, res: Response) => {
   if (!session) return;
   const { pin } = req.body as { pin?: string };
   try {
+    const { verifyTwoStepPin } = await import("../lib/twoStepPin");
     const r = await query("SELECT two_step_pin FROM users WHERE id = $1", [session.userId]);
-    if (!r.rows[0] || r.rows[0].two_step_pin !== pin) {
+    if (!r.rows[0] || !(await verifyTwoStepPin(session.userId, String(pin ?? ""), r.rows[0].two_step_pin))) {
       res.status(403).json({ success: false, message: "Incorrect PIN" });
       return;
     }
@@ -1757,6 +1791,125 @@ router.get("/:token/storage-stats", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "web storage stats");
     res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:token/notification-prefs", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  try {
+    const { getNotificationPrefs } = await import("../lib/notificationPrefs");
+    res.json({ success: true, prefs: await getNotificationPrefs(session.userId) });
+  } catch (err) {
+    req.log.error({ err }, "web get notification prefs");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.put("/:token/notification-prefs", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  try {
+    const { setNotificationPrefs } = await import("../lib/notificationPrefs");
+    const prefs = await setNotificationPrefs(session.userId, req.body ?? {});
+    res.json({ success: true, prefs });
+  } catch (err) {
+    req.log.error({ err }, "web set notification prefs");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/:token/account-export", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  try {
+    const { ensureNotificationPrefsColumn } = await import("../lib/notificationPrefs");
+    await ensureNotificationPrefsColumn();
+    await ensureExtendedPrivacyColumns();
+    const user = await query(
+      `SELECT id, phone, name, about, avatar_url, preferred_lang, created_at, last_seen,
+              profile_photo_privacy, about_privacy, status_privacy, groups_privacy,
+              read_receipts_enabled, default_disappear_seconds, silence_unknown_callers,
+              notification_prefs
+       FROM users WHERE id = $1 AND deleted_at IS NULL`,
+      [session.userId],
+    );
+    if (!user.rows[0]) {
+      res.status(404).json({ success: false, message: "User not found" });
+      return;
+    }
+    const chats = await query(
+      `SELECT c.id, c.is_group, c.name AS group_name, c.created_at
+       FROM chat_members cm
+       JOIN chats c ON c.id = cm.chat_id
+       WHERE cm.user_id = $1
+       ORDER BY c.created_at DESC
+       LIMIT 500`,
+      [session.userId],
+    );
+    const sos = await query(
+      `SELECT id, contact_name, contact_phone, created_at FROM sos_contacts WHERE user_id = $1`,
+      [session.userId],
+    );
+    const blocked = await query(
+      `SELECT blocked_id, created_at FROM blocked_users WHERE blocker_id = $1`,
+      [session.userId],
+    );
+    res.json({
+      success: true,
+      exportedAt: new Date().toISOString(),
+      report: {
+        profile: user.rows[0],
+        chats: chats.rows,
+        sosContacts: sos.rows,
+        blockedUserIds: blocked.rows.map((r: { blocked_id: number }) => r.blocked_id),
+        note: "Message contents are not included in this summary report.",
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "web account export");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.delete("/:token/account", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const userId = session.userId;
+  try {
+    const { ensureNotificationPrefsColumn } = await import("../lib/notificationPrefs");
+    await ensureNotificationPrefsColumn();
+    const existing = await query(`SELECT id, deleted_at FROM users WHERE id = $1`, [userId]);
+    if (!existing.rows[0]) {
+      res.status(404).json({ success: false, message: "User not found" });
+      return;
+    }
+    if (existing.rows[0].deleted_at) {
+      res.json({ success: true, alreadyDeleted: true });
+      return;
+    }
+    const tombstonePhone = `deleted_${userId}_${Date.now()}`;
+    await query(
+      `UPDATE users SET
+         phone = $1,
+         name = 'Deleted User',
+         about = NULL,
+         avatar_url = NULL,
+         push_token = NULL,
+         two_step_pin = NULL,
+         is_online = FALSE,
+         deleted_at = NOW(),
+         updated_at = NOW()
+       WHERE id = $2`,
+      [tombstonePhone, userId],
+    );
+    await query(`DELETE FROM sos_contacts WHERE user_id = $1 OR contact_user_id = $1`, [userId]).catch(() => {});
+    await query(`DELETE FROM web_sessions WHERE user_id = $1`, [userId]).catch(() => {});
+    await query(`DELETE FROM typing_sessions WHERE user_id = $1`, [userId]).catch(() => {});
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "web delete account");
+    res.status(500).json({ success: false, message: "Could not delete account." });
   }
 });
 

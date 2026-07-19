@@ -74,14 +74,26 @@ export async function sendChatPushToMembers(
   },
 ): Promise<void> {
   const { resolveUserMessageSoundId } = await import("./soundPrefsDb");
+  const { shouldSendPushForKind, getNotificationPrefs } = await import("./notificationPrefs");
   for (const m of members) {
     if (!isValidPushToken(m.push_token)) continue;
+    const uid = Number(m.user_id);
+    const kind = options.isGroup ? "groups" : "messages";
+    if (!(await shouldSendPushForKind(uid, kind))) continue;
+    const prefs = await getNotificationPrefs(uid);
+    const pushBody =
+      prefs.preview === "none"
+        ? "New message"
+        : prefs.preview === "name"
+          ? "New message"
+          : body;
+    const pushTitle = prefs.preview === "none" ? "Videh" : title;
     const messageSoundId = await resolveUserMessageSoundId(
-      Number(m.user_id),
+      uid,
       options.chatId,
       options.isGroup,
     );
-    await sendChatPush(m.push_token!, title, body, data, {
+    await sendChatPush(m.push_token!, pushTitle, pushBody, data, {
       categoryId: options.categoryId,
       threadId: options.threadId,
       imageUrl: options.imageUrl,

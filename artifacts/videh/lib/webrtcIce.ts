@@ -1,16 +1,7 @@
-/** Shared STUN fallback when server ICE config is unavailable. */
+/** STUN-only client fallback when server ICE config is unavailable. No public TURN secrets. */
 export const VIDEH_ICE_SERVERS_FALLBACK: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
-  {
-    urls: [
-      "turn:openrelay.metered.ca:80",
-      "turn:openrelay.metered.ca:443",
-      "turn:openrelay.metered.ca:443?transport=tcp",
-    ],
-    username: "openrelayproject",
-    credential: "openrelayproject",
-  },
 ];
 
 /** @deprecated use loadIceServers() */
@@ -50,12 +41,13 @@ export function peerIdFromCallChannel(channel: string, localUid: number): number
 
 export async function loadIceServers(sessionToken?: string | null): Promise<RTCIceServer[]> {
   if (cachedIce && Date.now() - cacheAt < CACHE_MS) return cachedIce;
+  if (!sessionToken) return VIDEH_ICE_SERVERS_FALLBACK;
   try {
     const { getApiUrl } = require("./api") as typeof import("./api");
     const res = await fetch(`${getApiUrl()}/api/webrtc/ice-config`, {
-      headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {},
+      headers: { Authorization: `Bearer ${sessionToken}` },
     });
-    const data = await res.json() as { success?: boolean; iceServers?: RTCIceServer[] };
+    const data = (await res.json()) as { success?: boolean; iceServers?: RTCIceServer[] };
     if (data.success && Array.isArray(data.iceServers) && data.iceServers.length > 0) {
       cachedIce = data.iceServers;
       cacheAt = Date.now();

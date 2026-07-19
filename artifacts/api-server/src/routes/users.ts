@@ -9,9 +9,14 @@ import {
   readLoginGuard,
   registerLoginFailure,
   retryAfterSeconds,
-  secretMatches,
 } from "../lib/loginAttemptGuard";
 import { clientIp, isRateLimited } from "../lib/rateLimit";
+import { hashTwoStepPin, isTwoStepEnabled, verifyTwoStepPin } from "../lib/twoStepPin";
+import {
+  ensureNotificationPrefsColumn,
+  getNotificationPrefs,
+  setNotificationPrefs,
+} from "../lib/notificationPrefs";
 import {
   ensurePrivacyColumns,
   getPresenceForViewer,
@@ -640,16 +645,17 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// Two-step verification status
+// Two-step verification status (auth required — do not leak to strangers)
 router.get("/:id/two-step-status", async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
   try {
     const r = await query("SELECT two_step_pin FROM users WHERE id = $1", [req.params.id]);
     if (r.rows.length === 0) { res.status(404).json({ success: false }); return; }
-    res.json({ success: true, enabled: !!r.rows[0].two_step_pin });
+    res.json({ success: true, enabled: isTwoStepEnabled(r.rows[0].two_step_pin) });
   } catch { res.status(500).json({ success: false }); }
 });
 
-// Set two-step PIN
+// Set two-step PIN (stored hashed)
 router.post("/:id/two-step-pin", async (req: Request, res: Response) => {
   const { pin } = req.body as { pin?: string };
   if (!assertSameUser(req, res, req.params.id)) return;
@@ -657,7 +663,8 @@ router.post("/:id/two-step-pin", async (req: Request, res: Response) => {
     res.status(400).json({ success: false, message: "6-digit numeric PIN required" }); return;
   }
   try {
-    await query("UPDATE users SET two_step_pin = $1 WHERE id = $2", [pin, req.params.id]);
+    const hashed = await hashTwoStepPin(pin);
+    await query("UPDATE users SET two_step_pin = $1 WHERE id = $2", [hashed, req.params.id]);
     res.json({ success: true });
   } catch { res.status(500).json({ success: false }); }
 });
@@ -668,7 +675,7 @@ router.delete("/:id/two-step-pin", async (req: Request, res: Response) => {
   if (!assertSameUser(req, res, req.params.id)) return;
   try {
     const r = await query("SELECT two_step_pin FROM users WHERE id = $1", [req.params.id]);
-    if (!r.rows[0] || r.rows[0].two_step_pin !== pin) {
+    if (!r.rows[0] || !(await verifyTwoStepPin(req.params.id, String(pin ?? ""), r.rows[0].two_step_pin))) {
       res.status(403).json({ success: false, message: "PIN galat hai" }); return;
     }
     await query("UPDATE users SET two_step_pin = NULL WHERE id = $1", [req.params.id]);
@@ -734,7 +741,7 @@ router.post("/:id/verify-two-step", async (req: Request, res: Response) => {
       });
       return;
     }
-    if (!secretMatches(row.two_step_pin, pin)) {
+    if (!(await verifyTwoStepPin(row.id, pin, row.two_step_pin))) {
       const fail = await registerLoginFailure(TWO_STEP_SCOPE, userId, 15 * 60 * 1000);
       if (fail.locked) {
         res.status(429).json({
@@ -786,6 +793,120 @@ router.get("/:id/storage-stats", async (req: Request, res: Response) => {
     `, [req.params.id]);
     res.json({ success: true, stats: stats.rows[0] });
   } catch { res.status(500).json({ success: false }); }
+});
+
+router.get("/:id/notification-prefs", async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
+  try {
+    res.json({ success: true, prefs: await getNotificationPrefs(Number(req.params.id)) });
+  } catch (err) {
+    req.log.error({ err }, "get notification prefs");
+    res.status(500).json({ success: false });
+  }
+});
+
+router.put("/:id/notification-prefs", async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
+  try {
+    const prefs = await setNotificationPrefs(Number(req.params.id), req.body ?? {});
+    res.json({ success: true, prefs });
+  } catch (err) {
+    req.log.error({ err }, "set notification prefs");
+    res.status(500).json({ success: false });
+  }
+});
+
+/** Immediate account information report (privacy / data request). */
+router.get("/:id/account-export", async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
+  const userId = Number(req.params.id);
+  try {
+    await ensureNotificationPrefsColumn();
+    await ensureExtendedPrivacyColumns();
+    const user = await query(
+      `SELECT id, phone, name, about, avatar_url, preferred_lang, created_at, last_seen,
+              profile_photo_privacy, about_privacy, status_privacy, groups_privacy,
+              read_receipts_enabled, default_disappear_seconds, silence_unknown_callers,
+              notification_prefs
+       FROM users WHERE id = $1 AND deleted_at IS NULL`,
+      [userId],
+    );
+    if (!user.rows[0]) {
+      res.status(404).json({ success: false, message: "User not found" });
+      return;
+    }
+    const chats = await query(
+      `SELECT c.id, c.is_group, c.name AS group_name, c.created_at
+       FROM chat_members cm
+       JOIN chats c ON c.id = cm.chat_id
+       WHERE cm.user_id = $1
+       ORDER BY c.created_at DESC
+       LIMIT 500`,
+      [userId],
+    );
+    const sos = await query(
+      `SELECT id, contact_name, contact_phone, created_at FROM sos_contacts WHERE user_id = $1`,
+      [userId],
+    );
+    const blocked = await query(
+      `SELECT blocked_id, created_at FROM blocked_users WHERE blocker_id = $1`,
+      [userId],
+    );
+    res.json({
+      success: true,
+      exportedAt: new Date().toISOString(),
+      report: {
+        profile: user.rows[0],
+        chats: chats.rows,
+        sosContacts: sos.rows,
+        blockedUserIds: blocked.rows.map((r: { blocked_id: number }) => r.blocked_id),
+        note: "Message contents are not included in this summary report. Export chat backups from Settings → Chats on your device.",
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "account export");
+    res.status(500).json({ success: false });
+  }
+});
+
+/** Soft-delete account — cannot be undone. */
+router.delete("/:id", async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
+  const userId = Number(req.params.id);
+  try {
+    await ensureNotificationPrefsColumn();
+    const existing = await query(`SELECT id, deleted_at FROM users WHERE id = $1`, [userId]);
+    if (!existing.rows[0]) {
+      res.status(404).json({ success: false, message: "User not found" });
+      return;
+    }
+    if (existing.rows[0].deleted_at) {
+      res.json({ success: true, alreadyDeleted: true });
+      return;
+    }
+    const tombstonePhone = `deleted_${userId}_${Date.now()}`;
+    await query(
+      `UPDATE users SET
+         phone = $1,
+         name = 'Deleted User',
+         about = NULL,
+         avatar_url = NULL,
+         push_token = NULL,
+         two_step_pin = NULL,
+         is_online = FALSE,
+         deleted_at = NOW(),
+         updated_at = NOW()
+       WHERE id = $2`,
+      [tombstonePhone, userId],
+    );
+    await query(`DELETE FROM sos_contacts WHERE user_id = $1 OR contact_user_id = $1`, [userId]).catch(() => {});
+    await query(`DELETE FROM web_sessions WHERE user_id = $1`, [userId]).catch(() => {});
+    await query(`DELETE FROM typing_sessions WHERE user_id = $1`, [userId]).catch(() => {});
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "delete account");
+    res.status(500).json({ success: false, message: "Could not delete account." });
+  }
 });
 
 // Save push token

@@ -49,7 +49,12 @@ import { emitChatMessageSignal, type ChatMessageSignal } from "@/lib/chatMessage
 import { extractChatPushBody } from "@/lib/chatPushPayload";
 import { getNotificationActiveChatId, isOwnOutgoingChatMessage } from "@/lib/incomingMessageNotify";
 import { dismissChatMessageNotifications } from "@/lib/chatMessageNotification";
-import { INCOMING_RING_TIMEOUT_MS, INCOMING_CALL_POLL_ACTIVE_MS, INCOMING_CALL_POLL_BACKGROUND_MS } from "@/lib/callConstants";
+import {
+  INCOMING_RING_TIMEOUT_MS,
+  INCOMING_CALL_POLL_ACTIVE_MS,
+  INCOMING_CALL_POLL_BACKGROUND_MS,
+  INCOMING_CALL_POLL_SSE_HEALTHY_MS,
+} from "@/lib/callConstants";
 import { maybePromptDisableBatteryOptimization } from "@/lib/incomingCallBattery";
 import { isIncomingCallPushData, presentIncomingCallFromPush } from "@/lib/incomingCallPush";
 import {
@@ -221,53 +226,70 @@ function RootLayoutNav() {
     if (activeCallIdRef.current === next.callId && activeCallIsOutgoingRef.current) return;
     if (activeCallSession?.callId === next.callId && activeCallSession.isIncoming === false) return;
 
-    const isRepeatOffer = offeredCallIdRef.current === next.callId || !claimIncomingCallRing(next.callId);
-    if (isRepeatOffer) {
+    void (async () => {
+      try {
+        const { loadNotificationPrefs } = await import("@/lib/notificationPrefs");
+        const prefs = await loadNotificationPrefs();
+        if (!prefs.calls) return;
+      } catch {
+        /* deliver by default */
+      }
       if (dismissedIncomingCallIdsRef.current.has(next.callId)) return;
       if (activeCallIdRef.current === next.callId && activeCallIsOutgoingRef.current) return;
       if (activeCallSession?.callId === next.callId && activeCallSession.isIncoming === false) return;
-      offeredCallIdRef.current = next.callId;
-      setIncomingCall((prev) => (prev?.callId === next.callId ? { ...prev, ...next } : next));
-      pendingIncomingRef.current = next;
-      presentIncomingCallUi(next, { useNativeSurface: !isAppInForeground() });
-      scheduleIncomingAutoEnd(next.callId);
-      return;
-    }
-    offeredCallIdRef.current = next.callId;
 
-    if (
-      activeCallSession?.engineActive
-      && !activeCallSession.ringing
-      && activeCallSession.callId !== next.callId
-    ) {
-      setCallWaiting(next);
-      presentIncomingCallUi(next, { useNativeSurface: !isAppInForeground() });
+      const isRepeatOffer = offeredCallIdRef.current === next.callId || !claimIncomingCallRing(next.callId);
+      if (isRepeatOffer) {
+        if (dismissedIncomingCallIdsRef.current.has(next.callId)) return;
+        if (activeCallIdRef.current === next.callId && activeCallIsOutgoingRef.current) return;
+        if (activeCallSession?.callId === next.callId && activeCallSession.isIncoming === false) return;
+        offeredCallIdRef.current = next.callId;
+        setIncomingCall((prev) => (prev?.callId === next.callId ? { ...prev, ...next } : next));
+        pendingIncomingRef.current = next;
+        presentIncomingCallUi(next, { useNativeSurface: !isAppInForeground() });
+        scheduleIncomingAutoEnd(next.callId);
+        return;
+      }
+      offeredCallIdRef.current = next.callId;
+
+      if (
+        activeCallSession?.engineActive
+        && !activeCallSession.ringing
+        && activeCallSession.callId !== next.callId
+      ) {
+        setCallWaiting(next);
+        presentIncomingCallUi(next, { useNativeSurface: !isAppInForeground() });
+        void startIncomingCallExperience(next);
+        scheduleIncomingAutoEnd(next.callId);
+        return;
+      }
+
+      const appActive = isAppInForeground();
+      const presentSurfaces = !appActive && shouldPresentIncomingCallSurfaces(next.callId);
+      pendingIncomingRef.current = next;
+      setIncomingCall((prev) => (prev?.callId === next.callId ? { ...prev, ...next } : next));
+      presentIncomingCallUi(next, { useNativeSurface: presentSurfaces });
       void startIncomingCallExperience(next);
       scheduleIncomingAutoEnd(next.callId);
-      return;
-    }
 
-    const appActive = isAppInForeground();
-    const presentSurfaces = !appActive && shouldPresentIncomingCallSurfaces(next.callId);
-    pendingIncomingRef.current = next;
-    setIncomingCall((prev) => (prev?.callId === next.callId ? { ...prev, ...next } : next));
-    presentIncomingCallUi(next, { useNativeSurface: presentSurfaces });
-    void startIncomingCallExperience(next);
-    scheduleIncomingAutoEnd(next.callId);
-
-    void loadCachedSilenceUnknownCallers().then((silenceUnknown) => {
-      const knownCaller = isKnownCaller(Number(next.chatId), next.callerId, chats);
-      if (silenceUnknown && !knownCaller) {
-        void stopIncomingCallExperience(next.callId, { force: false });
-      }
-    });
+      void loadCachedSilenceUnknownCallers().then((silenceUnknown) => {
+        const knownCaller = isKnownCaller(Number(next.chatId), next.callerId, chats);
+        if (silenceUnknown && !knownCaller && user?.dbId) {
+          void declineIncomingCallSilently(next.callId, user.dbId, user.sessionToken);
+          dismissIncomingCallUi(next.callId, true);
+        }
+      });
+    })();
   }, [
     activeCallSession?.callId,
     activeCallSession?.engineActive,
     activeCallSession?.ringing,
     activeCallSession?.isIncoming,
     chats,
+    dismissIncomingCallUi,
     scheduleIncomingAutoEnd,
+    user?.dbId,
+    user?.sessionToken,
   ]);
 
   const offerIncomingCall = useCallback(async (raw: {
@@ -464,9 +486,12 @@ function RootLayoutNav() {
   useEffect(() => {
     if (!isAuthenticated || !user?.dbId) return;
     let cancelled = false;
+    let lastSseRingAt = 0;
     const pollMs = () => {
       const state = AppState.currentState;
-      return state === "active" ? INCOMING_CALL_POLL_ACTIVE_MS : INCOMING_CALL_POLL_BACKGROUND_MS;
+      if (state !== "active") return INCOMING_CALL_POLL_BACKGROUND_MS;
+      if (Date.now() - lastSseRingAt < 15_000) return INCOMING_CALL_POLL_SSE_HEALTHY_MS;
+      return INCOMING_CALL_POLL_ACTIVE_MS;
     };
     const poll = async () => {
       try {
@@ -536,6 +561,9 @@ function RootLayoutNav() {
       const action = signal.action ?? "";
       const callId = signal.callId ?? "";
       if (action === "ringing" && callId && user.dbId) {
+        lastSseRingAt = Date.now();
+        clearInterval(timer);
+        timer = setInterval(poll, pollMs());
         if (dismissedIncomingCallIdsRef.current.has(callId)) return;
         if (isIncomingCallAlreadyHandled(callId)) return;
         if (getRingingCallId() === callId) return;
@@ -1005,7 +1033,6 @@ function RootLayoutNav() {
         <Stack.Screen name="settings/two-step" options={{ headerShown: false }} />
         <Stack.Screen name="settings/change-number" options={{ headerShown: false }} />
         <Stack.Screen name="settings/storage" options={{ headerShown: false }} />
-        <Stack.Screen name="settings/accessibility" options={{ headerShown: false }} />
         <Stack.Screen name="settings/language" options={{ headerShown: false }} />
         <Stack.Screen name="settings/assistant" options={{ headerShown: false }} />
         <Stack.Screen name="settings/privacy" options={{ headerShown: false }} />

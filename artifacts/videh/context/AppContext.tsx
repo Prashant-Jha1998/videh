@@ -44,7 +44,7 @@ import {
   type MediaQuality,
 } from "@/lib/imageEdit";
 import { ensureUploadableFileUri } from "@/lib/prepareFileUpload";
-import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
+import { resolvePublicAssetUrl, withStatusMediaAuth } from "@/lib/publicAssetUrl";
 import { encodeVoiceMessageText, stripWaveformMeta } from "@/lib/voiceWaveform";
 import { messageReplyPreviewText } from "@/lib/messageReplyPreview";
 import { messageFromStatusReplyMeta, type StatusReplyMeta } from "@/lib/statusReply";
@@ -495,7 +495,15 @@ interface AppContextType {
   createGroup: (name: string, memberIds: number[], groupAvatarUrl?: string) => void;
   markAsRead: (chatId: string) => void;
   markAllAsRead: () => Promise<void>;
-  addStatus: (content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string, videoDurationMs?: number | null, editorData?: StoryEditorData) => Promise<void> | undefined;
+  addStatus: (
+    content: string,
+    type: "text" | "image" | "video",
+    bg?: string,
+    mediaUrl?: string,
+    videoDurationMs?: number | null,
+    editorData?: StoryEditorData,
+    audience?: { mode: "all_contacts" | "selected_contacts"; userIds?: number[] },
+  ) => Promise<void> | undefined;
   deleteStatus: (statusId: string) => Promise<void>;
   deleteMessage: (chatId: string, messageId: string) => void;
   pinChat: (chatId: string) => void;
@@ -1163,11 +1171,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const mapped: Status[] = data.statuses.map((s: any) => {
         const isMe = Number(s.user_id) === Number(dbUserId);
         const rawEditor = s.editor_data as StoryEditorData | null | undefined;
+        const token = me?.sessionToken ?? authSessionToken;
         const editorData = rawEditor
           ? {
               ...rawEditor,
               musicUri: rawEditor.musicUri
-                ? resolvePublicAssetUrl(rawEditor.musicUri) ?? rawEditor.musicUri
+                ? (withStatusMediaAuth(rawEditor.musicUri, token)
+                  ?? resolvePublicAssetUrl(rawEditor.musicUri)
+                  ?? rawEditor.musicUri)
                 : undefined,
             }
           : undefined;
@@ -1182,7 +1193,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             : (s.user_avatar ?? undefined),
           content: s.content ?? "",
           type: s.type ?? "text",
-          mediaUrl: resolvePublicAssetUrl(s.media_url) ?? s.media_url ?? undefined,
+          mediaUrl: withStatusMediaAuth(s.media_url, token)
+            ?? resolvePublicAssetUrl(s.media_url)
+            ?? s.media_url
+            ?? undefined,
           timestamp: new Date(s.created_at).getTime(),
           expiresAt: s.expires_at ? new Date(s.expires_at).getTime() : undefined,
           isBoosted: Boolean(s.is_boosted),
@@ -3607,7 +3621,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     })();
   }, [loadChats]);
 
-  const addStatus = useCallback(async (content: string, type: "text" | "image" | "video", bg?: string, mediaUrl?: string, videoDurationMs?: number | null, editorData?: StoryEditorData) => {
+  const addStatus = useCallback(async (
+    content: string,
+    type: "text" | "image" | "video",
+    bg?: string,
+    mediaUrl?: string,
+    videoDurationMs?: number | null,
+    editorData?: StoryEditorData,
+    audience?: { mode: "all_contacts" | "selected_contacts"; userIds?: number[] },
+  ) => {
     const u = userRef.current;
     if (!u) return;
     const tempId = Date.now().toString();
@@ -3629,7 +3651,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ? {
               ...editorData,
               musicUri: editorData.musicUri
-                ? await uploadStatusMedia(editorData.musicUri, "audio/mpeg")
+                ? (/^https?:\/\//i.test(editorData.musicUri)
+                  ? editorData.musicUri
+                  : await uploadStatusMedia(editorData.musicUri, "audio/mpeg"))
                 : undefined,
             }
           : null;
@@ -3644,6 +3668,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             mediaUrl: uploadedMediaUrl,
             videoDurationMs: type === "video" ? videoDurationMs ?? null : undefined,
             editorData: uploadedEditorData,
+            audienceMode: audience?.mode ?? "all_contacts",
+            audienceUserIds: audience?.mode === "selected_contacts" ? (audience.userIds ?? []) : [],
           }),
         });
         const data = await res.json().catch(() => ({})) as { success?: boolean; message?: string };

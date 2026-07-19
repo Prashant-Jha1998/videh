@@ -79,7 +79,7 @@ export function mapApiStatusRow(
     mediaUrl: resolvePublicAssetUrl(s.media_url as string | undefined) ?? (s.media_url as string | undefined),
     timestamp: new Date(String(s.created_at)).getTime(),
     expiresAt: s.expires_at ? new Date(String(s.expires_at)).getTime() : undefined,
-    viewed: true,
+    viewed: Boolean(s.viewed),
     backgroundColor: (s.background_color as string | undefined) ?? "#059669",
   };
 }

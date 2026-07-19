@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
+import { useApp } from "@/context/AppContext";
 import {
   getCallAudioPrefs,
   labelForCallRingtone,
@@ -21,40 +22,58 @@ import {
 import { getCallMediaSettings, setCallLowDataMode } from "@/lib/callMediaSettings";
 import { labelForSoundId } from "@/lib/premiumSounds";
 import { getSoundPrefs } from "@/lib/soundPrefs";
+import {
+  DEFAULT_NOTIFICATION_PREFS,
+  loadNotificationPrefs,
+  previewLabel,
+  saveNotificationPrefs,
+  type NotificationPrefs,
+} from "@/lib/notificationPrefs";
 
-const PREVIEW_OPTIONS = ["Always show preview", "Only show sender name", "No preview"];
+const PREVIEW_OPTIONS: { label: string; value: NotificationPrefs["preview"] }[] = [
+  { label: "Always show preview", value: "always" },
+  { label: "Only show sender name", value: "name" },
+  { label: "No preview", value: "none" },
+];
 
 export default function NotificationsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user } = useApp();
 
-  const [msgNotifs, setMsgNotifs] = useState(true);
+  const [prefs, setPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
   const [msgTone, setMsgTone] = useState("Default");
-  const [msgVibrate, setMsgVibrate] = useState(true);
-  const [msgPreview, setMsgPreview] = useState("Always show preview");
-  const [groupNotifs, setGroupNotifs] = useState(true);
   const [groupTone, setGroupTone] = useState("Default");
-  const [groupVibrate, setGroupVibrate] = useState(true);
   const [callRingtone, setCallRingtone] = useState("Default");
   const [callVibrate, setCallVibrate] = useState(true);
-  const [callNotifs, setCallNotifs] = useState(true);
   const [callLowData, setCallLowData] = useState(false);
-  const [statusNotifs, setStatusNotifs] = useState(true);
-  const [reactionNotifs, setReactionNotifs] = useState(true);
+
+  const persist = useCallback(
+    async (next: NotificationPrefs) => {
+      setPrefs(next);
+      await saveNotificationPrefs(next, {
+        userId: user?.dbId,
+        sessionToken: user?.sessionToken,
+      });
+    },
+    [user?.dbId, user?.sessionToken],
+  );
 
   const loadPrefs = useCallback(async () => {
-    const [callPrefs, soundPrefs, media] = await Promise.all([
+    const [notif, callPrefs, soundPrefs, media] = await Promise.all([
+      loadNotificationPrefs({ userId: user?.dbId, sessionToken: user?.sessionToken }),
       getCallAudioPrefs(),
       getSoundPrefs(),
       getCallMediaSettings(),
     ]);
+    setPrefs(notif);
     setCallRingtone(labelForCallRingtone(callPrefs.ringtone));
     setCallVibrate(callPrefs.vibrate);
     setMsgTone(labelForSoundId(soundPrefs.globalMessageSound));
     setGroupTone(labelForSoundId(soundPrefs.globalGroupMessageSound));
     setCallLowData(media.lowDataMode);
-  }, []);
+  }, [user?.dbId, user?.sessionToken]);
 
   useFocusEffect(
     useCallback(() => {
@@ -97,8 +116,13 @@ export default function NotificationsScreen() {
 
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Messages</Text>
-          <SwitchRow label="Conversation notifications" value={msgNotifs} onChange={setMsgNotifs} colors={colors} />
-          {msgNotifs && (
+          <SwitchRow
+            label="Conversation notifications"
+            value={prefs.messages}
+            onChange={(v) => void persist({ ...prefs, messages: v })}
+            colors={colors}
+          />
+          {prefs.messages && (
             <>
               <TappableRow
                 label="Notification tone"
@@ -106,15 +130,23 @@ export default function NotificationsScreen() {
                 onPress={() => router.push("/settings/premium-sounds")}
                 colors={colors}
               />
-              <SwitchRow label="Vibrate" value={msgVibrate} onChange={setMsgVibrate} colors={colors} />
+              <SwitchRow
+                label="Vibrate"
+                value={prefs.messageVibrate}
+                onChange={(v) => void persist({ ...prefs, messageVibrate: v })}
+                colors={colors}
+              />
               <TappableRow
-                label="Popup notification"
-                value={msgPreview}
+                label="Notification preview"
+                value={previewLabel(prefs.preview)}
                 onPress={() =>
                   Alert.alert(
                     "Notification preview",
                     "",
-                    PREVIEW_OPTIONS.map((p) => ({ text: p, onPress: () => setMsgPreview(p) })),
+                    PREVIEW_OPTIONS.map((p) => ({
+                      text: p.label,
+                      onPress: () => void persist({ ...prefs, preview: p.value }),
+                    })),
                   )
                 }
                 colors={colors}
@@ -126,8 +158,13 @@ export default function NotificationsScreen() {
 
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Groups</Text>
-          <SwitchRow label="Group notifications" value={groupNotifs} onChange={setGroupNotifs} colors={colors} />
-          {groupNotifs && (
+          <SwitchRow
+            label="Group notifications"
+            value={prefs.groups}
+            onChange={(v) => void persist({ ...prefs, groups: v })}
+            colors={colors}
+          />
+          {prefs.groups && (
             <>
               <TappableRow
                 label="Notification tone"
@@ -135,15 +172,26 @@ export default function NotificationsScreen() {
                 onPress={() => router.push("/settings/premium-sounds")}
                 colors={colors}
               />
-              <SwitchRow label="Vibrate" value={groupVibrate} onChange={setGroupVibrate} colors={colors} last />
+              <SwitchRow
+                label="Vibrate"
+                value={prefs.groupVibrate}
+                onChange={(v) => void persist({ ...prefs, groupVibrate: v })}
+                colors={colors}
+                last
+              />
             </>
           )}
         </View>
 
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Calls</Text>
-          <SwitchRow label="Call notifications" value={callNotifs} onChange={setCallNotifs} colors={colors} />
-          {callNotifs && (
+          <SwitchRow
+            label="Call notifications"
+            value={prefs.calls}
+            onChange={(v) => void persist({ ...prefs, calls: v })}
+            colors={colors}
+          />
+          {prefs.calls && (
             <>
               <TappableRow
                 label="Ringtone"
@@ -168,8 +216,19 @@ export default function NotificationsScreen() {
 
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>Other</Text>
-          <SwitchRow label="Status notifications" value={statusNotifs} onChange={setStatusNotifs} colors={colors} />
-          <SwitchRow label="Reaction notifications" value={reactionNotifs} onChange={setReactionNotifs} colors={colors} last />
+          <SwitchRow
+            label="Status notifications"
+            value={prefs.status}
+            onChange={(v) => void persist({ ...prefs, status: v })}
+            colors={colors}
+          />
+          <SwitchRow
+            label="Reaction notifications"
+            value={prefs.reactions}
+            onChange={(v) => void persist({ ...prefs, reactions: v })}
+            colors={colors}
+            last
+          />
         </View>
       </ScrollView>
     </View>

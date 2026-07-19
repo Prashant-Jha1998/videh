@@ -389,6 +389,42 @@ export const webApi = {
       success: true;
       stats: { total_chats: number; total_messages: number; media_messages: number; text_messages: number };
     }>(`/web-session/${token}/storage-stats`),
+  notificationPrefs: (token: string) =>
+    request<{
+      success: true;
+      prefs: {
+        messages: boolean;
+        groups: boolean;
+        calls: boolean;
+        status: boolean;
+        reactions: boolean;
+        messageVibrate: boolean;
+        groupVibrate: boolean;
+        preview: "always" | "name" | "none";
+      };
+    }>(`/web-session/${token}/notification-prefs`),
+  setNotificationPrefs: (
+    token: string,
+    prefs: Partial<{
+      messages: boolean;
+      groups: boolean;
+      calls: boolean;
+      status: boolean;
+      reactions: boolean;
+      messageVibrate: boolean;
+      groupVibrate: boolean;
+      preview: "always" | "name" | "none";
+    }>,
+  ) =>
+    request<{ success: true; prefs: Record<string, unknown> }>(`/web-session/${token}/notification-prefs`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(prefs),
+    }),
+  accountExport: (token: string) =>
+    request<{ success: true; exportedAt: string; report: unknown }>(`/web-session/${token}/account-export`),
+  deleteAccount: (token: string) =>
+    request<{ success: true; alreadyDeleted?: boolean }>(`/web-session/${token}/account`, { method: "DELETE" }),
   sosContacts: (token: string) =>
     request<{
       success: true;

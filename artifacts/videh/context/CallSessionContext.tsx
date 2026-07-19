@@ -21,7 +21,12 @@ import {
   stopCallAlert,
 } from "@/lib/callRingtone";
 import { addUsersToOngoingCall } from "@/lib/callParticipants";
-import { CONNECTING_TIMEOUT_MS, INCOMING_RING_TIMEOUT_MS, OUTGOING_RING_STATUS_POLL_MS } from "@/lib/callConstants";
+import {
+  CONNECTING_TIMEOUT_MS,
+  INCOMING_RING_TIMEOUT_MS,
+  JOINED_CALL_STATUS_POLL_MS,
+  OUTGOING_RING_STATUS_POLL_MS,
+} from "@/lib/callConstants";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import { videhSignalingPost } from "@/lib/videhCall/signalingClient";
 import { chooseInCallAudioRoute, wakeScreenForIncomingCall, type InCallAudioRoute } from "@/lib/inCallAudio";
@@ -886,11 +891,11 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
     const polledCallId = session.callId;
     statusPollMissRef.current = 0;
     const pollMs = call.joined
-      ? 800
+      ? JOINED_CALL_STATUS_POLL_MS
       : session.engineActive
-        ? 500
+        ? 800
         : session.isIncoming
-          ? 400
+          ? 600
           : OUTGOING_RING_STATUS_POLL_MS;
     const missLimit = call.joined ? 6 : 4;
     const timer = setInterval(() => {

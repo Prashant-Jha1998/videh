@@ -53,6 +53,9 @@ export function WebCallsListPane({
       >
         Calls
       </div>
+      <p style={{ margin: 0, padding: "8px 16px 12px", fontSize: 12, color: "#667781", background: "#f0f2f5" }}>
+        Live voice & video calls are available in the Videh mobile app. This list shows history only.
+      </p>
       <div style={{ flex: 1, overflowY: "auto" }}>
         {calls.length === 0 ? (
           <p style={{ padding: 24, color: "#667781", textAlign: "center", fontSize: 14 }}>No recent calls</p>

@@ -4,9 +4,54 @@ import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { query } from "../lib/db";
 import { stateGetJson, stateSetJson } from "../lib/sharedState";
 import { normalizePhone } from "../lib/phoneNormalize";
+import { publishChatEvent } from "../lib/realtime";
 
 const router = Router();
 const MAX_SOS_CONTACTS = 5;
+
+function mapsSearchUrl(lat: number, lng: number): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`;
+}
+
+function parseCoords(latitude: unknown, longitude: unknown): { lat: number; lng: number } | null {
+  const lat = typeof latitude === "number" ? latitude : Number(latitude);
+  const lng = typeof longitude === "number" ? longitude : Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+async function insertAndPublishSosMessage(opts: {
+  chatId: number;
+  senderId: number;
+  senderName: string;
+  content: string;
+  type: "text" | "location";
+  mediaUrl?: string | null;
+  recipientId: number;
+}): Promise<number> {
+  const result = await query(
+    `INSERT INTO messages (chat_id, sender_id, content, type, media_url)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id`,
+    [opts.chatId, opts.senderId, opts.content, opts.type, opts.mediaUrl ?? null],
+  );
+  const messageId = Number(result.rows[0].id);
+  publishChatEvent({
+    type: "message",
+    chatId: opts.chatId,
+    userIds: [opts.senderId, opts.recipientId],
+    payload: {
+      messageId,
+      content: opts.content,
+      type: opts.type,
+      mediaUrl: opts.mediaUrl ?? undefined,
+      senderId: opts.senderId,
+      senderName: opts.senderName,
+    },
+  });
+  return messageId;
+}
 
 /** India mobile stored as +91 + exactly 10 digits. */
 function toIndiaSosPhone(raw: string | null | undefined): string | null {
@@ -177,8 +222,13 @@ router.post("/:userId/trigger", async (req: Request, res: Response) => {
       res.status(400).json({ success: false, message: "No SOS contacts configured" });
       return;
     }
-    const locationText = latitude ? `📍 Location: https://maps.google.com/?q=${latitude},${longitude}` : (address ? `📍 ${address}` : "");
-    const sosMsg = `🚨 SOS ALERT: ${sender.name ?? sender.phone} needs immediate help.\n${locationText}`;
+    const coords = parseCoords(latitude, longitude);
+    const addressLabel = typeof address === "string" && address.trim() ? address.trim().slice(0, 160) : undefined;
+    const locationText = coords
+      ? `📍 Location: ${mapsSearchUrl(coords.lat, coords.lng)}`
+      : (addressLabel ? `📍 ${addressLabel}` : "");
+    const senderName = String(sender.name ?? sender.phone ?? "Videh user");
+    const sosMsg = `🚨 SOS ALERT: ${senderName} needs immediate help.${locationText ? `\n${locationText}` : ""}`;
 
     let sentCount = 0;
     const smsFallbackNumbers: string[] = [];
@@ -199,25 +249,57 @@ router.post("/:userId/trigger", async (req: Request, res: Response) => {
 
       const chatId = await findOrCreateDirectChat(userId, linkedId);
 
-      await query(
-        "INSERT INTO messages (chat_id, sender_id, content, type) VALUES ($1,$2,$3,'text')",
-        [chatId, userId, sosMsg]
-      );
+      // 1) Alert text so chat list shows SOS clearly
+      await insertAndPublishSosMessage({
+        chatId,
+        senderId: Number(userId),
+        senderName,
+        content: sosMsg,
+        type: "text",
+        recipientId: linkedId,
+      });
+
+      // 2) Native location bubble (map preview) when GPS is available
+      if (coords) {
+        const locationContent = JSON.stringify({
+          v: 1,
+          mode: "live",
+          lat: coords.lat,
+          lng: coords.lng,
+          label: addressLabel || "SOS live location",
+          until: Date.now() + 30 * 60_000,
+          comment: "SOS emergency location",
+        });
+        await insertAndPublishSosMessage({
+          chatId,
+          senderId: Number(userId),
+          senderName,
+          content: locationContent,
+          type: "location",
+          mediaUrl: mapsSearchUrl(coords.lat, coords.lng),
+          recipientId: linkedId,
+        });
+      }
 
       const pushRow = await query("SELECT push_token FROM users WHERE id = $1", [linkedId]);
       const pushToken = pushRow.rows[0]?.push_token ?? contact.push_token;
       if (isValidPushToken(pushToken)) {
         await sendChatPush(
           pushToken ?? [],
-          `🚨 SOS — ${sender.name ?? sender.phone}`,
-          locationText || "Emergency! Please help!",
+          `🚨 SOS — ${senderName}`,
+          coords ? "📍 Live location shared — open chat" : (locationText || "Emergency! Please help!"),
           { chatId: String(chatId), sos: "true", notificationKind: "sos" },
         );
       }
       sentCount++;
     }
 
-    res.json({ success: true, sentTo: sentCount, smsFallbackNumbers });
+    res.json({
+      success: true,
+      sentTo: sentCount,
+      smsFallbackNumbers,
+      locationIncluded: Boolean(coords),
+    });
   } catch (err) {
     req.log.error({ err }, "sos trigger error");
     res.status(500).json({ success: false, message: "Server error" });
@@ -255,7 +337,22 @@ router.post("/:userId/location-update", async (req: Request, res: Response) => {
        WHERE sc.user_id = $1`,
       [userId]
     );
-    const msg = `📡 Live location update from ${sender.name ?? sender.phone}: https://maps.google.com/?q=${latitude},${longitude}`;
+    const coords = parseCoords(latitude, longitude);
+    if (!coords) {
+      res.status(400).json({ success: false, message: "Invalid coordinates" });
+      return;
+    }
+    const senderName = String(sender.name ?? sender.phone ?? "Videh user");
+    const locationContent = JSON.stringify({
+      v: 1,
+      mode: "live",
+      lat: coords.lat,
+      lng: coords.lng,
+      label: "SOS live location",
+      until: Date.now() + 30 * 60_000,
+      comment: "SOS location update",
+    });
+    const mediaUrl = mapsSearchUrl(coords.lat, coords.lng);
     let sentTo = 0;
     for (const contact of contacts.rows) {
       const linkedId = await resolveLinkedUserId({
@@ -265,7 +362,15 @@ router.post("/:userId/location-update", async (req: Request, res: Response) => {
       });
       if (!linkedId) continue;
       const chatId = await findOrCreateDirectChat(userId, linkedId);
-      await query("INSERT INTO messages (chat_id, sender_id, content, type) VALUES ($1,$2,$3,'text')", [chatId, userId, msg]);
+      await insertAndPublishSosMessage({
+        chatId,
+        senderId: Number(userId),
+        senderName,
+        content: locationContent,
+        type: "location",
+        mediaUrl,
+        recipientId: linkedId,
+      });
       sentTo++;
     }
     await stateSetJson(throttleKey, now, 45_000);

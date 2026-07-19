@@ -24,7 +24,6 @@ export default function JoinCallScreen() {
   const [loading, setLoading] = useState(true);
   const [hostName, setHostName] = useState("");
   const [callType, setCallType] = useState<"audio" | "video">("video");
-  const [chatId, setChatId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!token) {
@@ -39,13 +38,12 @@ export default function JoinCallScreen() {
       }
       setHostName(info.hostName);
       setCallType(info.callType === "audio" ? "audio" : "video");
-      setChatId(info.chatId ?? null);
       setLoading(false);
     });
   }, [token, user?.sessionToken, router]);
 
   const onJoin = async () => {
-    if (!token || !user?.sessionToken) {
+    if (!token || !user?.sessionToken || !user.dbId) {
       Alert.alert("Sign in required", "Open Videh and sign in to join this call.");
       return;
     }
@@ -56,11 +54,31 @@ export default function JoinCallScreen() {
       Alert.alert("Could not join", "Link may have expired.");
       return;
     }
+
+    if (joined.liveCall?.callId && joined.liveCall.channel) {
+      const iAmCaller = joined.liveCall.callerId === user.dbId;
+      router.replace({
+        pathname: "/call/[id]",
+        params: {
+          id: String(joined.chatId),
+          name: hostName || "Videh call",
+          type: joined.callType,
+          callId: joined.liveCall.callId,
+          channel: joined.liveCall.channel,
+          incoming: iAmCaller ? "0" : "1",
+          ringing: "0",
+          callerId: String(joined.liveCall.callerId),
+        },
+      });
+      return;
+    }
+
+    // No live call — start an outgoing call to the host from this chat.
     router.replace({
       pathname: "/call/[id]",
       params: {
         id: String(joined.chatId),
-        name: hostName,
+        name: hostName || "Videh call",
         type: joined.callType,
       },
     });

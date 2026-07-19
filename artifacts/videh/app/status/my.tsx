@@ -93,10 +93,9 @@ export default function MyStatusScreen() {
   }, [durationDays, radiusKm, targetCity, targetState]);
 
   const shareStatus = async (status: Status, channelLabel?: string) => {
+    // Never share private status media URLs (auth-gated). Text-only share.
     const text = status.content?.trim() || "Shared from my Videh status";
-    const payload = status.mediaUrl
-      ? { message: channelLabel ? `${channelLabel}\n${text}` : text, url: status.mediaUrl }
-      : { message: channelLabel ? `${channelLabel}\n${text}` : text };
+    const payload = { message: channelLabel ? `${channelLabel}\n${text}` : text };
     await Share.share(payload).catch(() => {});
   };
 

@@ -7,15 +7,16 @@ export type CallMessageMeta = {
   durationSeconds?: number;
 };
 
-export function callMessagePreview(meta: CallMessageMeta, participantCount = 1): string {
-  const label =
-    participantCount > 1
-      ? meta.callType === "video"
-        ? "Group video call"
-        : "Group voice call"
-      : meta.callType === "video"
-        ? "Video call"
-        : "Voice call";
+/** `inviteeCount` = callee list size (1 for 1:1). Do not pass total party size including caller. */
+export function callMessagePreview(meta: CallMessageMeta, inviteeCount = 1): string {
+  const isGroup = inviteeCount > 1;
+  const label = isGroup
+    ? meta.callType === "video"
+      ? "Group video call"
+      : "Group voice call"
+    : meta.callType === "video"
+      ? "Video call"
+      : "Voice call";
   if (meta.result === "answered") {
     const total = Math.max(0, meta.durationSeconds ?? 0);
     const mins = Math.floor(total / 60);

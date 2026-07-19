@@ -13,66 +13,33 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Constants from "expo-constants";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-import { getApiUrl } from "@/lib/api";
-import { jsonAuthHeaders } from "@/lib/authHeaders";
 import { THIRD_PARTY_BRAND_DISCLAIMER } from "@/lib/legalDisclaimers";
 
-const SUPPORT_PHONE = "+919999999999";
-const SUPPORT_DISPLAY = "+91 9999999999";
-const SUPPORT_NAME = "Videh Support";
+const SUPPORT_EMAIL = "support@videh.co.in";
 
 export default function HelpScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, chats } = useApp();
+  const { user } = useApp();
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const openSupportChat = useCallback(async () => {
-    if (!user?.dbId) {
-      Alert.alert("Sign in required", "Please sign in to message support.");
-      return;
-    }
+  const openSupportEmail = useCallback(async () => {
+    const subject = encodeURIComponent("Videh support");
+    const body = encodeURIComponent(
+      `User: ${user?.name ?? ""}\nPhone: +91 ${user?.phone ?? ""}\n\nDescribe your issue:\n`,
+    );
+    const url = `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
     try {
-      const res = await fetch(`${getApiUrl()}/api/users/check-phones`, {
-        method: "POST",
-        headers: jsonAuthHeaders(user.sessionToken),
-        body: JSON.stringify({ phones: [SUPPORT_PHONE] }),
-      });
-      const data = (await res.json()) as {
-        registered?: Record<string, { id: number; name?: string; avatarUrl?: string }>;
-      };
-      const reg = data.registered?.[SUPPORT_PHONE];
-      if (!reg?.id) {
-        Alert.alert(
-          "Contact us",
-          `${SUPPORT_DISPLAY} is not registered on Videh yet.\n\nEmail: support@videh.app`,
-        );
-        return;
-      }
-      const supportId = Number(reg.id);
-      const supportName = reg.name?.trim() || SUPPORT_NAME;
-      const chat = chats.find((c) => !c.isGroup && c.otherUserId === supportId);
-      if (chat && !chat.id.startsWith("new_")) {
-        router.push({ pathname: "/chat/[id]", params: { id: chat.id, name: supportName } });
-        return;
-      }
-      router.push({
-        pathname: "/chat/[id]",
-        params: {
-          id: `new_${supportId}`,
-          name: supportName,
-          otherUserId: String(supportId),
-          otherAvatar: reg.avatarUrl ?? "",
-        },
-      });
+      await Linking.openURL(url);
     } catch {
-      Alert.alert("Error", "Could not open support chat. Please try again.");
+      Alert.alert("Contact us", `Email ${SUPPORT_EMAIL}`);
     }
-  }, [chats, router, user?.dbId, user?.sessionToken]);
+  }, [user?.name, user?.phone]);
 
   const inviteFriend = useCallback(async () => {
     const message = "Try Videh — chat, calls, stories, and Videh Video in one app.\n\nhttps://videh.co.in/download.html";
@@ -85,12 +52,12 @@ export default function HelpScreen() {
     {
       icon: "help-circle-outline", iconBg: "#2196F3", label: "Help Centre",
       hint: "Find answers to common questions",
-      onPress: () => { void Linking.openURL("https://videh.co.in"); },
+      onPress: () => { void Linking.openURL("https://videh.co.in/help"); },
     },
     {
-      icon: "chatbubble-outline", iconBg: "#4CAF50", label: "Contact us",
-      hint: SUPPORT_DISPLAY,
-      onPress: () => { void openSupportChat(); },
+      icon: "mail-outline", iconBg: "#4CAF50", label: "Contact us",
+      hint: SUPPORT_EMAIL,
+      onPress: () => { void openSupportEmail(); },
     },
     {
       icon: "star-outline", iconBg: "#FF9800", label: "Rate us",
@@ -151,7 +118,9 @@ export default function HelpScreen() {
 
         <View style={styles.versionBlock}>
           <Text style={[styles.disclaimerText, { color: colors.mutedForeground }]}>{THIRD_PARTY_BRAND_DISCLAIMER}</Text>
-          <Text style={[styles.versionText, { color: colors.mutedForeground }]}>Videh v1.0.0</Text>
+          <Text style={[styles.versionText, { color: colors.mutedForeground }]}>
+            Videh v{Constants.expoConfig?.version ?? "1.0.94"}
+          </Text>
           <Text style={[styles.versionSub, { color: colors.mutedForeground }]}>© 2026 Videh Technologies</Text>
         </View>
       </ScrollView>

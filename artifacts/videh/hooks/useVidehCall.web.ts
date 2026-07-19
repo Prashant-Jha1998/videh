@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { callDebug } from "@/lib/callDebug";
-import { channelsForCall, loadIceServers } from "@/lib/webrtcIce";
+import { channelsForCall, loadIceServers, peerIdFromCallChannel } from "@/lib/webrtcIce";
 import { webrtcFetch } from "@/lib/webrtcApi";
 import { startScreenShare, stopScreenShare as stopScreenShareTracks } from "@/lib/screenShare";
 import type { VidehCallState } from "./videhCallTypes";
@@ -9,6 +9,8 @@ export type { VidehCallState } from "./videhCallTypes";
 
 type Role = "caller" | "callee";
 const SIGNAL_POLL_MS = 80;
+const SIGNAL_POLL_CONNECTED_MS = 1200;
+const ICE_RESTART_DELAY_MS = 5000;
 
 export function useVidehCall(
   baseChannel: string,
@@ -36,6 +38,11 @@ export function useVidehCall(
   const lastAnswerRevisionRef = useRef<Map<string, number>>(new Map());
   const offerProcessingRef = useRef<Set<string>>(new Set());
   const connectGenRef = useRef(0);
+  const connectedNotifiedRef = useRef(false);
+  const iceRestartTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const iceRestartInFlightRef = useRef<Set<string>>(new Set());
+  const remotePeerIdsRef = useRef(remotePeerIds);
+  remotePeerIdsRef.current = remotePeerIds;
 
   const [joined, setJoined] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -178,6 +185,55 @@ export function useVidehCall(
       })();
     };
 
+    const schedulePoll = (channel: string, ms: number) => {
+      const existing = pollTimersRef.current.get(channel);
+      if (existing) clearInterval(existing);
+      const timer = setInterval(() => pollSignalOnce(channel), ms);
+      pollTimersRef.current.set(channel, timer);
+    };
+
+    const shouldInitiateIceRestart = (channel: string): boolean => {
+      const peerId = peerIdFromCallChannel(channel, uid) || remotePeerIdsRef.current[0];
+      if (!peerId || peerId === uid) return true;
+      return uid < peerId;
+    };
+
+    const scheduleIceRestart = (channel: string, role: Role) => {
+      if (stopped || iceRestartInFlightRef.current.has(channel)) return;
+      if (iceRestartTimersRef.current.has(channel)) return;
+      const timer = setTimeout(() => {
+        iceRestartTimersRef.current.delete(channel);
+        void (async () => {
+          const pcNow = pcsRef.current.get(channel);
+          if (stopped || !pcNow) return;
+          if (pcNow.connectionState === "connected") return;
+          if (!shouldInitiateIceRestart(channel)) return;
+          iceRestartInFlightRef.current.add(channel);
+          try {
+            if (typeof pcNow.restartIce === "function") pcNow.restartIce();
+            const offer = await pcNow.createOffer({ iceRestart: true });
+            await pcNow.setLocalDescription(offer);
+            const res = await webrtcFetch(`/sessions/${encodeURIComponent(channel)}/offer`, sessionToken, {
+              method: "POST",
+              body: JSON.stringify({ offer, iceRestart: true }),
+            });
+            const payload = (await res.json()) as { offerRevision?: number };
+            if (typeof payload.offerRevision === "number") {
+              lastOfferRevisionRef.current.set(channel, payload.offerRevision);
+            }
+            candidateCursorsRef.current.set(channel, 0);
+            if (role === "caller") lastAnswerRevisionRef.current.delete(channel);
+            schedulePoll(channel, SIGNAL_POLL_MS);
+          } catch {
+            /* retry on next disconnect */
+          } finally {
+            iceRestartInFlightRef.current.delete(channel);
+          }
+        })();
+      }, ICE_RESTART_DELAY_MS);
+      iceRestartTimersRef.current.set(channel, timer);
+    };
+
     const connectChannel = async (channel: string, sharedLocalStream: MediaStream, iceServers: RTCIceServer[]) => {
       if (connectGen !== connectGenRef.current || stopped) return;
 
@@ -236,11 +292,33 @@ export function useVidehCall(
         refreshAggregate();
       };
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "connected") {
+        const state = pc.connectionState;
+        if (state === "connected") {
           callDebug("PEER_CONNECTION_CONNECTED", { channel, role, uid, callId });
+          const t = iceRestartTimersRef.current.get(channel);
+          if (t) {
+            clearTimeout(t);
+            iceRestartTimersRef.current.delete(channel);
+          }
           setError(null);
-        } else if (pc.connectionState === "failed") {
-          setError("Call connection failed.");
+          schedulePoll(channel, SIGNAL_POLL_CONNECTED_MS);
+          if (!connectedNotifiedRef.current && callId && sessionToken) {
+            connectedNotifiedRef.current = true;
+            void webrtcFetch(`/calls/${callId}/connected`, sessionToken, {
+              method: "POST",
+              body: JSON.stringify({ userId: uid }),
+            }).catch(() => {});
+          }
+        } else if (state === "failed") {
+          const t = iceRestartTimersRef.current.get(channel);
+          if (t) {
+            clearTimeout(t);
+            iceRestartTimersRef.current.delete(channel);
+          }
+          schedulePoll(channel, SIGNAL_POLL_MS);
+          scheduleIceRestart(channel, role);
+        } else if (state === "disconnected" || state === "connecting") {
+          schedulePoll(channel, SIGNAL_POLL_MS);
         }
         refreshAggregate();
       };
@@ -260,8 +338,7 @@ export function useVidehCall(
         return;
       }
 
-      const pollTimer = setInterval(() => pollSignalOnce(channel), SIGNAL_POLL_MS);
-      pollTimersRef.current.set(channel, pollTimer);
+      schedulePoll(channel, SIGNAL_POLL_MS);
       pollSignalOnce(channel);
     };
 
@@ -296,6 +373,9 @@ export function useVidehCall(
       stopped = true;
       for (const timer of pollTimersRef.current.values()) clearInterval(timer);
       pollTimersRef.current.clear();
+      for (const timer of iceRestartTimersRef.current.values()) clearTimeout(timer);
+      iceRestartTimersRef.current.clear();
+      iceRestartInFlightRef.current.clear();
       pollBusyRef.current.clear();
       offerProcessingRef.current.clear();
       localStreamRef.current?.getTracks().forEach((track) => track.stop());

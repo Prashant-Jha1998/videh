@@ -1474,7 +1474,9 @@ export default function VidehWeb() {
           user={user}
           currentToken={token}
           onLogout={() => void handleLogout()}
-          onOpenSupportChat={() => alert("Search for Videh Support in New chat, or email support@videh.app")}
+          onOpenSupportChat={() => {
+            window.location.href = "mailto:support@videh.co.in?subject=Videh%20support";
+          }}
         />
       ) : (
         <WebEmptyPane section={mainSection} />

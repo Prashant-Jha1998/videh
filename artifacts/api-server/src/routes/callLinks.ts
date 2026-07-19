@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { Router, type Request, type Response } from "express";
-import { assertSameUser, requireAuth } from "../lib/auth";
+import { requireAuth } from "../lib/auth";
 import { query } from "../lib/db";
+import { attachJoinerToLiveCall } from "./webrtc";
 
 const router = Router();
 router.use(requireAuth);
@@ -93,7 +94,9 @@ router.get("/:token", async (req: Request, res: Response) => {
   }
 });
 
-/** Join: start a call with the link host (creates/uses chat). */
+/**
+ * Join: attach to the host's live call when present; otherwise return chat so the app can dial.
+ */
 router.post("/:token/join", async (req: Request, res: Response) => {
   const token = String(req.params.token ?? "").trim();
   const joinerId = Number((req as any).authUserId);
@@ -138,12 +141,30 @@ router.post("/:token/join", async (req: Request, res: Response) => {
       }
     }
 
+    const live = await attachJoinerToLiveCall(chatId, joinerId);
+    if (live) {
+      res.json({
+        success: true,
+        chatId,
+        callType: live.type,
+        hostUserId: hostId,
+        liveCall: {
+          callId: live.callId,
+          channel: live.channel,
+          callerId: live.callerId,
+          alreadyOnCall: live.alreadyOnCall,
+        },
+      });
+      return;
+    }
+
     res.json({
       success: true,
       chatId,
       callType: link.call_type,
       hostUserId: hostId,
-      message: "Open chat and start the call from the app.",
+      liveCall: null,
+      startOutgoing: joinerId !== hostId,
     });
   } catch (err) {
     req.log?.error?.({ err }, "join call link");

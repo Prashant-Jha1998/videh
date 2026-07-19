@@ -495,8 +495,12 @@ export default function StatusCreateScreen() {
     setPosting(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
+      const audience = {
+        mode: audienceMode,
+        userIds: audienceMode === "selected_contacts" ? selectedAudienceIds : [],
+      };
       if (mode === "text") {
-        await addStatus(text.trim(), "text", bgColor);
+        await addStatus(text.trim(), "text", bgColor, undefined, undefined, undefined, audience);
       } else if (mediaUri) {
         const content = caption.trim() || (mediaType === "video" ? "📹 Video" : "📷 Photo");
         const uploadUri = await prepareMediaForStoryUpload(mediaUri, mediaType);
@@ -507,7 +511,7 @@ export default function StatusCreateScreen() {
           musicName: storyMusicName ?? undefined,
           trimStartMs: mediaType === "video" ? trimStartMs : undefined,
           trimEndMs: mediaType === "video" ? effectiveTrimEndMs : undefined,
-        });
+        }, audience);
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();

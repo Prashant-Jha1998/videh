@@ -26,7 +26,7 @@ import { useApp } from "@/context/AppContext";
 import type { Status } from "@/context/AppContext";
 import { mapApiStatusRow } from "@/lib/statusReply";
 import { getApiUrl } from "@/lib/api";
-import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
+import { resolvePublicAssetUrl, withStatusMediaAuth } from "@/lib/publicAssetUrl";
 import { saveStatusToGalleryWithAlert } from "@/lib/saveStatusToLibrary";
 import { usePlayableAudioUri } from "@/lib/usePlayableAudioUri";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
@@ -264,7 +264,9 @@ export default function ViewStatusScreen() {
     });
   }, [ids.join(","), statuses, fetchedStatuses, user?.dbId, user?.sessionToken, user?.name, user?.avatar]);
   const resolvedMediaUrl = currentStatus?.mediaUrl
-    ? resolvePublicAssetUrl(currentStatus.mediaUrl) ?? currentStatus.mediaUrl
+    ? (withStatusMediaAuth(currentStatus.mediaUrl, user?.sessionToken)
+      ?? resolvePublicAssetUrl(currentStatus.mediaUrl)
+      ?? currentStatus.mediaUrl)
     : undefined;
   const isMyStatus = currentStatus?.userId === "me";
   const isMedia = currentStatus?.type === "image" || currentStatus?.type === "video";
@@ -279,12 +281,7 @@ export default function ViewStatusScreen() {
     });
   }, []);
 
-  useEffect(() => {
-    // Move status group to Viewed instantly when viewer opens.
-    ids.forEach((id) => markStatusViewedLocally(id));
-  }, [ids.join(","), markStatusViewedLocally]);
-
-  // Mark viewed + fetch data when status changes
+  // Mark viewed + fetch data when status changes (only the current item, not the whole carousel)
   useEffect(() => {
     if (!currentStatus || !user?.dbId) return;
     if (!isMyStatus) {
@@ -466,12 +463,33 @@ export default function ViewStatusScreen() {
       else if (action === "video") await startStatusCall("video");
       else if (action === "contact") await openStatusContactChat();
       else if (action === "report") {
+        const submitReport = (reason: string) => {
+          if (!user?.dbId || !currentStatus) return;
+          fetch(`${BASE_URL}/api/statuses/${currentStatus.id}/report`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(user.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+            },
+            body: JSON.stringify({ reporterId: user.dbId, reason, details: reason }),
+          })
+            .then((r) => r.json())
+            .then((d: { success?: boolean }) => {
+              Alert.alert(
+                d.success ? "Reported" : "Error",
+                d.success
+                  ? "Thank you. Our team will review this status."
+                  : "Could not send report. Try again.",
+              );
+            })
+            .catch(() => Alert.alert("Error", "Could not send report. Try again."));
+        };
         Alert.alert(
           "Report status",
           "Tell us why you are reporting this status.",
           [
-            { text: "Spam", onPress: () => Alert.alert("Reported", "Thank you. Our team will review this status.") },
-            { text: "Inappropriate", onPress: () => Alert.alert("Reported", "Thank you. Our team will review this status.") },
+            { text: "Spam", onPress: () => submitReport("spam") },
+            { text: "Inappropriate", onPress: () => submitReport("inappropriate") },
             { text: "Cancel", style: "cancel" },
           ],
         );

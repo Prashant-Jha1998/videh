@@ -5,6 +5,7 @@ import { query } from "../lib/db";
 import { publishChatEvent, filterSseConnectedUserIds } from "../lib/realtime";
 import { EXPO_INCOMING_CALL_CATEGORY_ID } from "../lib/expoPush";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
+import { clientIp, isRateLimited } from "../lib/rateLimit";
 import { stateDelete, stateGetJson, stateKeys, stateSetJson } from "../lib/sharedState";
 import { getIceServers } from "../lib/webrtcIce";
 
@@ -40,10 +41,10 @@ type CallInvite = {
 };
 
 const router = Router();
+router.use(requireAuth);
 router.get("/ice-config", (_req: Request, res: Response) => {
   res.json({ success: true, iceServers: getIceServers() });
 });
-router.use(requireAuth);
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 /** Keep in sync with videh `INCOMING_RING_TIMEOUT_MS` (45s). */
 const RING_TIMEOUT_MS = 45 * 1000;
@@ -63,27 +64,38 @@ const ringExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const RING_REMINDER_MS = 8_000;
 const ringReminderTimers = new Map<string, ReturnType<typeof setInterval>>();
 
+function callIsOnHold(call: CallInvite): boolean {
+  return Boolean(call.holdByUser && Object.values(call.holdByUser).some(Boolean));
+}
+
 function callIsOrphanStale(call: CallInvite): boolean {
   if (isCallEnded(call)) return true;
+  // Held calls stop status heartbeats — do not auto-finalize while on hold.
+  if (callIsOnHold(call)) return false;
   const idleMs = Date.now() - call.updatedAt;
   if (!call.connectedAt) {
     const accepted = Object.values(call.statuses).some((s) => s === "accepted");
     if (accepted) return idleMs > NEGOTIATE_IDLE_MS;
-    return idleMs > RING_TIMEOUT_MS;
+    // Fresh rings use createdAt so status polls cannot keep a dead ring alive forever.
+    return Date.now() - call.createdAt > RING_TIMEOUT_MS;
   }
   return idleMs > CONNECTED_CALL_IDLE_MS;
 }
 
-/** Never-connected calls must not block the next dial (repeat calls). */
+/**
+ * Accepted but never connected after idle — safe to release.
+ * Fresh ringing/calling invites must NOT be treated as ghosts.
+ */
 function isNegotiateGhost(call: CallInvite): boolean {
-  if (call.connectedAt || isCallEnded(call)) return false;
-  return Object.values(call.statuses).some(
-    (s) => s === "accepted" || s === "calling" || s === "ringing",
-  );
+  if (call.connectedAt || isCallEnded(call) || callIsOnHold(call)) return false;
+  const accepted = Object.values(call.statuses).some((s) => s === "accepted");
+  if (!accepted) return false;
+  return Date.now() - call.updatedAt > NEGOTIATE_IDLE_MS;
 }
 
 function shouldReleaseCallForUser(call: CallInvite, userId: number): boolean {
   if (!isCallParticipant(call, userId)) return false;
+  if (callIsOnHold(call) && call.connectedAt) return false;
   const status = call.statuses[userId];
   if (!status || status === "declined" || status === "missed" || status === "ended" || status === "busy") {
     return false;
@@ -91,6 +103,42 @@ function shouldReleaseCallForUser(call: CallInvite, userId: number): boolean {
   if (callIsOrphanStale(call)) return true;
   if (isNegotiateGhost(call)) return true;
   return false;
+}
+
+function authUid(req: Request): number {
+  return Number((req as any).authUserId) || 0;
+}
+
+/** Bind signaling channel to an authenticated call participant. */
+async function requireSessionAccess(
+  req: Request,
+  res: Response,
+  channel: string,
+): Promise<{ session: SignalSession; call: CallInvite; userId: number; role: Role } | null> {
+  const userId = authUid(req);
+  if (!userId) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return null;
+  }
+  const session = await getSession(channel);
+  if (!session) {
+    res.status(404).json({ success: false, message: "Call session not found." });
+    return null;
+  }
+  const call = await findCallByChannel(channel);
+  if (!call || !isCallParticipant(call, userId)) {
+    res.status(403).json({ success: false, message: "Not a call participant." });
+    return null;
+  }
+  const role: Role = session.callerId === userId ? "caller" : "callee";
+  if (role === "callee" && session.calleeId && session.calleeId !== userId && call.callerId !== userId) {
+    // Allow any invitee as callee on 1:1 mesh; must be on the invite.
+    if (!call.participantIds.includes(userId)) {
+      res.status(403).json({ success: false, message: "Not a call participant." });
+      return null;
+    }
+  }
+  return { session, call, userId, role };
 }
 
 function clearRingExpiryTimer(callId: string): void {
@@ -145,12 +193,13 @@ async function sendRingReminder(callId: string): Promise<void> {
       [call.chatId],
     );
     const pushUserIds = userIdsNeedingCallPush(ringingIds);
-    const pushTokens = members.rows
-      .filter((row: { user_id: number; push_token: string | null }) =>
-        pushUserIds.includes(Number(row.user_id)),
-      )
-      .map((row: { push_token: string | null }) => row.push_token)
-      .filter((t: unknown): t is string => isValidPushToken(t));
+    const { shouldSendPushForKind } = await import("../lib/notificationPrefs");
+    const pushTokens: string[] = [];
+    for (const row of members.rows as { user_id: number; push_token: string | null }[]) {
+      if (!pushUserIds.includes(Number(row.user_id))) continue;
+      if (!(await shouldSendPushForKind(Number(row.user_id), "calls"))) continue;
+      if (isValidPushToken(row.push_token)) pushTokens.push(row.push_token!);
+    }
     if (pushTokens.length > 0) {
       await sendChatPush(
         pushTokens,
@@ -226,6 +275,8 @@ function scheduleRingExpiry(callId: string): void {
 }
 const sessionKey = (channel: string) => `webrtc:session:${channel}`;
 const callKey = (callId: string) => `webrtc:call:${callId}`;
+const channelIndexKey = (channel: string) => `webrtc:channel:${channel}`;
+const chatIndexKey = (chatId: number) => `webrtc:chat:${chatId}`;
 
 async function getSession(channel: string): Promise<SignalSession | null> {
   return stateGetJson<SignalSession>(sessionKey(channel));
@@ -241,12 +292,39 @@ async function getCall(callId: string): Promise<CallInvite | null> {
 
 async function saveCall(call: CallInvite): Promise<void> {
   await stateSetJson(callKey(call.callId), call, SESSION_TTL_MS);
+  await stateSetJson(channelIndexKey(call.channel), call.callId, SESSION_TTL_MS);
+  await stateSetJson(chatIndexKey(call.chatId), call.callId, SESSION_TTL_MS);
 }
 
 async function findCallByChannel(channel: string): Promise<CallInvite | null> {
+  const indexedId = await stateGetJson<string>(channelIndexKey(channel));
+  if (indexedId) {
+    const indexed = await getCall(indexedId);
+    if (indexed?.channel === channel) return indexed;
+  }
+  // Legacy fallback for calls saved before channel index existed.
   for (const key of await stateKeys("webrtc:call:")) {
     const call = await stateGetJson<CallInvite>(key);
-    if (call?.channel === channel) return call;
+    if (call?.channel === channel) {
+      await stateSetJson(channelIndexKey(channel), call.callId, SESSION_TTL_MS);
+      return call;
+    }
+  }
+  return null;
+}
+
+async function findLiveCallByChatId(chatId: number): Promise<CallInvite | null> {
+  const indexedId = await stateGetJson<string>(chatIndexKey(chatId));
+  if (indexedId) {
+    const indexed = await getCall(indexedId);
+    if (indexed && indexed.chatId === chatId && !isCallEnded(indexed)) return indexed;
+  }
+  for (const key of await stateKeys("webrtc:call:")) {
+    const call = await stateGetJson<CallInvite>(key);
+    if (call && call.chatId === chatId && !isCallEnded(call)) {
+      await stateSetJson(chatIndexKey(chatId), call.callId, SESSION_TTL_MS);
+      return call;
+    }
   }
   return null;
 }
@@ -260,11 +338,6 @@ async function markCallConnected(call: CallInvite): Promise<void> {
   call.updatedAt = Date.now();
   clearRingExpiryTimer(call.callId);
   await saveCall(call);
-}
-
-async function markCallConnectedByChannel(channel: string): Promise<void> {
-  const call = await findCallByChannel(channel);
-  if (call) await markCallConnected(call);
 }
 
 let lastCleanupAt = 0;
@@ -477,6 +550,9 @@ async function finalizeCall(call: CallInvite): Promise<void> {
   await persistCallHistory(call);
   await stateDelete(callKey(call.callId));
   await stateDelete(sessionKey(call.channel));
+  await stateDelete(channelIndexKey(call.channel));
+  const chatIdx = await stateGetJson<string>(chatIndexKey(call.chatId));
+  if (chatIdx === call.callId) await stateDelete(chatIndexKey(call.chatId));
 }
 
 function acceptedUserIdsFromCall(call: CallInvite): number[] {
@@ -518,6 +594,13 @@ router.post("/calls", async (req: Request, res: Response) => {
   const callerId = Number((req as any).authUserId);
   if (!chatId || !callerId) {
     res.status(400).json({ success: false, message: "chatId is required." });
+    return;
+  }
+  if (
+    isRateLimited(`webrtc:call:user:${callerId}`, 20, 60_000)
+    || isRateLimited(`webrtc:call:ip:${clientIp(req)}`, 40, 60_000)
+  ) {
+    res.status(429).json({ success: false, message: "Too many call attempts. Try again shortly." });
     return;
   }
 
@@ -565,10 +648,40 @@ router.post("/calls", async (req: Request, res: Response) => {
         )
     `, [chatId, callerId]);
     const allowedIds = new Set(allowedParticipants.rows.map((row: any) => Number(row.user_id)));
-    const callableParticipantIds = participantIds.filter((id) => allowedIds.has(id));
+    let callableParticipantIds = participantIds.filter((id) => allowedIds.has(id));
     if (callableParticipantIds.length === 0) {
       res.status(400).json({ success: false, message: "No participants to call." });
       return;
+    }
+
+    // Enforce silence_unknown_callers: unknown = no prior messages in this chat.
+    const historyRes = await query(
+      `SELECT EXISTS(
+         SELECT 1 FROM messages
+         WHERE chat_id = $1 AND COALESCE(is_deleted, FALSE) = FALSE
+         LIMIT 1
+       ) AS has_history`,
+      [chatId],
+    );
+    const hasChatHistory = Boolean(historyRes.rows[0]?.has_history);
+    if (!hasChatHistory && callableParticipantIds.length > 0) {
+      const { ensureExtendedPrivacyColumns } = await import("../lib/userPrivacySettings");
+      await ensureExtendedPrivacyColumns();
+      const silenceRes = await query(
+        `SELECT id FROM users WHERE id = ANY($1::int[]) AND silence_unknown_callers = TRUE`,
+        [callableParticipantIds],
+      );
+      const silenced = new Set(silenceRes.rows.map((r: { id: number }) => Number(r.id)));
+      if (silenced.size > 0) {
+        callableParticipantIds = callableParticipantIds.filter((id) => !silenced.has(id));
+      }
+      if (callableParticipantIds.length === 0) {
+        res.status(403).json({
+          success: false,
+          message: "This person only accepts calls from known contacts.",
+        });
+        return;
+      }
     }
 
     await releaseStaleCallsForUser(callerId);
@@ -626,10 +739,6 @@ router.post("/calls", async (req: Request, res: Response) => {
       });
     }
     const pushUserIds = userIdsNeedingCallPush(ringingIds);
-    const pushTokens = members.rows
-      .filter((row: any) => pushUserIds.includes(Number(row.user_id)))
-      .map((row: any) => row.push_token)
-      .filter((t: unknown): t is string => isValidPushToken(t));
     if (busyParticipantIds.length > 0) {
       publishCallSignal({
         chatId,
@@ -638,25 +747,37 @@ router.post("/calls", async (req: Request, res: Response) => {
         payload: { callId, chatId, busyParticipantIds, type: invite.type },
       });
     }
-    if (ringingIds.length > 0 && pushTokens.length > 0) {
-      void sendChatPush(
-        pushTokens,
-        body.type === "video" ? "Video call" : "Voice call",
-        `${caller.name ?? "Videh user"} is calling`,
-        {
-          callId,
-          chatId: String(chatId),
-          type: invite.type,
-          channel,
-          callerId: String(callerId),
-          callerName: caller.name ?? "Videh user",
-          kind: "call",
-          notificationKind: "incoming_call",
-        },
-        { categoryId: EXPO_INCOMING_CALL_CATEGORY_ID, threadId: `call-${callId}`, isCall: true },
-      ).catch((err) => {
-        console.error("call invite push", err);
-      });
+    if (ringingIds.length > 0) {
+      void (async () => {
+        try {
+          const { shouldSendPushForKind } = await import("../lib/notificationPrefs");
+          const pushTokens: string[] = [];
+          for (const row of members.rows as { user_id: number; push_token: string | null }[]) {
+            if (!pushUserIds.includes(Number(row.user_id))) continue;
+            if (!(await shouldSendPushForKind(Number(row.user_id), "calls"))) continue;
+            if (isValidPushToken(row.push_token)) pushTokens.push(row.push_token!);
+          }
+          if (pushTokens.length === 0) return;
+          await sendChatPush(
+            pushTokens,
+            body.type === "video" ? "Video call" : "Voice call",
+            `${caller.name ?? "Videh user"} is calling`,
+            {
+              callId,
+              chatId: String(chatId),
+              type: invite.type,
+              channel,
+              callerId: String(callerId),
+              callerName: caller.name ?? "Videh user",
+              kind: "call",
+              notificationKind: "incoming_call",
+            },
+            { categoryId: EXPO_INCOMING_CALL_CATEGORY_ID, threadId: `call-${callId}`, isCall: true },
+          );
+        } catch (err) {
+          console.error("call invite push", err);
+        }
+      })();
     }
     const allInviteesBusy = callableParticipantIds.length > 0 && ringingIds.length === 0;
     if (allInviteesBusy) {
@@ -683,12 +804,11 @@ router.get("/calls/incoming/:userId", async (req: Request, res: Response) => {
   const calls = (await Promise.all((await stateKeys("webrtc:call:")).map((key) => stateGetJson<CallInvite>(key))))
     .filter((call): call is CallInvite => Boolean(call));
   const ringing = calls.filter(
-    (call) => call.statuses[userId] === "ringing" && call.callerId !== userId,
+    (call) =>
+      call.statuses[userId] === "ringing"
+      && call.callerId !== userId
+      && Date.now() - call.createdAt <= RING_TIMEOUT_MS,
   );
-  for (const call of ringing) {
-    call.updatedAt = Date.now();
-    await saveCall(call);
-  }
   const incoming = ringing
     .sort((a, b) => b.createdAt - a.createdAt)
     .map((call) => serializeIncoming(call, userId));
@@ -813,7 +933,7 @@ router.post("/calls/:callId/connected", async (req: Request, res: Response) => {
 router.get("/calls/:callId/status", async (req: Request, res: Response) => {
   await cleanupSessions();
   const call = await getCall(String(req.params.callId));
-  const userId = Number(req.query.userId) || Number((req as any).authUserId);
+  const userId = authUid(req);
   if (!call) {
     res.status(404).json({ success: false, message: "Call not found." });
     return;
@@ -822,13 +942,39 @@ router.get("/calls/:callId/status", async (req: Request, res: Response) => {
     res.status(403).json({ success: false, message: "Not a call participant." });
     return;
   }
+  if (!assertSameUser(req, res, userId)) return;
+
+  // Multi-worker safe ring expiry (process-local timers may not exist on this worker).
+  if (Date.now() - call.createdAt > RING_TIMEOUT_MS) {
+    let ringExpired = false;
+    for (const uid of call.participantIds) {
+      if (call.statuses[uid] === "ringing") {
+        call.statuses[uid] = "missed";
+        ringExpired = true;
+      }
+    }
+    if (ringExpired) {
+      call.updatedAt = Date.now();
+      if (isCallEnded(call)) await finalizeCall(call);
+      else await saveCall(call);
+    }
+  }
+
   const acceptedCount = Object.values(call.statuses).filter((status) => status === "accepted").length;
   const ringingCount = Object.values(call.statuses).filter((status) => status === "ringing").length;
   const declinedCount = Object.values(call.statuses).filter((status) => status === "declined").length;
   const missedCount = Object.values(call.statuses).filter((status) => status === "missed").length;
   const busyCount = Object.values(call.statuses).filter((status) => status === "busy").length;
   const ended = isCallEnded(call);
-  if (!ended && call.connectedAt) {
+  const myStatus = call.statuses[userId];
+  // Heartbeat while connected, negotiating, or on hold so orphan cleanup stays accurate.
+  if (
+    !ended
+    && (call.connectedAt
+      || callIsOnHold(call)
+      || myStatus === "accepted"
+      || myStatus === "calling")
+  ) {
     call.updatedAt = Date.now();
     await saveCall(call);
   }
@@ -884,6 +1030,21 @@ router.post("/calls/:callId/participants", async (req: Request, res: Response) =
   }
 
   try {
+    const chatRow = await query(`SELECT is_group FROM chats WHERE id = $1`, [call.chatId]);
+    if (!chatRow.rows[0]?.is_group) {
+      res.status(400).json({
+        success: false,
+        message: "Cannot add participants to a one-to-one call.",
+      });
+      return;
+    }
+
+    const memberRes = await query(
+      `SELECT user_id FROM chat_members WHERE chat_id = $1 AND user_id = ANY($2::int[])`,
+      [call.chatId, uniqueIds],
+    );
+    const memberIds = new Set(memberRes.rows.map((r: { user_id: number }) => Number(r.user_id)));
+
     const blockRes = await query(
       `SELECT blocker_id, blocked_id FROM blocked_users
       WHERE (blocker_id = $1 AND blocked_id = ANY($2::int[]))
@@ -892,12 +1053,15 @@ router.post("/calls/:callId/participants", async (req: Request, res: Response) =
     );
     const blocked = new Set<number>();
     for (const row of blockRes.rows as { blocker_id: number; blocked_id: number }[]) {
-      blocked.add(Number(row.blocker_id));
-      blocked.add(Number(row.blocked_id));
+      const other = Number(row.blocker_id) === requesterId ? Number(row.blocked_id) : Number(row.blocker_id);
+      blocked.add(other);
     }
-    const allowedIds = uniqueIds.filter((id) => !blocked.has(id));
+    const allowedIds = uniqueIds.filter((id) => memberIds.has(id) && !blocked.has(id));
     if (allowedIds.length === 0) {
-      res.status(403).json({ success: false, message: "Cannot add blocked contacts to this call." });
+      res.status(403).json({
+        success: false,
+        message: "Can only add group members who are not blocked.",
+      });
       return;
     }
 
@@ -1106,45 +1270,28 @@ router.post("/sessions", async (req: Request, res: Response) => {
     videhCallerId?: number;
   };
   const channel = safeChannel(body.channel);
-  const userId = Number(body.userId);
-  const videhCallerIdRaw = Number(body.videhCallerId);
+  const userId = Number(body.userId) || authUid(req);
   if (!channel || !userId) {
     res.status(400).json({ success: false, message: "channel and userId are required." });
     return;
   }
   if (!assertSameUser(req, res, userId)) return;
 
-  // FIX: If videhCallerId is missing or 0, derive it from the linked call.
-  // This handles edge cases where the frontend sends 0 on retry.
-  let videhCallerId = Number.isFinite(videhCallerIdRaw) && videhCallerIdRaw > 0
-    ? videhCallerIdRaw
-    : 0;
-
-  if (videhCallerId <= 0) {
-    const linkedCallForDerive = await findCallByChannel(channel);
-    if (linkedCallForDerive) {
-      videhCallerId = linkedCallForDerive.callerId;
-    }
-  }
-
-  if (videhCallerId <= 0) {
-    res.status(400).json({ success: false, message: "videhCallerId is required." });
+  const linkedCall = await findCallByChannel(channel);
+  if (!linkedCall || !isCallParticipant(linkedCall, userId)) {
+    res.status(403).json({ success: false, message: "Not a call participant." });
     return;
   }
 
+  const videhCallerId = linkedCall.callerId;
   let session = await getSession(channel);
-  const linkedCall = await findCallByChannel(channel);
   let role: Role = "caller";
   const iAmVidehCaller = videhCallerId === userId;
-  if (!session || !linkedCall) {
-    if (session && !linkedCall) {
-      await stateDelete(sessionKey(channel));
-    }
+  if (!session) {
     session = {
       channel,
-      type: body.type === "video" ? "video" : "audio",
-      callerId: iAmVidehCaller ? userId : videhCallerId,
-      // FIX: Set calleeId on creation if we already know who the callee is.
+      type: body.type === "video" ? "video" : linkedCall.type,
+      callerId: videhCallerId,
       calleeId: iAmVidehCaller ? undefined : userId,
       callerCandidates: [],
       calleeCandidates: [],
@@ -1153,6 +1300,9 @@ router.post("/sessions", async (req: Request, res: Response) => {
     };
     role = iAmVidehCaller ? "caller" : "callee";
   } else {
+    if (session.callerId !== videhCallerId) {
+      session.callerId = videhCallerId;
+    }
     role = session.callerId === userId ? "caller" : "callee";
     if (role === "callee") session.calleeId = userId;
     session.updatedAt = Date.now();
@@ -1179,11 +1329,9 @@ router.get("/sessions/:channel", async (req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
   await cleanupSessions();
   const channel = safeChannel(req.params.channel);
-  const session = await getSession(channel);
-  if (!session) {
-    res.status(404).json({ success: false, message: "Call session not found." });
-    return;
-  }
+  const access = await requireSessionAccess(req, res, channel);
+  if (!access) return;
+  const { session, role } = access;
   session.updatedAt = Date.now();
   await saveSession(session);
   res.json({
@@ -1191,8 +1339,8 @@ router.get("/sessions/:channel", async (req: Request, res: Response) => {
     session: {
       channel: session.channel,
       type: session.type,
-      offer: session.offer ?? null,
-      answer: session.answer ?? null,
+      offer: role === "callee" ? (session.offer ?? null) : null,
+      answer: role === "caller" ? (session.answer ?? null) : null,
       offerRevision: session.offerRevision ?? 0,
       answerRevision: session.answerRevision ?? 0,
       callerId: session.callerId,
@@ -1203,11 +1351,13 @@ router.get("/sessions/:channel", async (req: Request, res: Response) => {
 
 router.post("/sessions/:channel/offer", async (req: Request, res: Response) => {
   const channel = safeChannel(req.params.channel);
-  const session = await getSession(channel);
-  if (!session) {
-    res.status(404).json({ success: false });
+  const access = await requireSessionAccess(req, res, channel);
+  if (!access) return;
+  if (access.role !== "caller") {
+    res.status(403).json({ success: false, message: "Only the caller can post the offer." });
     return;
   }
+  const { session } = access;
   const body = req.body as { offer?: unknown; iceRestart?: boolean };
   if (body.iceRestart) {
     session.answer = undefined;
@@ -1225,29 +1375,37 @@ router.post("/sessions/:channel/offer", async (req: Request, res: Response) => {
 
 router.post("/sessions/:channel/answer", async (req: Request, res: Response) => {
   const channel = safeChannel(req.params.channel);
-  const session = await getSession(channel);
-  if (!session) {
-    res.status(404).json({ success: false });
+  const access = await requireSessionAccess(req, res, channel);
+  if (!access) return;
+  if (access.role !== "callee") {
+    res.status(403).json({ success: false, message: "Only the callee can post the answer." });
     return;
   }
+  const { session } = access;
   session.answer = (req.body as { answer?: unknown }).answer ?? null;
   session.answerRevision = (session.answerRevision ?? 0) + 1;
   session.updatedAt = Date.now();
   await saveSession(session);
   req.log?.info?.({ channel, answerRevision: session.answerRevision }, "webrtc answer posted");
-  void markCallConnectedByChannel(channel);
+  // Connected time is marked only via POST /calls/:callId/connected (media up).
   res.json({ success: true, answerRevision: session.answerRevision });
 });
 
 router.post("/sessions/:channel/candidates", async (req: Request, res: Response) => {
   const channel = safeChannel(req.params.channel);
-  const session = await getSession(channel);
+  const access = await requireSessionAccess(req, res, channel);
+  if (!access) return;
   const role = (req.body as { role?: Role }).role;
   const candidate = (req.body as { candidate?: unknown }).candidate;
-  if (!session || (role !== "caller" && role !== "callee") || !candidate) {
+  if ((role !== "caller" && role !== "callee") || !candidate) {
     res.status(400).json({ success: false });
     return;
   }
+  if (role !== access.role) {
+    res.status(403).json({ success: false, message: "Role mismatch." });
+    return;
+  }
+  const { session } = access;
   if (role === "caller") session.callerCandidates.push(candidate);
   else session.calleeCandidates.push(candidate);
   session.updatedAt = Date.now();
@@ -1258,13 +1416,19 @@ router.post("/sessions/:channel/candidates", async (req: Request, res: Response)
 router.get("/sessions/:channel/candidates", async (req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
   const channel = safeChannel(req.params.channel);
-  const session = await getSession(channel);
+  const access = await requireSessionAccess(req, res, channel);
+  if (!access) return;
   const role = String(req.query.role ?? "") as Role;
   const since = Math.max(0, Number(req.query.since) || 0);
-  if (!session || (role !== "caller" && role !== "callee")) {
+  if (role !== "caller" && role !== "callee") {
     res.status(400).json({ success: false });
     return;
   }
+  if (role !== access.role) {
+    res.status(403).json({ success: false, message: "Role mismatch." });
+    return;
+  }
+  const { session } = access;
   const remoteCandidates = role === "caller" ? session.calleeCandidates : session.callerCandidates;
   session.updatedAt = Date.now();
   await saveSession(session);
@@ -1272,8 +1436,73 @@ router.get("/sessions/:channel/candidates", async (req: Request, res: Response) 
 });
 
 router.delete("/sessions/:channel", async (req: Request, res: Response) => {
-  await stateDelete(sessionKey(safeChannel(req.params.channel)));
+  const channel = safeChannel(req.params.channel);
+  const access = await requireSessionAccess(req, res, channel);
+  if (!access) return;
+  await stateDelete(sessionKey(channel));
   res.json({ success: true });
 });
+
+/** Attach a signed-in user to an in-progress call for the chat (call-link join). */
+export async function attachJoinerToLiveCall(
+  chatId: number,
+  joinerId: number,
+): Promise<{
+  callId: string;
+  channel: string;
+  callerId: number;
+  type: "audio" | "video";
+  alreadyOnCall: boolean;
+} | null> {
+  const call = await findLiveCallByChatId(chatId);
+  if (!call) return null;
+  if (call.callerId === joinerId) {
+    return {
+      callId: call.callId,
+      channel: call.channel,
+      callerId: call.callerId,
+      type: call.type,
+      alreadyOnCall: true,
+    };
+  }
+  if (!call.participantIds.includes(joinerId)) {
+    call.participantIds.push(joinerId);
+  }
+  const prev = call.statuses[joinerId];
+  if (prev === "accepted" || prev === "calling") {
+    return {
+      callId: call.callId,
+      channel: call.channel,
+      callerId: call.callerId,
+      type: call.type,
+      alreadyOnCall: true,
+    };
+  }
+  call.statuses[joinerId] = "accepted";
+  call.updatedAt = Date.now();
+  clearRingExpiryTimer(call.callId);
+  await saveCall(call);
+  publishCallSignal({
+    chatId: call.chatId,
+    userIds: [call.callerId, ...call.participantIds],
+    action: "accepted",
+    payload: {
+      ...serializeIncoming(call, joinerId),
+      callId: call.callId,
+      channel: call.channel,
+      callerId: call.callerId,
+      acceptingUserId: joinerId,
+      acceptedUserIds: acceptedUserIdsFromCall(call),
+      action: "accepted",
+    },
+  });
+  return {
+    callId: call.callId,
+    channel: call.channel,
+    callerId: call.callerId,
+    type: call.type,
+    alreadyOnCall: false,
+  };
+}
 
 export default router;

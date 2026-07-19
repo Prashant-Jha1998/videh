@@ -119,21 +119,9 @@ export default function SettingsScreen() {
       { icon: "notifications-outline", iconBg: "#FF5722", label: t("settings.row.notifications"), value: t("settings.row.notificationsSub"), onPress: () => router.push("/settings/notifications") },
       { icon: "musical-notes-outline", iconBg: "#7C4DFF", label: t("settings.premiumSounds"), value: t("settings.premiumSoundsSub"), onPress: () => router.push("/settings/premium-sounds" as Href) },
       { icon: "server-outline", iconBg: "#607D8B", label: t("settings.row.storage"), value: t("settings.row.storageSub"), onPress: () => router.push("/settings/storage") },
-      { icon: "accessibility-outline", iconBg: "#795548", label: t("settings.row.accessibility"), value: t("settings.row.accessibilitySub"), onPress: () => router.push("/settings/accessibility") },
       { icon: "language-outline", iconBg: "#009688", label: t("settings.row.language"), value: t("settings.row.languageSub"), onPress: () => router.push("/settings/language") },
       { icon: "help-circle-outline", iconBg: "#3F51B5", label: t("settings.row.help"), value: t("settings.row.helpSub"), onPress: () => router.push("/settings/help") },
       { icon: "person-add-outline", iconBg: "#8BC34A", label: t("settings.row.invite"), onPress: inviteFriend },
-      {
-        icon: "phone-portrait-outline",
-        iconBg: "#059669",
-        label: t("settings.row.updates"),
-        value: t("settings.row.updatesSub"),
-        onPress: () =>
-          Alert.alert(
-            t("settings.updatesTitle"),
-            t("settings.updatesBody"),
-          ),
-      },
     ],
     [t, router, inviteFriend],
   );

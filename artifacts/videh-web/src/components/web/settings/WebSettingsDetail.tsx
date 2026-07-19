@@ -60,11 +60,9 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   notifications: "Notifications",
   "premium-sounds": "Premium sounds",
   storage: "Storage and data",
-  accessibility: "Accessibility",
   language: "App language",
   help: "Help",
   invite: "Invite a friend",
-  updates: "App updates",
   "qr-code": "QR code",
 };
 
@@ -119,7 +117,6 @@ export function WebSettingsDetail({
   user,
   currentToken,
   onLogout,
-  onOpenSupportChat,
 }: {
   section: SettingsSectionId;
   token: string;
@@ -139,14 +136,12 @@ export function WebSettingsDetail({
   if (section === "chats") return <ChatsSection title={title} />;
   if (section === "broadcasts") return <BroadcastsSection title={title} />;
   if (section === "sos") return <SosSection title={title} token={token} />;
-  if (section === "notifications") return <NotificationsSection title={title} />;
+  if (section === "notifications") return <NotificationsSection title={title} token={token} />;
   if (section === "premium-sounds") return <PremiumSoundsSection title={title} />;
   if (section === "storage") return <StorageSection title={title} token={token} />;
-  if (section === "accessibility") return <AccessibilitySection title={title} />;
   if (section === "language") return <LanguageSection title={title} token={token} />;
-  if (section === "help") return <HelpSection title={title} onOpenSupportChat={onOpenSupportChat} />;
+  if (section === "help") return <HelpSection title={title} />;
   if (section === "invite") return <InviteSection title={title} />;
-  if (section === "updates") return <UpdatesSection title={title} />;
   if (section === "qr-code") return <QrCodeSection title={title} user={user} />;
   return null;
 }
@@ -309,19 +304,44 @@ function AccountSection({
       <SettingsSection label="Account data">
         <SettingsRow
           label="Request account info"
-          hint="Get a report of your Videh account information"
-          onClick={() => alert("Your account information report will be ready within 3 days.")}
+          hint="Download a summary of your Videh account information"
+          onClick={() => {
+            void (async () => {
+              try {
+                const data = await webApi.accountExport(token);
+                const blob = new Blob(
+                  [JSON.stringify({ exportedAt: data.exportedAt, report: data.report }, null, 2)],
+                  { type: "application/json" },
+                );
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `videh-account-${user.id}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch (e) {
+                alert(e instanceof Error ? e.message : "Could not create account report.");
+              }
+            })();
+          }}
         />
       </SettingsSection>
       <SettingsSection>
         <SettingsRow
           label="Delete account"
-          hint="Delete your account and all data permanently"
+          hint="Remove your profile and sign out everywhere"
           danger
           onClick={() => {
-            if (confirm("Delete your Videh account? This cannot be undone.")) {
-              if (confirm("Are you sure? All chats and data will be removed.")) onLogout();
-            }
+            if (!confirm("Delete your Videh account? This cannot be undone.")) return;
+            if (!confirm("Are you sure? Your profile will be removed permanently.")) return;
+            void (async () => {
+              try {
+                await webApi.deleteAccount(token);
+                onLogout();
+              } catch (e) {
+                alert(e instanceof Error ? e.message : "Could not delete account.");
+              }
+            })();
           }}
         />
       </SettingsSection>
@@ -684,33 +704,127 @@ function SosSection({ title, token }: { title: string; token: string }) {
   );
 }
 
-function NotificationsSection({ title }: { title: string }) {
-  const [msgNotifs, setMsgNotifs] = useState(() => loadBool(WEB_PREFS.msgNotifs, true));
-  const [msgVibrate, setMsgVibrate] = useState(() => loadBool(WEB_PREFS.msgVibrate, true));
-  const [msgPreview, setMsgPreview] = useState(() => loadString(WEB_PREFS.msgPreview, PREVIEW_OPTIONS[0]));
-  const [groupNotifs, setGroupNotifs] = useState(() => loadBool(WEB_PREFS.groupNotifs, true));
-  const [callNotifs, setCallNotifs] = useState(() => loadBool(WEB_PREFS.callNotifs, true));
-  const [callVibrate, setCallVibrate] = useState(() => loadBool(WEB_PREFS.callVibrate, true));
-  const [statusNotifs, setStatusNotifs] = useState(() => loadBool(WEB_PREFS.statusNotifs, true));
-  const [reactionNotifs, setReactionNotifs] = useState(() => loadBool(WEB_PREFS.reactionNotifs, true));
+function previewToLabel(preview: "always" | "name" | "none"): string {
+  if (preview === "name") return PREVIEW_OPTIONS[1];
+  if (preview === "none") return PREVIEW_OPTIONS[2];
+  return PREVIEW_OPTIONS[0];
+}
+
+function labelToPreview(label: string): "always" | "name" | "none" {
+  if (label === PREVIEW_OPTIONS[1]) return "name";
+  if (label === PREVIEW_OPTIONS[2]) return "none";
+  return "always";
+}
+
+function NotificationsSection({ title, token }: { title: string; token: string }) {
+  const [msgNotifs, setMsgNotifs] = useState(true);
+  const [msgVibrate, setMsgVibrate] = useState(true);
+  const [msgPreview, setMsgPreview] = useState(PREVIEW_OPTIONS[0]);
+  const [groupNotifs, setGroupNotifs] = useState(true);
+  const [callNotifs, setCallNotifs] = useState(true);
+  const [statusNotifs, setStatusNotifs] = useState(true);
+  const [reactionNotifs, setReactionNotifs] = useState(true);
+
+  useEffect(() => {
+    void webApi
+      .notificationPrefs(token)
+      .then((d) => {
+        const p = d.prefs;
+        setMsgNotifs(p.messages !== false);
+        setMsgVibrate(p.messageVibrate !== false);
+        setMsgPreview(previewToLabel(p.preview ?? "always"));
+        setGroupNotifs(p.groups !== false);
+        setCallNotifs(p.calls !== false);
+        setStatusNotifs(p.status !== false);
+        setReactionNotifs(p.reactions !== false);
+        saveBool(WEB_PREFS.msgNotifs, p.messages !== false);
+        saveBool(WEB_PREFS.groupNotifs, p.groups !== false);
+        saveBool(WEB_PREFS.callNotifs, p.calls !== false);
+      })
+      .catch(() => {
+        setMsgNotifs(loadBool(WEB_PREFS.msgNotifs, true));
+        setGroupNotifs(loadBool(WEB_PREFS.groupNotifs, true));
+        setCallNotifs(loadBool(WEB_PREFS.callNotifs, true));
+      });
+  }, [token]);
+
+  const persist = (patch: Record<string, unknown>) => {
+    void webApi.setNotificationPrefs(token, patch).catch(() => {});
+  };
 
   return (
     <SettingsDetailShell title={title}>
       <SettingsSection label="Messages">
-        <SettingsSwitch label="Message notifications" checked={msgNotifs} onChange={(v) => { setMsgNotifs(v); saveBool(WEB_PREFS.msgNotifs, v); }} />
-        <SettingsSwitch label="Vibrate" checked={msgVibrate} onChange={(v) => { setMsgVibrate(v); saveBool(WEB_PREFS.msgVibrate, v); }} />
-        <SettingsSelect label="Notification preview" value={msgPreview} options={PREVIEW_OPTIONS} onChange={(v) => { setMsgPreview(v); saveString(WEB_PREFS.msgPreview, v); }} />
+        <SettingsSwitch
+          label="Message notifications"
+          checked={msgNotifs}
+          onChange={(v) => {
+            setMsgNotifs(v);
+            saveBool(WEB_PREFS.msgNotifs, v);
+            persist({ messages: v });
+          }}
+        />
+        <SettingsSwitch
+          label="Vibrate"
+          checked={msgVibrate}
+          onChange={(v) => {
+            setMsgVibrate(v);
+            saveBool(WEB_PREFS.msgVibrate, v);
+            persist({ messageVibrate: v });
+          }}
+        />
+        <SettingsSelect
+          label="Notification preview"
+          value={msgPreview}
+          options={PREVIEW_OPTIONS}
+          onChange={(v) => {
+            setMsgPreview(v);
+            saveString(WEB_PREFS.msgPreview, v);
+            persist({ preview: labelToPreview(v) });
+          }}
+        />
       </SettingsSection>
       <SettingsSection label="Groups">
-        <SettingsSwitch label="Group notifications" checked={groupNotifs} onChange={(v) => { setGroupNotifs(v); saveBool(WEB_PREFS.groupNotifs, v); }} />
+        <SettingsSwitch
+          label="Group notifications"
+          checked={groupNotifs}
+          onChange={(v) => {
+            setGroupNotifs(v);
+            saveBool(WEB_PREFS.groupNotifs, v);
+            persist({ groups: v });
+          }}
+        />
       </SettingsSection>
       <SettingsSection label="Calls">
-        <SettingsSwitch label="Show notifications" checked={callNotifs} onChange={(v) => { setCallNotifs(v); saveBool(WEB_PREFS.callNotifs, v); }} />
-        <SettingsSwitch label="Vibrate" checked={callVibrate} onChange={(v) => { setCallVibrate(v); saveBool(WEB_PREFS.callVibrate, v); }} />
+        <SettingsSwitch
+          label="Call notifications"
+          checked={callNotifs}
+          onChange={(v) => {
+            setCallNotifs(v);
+            saveBool(WEB_PREFS.callNotifs, v);
+            persist({ calls: v });
+          }}
+        />
       </SettingsSection>
       <SettingsSection label="Status">
-        <SettingsSwitch label="Status reactions" checked={reactionNotifs} onChange={(v) => { setReactionNotifs(v); saveBool(WEB_PREFS.reactionNotifs, v); }} />
-        <SettingsSwitch label="Status updates" checked={statusNotifs} onChange={(v) => { setStatusNotifs(v); saveBool(WEB_PREFS.statusNotifs, v); }} />
+        <SettingsSwitch
+          label="Status reactions"
+          checked={reactionNotifs}
+          onChange={(v) => {
+            setReactionNotifs(v);
+            saveBool(WEB_PREFS.reactionNotifs, v);
+            persist({ reactions: v });
+          }}
+        />
+        <SettingsSwitch
+          label="Status updates"
+          checked={statusNotifs}
+          onChange={(v) => {
+            setStatusNotifs(v);
+            saveBool(WEB_PREFS.statusNotifs, v);
+            persist({ status: v });
+          }}
+        />
       </SettingsSection>
     </SettingsDetailShell>
   );
@@ -762,40 +876,6 @@ function StorageSection({ title, token }: { title: string; token: string }) {
   );
 }
 
-function AccessibilitySection({ title }: { title: string }) {
-  const [fontSize, setFontSize] = useState(() => loadString(WEB_PREFS.fontSize, "medium"));
-  const [highContrast, setHighContrast] = useState(() => loadBool(WEB_PREFS.highContrast, false));
-  const [reduceMotion, setReduceMotion] = useState(() => loadBool(WEB_PREFS.reduceMotion, false));
-  const [boldText, setBoldText] = useState(() => loadBool(WEB_PREFS.boldText, false));
-
-  const FONT_OPTS = [
-    { key: "small", label: "Small" },
-    { key: "medium", label: "Normal" },
-    { key: "large", label: "Large" },
-    { key: "xlarge", label: "Extra large" },
-  ];
-
-  return (
-    <SettingsDetailShell title={title}>
-      <SettingsSection label="Text">
-        {FONT_OPTS.map((f) => (
-          <SettingsOptionRow
-            key={f.key}
-            label={f.label}
-            selected={fontSize === f.key}
-            onClick={() => { setFontSize(f.key); saveString(WEB_PREFS.fontSize, f.key); }}
-          />
-        ))}
-        <SettingsSwitch label="Bold text" checked={boldText} onChange={(v) => { setBoldText(v); saveBool(WEB_PREFS.boldText, v); }} />
-      </SettingsSection>
-      <SettingsSection label="Display">
-        <SettingsSwitch label="High contrast" checked={highContrast} onChange={(v) => { setHighContrast(v); saveBool(WEB_PREFS.highContrast, v); }} />
-        <SettingsSwitch label="Reduce motion" checked={reduceMotion} onChange={(v) => { setReduceMotion(v); saveBool(WEB_PREFS.reduceMotion, v); }} />
-      </SettingsSection>
-    </SettingsDetailShell>
-  );
-}
-
 function LanguageSection({ title, token }: { title: string; token: string }) {
   const [selected, setSelected] = useState(() => loadString(WEB_PREFS.locale, "en"));
 
@@ -829,13 +909,24 @@ function LanguageSection({ title, token }: { title: string; token: string }) {
   );
 }
 
-function HelpSection({ title, onOpenSupportChat }: { title: string; onOpenSupportChat?: () => void }) {
+function HelpSection({ title }: { title: string }) {
   return (
     <SettingsDetailShell title={title}>
       <SettingsSection>
-        <SettingsRow label="Help Centre" hint="Find answers to common questions" onClick={() => window.open("https://help.videh.app", "_blank")} />
-        <SettingsRow label="Contact us" hint="Message Videh Support" onClick={onOpenSupportChat} />
-        <SettingsRow label="Terms and Privacy Policy" onClick={() => window.open("https://videh.app/privacy", "_blank")} />
+        <SettingsRow
+          label="Help Centre"
+          hint="Find answers to common questions"
+          onClick={() => window.open("https://videh.co.in/help", "_blank")}
+        />
+        <SettingsRow
+          label="Contact us"
+          hint="support@videh.co.in"
+          onClick={() => {
+            window.location.href = "mailto:support@videh.co.in?subject=Videh%20support";
+          }}
+        />
+        <SettingsRow label="Terms of Service" onClick={() => window.open("https://videh.co.in/terms", "_blank")} />
+        <SettingsRow label="Privacy Policy" onClick={() => window.open("https://videh.co.in/privacy", "_blank")} />
         <SettingsRow label="App info" value="Videh Messenger · web.videh.co.in" />
       </SettingsSection>
     </SettingsDetailShell>
@@ -872,22 +963,6 @@ function InviteSection({ title }: { title: string }) {
             alert("Copied to clipboard.");
           }}
         />
-      </SettingsSection>
-    </SettingsDetailShell>
-  );
-}
-
-function UpdatesSection({ title }: { title: string }) {
-  return (
-    <SettingsDetailShell title={title}>
-      <SettingsSection>
-        <SettingsRow label="Videh Web" value="Latest version" />
-        <SettingsRow
-          label="What's new"
-          hint="Broadcasts, SOS, disappearing messages, QR codes, and more"
-          onClick={() => alert("You're on the latest Videh Web. For Android app updates, check the Play Store or videh.app.")}
-        />
-        <SettingsRow label="Check for updates" onClick={() => alert("Videh Web is always up to date when you refresh the page.")} />
       </SettingsSection>
     </SettingsDetailShell>
   );

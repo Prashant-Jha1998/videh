@@ -101,12 +101,26 @@ export async function deliverPremiumChatMessageNotification(
     }
     const chat = findChat(opts.chatId);
     if (chat?.isMuted) return false;
+    let webTitle = opts.senderName?.trim() || chat?.name || "Videh";
+    let webBody = opts.body?.trim() || chat?.lastMessage?.trim() || "Message";
+    try {
+      const { loadNotificationPrefs } = await import("./notificationPrefs");
+      const prefs = await loadNotificationPrefs();
+      const isGroup = Boolean(chat?.isGroup ?? opts.isGroup);
+      if (isGroup ? !prefs.groups : !prefs.messages) return false;
+      if (prefs.preview === "none") {
+        webTitle = "Videh";
+        webBody = "New message";
+      } else if (prefs.preview === "name") {
+        webBody = "New message";
+      }
+    } catch {
+      /* keep defaults */
+    }
     if (AppState.currentState === "active" && activeChatId === opts.chatId) return false;
     if (!shouldDeliverNotification(opts.chatId, opts.messageId)) return false;
     const { showWebBrowserNotification } = await import("./web/webBrowserNotify");
-    const title = opts.senderName?.trim() || chat?.name || "Videh";
-    const body = opts.body?.trim() || chat?.lastMessage?.trim() || "Message";
-    showWebBrowserNotification(title, body, {
+    showWebBrowserNotification(webTitle, webBody, {
       tag: `chat-${opts.chatId}`,
       data: { chatId: opts.chatId },
       onClick: () => {
@@ -137,6 +151,20 @@ export async function deliverPremiumChatMessageNotification(
       "post-fix",
     );
     return false;
+  }
+
+  try {
+    const { loadNotificationPrefs } = await import("./notificationPrefs");
+    const prefs = await loadNotificationPrefs();
+    const isGroup = Boolean(chat?.isGroup);
+    if (isGroup ? !prefs.groups : !prefs.messages) return false;
+    if (prefs.preview === "none") {
+      opts = { ...opts, body: "New message", senderName: "Videh" };
+    } else if (prefs.preview === "name") {
+      opts = { ...opts, body: "New message" };
+    }
+  } catch {
+    /* keep default delivery */
   }
 
   const appActive = AppState.currentState === "active";

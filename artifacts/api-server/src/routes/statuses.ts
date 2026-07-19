@@ -6,9 +6,19 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import { query } from "../lib/db";
 import { enforceModerationForActivity } from "../lib/moderation";
-import { assertSameUser, requireAuth } from "../lib/auth";
+import { assertSameUser, getAuthUserId, requireAuth } from "../lib/auth";
 import { canSeeUserField } from "../lib/userPrivacySettings";
 import { publicMediaUrl, resolveStoredMediaUrl } from "../lib/mediaStorage";
+import {
+  assertOwnedStatusMediaUrl,
+  canViewerAccessStatus,
+  canViewerAccessStatusMedia,
+  canViewerAccessStatusReplyContext,
+  ensureStatusAudienceSchema,
+  extractStatusMediaFilename,
+  normalizeAudienceMode,
+  setStatusAudience,
+} from "../lib/statusVisibility";
 
 function resolveStatusMediaUrl(req: Request, url: unknown): string | null {
   const raw = String(url ?? "").trim();
@@ -38,7 +48,9 @@ const statusMediaUpload = multer({
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname || "").toLowerCase();
     const allowedExt = new Set([".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v", ".3gp", ".aac", ".m4a", ".mp3"]);
-    if (/^(image|video|audio)\//.test(file.mimetype) || file.mimetype === "application/octet-stream" || allowedExt.has(ext)) cb(null, true);
+    const mimeOk = /^(image|video|audio)\//.test(file.mimetype);
+    const octetOk = file.mimetype === "application/octet-stream" && allowedExt.has(ext);
+    if (mimeOk || octetOk || allowedExt.has(ext)) cb(null, true);
     else cb(new Error("Only image, video, and audio files are allowed."));
   },
 });
@@ -302,10 +314,11 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
   try {
     await ensureBoostTables();
     await ensureStatusEditorColumns();
+    await ensureStatusAudienceSchema();
     const result = await query(`
       SELECT
         s.id, s.user_id, s.content, s.type, s.background_color,
-        s.media_url, s.editor_data, s.expires_at, s.created_at,
+        s.media_url, s.editor_data, s.expires_at, s.created_at, s.audience_mode,
         u.name AS user_name, u.avatar_url AS user_avatar,
         EXISTS(
           SELECT 1 FROM status_boosts sb
@@ -391,19 +404,19 @@ router.get("/user/:userId", async (req: Request, res: Response) => {
     const viewerId = Number(userId);
     const visible: typeof result.rows = [];
     for (const row of result.rows) {
+      const statusId = Number(row.id);
       const ownerId = Number(row.user_id);
-      if (ownerId === viewerId) {
-        visible.push(row);
-        continue;
-      }
-      const [seeStatus, seePhoto] = await Promise.all([
-        canSeeUserField(viewerId, ownerId, "status_privacy"),
-        canSeeUserField(viewerId, ownerId, "profile_photo_privacy"),
-      ]);
-      if (!seeStatus) continue;
+      const allowed = ownerId === viewerId || (await canViewerAccessStatus(viewerId, statusId));
+      if (!allowed) continue;
+      const seePhoto =
+        ownerId === viewerId || (await canSeeUserField(viewerId, ownerId, "profile_photo_privacy"));
+      const isOwner = ownerId === viewerId;
       visible.push({
         ...row,
         user_avatar: seePhoto ? row.user_avatar : null,
+        // Hide engagement counts from non-owners.
+        view_count: isOwner ? row.view_count : undefined,
+        reaction_count: isOwner ? row.reaction_count : undefined,
       });
     }
 
@@ -438,8 +451,18 @@ router.get("/boost/quote", async (req: Request, res: Response) => {
 router.get("/media/:filename", async (req: Request, res: Response) => {
   try {
     await ensureStatusMediaTable();
+    await ensureStatusAudienceSchema();
+    const viewerId = getAuthUserId(req);
+    if (!viewerId) {
+      res.status(401).json({ success: false, message: "Authentication required" });
+      return;
+    }
     const rawFilename = Array.isArray(req.params.filename) ? req.params.filename[0] : req.params.filename;
     const filename = path.basename(rawFilename ?? "");
+    if (!(await canViewerAccessStatusMedia(viewerId, filename))) {
+      res.status(403).json({ success: false, message: "Not allowed to view this media." });
+      return;
+    }
     const result = await query(
       "SELECT filename, mime_type, size_bytes, data FROM status_media_files WHERE filename = $1",
       [filename],
@@ -455,7 +478,7 @@ router.get("/media/:filename", async (req: Request, res: Response) => {
     const mimeType = mimeFromFilename(row.filename, row.mime_type);
     res.setHeader("Content-Type", mimeType);
     res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("Cache-Control", "private, max-age=3600");
 
     const range = req.headers.range;
     if (range) {
@@ -490,14 +513,17 @@ router.post("/media", requireAuth, runStatusMediaUpload, async (req: Request, re
   }
   try {
     await ensureStatusMediaTable();
+    await ensureStatusAudienceSchema();
+    const uploaderId = getAuthUserId(req);
     const data = await fs.promises.readFile(file.path);
     const mimeType = mimeFromFilename(file.filename, file.mimetype);
     await query(
-      `INSERT INTO status_media_files (filename, mime_type, size_bytes, data)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO status_media_files (filename, mime_type, size_bytes, data, uploader_id)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (filename)
-       DO UPDATE SET mime_type = EXCLUDED.mime_type, size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data`,
-      [file.filename, mimeType, file.size, data],
+       DO UPDATE SET mime_type = EXCLUDED.mime_type, size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data,
+                     uploader_id = COALESCE(status_media_files.uploader_id, EXCLUDED.uploader_id)`,
+      [file.filename, mimeType, file.size, data, uploaderId],
     );
     await fs.promises.unlink(file.path).catch(() => {});
 
@@ -618,33 +644,66 @@ router.post("/:statusId/boost", async (req: Request, res: Response) => {
       amountInr: plan.amountInr,
     });
 
-    const result = await query(`
-      INSERT INTO status_boosts (
-        status_id, user_id, amount_inr, duration_hours, duration_days, estimated_reach,
-        target_state, target_city, target_radius_km,
-        status, payment_status, payment_provider, payment_reference, pending_hold_until, ends_at
-      )
-      VALUES (
-        $1, $2, $3, $4, $5, $6,
-        $7, $8, $9,
-        'pending_verification', 'captured', $10, $11,
-        NOW() + INTERVAL '24 hours',
-        NOW() + INTERVAL '24 hours'
-      )
-      RETURNING *
-    `, [
-      statusId,
-      userId,
-      plan.amountInr,
-      plan.durationDays * 24,
-      plan.durationDays,
-      plan.estimatedReach,
-      plan.targetState,
-      plan.targetCity,
-      plan.radiusKm,
-      "razorpay",
-      razorpayPaymentId.trim(),
-    ]);
+    const paymentRef = razorpayPaymentId.trim();
+    const existingPay = await query(
+      `SELECT * FROM status_boosts WHERE payment_reference = $1 LIMIT 1`,
+      [paymentRef],
+    );
+    if (existingPay.rows[0]) {
+      res.json({
+        success: true,
+        boost: existingPay.rows[0],
+        plan,
+        deduplicated: true,
+        message: "Payment already recorded. Boost is pending admin verification.",
+      });
+      return;
+    }
+
+    let result;
+    try {
+      result = await query(`
+        INSERT INTO status_boosts (
+          status_id, user_id, amount_inr, duration_hours, duration_days, estimated_reach,
+          target_state, target_city, target_radius_km,
+          status, payment_status, payment_provider, payment_reference, pending_hold_until, ends_at
+        )
+        VALUES (
+          $1, $2, $3, $4, $5, $6,
+          $7, $8, $9,
+          'pending_verification', 'captured', $10, $11,
+          NOW() + INTERVAL '24 hours',
+          NOW() + INTERVAL '24 hours'
+        )
+        RETURNING *
+      `, [
+        statusId,
+        userId,
+        plan.amountInr,
+        plan.durationDays * 24,
+        plan.durationDays,
+        plan.estimatedReach,
+        plan.targetState,
+        plan.targetCity,
+        plan.radiusKm,
+        "razorpay",
+        paymentRef,
+      ]);
+    } catch (insertErr: unknown) {
+      const code = (insertErr as { code?: string })?.code;
+      if (code === "23505") {
+        const again = await query(`SELECT * FROM status_boosts WHERE payment_reference = $1 LIMIT 1`, [paymentRef]);
+        res.json({
+          success: true,
+          boost: again.rows[0],
+          plan,
+          deduplicated: true,
+          message: "Payment already recorded. Boost is pending admin verification.",
+        });
+        return;
+      }
+      throw insertErr;
+    }
 
     await query(
       `UPDATE statuses
@@ -660,6 +719,7 @@ router.post("/:statusId/boost", async (req: Request, res: Response) => {
       message: "Payment received. Boost is pending admin verification and can be approved within 24 hours.",
     });
   } catch (err) {
+    req.log.error({ err }, "status boost confirm error");
     res.status(500).json({ success: false });
   }
 });
@@ -714,8 +774,13 @@ router.get("/:statusId/boost/analytics", async (req: Request, res: Response) => 
 
 // Post a status
 router.post("/", async (req: Request, res: Response) => {
-  const { userId, content, type, backgroundColor, mediaUrl, videoDurationMs, editorData } = req.body as {
-    userId?: number; content?: string; type?: string; backgroundColor?: string; mediaUrl?: string; videoDurationMs?: number | null; editorData?: unknown;
+  const {
+    userId, content, type, backgroundColor, mediaUrl, videoDurationMs, editorData,
+    audienceMode, audienceUserIds,
+  } = req.body as {
+    userId?: number; content?: string; type?: string; backgroundColor?: string; mediaUrl?: string;
+    videoDurationMs?: number | null; editorData?: unknown;
+    audienceMode?: string; audienceUserIds?: number[];
   };
   if (!userId || !content) { res.status(400).json({ success: false }); return; }
   if (!assertSameUser(req, res, userId)) return;
@@ -730,12 +795,55 @@ router.post("/", async (req: Request, res: Response) => {
       return;
     }
   }
+  const mode = normalizeAudienceMode(audienceMode);
+  const audienceIds = Array.isArray(audienceUserIds) ? audienceUserIds.map(Number).filter((n) => Number.isFinite(n) && n > 0) : [];
+  if (mode === "selected_contacts" && audienceIds.length === 0) {
+    res.status(400).json({ success: false, message: "Select at least one contact for this story audience." });
+    return;
+  }
   try {
     await ensureStatusEditorColumns();
+    await ensureStatusAudienceSchema();
+    let safeMediaUrl: string | null = null;
+    try {
+      safeMediaUrl = await assertOwnedStatusMediaUrl(userId, mediaUrl ?? null);
+    } catch (mediaErr) {
+      res.status(400).json({
+        success: false,
+        message: mediaErr instanceof Error ? mediaErr.message : "Invalid story media.",
+      });
+      return;
+    }
+    if ((type === "image" || type === "video") && !safeMediaUrl) {
+      res.status(400).json({ success: false, message: "Media is required for photo/video stories." });
+      return;
+    }
+    let safeEditorData: unknown = editorData ?? null;
+    if (editorData && typeof editorData === "object") {
+      const ed = { ...(editorData as Record<string, unknown>) };
+      if (ed.musicUri) {
+        const music = String(ed.musicUri);
+        if (/^https?:\/\//i.test(music)) {
+          // Stock catalog / remote audio (not our private media store).
+          ed.musicUri = music.slice(0, 500);
+        } else {
+          try {
+            ed.musicUri = await assertOwnedStatusMediaUrl(userId, music);
+          } catch (musicErr) {
+            res.status(400).json({
+              success: false,
+              message: musicErr instanceof Error ? musicErr.message : "Invalid story music.",
+            });
+            return;
+          }
+        }
+      }
+      safeEditorData = ed;
+    }
     const activityType = type === "video" ? "video_share" : "story_status";
     const mod = await enforceModerationForActivity(userId, activityType, {
       content,
-      mediaUrl: mediaUrl ?? null,
+      mediaUrl: safeMediaUrl,
       type: type ?? "text",
     });
     if (!mod.allowed) {
@@ -751,10 +859,20 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     const result = await query(`
-      INSERT INTO statuses (user_id, content, type, background_color, media_url, editor_data, expires_at)
-      VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW() + INTERVAL '24 hours')
+      INSERT INTO statuses (user_id, content, type, background_color, media_url, editor_data, audience_mode, expires_at)
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW() + INTERVAL '24 hours')
       RETURNING *
-    `, [userId, content, type ?? "text", backgroundColor ?? "#5B4FE8", mediaUrl ?? null, editorData ? JSON.stringify(editorData) : null]);
+    `, [
+      userId,
+      content,
+      type ?? "text",
+      backgroundColor ?? "#5B4FE8",
+      safeMediaUrl,
+      safeEditorData ? JSON.stringify(safeEditorData) : null,
+      mode,
+    ]);
+    const statusId = Number(result.rows[0].id);
+    await setStatusAudience(statusId, mode, audienceIds);
     res.json({ success: true, status: result.rows[0] });
   } catch (err) {
     res.status(500).json({ success: false });
@@ -767,30 +885,16 @@ router.get("/:statusId/reply-context", async (req: Request, res: Response) => {
   const viewerId = Number(req.query.viewerId);
   if (!viewerId || !assertSameUser(req, res, viewerId)) return;
   try {
-    const access = await query(
-      `SELECT s.id, s.user_id
-       FROM statuses s
-       WHERE s.id = $1
-         AND (
-           s.user_id = $2
-           OR EXISTS (
-             SELECT 1 FROM messages m
-             JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $2
-             WHERE m.status_reply_id = s.id
-           )
-           OR EXISTS (
-             SELECT 1 FROM status_views sv
-             WHERE sv.status_id = s.id AND sv.viewer_id = $2
-           )
-         )
-       LIMIT 1`,
-      [statusId, viewerId],
-    );
-    if (!access.rows.length) {
+    if (!(await canViewerAccessStatusReplyContext(Number(viewerId), Number(statusId)))) {
       res.status(404).json({ success: false, message: "Status not found." });
       return;
     }
-    const ownerId = Number(access.rows[0].user_id);
+    const ownerRow = await query(`SELECT user_id FROM statuses WHERE id = $1`, [statusId]);
+    if (!ownerRow.rows[0]) {
+      res.status(404).json({ success: false, message: "Status not found." });
+      return;
+    }
+    const ownerId = Number(ownerRow.rows[0].user_id);
     const statusRow = await query(
       `SELECT s.*, u.name AS user_name, u.avatar_url AS user_avatar
        FROM statuses s
@@ -827,6 +931,10 @@ router.post("/:statusId/view", async (req: Request, res: Response) => {
   const { viewerId } = req.body as { viewerId?: number };
   if (!assertSameUser(req, res, viewerId)) return;
   try {
+    if (!(await canViewerAccessStatus(Number(viewerId), Number(statusId)))) {
+      res.status(403).json({ success: false, message: "Not allowed to view this status." });
+      return;
+    }
     await query(
       "INSERT INTO status_views (status_id, viewer_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
       [statusId, viewerId]
@@ -882,6 +990,10 @@ router.post("/:statusId/react", async (req: Request, res: Response) => {
   if (!userId || !emoji) { res.status(400).json({ success: false }); return; }
   if (!assertSameUser(req, res, userId)) return;
   try {
+    if (!(await canViewerAccessStatus(Number(userId), Number(statusId)))) {
+      res.status(403).json({ success: false, message: "Not allowed to react to this status." });
+      return;
+    }
     await query(`
       INSERT INTO status_reactions (status_id, user_id, emoji)
       VALUES ($1, $2, $3)
@@ -906,13 +1018,87 @@ router.delete("/:statusId/react", async (req: Request, res: Response) => {
   }
 });
 
+// Report a status (persists for admin review)
+router.post("/:statusId/report", async (req: Request, res: Response) => {
+  const { statusId } = req.params;
+  const { reporterId, reason, details } = req.body as {
+    reporterId?: number; reason?: string; details?: string;
+  };
+  if (!reporterId || !assertSameUser(req, res, reporterId)) return;
+  try {
+    if (!(await canViewerAccessStatus(Number(reporterId), Number(statusId), { allowExpired: true }))) {
+      res.status(403).json({ success: false, message: "Not allowed." });
+      return;
+    }
+    const owner = await query(`SELECT user_id FROM statuses WHERE id = $1`, [statusId]);
+    const reportedUserId = Number(owner.rows[0]?.user_id);
+    if (!reportedUserId) {
+      res.status(404).json({ success: false, message: "Status not found." });
+      return;
+    }
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_reports (
+        id SERIAL PRIMARY KEY,
+        reporter_id INTEGER NOT NULL,
+        reported_user_id INTEGER NOT NULL,
+        chat_id INTEGER,
+        reason TEXT,
+        details TEXT,
+        block_after_report BOOLEAN DEFAULT FALSE,
+        status TEXT DEFAULT 'open',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await query(
+      `INSERT INTO user_reports (reporter_id, reported_user_id, reason, details)
+       VALUES ($1, $2, $3, $4)`,
+      [
+        reporterId,
+        reportedUserId,
+        reason ?? "status_report",
+        `statusId=${statusId}; ${details ?? ""}`.slice(0, 1000),
+      ],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "status report error");
+    res.status(500).json({ success: false });
+  }
+});
+
 // Delete status
 router.delete("/:statusId", async (req: Request, res: Response) => {
   const { statusId } = req.params;
   const { userId } = req.body as { userId?: number };
   if (!assertSameUser(req, res, userId)) return;
   try {
+    const existing = await query(
+      `SELECT media_url, editor_data FROM statuses WHERE id = $1 AND user_id = $2`,
+      [statusId, userId],
+    );
     await query("DELETE FROM statuses WHERE id = $1 AND user_id = $2", [statusId, userId]);
+    const row = existing.rows[0] as { media_url?: string | null; editor_data?: unknown } | undefined;
+    if (row) {
+      const names = new Set<string>();
+      const main = extractStatusMediaFilename(row.media_url);
+      if (main) names.add(main);
+      const edText = typeof row.editor_data === "string" ? row.editor_data : JSON.stringify(row.editor_data ?? {});
+      for (const match of edText.matchAll(/\/api\/statuses\/media\/([^\\/?#"']+)/g)) {
+        if (match[1]) names.add(decodeURIComponent(match[1]));
+      }
+      for (const filename of names) {
+        const still = await query(
+          `SELECT 1 FROM statuses
+           WHERE media_url ILIKE '%' || $1 || '%'
+              OR editor_data::text ILIKE '%' || $1 || '%'
+           LIMIT 1`,
+          [filename],
+        );
+        if (!still.rows[0]) {
+          await query(`DELETE FROM status_media_files WHERE filename = $1`, [filename]);
+        }
+      }
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false });

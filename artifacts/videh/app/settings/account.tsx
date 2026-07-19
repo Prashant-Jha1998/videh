@@ -2,9 +2,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Platform,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -25,17 +27,26 @@ export default function AccountSettingsScreen() {
   const { user, logout } = useApp();
   const { t } = useUiPreferences();
   const [twoStepEnabled, setTwoStepEnabled] = useState(false);
+  const [busy, setBusy] = useState<"export" | "delete" | null>(null);
+
+  const authHeaders = useCallback((): Record<string, string> => {
+    const h: Record<string, string> = { "Content-Type": "application/json" };
+    if (user?.sessionToken) h.Authorization = `Bearer ${user.sessionToken}`;
+    return h;
+  }, [user?.sessionToken]);
 
   const refreshTwoStep = useCallback(async () => {
     if (!user?.dbId) return;
     try {
-      const r = await fetch(`${API_URL}/users/${user.dbId}/two-step-status`);
+      const r = await fetch(`${API_URL}/users/${user.dbId}/two-step-status`, {
+        headers: authHeaders(),
+      });
       const d = await r.json();
       if (d.success) setTwoStepEnabled(!!d.enabled);
     } catch {
       setTwoStepEnabled(false);
     }
-  }, [user?.dbId]);
+  }, [user?.dbId, authHeaders]);
 
   useEffect(() => {
     void refreshTwoStep();
@@ -56,25 +67,39 @@ export default function AccountSettingsScreen() {
       [
         { text: "Cancel", style: "cancel" },
         { text: "Continue", onPress: () => router.push("/settings/change-number") },
-      ]
+      ],
     );
   };
 
-  const requestInfo = () => {
-    Alert.alert(
-      "Request Account Info",
-      "We will prepare a report of your Videh account information and send it to you.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Request", onPress: () => Alert.alert("Request Submitted", "Your account information report will be ready within 3 days.") },
-      ]
-    );
+  const requestInfo = async () => {
+    if (!user?.dbId || busy) return;
+    setBusy("export");
+    try {
+      const r = await fetch(`${API_URL}/users/${user.dbId}/account-export`, {
+        headers: authHeaders(),
+      });
+      const d = await r.json() as { success?: boolean; report?: unknown; exportedAt?: string; message?: string };
+      if (!r.ok || !d.success || !d.report) {
+        Alert.alert("Error", d.message ?? "Could not create account report.");
+        return;
+      }
+      const text = JSON.stringify({ exportedAt: d.exportedAt, report: d.report }, null, 2);
+      await Share.share({
+        message: text,
+        title: "Videh account information",
+      });
+    } catch {
+      Alert.alert("Error", "Could not create account report.");
+    } finally {
+      setBusy(null);
+    }
   };
 
   const deleteAccount = () => {
+    if (busy) return;
     Alert.alert(
       "Delete Account",
-      "Deleting your account will:\n• Delete your account from Videh\n• Delete your message history\n• Remove you from all Videh groups\n\nThis action cannot be undone.",
+      "Deleting your account will:\n• Remove your profile from Videh\n• Sign you out on all devices\n• Stop notifications and SOS contacts\n\nChat history already received by others may remain on their devices. This cannot be undone.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -90,15 +115,32 @@ export default function AccountSettingsScreen() {
                   text: "Delete",
                   style: "destructive",
                   onPress: async () => {
-                    await logout();
-                    router.replace("/auth/phone");
-                  }
-                }
-              ]
+                    if (!user?.dbId) return;
+                    setBusy("delete");
+                    try {
+                      const r = await fetch(`${API_URL}/users/${user.dbId}`, {
+                        method: "DELETE",
+                        headers: authHeaders(),
+                      });
+                      const d = await r.json().catch(() => ({})) as { success?: boolean; message?: string };
+                      if (!r.ok || !d.success) {
+                        Alert.alert("Error", d.message ?? "Could not delete account.");
+                        return;
+                      }
+                      await logout();
+                      router.replace("/auth/phone");
+                    } catch {
+                      Alert.alert("Error", "Could not delete account.");
+                    } finally {
+                      setBusy(null);
+                    }
+                  },
+                },
+              ],
             );
-          }
+          },
         },
-      ]
+      ],
     );
   };
 
@@ -113,7 +155,6 @@ export default function AccountSettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 60 }}>
-        {/* Phone number */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <Text style={[styles.sectionLabel, { color: colors.primary }]}>{t("account.phoneSection")}</Text>
           <View style={styles.infoRow}>
@@ -121,7 +162,6 @@ export default function AccountSettingsScreen() {
           </View>
         </View>
 
-        {/* Security */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <SettingRow
             icon="lock-closed-outline"
@@ -150,26 +190,35 @@ export default function AccountSettingsScreen() {
           />
         </View>
 
-        {/* Data */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <SettingRow
             icon="document-text-outline"
             iconBg="#FF9800"
             label="Request account info"
-            value="Create report of your account"
+            value={busy === "export" ? "Preparing…" : "Download a summary of your account"}
             colors={colors}
-            onPress={requestInfo}
+            onPress={() => { void requestInfo(); }}
             last
           />
         </View>
 
-        {/* Danger */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
-          <TouchableOpacity style={styles.deleteRow} onPress={deleteAccount} activeOpacity={0.7}>
-            <Ionicons name="trash-outline" size={20} color={colors.destructive} />
+          <TouchableOpacity
+            style={styles.deleteRow}
+            onPress={deleteAccount}
+            activeOpacity={0.7}
+            disabled={busy === "delete"}
+          >
+            {busy === "delete" ? (
+              <ActivityIndicator color={colors.destructive} />
+            ) : (
+              <Ionicons name="trash-outline" size={20} color={colors.destructive} />
+            )}
             <View>
               <Text style={[styles.deleteLabel, { color: colors.destructive }]}>Delete account</Text>
-              <Text style={[styles.deleteHint, { color: colors.mutedForeground }]}>Delete your account and all data</Text>
+              <Text style={[styles.deleteHint, { color: colors.mutedForeground }]}>
+                Permanently delete your Videh account
+              </Text>
             </View>
           </TouchableOpacity>
         </View>

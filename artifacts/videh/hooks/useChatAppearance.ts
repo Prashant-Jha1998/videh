@@ -3,15 +3,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { useResolvedColorScheme } from "@/hooks/useResolvedColorScheme";
 import { getPerChatTheme, type PerChatThemeOverride } from "@/lib/perChatTheme";
+import { DEFAULT_APP_THEME_ID } from "@/lib/appThemes";
 import {
   getThemeAppearanceById,
   mixHex,
   resolveBubbles,
-  resolveChatBackground,
   type AnimatedWallpaperId,
   type BubbleOverride,
   type ThemeAppearance,
 } from "@/lib/themeAppearance";
+
+/** Classic unthemed chat canvas (no per-chat theme applied). */
+const DEFAULT_CHAT_BG_LIGHT = "#F0F2F5";
+const DEFAULT_CHAT_BG_DARK = "#0B141A";
+const DEFAULT_SENT_LIGHT = "#D9FDD3";
+const DEFAULT_SENT_DARK = "#005C4B";
+const DEFAULT_RECEIVED_LIGHT = "#FFFFFF";
+const DEFAULT_RECEIVED_DARK = "#1F2C34";
 
 export type ChatAppearance = {
   appearance: ThemeAppearance;
@@ -37,8 +45,6 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
   const scheme = useResolvedColorScheme();
   const isDark = scheme === "dark";
   const {
-    appThemeId,
-    chatWallpaperColor,
     globalAnimatedWallpaper,
     customBubbleOverride,
     perChatRevision,
@@ -79,15 +85,30 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
   );
 
   return useMemo(() => {
-    const themeId = perChat?.themeId ?? appThemeId;
+    const hasPerChatTheme = Boolean(perChat?.themeId);
+
+    // No per-chat theme → classic white/grey chat (ignore global app theme / wallpaper / custom bubbles).
+    if (!hasPerChatTheme) {
+      const appearance = getThemeAppearanceById(DEFAULT_APP_THEME_ID);
+      return {
+        appearance,
+        chatBubbleSent: isDark ? DEFAULT_SENT_DARK : DEFAULT_SENT_LIGHT,
+        chatBubbleReceived: isDark ? DEFAULT_RECEIVED_DARK : DEFAULT_RECEIVED_LIGHT,
+        chatBackground: isDark ? DEFAULT_CHAT_BG_DARK : DEFAULT_CHAT_BG_LIGHT,
+        animatedWallpaper: "none" as AnimatedWallpaperId,
+        perChatOverride: perChat,
+        isDark,
+      };
+    }
+
+    const themeId = perChat!.themeId!;
     const appearance = getThemeAppearanceById(themeId);
     const bubbleOverride = perChatBubbleOverride(perChat) ?? customBubbleOverride;
     const accent = appearance.accent[0];
-    const hasPerChatTheme = Boolean(perChat?.themeId);
 
     let { sent, received } = resolveBubbles(appearance, isDark, bubbleOverride);
     // Accent-only per-chat save uses very pale derived bubbles — strengthen so the theme is visible.
-    if (hasPerChatTheme && !perChatBubbleOverride(perChat)) {
+    if (!perChatBubbleOverride(perChat)) {
       sent = isDark ? mixHex(accent, "#12101F", 0.42) : mixHex(accent, "#FFFFFF", 0.52);
       received = isDark ? "#1E1D2E" : "#FFFFFF";
     }
@@ -98,14 +119,13 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
       ?? globalAnimatedWallpaper
       ?? "none";
 
-    // Per-chat accent must tint the background; do not let global wallpaper color override it.
-    const chatBackground = hasPerChatTheme
-      ? (isDark ? mixHex(accent, "#12101F", 0.82) : mixHex(accent, "#F7F5FF", 0.86))
-      : resolveChatBackground(appearance, isDark, chatWallpaperColor);
+    const chatBackground = isDark
+      ? mixHex(accent, "#12101F", 0.82)
+      : mixHex(accent, "#F7F5FF", 0.86);
 
     if (__DEV__) {
       console.log(
-        `[chat-theme] apply chatId=${chatId ?? "null"} themeId=${themeId} perChat=${hasPerChatTheme} bg=${chatBackground} sent=${sent}`,
+        `[chat-theme] apply chatId=${chatId ?? "null"} themeId=${themeId} perChat=true bg=${chatBackground} sent=${sent}`,
       );
     }
 
@@ -120,8 +140,6 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
     };
   }, [
     perChat,
-    appThemeId,
-    chatWallpaperColor,
     globalAnimatedWallpaper,
     customBubbleOverride,
     isDark,

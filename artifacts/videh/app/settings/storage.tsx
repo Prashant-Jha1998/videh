@@ -146,13 +146,6 @@ export default function StorageScreen() {
           />
         </View>
 
-        {/* Network */}
-        <View style={[styles.section, { backgroundColor: colors.card }]}>
-          <Text style={[styles.sectionLabel, { color: colors.primary }]}>NETWORK</Text>
-          <StatRow icon="wifi-outline" iconBg="#00BCD4" label="Use less data for calls" value="OFF" colors={colors} />
-          <StatRow icon="cellular-outline" iconBg="#009688" label="Proxy" value="None" colors={colors} last />
-        </View>
-
         {/* Clear cache */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <TouchableOpacity

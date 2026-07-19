@@ -418,18 +418,24 @@ router.post("/status-boosts/:boostId/reject", requireAdmin, async (req, res) => 
     const rejected = await query(
       `UPDATE status_boosts
        SET status = 'rejected',
+           payment_status = 'refund_required',
            verification_note = $2,
            rejected_at = NOW()
        WHERE id = $1
          AND status = 'pending_verification'
        RETURNING *`,
-      [boostId, note],
+      [boostId, `REFUND_REQUIRED: ${note}`],
     );
     if (!rejected.rows[0]) {
       res.status(404).json({ success: false, message: "Pending boost not found." });
       return;
     }
-    res.json({ success: true, boost: rejected.rows[0], message: "Boost rejected." });
+    res.json({
+      success: true,
+      boost: rejected.rows[0],
+      message: "Boost rejected. Marked refund_required — process Razorpay refund manually.",
+      refundRequired: true,
+    });
   } catch (err) {
     logger.error({ err }, "admin reject status boost");
     res.status(500).json({ success: false, message: "Could not reject boost." });

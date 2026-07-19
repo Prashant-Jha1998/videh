@@ -273,6 +273,23 @@ cron.schedule("*/5 * * * *", async () => {
   }
 });
 
+/** Every 20 minutes — purge expired stories and orphaned status media. */
+cron.schedule("*/20 * * * *", async () => {
+  try {
+    const lockKey = "jobs:status-purge:lock";
+    if (!(await stateAcquireLock(lockKey, 15 * 60_000))) return;
+    const { purgeExpiredStatuses } = await import("./lib/statusPurge");
+    const result = await purgeExpiredStatuses(300);
+    if (result.statuses > 0 || result.media > 0) {
+      logger.info(result, "Purged expired statuses / orphan media");
+    }
+    await stateDelete(lockKey);
+  } catch (err) {
+    await stateDelete("jobs:status-purge:lock").catch(() => {});
+    logger.error({ err }, "Status purge cron error");
+  }
+});
+
 /** Daily — permanently delete chat messages older than 90 days. */
 cron.schedule("15 3 * * *", async () => {
   try {

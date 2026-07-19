@@ -2214,7 +2214,7 @@ export default function ChatScreen() {
   }, []);
 
   const { keyboardVisible, keyboardHeight } = useChatKeyboard();
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const prevKeyboardVisibleRef = useRef(false);
   const prevWindowHeightRef = useRef(windowHeight);
   const emojiPanelOpenRef = useRef(false);
@@ -4444,6 +4444,30 @@ export default function ChatScreen() {
     router.push({ pathname: "/chat/message-info", params: messageInfoRouteParams(chatId, selectedMessage) });
   };
 
+  // Fit every selection action on narrow phones without horizontal clipping.
+  const selectionActionCount = useMemo(() => {
+    let n = 2; // forward + delete
+    if (selectedIds.length === 1) {
+      n += 2; // reply + star
+      if (canCopySelection) n += 1;
+      if (canOpenMessageInfo) n += 1;
+      if (selectionMenuItems.length > 0) n += 1;
+    } else if (canCopySelection) {
+      n += 1;
+    }
+    return n;
+  }, [selectedIds.length, canCopySelection, canOpenMessageInfo, selectionMenuItems.length]);
+
+  const selectionChromeWidth = windowWidth < 380 ? 72 : 118; // back + count label
+  const selectionBtnSize = Math.max(
+    30,
+    Math.min(40, Math.floor((windowWidth - selectionChromeWidth - 16) / Math.max(selectionActionCount, 1))),
+  );
+  const selectionIconSize = Math.max(18, Math.min(24, Math.round(selectionBtnSize * 0.62)));
+  const selectionCountLabel = windowWidth < 380
+    ? String(selectedIds.length)
+    : `${selectedIds.length} selected`;
+
   const inputBarBottomPad = keyboardVisible
     ? Platform.OS === "ios"
       ? Math.max(insets.bottom, 8)
@@ -4744,25 +4768,27 @@ export default function ChatScreen() {
       {/* Header */}
       {selectionActive ? (
         <ThemedHeader accentColors={headerAccent} style={[styles.header, styles.selectionHeader, { paddingTop: topPad }]}>
-          <TouchableOpacity style={styles.selectionHeaderBtn} onPress={clearSelection} hitSlop={8}>
-            <Ionicons name="arrow-back" size={26} color={headerIcon} />
-          </TouchableOpacity>
-          <View style={{ flex: 1, minWidth: 0, justifyContent: "center", paddingHorizontal: 4 }}>
-            <Text style={[styles.headerName, { color: chatHeaderTitleColor }]} numberOfLines={1}>
-              {selectedIds.length} selected
-            </Text>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.selectionHeaderActionsScroll}
-            contentContainerStyle={styles.selectionHeaderActions}
+          <TouchableOpacity
+            style={[styles.selectionHeaderBtn, { width: selectionBtnSize, height: selectionBtnSize }]}
+            onPress={clearSelection}
+            hitSlop={8}
+            accessibilityLabel="Clear selection"
           >
+            <Ionicons name="arrow-back" size={selectionIconSize + 2} color={headerIcon} />
+          </TouchableOpacity>
+          <Text
+            style={[styles.selectionCountText, { color: chatHeaderTitleColor, minWidth: windowWidth < 380 ? 18 : 72 }]}
+            numberOfLines={1}
+          >
+            {selectionCountLabel}
+          </Text>
+          <View style={styles.selectionHeaderActions}>
             {selectedIds.length === 1 ? (
               <>
                 <TouchableOpacity
-                  style={styles.selectionHeaderBtn}
-                  hitSlop={6}
+                  style={[styles.selectionHeaderBtn, { width: selectionBtnSize, height: selectionBtnSize }]}
+                  hitSlop={4}
+                  accessibilityLabel="Reply"
                   onPress={() => {
                     const m = allMessages.find((x) => x.id === selectedIds[0]);
                     if (!m || m.type === "deleted") return;
@@ -4771,50 +4797,55 @@ export default function ChatScreen() {
                     inputRef.current?.focus();
                   }}
                 >
-                  <Ionicons name="arrow-undo-outline" size={26} color={headerIcon} />
+                  <Ionicons name="arrow-undo-outline" size={selectionIconSize} color={headerIcon} />
                 </TouchableOpacity>
                 {canCopySelection ? (
                   <TouchableOpacity
-                    style={styles.selectionHeaderBtn}
-                    hitSlop={6}
+                    style={[styles.selectionHeaderBtn, { width: selectionBtnSize, height: selectionBtnSize }]}
+                    hitSlop={4}
+                    accessibilityLabel="Copy"
                     onPress={copySelectedMessages}
                   >
-                    <Ionicons name="copy-outline" size={25} color={headerIcon} />
+                    <Ionicons name="copy-outline" size={selectionIconSize} color={headerIcon} />
                   </TouchableOpacity>
                 ) : null}
                 <TouchableOpacity
-                  style={styles.selectionHeaderBtn}
-                  hitSlop={6}
+                  style={[styles.selectionHeaderBtn, { width: selectionBtnSize, height: selectionBtnSize }]}
+                  hitSlop={4}
+                  accessibilityLabel="Star"
                   onPress={() => {
                     const m = allMessages.find((x) => x.id === selectedIds[0]);
                     if (!m || !chatId || m.type === "deleted") return;
                     starMessage(chatId, m.id);
                   }}
                 >
-                  <Ionicons name="star-outline" size={26} color={headerIcon} />
+                  <Ionicons name="star-outline" size={selectionIconSize} color={headerIcon} />
                 </TouchableOpacity>
                 {canOpenMessageInfo ? (
                   <TouchableOpacity
-                    style={styles.selectionHeaderBtn}
-                    hitSlop={6}
+                    style={[styles.selectionHeaderBtn, { width: selectionBtnSize, height: selectionBtnSize }]}
+                    hitSlop={4}
+                    accessibilityLabel="Message info"
                     onPress={openSelectedMessageInfo}
                   >
-                    <Ionicons name="information-circle-outline" size={27} color={headerIcon} />
+                    <Ionicons name="information-circle-outline" size={selectionIconSize + 1} color={headerIcon} />
                   </TouchableOpacity>
                 ) : null}
               </>
             ) : canCopySelection ? (
               <TouchableOpacity
-                style={styles.selectionHeaderBtn}
-                hitSlop={6}
+                style={[styles.selectionHeaderBtn, { width: selectionBtnSize, height: selectionBtnSize }]}
+                hitSlop={4}
+                accessibilityLabel="Copy"
                 onPress={copySelectedMessages}
               >
-                <Ionicons name="copy-outline" size={25} color={headerIcon} />
+                <Ionicons name="copy-outline" size={selectionIconSize} color={headerIcon} />
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
-              style={styles.selectionHeaderBtn}
-              hitSlop={6}
+              style={[styles.selectionHeaderBtn, { width: selectionBtnSize, height: selectionBtnSize }]}
+              hitSlop={4}
+              accessibilityLabel="Forward"
               onPress={() => {
                 const ids = selectedIds.filter((id) => {
                   const m = allMessages.find((x) => x.id === id);
@@ -4825,25 +4856,27 @@ export default function ChatScreen() {
                 openForwardScreen(ids);
               }}
             >
-              <Ionicons name="arrow-redo-outline" size={26} color={headerIcon} />
+              <Ionicons name="arrow-redo-outline" size={selectionIconSize} color={headerIcon} />
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.selectionHeaderBtn}
-              hitSlop={6}
+              style={[styles.selectionHeaderBtn, { width: selectionBtnSize, height: selectionBtnSize }]}
+              hitSlop={4}
+              accessibilityLabel="Delete"
               onPress={() => setBulkDeleteOpen(true)}
             >
-              <Ionicons name="trash-outline" size={26} color={headerIcon} />
+              <Ionicons name="trash-outline" size={selectionIconSize} color={headerIcon} />
             </TouchableOpacity>
             {selectedIds.length === 1 && selectionMenuItems.length > 0 ? (
               <TouchableOpacity
-                style={styles.selectionHeaderBtn}
-                hitSlop={6}
+                style={[styles.selectionHeaderBtn, { width: selectionBtnSize, height: selectionBtnSize }]}
+                hitSlop={4}
+                accessibilityLabel="More"
                 onPress={() => setSelectionMenuOpen(true)}
               >
-                <Ionicons name="ellipsis-vertical" size={26} color={headerIcon} />
+                <Ionicons name="ellipsis-vertical" size={selectionIconSize} color={headerIcon} />
               </TouchableOpacity>
             ) : null}
-          </ScrollView>
+          </View>
         </ThemedHeader>
       ) : (
         <ThemedHeader accentColors={headerAccent} style={[styles.header, { paddingTop: topPad }]}>
@@ -5637,20 +5670,27 @@ const styles = StyleSheet.create({
   groupSenderName: { fontSize: 13, fontFamily: "Inter_600SemiBold", marginBottom: 2, marginLeft: 2, paddingRight: 8 },
   groupSenderAdmin: { fontSize: 12, fontFamily: "Inter_400Regular" },
   header: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 8, paddingBottom: 10, gap: 6 },
-  selectionHeader: { paddingBottom: 8 },
-  selectionHeaderActionsScroll: { flexGrow: 0, flexShrink: 1, maxWidth: "62%" },
+  selectionHeader: { paddingBottom: 8, gap: 2, paddingHorizontal: 4 },
+  selectionCountText: {
+    fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
+    flexShrink: 0,
+    paddingHorizontal: 2,
+  },
   selectionHeaderActions: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: "row",
+    flexWrap: "nowrap",
     alignItems: "center",
     justifyContent: "flex-end",
-    gap: 2,
-    paddingRight: 2,
   },
   selectionHeaderBtn: {
-    width: 44,
-    height: 44,
+    width: 36,
+    height: 36,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 1,
   },
   backBtn: { padding: 6 },
   headerAvatarShell: { width: 38, height: 38, position: "relative", overflow: "visible" },

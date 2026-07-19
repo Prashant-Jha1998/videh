@@ -4,6 +4,10 @@ export const INCOMING_RING_TIMEOUT_MS = 45_000;
 export const CONNECTING_TIMEOUT_MS = 35_000;
 /** Backup poll while app is open — SSE/FCM are primary. */
 export const INCOMING_CALL_POLL_ACTIVE_MS = 2_500;
+/** When SSE recently delivered a ringing signal, poll less often. */
+export const INCOMING_CALL_POLL_SSE_HEALTHY_MS = 8_000;
 export const INCOMING_CALL_POLL_BACKGROUND_MS = 400;
 /** Outgoing call status poll while waiting for callee to accept. */
-export const OUTGOING_RING_STATUS_POLL_MS = 200;
+export const OUTGOING_RING_STATUS_POLL_MS = 500;
+/** Status heartbeat once media is connected (SSE covers most events). */
+export const JOINED_CALL_STATUS_POLL_MS = 3_000;
