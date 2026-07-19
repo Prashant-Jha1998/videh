@@ -280,13 +280,13 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "kumarprasun1998",
+    "owner": "mmsbywarroom",
     "extra": {
       "router": {
         "origin": "https://videh.co.in"
       },
       "eas": {
-        "projectId": "d2a8e42c-8864-4a8f-8d0e-cbd95c97cf8c"
+        "projectId": "aef28f13-c565-43ac-b69b-690a2b3f0acf"
       }
     }
   }
