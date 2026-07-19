@@ -303,11 +303,11 @@ router.post("/:id/avatar", async (req: Request, res: Response) => {
   }
 });
 
-// Set online
+// Set online (heartbeat — last_seen drives freshness for chat-list dots)
 router.post("/:id/online", async (req: Request, res: Response) => {
   if (!assertSameUser(req, res, req.params.id)) return;
   try {
-    await query("UPDATE users SET is_online = TRUE WHERE id = $1", [req.params.id]);
+    await query("UPDATE users SET is_online = TRUE, last_seen = NOW() WHERE id = $1", [req.params.id]);
     res.json({ success: true });
   } catch { res.status(500).json({ success: false }); }
 });

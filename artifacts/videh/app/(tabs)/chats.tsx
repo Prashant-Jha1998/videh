@@ -33,6 +33,7 @@ import { DisappearTimerBadge } from "@/components/DisappearTimerBadge";
 import { headerTopInset } from "@/lib/headerInset";
 import { isChatDisappearingEnabled } from "@/lib/disappearTimerOptions";
 import { resolvePublicAssetUrl } from "@/lib/publicAssetUrl";
+import { VIDEH_BRAND } from "@/lib/brandColors";
 
 interface BroadcastListRow {
   id: number;
@@ -806,9 +807,18 @@ function ChatRow({
           )}
           {disappearingOn ? <DisappearTimerBadge size={14} /> : null}
         </View>
-        {!chat.isGroup && chat.isOnline && (
-          <View style={[styles.onlineDot, { backgroundColor: colors.onlineGreen }]} />
-        )}
+        {!chat.isGroup && chat.isOnline ? (
+          <View
+            style={[
+              styles.onlineDot,
+              {
+                backgroundColor: VIDEH_BRAND.online,
+                borderColor: colors.background,
+              },
+            ]}
+            accessibilityLabel="Online"
+          />
+        ) : null}
         {selected ? (
           <View style={[styles.selectedBadge, { backgroundColor: colors.primary }]}>
             <Ionicons name="checkmark" size={15} color="#fff" />
@@ -898,7 +908,17 @@ const styles = StyleSheet.create({
   statusRingInnerText: { color: "#fff", fontSize: 15, fontFamily: "Inter_700Bold" },
   avatarImg: { width: 52, height: 52, borderRadius: 26 },
   avatarText: { color: "#fff", fontSize: 18, fontFamily: "Inter_700Bold" },
-  onlineDot: { width: 14, height: 14, borderRadius: 7, position: "absolute", bottom: 4, right: 3, borderWidth: 2, borderColor: "#fff" },
+  onlineDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    position: "absolute",
+    bottom: 2,
+    right: 4,
+    borderWidth: 2,
+    zIndex: 6,
+    elevation: 4,
+  },
   selectedBadge: {
     position: "absolute",
     right: 0,

@@ -137,15 +137,27 @@ export type PresencePayload = {
   lastSeen: string | null;
 };
 
+/** Clients heartbeat every ~45s; treat as offline after missing ~2 heartbeats. */
+export const ONLINE_STALE_MS = 100_000;
+
+/** True only if DB flags online AND last heartbeat (last_seen) is recent. */
+export function isEffectivelyOnline(isOnlineFlag: boolean, lastSeen: Date | string | null | undefined): boolean {
+  if (!isOnlineFlag || !lastSeen) return false;
+  const ts = lastSeen instanceof Date ? lastSeen.getTime() : new Date(lastSeen).getTime();
+  if (!Number.isFinite(ts)) return false;
+  return Date.now() - ts < ONLINE_STALE_MS;
+}
+
 export async function getPresenceForViewer(viewerId: number, targetId: number): Promise<PresencePayload> {
   const hidden: PresencePayload = { canSee: false, isOnline: false, lastSeen: null };
   if (viewerId === targetId) {
     const r = await query(`SELECT is_online, last_seen FROM users WHERE id = $1`, [targetId]);
     const row = r.rows[0];
+    const lastSeen = row?.last_seen ? new Date(row.last_seen) : null;
     return {
       canSee: true,
-      isOnline: Boolean(row?.is_online),
-      lastSeen: row?.last_seen ? new Date(row.last_seen).toISOString() : null,
+      isOnline: isEffectivelyOnline(Boolean(row?.is_online), lastSeen),
+      lastSeen: lastSeen ? lastSeen.toISOString() : null,
     };
   }
 
@@ -159,10 +171,11 @@ export async function getPresenceForViewer(viewerId: number, targetId: number): 
   const row = r.rows[0];
   if (!row) return hidden;
 
+  const lastSeen = row.last_seen ? new Date(row.last_seen) : null;
   return {
     canSee: true,
-    isOnline: seeOnline ? Boolean(row.is_online) : false,
-    lastSeen: seeLastSeen && row.last_seen ? new Date(row.last_seen).toISOString() : null,
+    isOnline: seeOnline ? isEffectivelyOnline(Boolean(row.is_online), lastSeen) : false,
+    lastSeen: seeLastSeen && lastSeen ? lastSeen.toISOString() : null,
   };
 }
 

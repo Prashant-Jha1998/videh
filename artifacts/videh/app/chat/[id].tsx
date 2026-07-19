@@ -118,7 +118,7 @@ import {
   CHAT_NEAR_BOTTOM_PX,
   CHAT_COMPOSER_CLEARANCE_PX,
   CHAT_TYPING_FOOTER_PX,
-  CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
+  CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
 } from "@/lib/chatScrollBehavior";
 import {
   linkColorForBubbleBackground,
@@ -1377,6 +1377,14 @@ export default function ChatScreen() {
       setUnreadBelowCount((p) => (wasReadingHistory ? p : 0));
       void loadChatScrollSnapshot(user?.dbId, chatId).then((snap) => {
         if (!snap) return;
+        // Do not clobber an in-progress "reading older messages" session.
+        // Async snapshot often resolves after the user has already scrolled up.
+        if (userScrolledUpRef.current || readingHistoryRef.current) {
+          if (snap.readingHistory) {
+            chatScrollMemoryRef.current.set(chatId, true);
+          }
+          return;
+        }
         chatScrollMemoryRef.current.set(chatId, snap.readingHistory);
         lastScrollOffsetRef.current = snap.scrollOffset;
         if (!snap.readingHistory && snap.scrollOffset <= CHAT_NEAR_BOTTOM_PX) return;
@@ -2007,7 +2015,7 @@ export default function ChatScreen() {
     setShowJumpToLatest((p) => (p ? false : p));
     setUnreadBelowCount((p) => (p > 0 ? 0 : p));
     pinToLatest(false, { force: true, source: "scheduleOpenChatPin" });
-  }, [cancelAllScrollPins, pinToLatest, applyReadingHistoryMode]);
+  }, [cancelAllScrollPins, pinToLatest, applyReadingHistoryMode, blocksAutoScroll]);
   const markUserScrolledUp = useCallback(() => {
     if (userScrolledUpRef.current) return;
     cancelAllScrollPins();
@@ -3979,6 +3987,18 @@ export default function ChatScreen() {
   const hasMessageRows = (searching ? listRows : listRowsInverted).length > 0;
   /** Invert only when real messages exist — intro-only chats stay upright. */
   const messageListInverted = !searching && hasMessageRows;
+  /**
+   * Stable MVCP config: do NOT toggle threshold with readingHistory.
+   * Changing maintainVisibleContentPosition at runtime re-pins / jumps the inverted list.
+   * FOLLOW (10) only autoscrolls when already near offset 0 (latest).
+   */
+  const chatListMvcp = useMemo(
+    () => ({
+      minIndexForVisible: 0,
+      autoscrollToTopThreshold: CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD,
+    }),
+    [],
+  );
   const messagesScrollAnchorKey = useMemo(() => {
     const first = messagesForDisplay[0]?.id ?? "";
     const last = messagesForDisplay[messagesForDisplay.length - 1]?.id ?? "";
@@ -4610,7 +4630,10 @@ export default function ChatScreen() {
                     setEmojiPanelOpen(false);
                     setAssistantChatInputFocused(true);
                     if (chatId && inputVal.length > 0) setTyping(chatId);
-                    pinChatToBottom(false);
+                    // Stay put while reading older messages — do not force latest.
+                    if (!userScrolledUpRef.current && !readingHistoryRef.current) {
+                      pinChatToBottom(false);
+                    }
                   }}
                   onBlur={() => {
                     setAssistantChatInputFocused(false);
@@ -5058,12 +5081,7 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS !== "web"}
           maintainVisibleContentPosition={
-            searching || !messageListInverted
-              ? undefined
-              : {
-                  minIndexForVisible: 0,
-                  autoscrollToTopThreshold: CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD,
-                }
+            searching || !messageListInverted ? undefined : chatListMvcp
           }
           initialNumToRender={12}
           maxToRenderPerBatch={8}

@@ -2,6 +2,7 @@ import colors from "@/constants/colors";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { useResolvedColorScheme } from "@/hooks/useResolvedColorScheme";
 import { DEFAULT_APP_THEME_ID } from "@/lib/appThemes";
+import { VIDEH_BRAND } from "@/lib/brandColors";
 import { mixHex, resolveBubbles } from "@/lib/themeAppearance";
 
 type ColorScheme = typeof colors.light;
@@ -57,7 +58,7 @@ export function useColors(): ColorScheme & {
         ? "rgba(102,119,129,0.85)"
         : "rgba(255,255,255,0.65)",
     statusRing: primary,
-    onlineGreen: primary,
+    onlineGreen: VIDEH_BRAND.online,
     chatBubbleSent: bubbles.sent,
     chatBubbleReceived: bubbles.received,
     isDark,

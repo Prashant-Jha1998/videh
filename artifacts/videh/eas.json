@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v166-business-api-fixes"
+        "key": "apk-release-v168-chat-scroll-fix"
       }
     },
     "production": {
@@ -48,7 +48,7 @@
         "buildType": "app-bundle"
       },
       "cache": {
-        "key": "production-v98-webrtc-fix"
+        "key": "production-v167-online-dot-aab"
       }
     }
   }

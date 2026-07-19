@@ -89,7 +89,7 @@ export function buildChatsFromCache(
       lastMessageTime: row.lastMessageTime,
       unreadCount: row.unreadCount,
       isGroup: row.isGroup,
-      isOnline: row.isOnline,
+      isOnline: false, // never trust cached presence; refreshed from server
       isPinned: row.isPinned,
       isMuted: row.isMuted,
       isArchived: row.isArchived,

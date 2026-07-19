@@ -22,9 +22,14 @@ export const CHAT_BACK_TO_BOTTOM_PX = 48;
 /** Coalesce duplicate pin requests within the same frame / burst. */
 export const SCROLL_PIN_DEBOUNCE_MS = 48;
 
-/** MVCP: block tail autoscroll while user reads history (inverted list). */
+/**
+ * MVCP autoscrollToTopThreshold (inverted list: offset 0 = latest).
+ * Keep this STABLE at runtime — toggling the MVCP prop causes inverted FlatList jumps.
+ * Follow (10): native stick-to-latest only when already within ~10px of the tail.
+ * History (-1): reserved; prefer omitting autoscrollToTopThreshold over switching props.
+ */
 export const CHAT_MVCP_FOLLOW_AUTOSCROLL_THRESHOLD = 10;
-export const CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD = 1_000_000;
+export const CHAT_MVCP_HISTORY_AUTOSCROLL_THRESHOLD = -1;
 
 /** Inverted list: offset 0 = visual bottom (latest). */
 export function isInvertedChatNearBottom(
