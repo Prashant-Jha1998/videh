@@ -73,6 +73,9 @@ export async function presentIncomingCallFromPush(
 
   if (!inForeground) {
     if (Platform.OS === "android") {
+      if (!options?.skipCallKeep) {
+        showCallKeepIncoming(call.callId, call.callerName, call.chatId, call.type === "video");
+      }
       await showIncomingCallNotification(call);
     } else if (!options?.skipCallKeep) {
       showCallKeepIncoming(call.callId, call.callerName, call.chatId, call.type === "video");

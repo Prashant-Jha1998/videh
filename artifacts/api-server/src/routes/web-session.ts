@@ -11,6 +11,7 @@ import { publicMediaUrl } from "../lib/mediaStorage";
 import { attachChatEventStream, publishChatEvent } from "../lib/realtime";
 import { enforceGroupCreationPolicy } from "../lib/groupCreationPolicy";
 import { userCanAccessChatMedia } from "../lib/chatMediaAccess";
+import { assertSameUser } from "../lib/auth";
 import {
   computeMessageExpiresAt,
   ensureDisappearingMessageColumns,
@@ -44,6 +45,9 @@ import {
   getLatestBoostForStatus,
   getRazorpayConfig,
 } from "../lib/statusBoostPayment";
+import {
+  canViewerAccessStatusMedia,
+} from "../lib/statusVisibility";
 
 const router = Router();
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -332,6 +336,7 @@ router.post("/:token/link", async (req: Request, res: Response) => {
     res.status(400).json({ success: false, message: "userId required" });
     return;
   }
+  if (!assertSameUser(req, res, userId)) return;
 
   try {
     const sessionResult = await query(
@@ -1126,6 +1131,51 @@ router.post("/:token/statuses/media", statusMediaUpload.single("file"), async (r
     req.log.error({ err }, "web status media upload");
     if (file.path) await fs.promises.unlink(file.path).catch(() => {});
     res.status(500).json({ success: false, message: "Could not save story media." });
+  }
+});
+
+/** Authenticated proxy so browser <img>/<video> can load story media without Bearer headers. */
+router.get("/:token/statuses/media/:filename", async (req: Request, res: Response) => {
+  const session = await requireLinkedSession(req, res);
+  if (!session) return;
+  const rawFilename = routeParam(req.params.filename);
+  let filename = path.basename(rawFilename);
+  try {
+    filename = decodeURIComponent(filename);
+  } catch {
+    /* keep basename */
+  }
+  if (filename.endsWith("/content")) {
+    filename = filename.slice(0, -"/content".length);
+  }
+  try {
+    await ensureStatusMediaTable();
+    const statusIdRaw = typeof req.query["statusId"] === "string" ? Number(req.query["statusId"]) : NaN;
+    const statusId = Number.isFinite(statusIdRaw) && statusIdRaw > 0 ? statusIdRaw : undefined;
+    if (!(await canViewerAccessStatusMedia(session.userId, filename, { statusId }))) {
+      res.status(403).json({ success: false, message: "Not allowed to view this media." });
+      return;
+    }
+    const result = await query(
+      "SELECT filename, mime_type, size_bytes, data FROM status_media_files WHERE filename = $1",
+      [filename],
+    );
+    const row = result.rows[0] as { filename: string; mime_type: string; size_bytes: number; data: Buffer } | undefined;
+    if (!row) {
+      res.status(404).json({ success: false, message: "Media not found." });
+      return;
+    }
+    const data = row.data;
+    const size = Number(row.size_bytes) || data.length;
+    const mimeType = mimeFromFilename(row.filename, row.mime_type);
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Content-Length", String(size));
+    res.end(data);
+  } catch (err) {
+    req.log.error({ err }, "web session status media read");
+    res.status(500).json({ success: false });
   }
 });
 

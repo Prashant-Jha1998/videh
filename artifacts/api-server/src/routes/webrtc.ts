@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { assertSameUser, requireAuth } from "../lib/auth";
 import { insertCallChatMessage, publishCallSignal } from "../lib/callMessages";
 import { query } from "../lib/db";
-import { publishChatEvent, filterSseConnectedUserIds } from "../lib/realtime";
+import { publishChatEvent } from "../lib/realtime";
 import { EXPO_INCOMING_CALL_CATEGORY_ID } from "../lib/expoPush";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
 import { clientIp, isRateLimited } from "../lib/rateLimit";
@@ -159,8 +159,10 @@ function clearRingReminderTimers(callId: string): void {
 }
 
 function userIdsNeedingCallPush(userIds: number[]): number[] {
-  const sseConnected = new Set(filterSseConnectedUserIds(userIds));
-  return userIds.filter((id) => !sseConnected.has(id));
+  // Always send call pushes — SSE can still be "connected" while the app is backgrounded
+  // or the screen is locked, and JS cannot show lock-screen UI / ringtone without a
+  // system notification. Client dedupes via shouldPresentIncomingCallSurfaces.
+  return userIds;
 }
 
 async function sendRingReminder(callId: string): Promise<void> {

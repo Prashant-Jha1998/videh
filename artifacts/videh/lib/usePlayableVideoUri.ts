@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { useEffect, useState } from "react";
 import { resolvePublicAssetUrl, withStatusMediaAuth } from "./publicAssetUrl";
-import { getCachedAuthMediaFile, peekCachedAuthMediaFile, peekCachedAuthMediaFileSync } from "./useCachedAuthMediaUri";
+import { getCachedAuthMediaFile, peekCachedAuthMediaFileSync } from "./useCachedAuthMediaUri";
 
 function videoExtFromUri(uri: string): string {
   const trimmed = uri.trim();
@@ -118,20 +118,9 @@ export function usePlayableVideoUri(uri: string | undefined, sessionToken?: stri
           return;
         }
 
-        // Stream first for fast start; player sends Authorization (+ URL has statusId).
+        // Stream immediately — do not also download the same file in parallel (that slows first play).
         const streamUri = withStatusMediaAuth(absolute, sessionToken, statusIdFromUri(absolute)) ?? absolute;
         setPlayableUri(streamUri);
-
-        // Warm disk cache for next open / sibling prefetch — do not swap URI mid-play.
-        void (async () => {
-          try {
-            const onDisk = await peekCachedAuthMediaFile(absolute, "mp4");
-            if (onDisk || cancelled) return;
-            await getCachedAuthMediaFile(absolute, sessionToken, "mp4");
-          } catch {
-            /* streaming already in progress */
-          }
-        })();
 
         return () => {
           cancelled = true;

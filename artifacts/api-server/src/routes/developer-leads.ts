@@ -250,8 +250,13 @@ router.post("/draft", async (req: Request, res: Response) => {
 
 router.get("/:id", async (req, res) => {
   const id = Number(req.params.id);
+  const reference = String(req.query.reference ?? "").trim();
   if (!id) {
     res.status(400).json({ success: false, message: "Invalid id" });
+    return;
+  }
+  if (!reference && !getDeveloperPortalUser(req)) {
+    res.status(401).json({ success: false, message: "Sign in or provide reference code" });
     return;
   }
   try {
@@ -263,6 +268,15 @@ router.get("/:id", async (req, res) => {
         message: "Application not found",
         code: "lead_not_found",
       });
+      return;
+    }
+    const row = lead.rows[0] as {
+      reference_code?: string;
+      portal_user_id?: number | null;
+      email?: string;
+    };
+    if (!(await assertPortalLeadAccess(id, row, reference, req))) {
+      res.status(403).json({ success: false, message: "Access denied" });
       return;
     }
     const docs = await query(`SELECT * FROM developer_lead_documents WHERE lead_id = $1 ORDER BY doc_type`, [id]);
@@ -281,8 +295,13 @@ router.get("/:id", async (req, res) => {
 router.patch("/:id", async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   const body = req.body as Record<string, unknown>;
+  const reference = String(body.reference ?? req.query.reference ?? "").trim();
   if (!id) {
     res.status(400).json({ success: false, message: "Invalid id" });
+    return;
+  }
+  if (!reference && !getDeveloperPortalUser(req)) {
+    res.status(401).json({ success: false, message: "Sign in or provide reference code" });
     return;
   }
 
@@ -294,6 +313,22 @@ router.patch("/:id", async (req: Request, res: Response) => {
 
   try {
     await ensureDeveloperPlatformTables();
+    const existing = await query(
+      `SELECT reference_code, portal_user_id, email, status FROM developer_leads WHERE id = $1`,
+      [id],
+    );
+    const existingRow = existing.rows[0] as
+      | { reference_code?: string; portal_user_id?: number | null; email?: string; status?: string }
+      | undefined;
+    if (!existingRow) {
+      res.status(404).json({ success: false, message: "Application not found" });
+      return;
+    }
+    if (!(await assertPortalLeadAccess(id, existingRow, reference, req))) {
+      res.status(403).json({ success: false, message: "Access denied" });
+      return;
+    }
+
     const fields: string[] = ["updated_at = NOW()"];
     const params: unknown[] = [];
     let i = 1;

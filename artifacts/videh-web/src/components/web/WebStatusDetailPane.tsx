@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Eye, Flame, PenLine, Trash2 } from "lucide-react";
 import { webApi, type WebStatus } from "../../lib/webApi";
+import { resolveWebMediaFetchUrl } from "../../lib/webMediaUrl";
 import { Avatar, initials, hue } from "./webUiShared";
 import { WebStoryBoostModal } from "./WebStoryBoostModal";
 
@@ -14,12 +15,18 @@ function formatWhen(iso: string) {
   });
 }
 
-function StatusPreview({ status }: { status: WebStatus }) {
-  if (status.type === "image" && status.media_url) {
-    return <img src={status.media_url} alt="" className="vw-status-detail__media" />;
+function statusMediaSrc(url: string | undefined, token: string): string | undefined {
+  if (!url) return undefined;
+  return resolveWebMediaFetchUrl(url, token);
+}
+
+function StatusPreview({ status, token }: { status: WebStatus; token: string }) {
+  const src = statusMediaSrc(status.media_url, token);
+  if (status.type === "image" && src) {
+    return <img src={src} alt="" className="vw-status-detail__media" />;
   }
-  if (status.type === "video" && status.media_url) {
-    return <video src={status.media_url} controls className="vw-status-detail__media" />;
+  if (status.type === "video" && src) {
+    return <video src={src} controls className="vw-status-detail__media" />;
   }
   return (
     <div
@@ -169,7 +176,7 @@ export function WebStatusDetailPane({
                 onClick={() => setActiveId(s.id)}
               >
                 {s.type === "image" && s.media_url ? (
-                  <img src={s.media_url} alt="" />
+                  <img src={statusMediaSrc(s.media_url, token)} alt="" />
                 ) : (
                   <span style={{ backgroundColor: s.background_color ?? "#5B4FE8" }} />
                 )}
@@ -179,7 +186,7 @@ export function WebStatusDetailPane({
         ) : null}
 
         <div className="vw-status-detail__preview-wrap">
-          <StatusPreview status={active} />
+          <StatusPreview status={active} token={token} />
         </div>
 
         <div className="vw-status-detail__boost-row">

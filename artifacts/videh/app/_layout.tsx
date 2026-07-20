@@ -55,7 +55,7 @@ import {
   INCOMING_CALL_POLL_BACKGROUND_MS,
   INCOMING_CALL_POLL_SSE_HEALTHY_MS,
 } from "@/lib/callConstants";
-import { maybePromptDisableBatteryOptimization } from "@/lib/incomingCallBattery";
+import { maybePromptDisableBatteryOptimization, maybePromptFullScreenIntentPermission } from "@/lib/incomingCallBattery";
 import { isIncomingCallPushData, presentIncomingCallFromPush } from "@/lib/incomingCallPush";
 import {
   claimIncomingCallRing,
@@ -265,10 +265,12 @@ function RootLayoutNav() {
       }
 
       const appActive = isAppInForeground();
+      // Always claim surfaces when background so Android sticky notif / iOS CallKeep run once.
       const presentSurfaces = !appActive && shouldPresentIncomingCallSurfaces(next.callId);
       pendingIncomingRef.current = next;
       setIncomingCall((prev) => (prev?.callId === next.callId ? { ...prev, ...next } : next));
-      presentIncomingCallUi(next, { useNativeSurface: presentSurfaces });
+      // useNativeSurface whenever app is backgrounded (not only when claim succeeds on first offer).
+      presentIncomingCallUi(next, { useNativeSurface: !appActive || presentSurfaces });
       void startIncomingCallExperience(next);
       scheduleIncomingAutoEnd(next.callId);
 
@@ -481,6 +483,7 @@ function RootLayoutNav() {
   useEffect(() => {
     if (!isAuthenticated || Platform.OS !== "android") return;
     void maybePromptDisableBatteryOptimization();
+    void maybePromptFullScreenIntentPermission();
   }, [isAuthenticated]);
 
   useEffect(() => {
@@ -719,11 +722,36 @@ function RootLayoutNav() {
       if (!last) return;
       handledLaunchCallNotificationRef.current = true;
       const data = last.notification.request.content.data as Record<string, unknown> | undefined;
-      if (!data?.callId) return;
+      if (!data?.callId || !user?.dbId) return;
       const actionId = last.actionIdentifier;
+      const callId = String(data.callId);
+      if (actionId === NOTIFICATION_ACTION_DECLINE_CALL) {
+        void rejectIncomingCall({
+          callId,
+          userId: user.dbId,
+          sessionToken: user.sessionToken,
+        });
+        return;
+      }
+      if (actionId === NOTIFICATION_ACTION_ACCEPT_CALL) {
+        const partial = toIncomingCallInfo({
+          callId,
+          channel: String(data.channel ?? ""),
+          chatId: Number(data.chatId),
+          type: String(data.type ?? "audio"),
+          callerName: String(data.callerName ?? "Videh user"),
+          participantCount: 2,
+          callerId: Number(data.callerId) > 0 ? Number(data.callerId) : undefined,
+        });
+        clearIncomingAutoEnd();
+        dismissIncomingCallUi(callId, false);
+        activeCallIdRef.current = callId;
+        void acceptIncoming(partial).catch(() => {});
+        return;
+      }
       if (actionId && actionId !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
       void offerIncomingCall({
-        callId: String(data.callId),
+        callId,
         channel: String(data.channel ?? ""),
         chatId: Number(data.chatId),
         type: String(data.type ?? "audio"),
@@ -731,7 +759,7 @@ function RootLayoutNav() {
         callerId: Number(data.callerId) > 0 ? Number(data.callerId) : undefined,
       });
     })();
-  }, [isAuthenticated, offerIncomingCall]);
+  }, [acceptIncoming, clearIncomingAutoEnd, dismissIncomingCallUi, isAuthenticated, offerIncomingCall, user?.dbId, user?.sessionToken]);
 
   useEffect(() => {
     if (Platform.OS === "web" || !isAuthenticated) return;

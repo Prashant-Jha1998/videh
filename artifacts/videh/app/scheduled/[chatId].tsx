@@ -154,14 +154,16 @@ export default function ScheduledScreen() {
   const load = useCallback(async () => {
     if (!chatId) return;
     try {
-      const r = await fetch(`${BASE_URL}/api/scheduled/chat/${chatId}`);
+      const r = await fetch(`${BASE_URL}/api/scheduled/chat/${chatId}`, {
+        headers: user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {},
+      });
       const d = await r.json();
       if (d.success) setMessages(d.messages);
     } catch {
       /* ignore */
     }
     setLoading(false);
-  }, [chatId]);
+  }, [chatId, user?.sessionToken]);
 
   useEffect(() => {
     load();
@@ -220,7 +222,10 @@ export default function ScheduledScreen() {
     try {
       const r = await fetch(`${BASE_URL}/api/scheduled`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+        },
         body: JSON.stringify({
           chatId: Number(chatId),
           senderId: user?.dbId,
@@ -248,7 +253,10 @@ export default function ScheduledScreen() {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
-          await fetch(`${BASE_URL}/api/scheduled/${id}`, { method: "DELETE" });
+          await fetch(`${BASE_URL}/api/scheduled/${id}`, {
+            method: "DELETE",
+            headers: user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {},
+          });
           load();
         },
       },

@@ -814,7 +814,9 @@ export default function ChatInfoScreen() {
     setLastServerSearchEmpty(false);
     try {
       const enc = encodeURIComponent(raw.replace(/\s+/g, ""));
-      const res = await fetch(`${BASE_URL}/api/users/search/${enc}`);
+      const res = await fetch(`${BASE_URL}/api/users/search/${enc}`, {
+        headers: authedJsonHeaders(),
+      });
       const data = await res.json();
       const first = data.users?.[0] ?? null;
       setSearchResult(first);
@@ -859,7 +861,9 @@ export default function ChatInfoScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const enc = encodeURIComponent(row.phone.replace(/\s+/g, ""));
     try {
-      const res = await fetch(`${BASE_URL}/api/users/search/${enc}`);
+      const res = await fetch(`${BASE_URL}/api/users/search/${enc}`, {
+        headers: authedJsonHeaders(),
+      });
       const data = await res.json();
       const u = data.users?.[0] as { id: number } | undefined;
       if (!u) {

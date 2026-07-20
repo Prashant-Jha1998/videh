@@ -111,6 +111,8 @@ function VideoStatusPlayerSurface({
 
   useEffect(() => {
     if (status === "error") onLoadError();
+    // Treat idle/ready as buffered enough to hide the blocking overlay quickly.
+    if (status === "readyToPlay" || status === "idle") setBuffering(false);
     if (status === "loading") setBuffering(true);
   }, [status, onLoadError]);
 
@@ -118,9 +120,13 @@ function VideoStatusPlayerSurface({
     if (status !== "readyToPlay" || readyNotifiedRef.current) return;
     readyNotifiedRef.current = true;
     setBuffering(false);
-    if (startMs > 0) player.currentTime = startMs / 1000;
+    if (startMs > 0) {
+      try { player.currentTime = startMs / 1000; } catch { /* ignore */ }
+    }
     onReady();
-    if (!paused) player.play();
+    if (!paused) {
+      try { player.play(); } catch { /* ignore */ }
+    }
   }, [status, startMs, paused, player, onReady]);
 
   useEffect(() => {
@@ -320,11 +326,14 @@ export default function ViewStatusScreen() {
   const { statuses, user, createDirectChat, sendMessage, markStatusViewedLocally } = useApp();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const ids = params.ids
-    ? params.ids.split(",").filter(Boolean)
-    : params.id ? [params.id] : [];
+  const idsKey = typeof params.ids === "string" ? params.ids : Array.isArray(params.ids) ? params.ids.join(",") : "";
+  const focusId = typeof params.id === "string" ? params.id : Array.isArray(params.id) ? params.id[0] : undefined;
+  const ids = useMemo(
+    () => (idsKey ? idsKey.split(",").filter(Boolean) : focusId ? [focusId] : []),
+    [idsKey, focusId],
+  );
 
-  const initialIndex = params.id ? Math.max(0, ids.findIndex((x) => x === params.id)) : 0;
+  const initialIndex = focusId ? Math.max(0, ids.findIndex((x) => x === focusId)) : 0;
   const [currentIdx, setCurrentIdx] = useState(initialIndex);
   const [paused, setPaused] = useState(false);
   const [myReaction, setMyReaction] = useState<string | null>(null);
@@ -349,10 +358,13 @@ export default function ViewStatusScreen() {
   const pausedProgressRef = useRef(0);
   const videoDrivenRef = useRef(false);
   const mediaLoadFailedRef = useRef(false);
+  const animGenRef = useRef(0);
   const statusesRef = useRef(statuses);
   statusesRef.current = statuses;
   const statusCatalogRef = useRef(statusCatalog);
   statusCatalogRef.current = statusCatalog;
+  const idsRef = useRef(ids);
+  idsRef.current = ids;
   const longPressActiveRef = useRef(false);
   const longPressConsumedRef = useRef(false);
   const wasPausedBeforeHoldRef = useRef(false);
@@ -442,15 +454,13 @@ export default function ViewStatusScreen() {
 
   const currentStoryId = ids[currentIdx];
   const currentStoryType = currentStatus?.type;
-  const currentStoryTrimEndMs = currentStatus?.editorData?.trimEndMs;
-  const currentStoryTrimStartMs = currentStatus?.editorData?.trimStartMs;
 
   const goNext = useCallback(() => {
     animRef.current?.stop();
     videoDrivenRef.current = false;
-    if (currentIdxRef.current < ids.length - 1) setCurrentIdx((i) => i + 1);
+    if (currentIdxRef.current < idsRef.current.length - 1) setCurrentIdx((i) => i + 1);
     else router.back();
-  }, [ids.length, router]);
+  }, [router]);
 
   const goPrev = useCallback(() => {
     animRef.current?.stop();
@@ -464,9 +474,10 @@ export default function ViewStatusScreen() {
 
   // Image/text stories: timed progress. Video stories: driven by player callbacks.
   const startAnim = useCallback((idx: number, fromValue = 0) => {
-    const status = statusCatalogRef.current.get(ids[idx]);
+    const storyIds = idsRef.current;
+    const status = statusCatalogRef.current.get(storyIds[idx]);
+    const gen = ++animGenRef.current;
     if (status?.type === "video" && !mediaLoadFailedRef.current) {
-      // Video progress is synced from VideoStatusPlayer onProgress / onEnded.
       videoDrivenRef.current = true;
       progress.setValue(fromValue);
       return;
@@ -480,51 +491,46 @@ export default function ViewStatusScreen() {
     const anim = Animated.timing(progress, { toValue: 1, duration, useNativeDriver: false });
     animRef.current = anim;
     anim.start(({ finished }) => {
-      if (!finished) return;
-      if (idx < ids.length - 1) setCurrentIdx(idx + 1);
+      if (!finished || gen !== animGenRef.current) return;
+      if (idx < storyIds.length - 1) setCurrentIdx(idx + 1);
       else router.back();
     });
-  }, [ids, progress, router]);
+  }, [progress, router]);
 
+  // Restart progress only when the active story changes (or video becomes ready).
+  // Do NOT depend on resolvedMediaUrl / startAnim identity — those churn and reset the bar.
   useEffect(() => {
     animRef.current?.stop();
     pausedProgressRef.current = 0;
     progress.setValue(0);
     setPaused(false);
     const waitingForVideo = currentStoryType === "video"
-      && Boolean(resolvedMediaUrl)
+      && Boolean(currentStatus?.mediaUrl)
       && !videoReady
       && !mediaLoadFailed;
     if (waitingForVideo) return;
     startAnim(currentIdx);
-    return () => animRef.current?.stop();
-  }, [
-    currentIdx,
-    currentStoryId,
-    currentStoryType,
-    currentStoryTrimEndMs,
-    currentStoryTrimStartMs,
-    videoReady,
-    mediaLoadFailed,
-    resolvedMediaUrl,
-    startAnim,
-    progress,
-  ]);
+    return () => {
+      animGenRef.current += 1;
+      animRef.current?.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrow deps
+  }, [currentIdx, currentStoryId, currentStoryType, videoReady, mediaLoadFailed]);
 
   useEffect(() => {
     mediaLoadFailedRef.current = false;
     setMediaLoadFailed(false);
     setVideoReady(false);
-  }, [currentStatus?.id, currentStatus?.mediaUrl]);
+  }, [currentStatus?.id]);
 
   useEffect(() => {
     mediaLoadFailedRef.current = mediaLoadFailed;
   }, [mediaLoadFailed]);
 
-  // Prefetch current + next stories so advancement feels instant.
+  // Prefetch ONLY upcoming stories — never the current video (avoids bandwidth fight with stream).
   useEffect(() => {
     if (!user?.sessionToken) return;
-    const targets = [0, 1, 2]
+    const targets = [1, 2, 3]
       .map((offset) => statusCatalog.get(ids[currentIdx + offset]))
       .filter((s): s is Status => Boolean(s && (s.type === "image" || s.type === "video") && s.mediaUrl));
     for (const next of targets) {
@@ -537,12 +543,12 @@ export default function ViewStatusScreen() {
     }
   }, [currentIdx, ids, statusCatalog, user?.sessionToken]);
 
-  // Unblock story if video never becomes ready (network / codec edge cases).
+  // Unblock timed progress if video never becomes ready.
   useEffect(() => {
-    if (currentStoryType !== "video" || !resolvedMediaUrl || videoReady || mediaLoadFailed) return;
-    const timer = setTimeout(() => setVideoReady(true), 8000);
+    if (currentStoryType !== "video" || !currentStatus?.mediaUrl || videoReady || mediaLoadFailed) return;
+    const timer = setTimeout(() => setVideoReady(true), 3500);
     return () => clearTimeout(timer);
-  }, [currentIdx, currentStoryType, resolvedMediaUrl, videoReady, mediaLoadFailed]);
+  }, [currentIdx, currentStoryType, currentStatus?.mediaUrl, videoReady, mediaLoadFailed]);
 
   const pauseStory = useCallback(() => {
     if (paused) return;
@@ -560,6 +566,14 @@ export default function ViewStatusScreen() {
       startAnim(currentIdx, pausedProgressRef.current);
     }
   }, [currentIdx, paused, startAnim]);
+
+  const onVideoReady = useCallback(() => {
+    setVideoReady(true);
+  }, []);
+
+  const onVideoLoadError = useCallback(() => {
+    setMediaLoadFailed(true);
+  }, []);
 
   const onVideoProgress = useCallback((ratio: number) => {
     if (!videoDrivenRef.current) return;
@@ -872,8 +886,8 @@ export default function ViewStatusScreen() {
                   paused={paused || showMenu}
                   trimStartMs={editorData?.trimStartMs}
                   trimEndMs={editorData?.trimEndMs}
-                  onLoadError={() => setMediaLoadFailed(true)}
-                  onReady={() => setVideoReady(true)}
+                  onLoadError={onVideoLoadError}
+                  onReady={onVideoReady}
                   onProgress={onVideoProgress}
                   onEnded={onVideoEnded}
                 />

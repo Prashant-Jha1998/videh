@@ -2,7 +2,7 @@
   "expo": {
     "name": "Videh",
     "slug": "videh",
-    "version": "1.0.100",
+    "version": "1.0.101",
     "orientation": "portrait",
     "icon": "./assets/images/videh_icon_foreground.png",
     "scheme": "videh",
@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 175,
+      "versionCode": 176,
       "androidStatusBar": {
         "backgroundColor": "#FFFFFF",
         "barStyle": "dark-content",

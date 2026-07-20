@@ -2,7 +2,14 @@ import { Router, type Request, type Response } from "express";
 import { query } from "../lib/db";
 import { EXPO_CHAT_MESSAGE_CATEGORY_ID } from "../lib/expoPush";
 import { isValidPushToken, sendChatPush } from "../lib/pushNotify";
-import { assertSameUser, getAuthUserId, issueSessionToken, requireAuth } from "../lib/auth";
+import {
+  assertSameUser,
+  getAuthUserId,
+  issueSessionToken,
+  requireAuth,
+  verifyPhoneChangeTicket,
+  verifyTwoStepTicket,
+} from "../lib/auth";
 import {
   activeLockExpiry,
   clearLoginGuard,
@@ -56,32 +63,16 @@ async function ensureReportTables() {
   reportTablesEnsured = true;
 }
 
-// Register or login user (called after OTP verification)
-router.post("/register", async (req: Request, res: Response) => {
-  const { phone } = req.body as { phone?: string };
-  if (!phone) { res.status(400).json({ success: false, message: "Phone required" }); return; }
-
-  try {
-    const existing = await query("SELECT * FROM users WHERE phone = $1", [phone]);
-    if (existing.rows.length > 0) {
-      const user = existing.rows[0];
-      await query("UPDATE users SET is_online = TRUE, last_seen = NOW() WHERE id = $1", [user.id]);
-      res.json({ success: true, user: { ...user, is_online: true }, sessionToken: issueSessionToken(user.id) });
-    } else {
-      const result = await query(
-        "INSERT INTO users (phone, is_online) VALUES ($1, TRUE) RETURNING *",
-        [phone]
-      );
-      res.json({ success: true, user: result.rows[0], isNew: true, sessionToken: issueSessionToken(result.rows[0].id) });
-    }
-  } catch (err) {
-    req.log.error({ err }, "register error");
-    res.status(500).json({ success: false, message: "Server error" });
-  }
+// Register without OTP is disabled — login must go through /api/otp/verify.
+router.post("/register", async (_req: Request, res: Response) => {
+  res.status(403).json({
+    success: false,
+    message: "Direct registration is disabled. Complete OTP verification to sign in.",
+  });
 });
 
 // Check single phone number exists (must be before /:id)
-router.get("/check-phone", async (req: Request, res: Response) => {
+router.get("/check-phone", requireAuth, async (req: Request, res: Response) => {
   const raw = (req.query as { phone?: string }).phone ?? "";
   const digits = raw.replace(/\D/g, "");
   const fullPhone =
@@ -620,14 +611,25 @@ router.post("/check-phones", requireAuth, async (req: Request, res: Response) =>
   }
 });
 
-// PATCH: partial update (phone, preferredLang, fontSize)
+// PATCH: preferredLang / fontSize. Phone only with OTP phoneChangeTicket.
 router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
   if (!assertSameUser(req, res, req.params.id)) return;
-  const { phone, preferredLang, fontSize } = req.body as {
+  const { phone, preferredLang, fontSize, phoneChangeTicket } = req.body as {
     phone?: string;
     preferredLang?: string;
     fontSize?: string;
+    phoneChangeTicket?: string;
   };
+  if (phone != null && String(phone).trim() !== "") {
+    const nextPhone = String(phone).trim();
+    if (!verifyPhoneChangeTicket(phoneChangeTicket, nextPhone)) {
+      res.status(403).json({
+        success: false,
+        message: "Phone number change requires a fresh OTP verification.",
+      });
+      return;
+    }
+  }
   try {
     const result = await query(
       `UPDATE users SET 
@@ -636,7 +638,7 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
         font_size = COALESCE($3, font_size),
         updated_at = NOW()
        WHERE id = $4 RETURNING *`,
-      [phone ?? null, preferredLang ?? null, fontSize ?? null, req.params.id]
+      [phone?.trim() || null, preferredLang ?? null, fontSize ?? null, req.params.id]
     );
     if (result.rows.length === 0) { res.status(404).json({ success: false }); return; }
     res.json({ success: true, user: result.rows[0] });
@@ -683,10 +685,22 @@ router.delete("/:id/two-step-pin", async (req: Request, res: Response) => {
   } catch { res.status(500).json({ success: false }); }
 });
 
-/** After OTP: confirm 6-digit account PIN before completing login. */
+/** After OTP: confirm 6-digit account PIN before completing login. Requires twoStepTicket from OTP verify. */
 router.post("/:id/verify-two-step", async (req: Request, res: Response) => {
-  const { pin } = req.body as { pin?: string };
+  const body = req.body as { pin?: string; twoStepTicket?: string };
+  const { pin } = body;
   const userId = String(req.params.id ?? "");
+  const authHeader = req.headers.authorization;
+  const ticketFromHeader = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : undefined;
+  const ticket = body.twoStepTicket?.trim() || ticketFromHeader;
+  const ticketUserId = verifyTwoStepTicket(ticket, Number(userId));
+  if (!ticketUserId) {
+    res.status(401).json({
+      success: false,
+      message: "OTP login challenge expired or invalid. Please verify OTP again.",
+    });
+    return;
+  }
   if (!pin || pin.length !== 6 || !/^\d+$/.test(pin)) {
     res.status(400).json({ success: false, message: "6-digit numeric PIN required" });
     return;
@@ -730,14 +744,11 @@ router.post("/:id/verify-two-step", async (req: Request, res: Response) => {
       two_step_pin?: string | null;
     };
     if (!row.two_step_pin) {
-      await clearLoginGuard(TWO_STEP_SCOPE, userId);
-      res.json({
-        success: true,
+      // No PIN configured — do not mint a session from a stale challenge alone.
+      res.status(400).json({
+        success: false,
         noPin: true,
-        name: row.name ?? null,
-        about: row.about ?? null,
-        avatarUrl: row.avatar_url ?? null,
-        sessionToken: issueSessionToken(row.id),
+        message: "Two-step PIN is not enabled for this account. Sign in with OTP again.",
       });
       return;
     }
@@ -957,6 +968,7 @@ router.put("/:id/push-token", async (req: Request, res: Response) => {
 });
 
 router.post("/:id/test-push", async (req: Request, res: Response) => {
+  if (!assertSameUser(req, res, req.params.id)) return;
   try {
     const r = await query("SELECT push_token FROM users WHERE id = $1", [req.params.id]);
     const token = r.rows[0]?.push_token;
@@ -978,8 +990,8 @@ router.post("/:id/test-push", async (req: Request, res: Response) => {
   }
 });
 
-// Search users by phone
-router.get("/search/:phone", async (req: Request, res: Response) => {
+// Search users by phone (authenticated — prevents open user enumeration)
+router.get("/search/:phone", requireAuth, async (req: Request, res: Response) => {
   try {
     const result = await query(
       "SELECT id, phone, name, about, avatar_url, is_online FROM users WHERE phone LIKE $1 LIMIT 20",

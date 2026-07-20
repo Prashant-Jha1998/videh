@@ -94,7 +94,10 @@ export default function LinkedDevicesScreen() {
 
       const res = await fetch(`${BASE_URL}/api/web-session/${token}/link`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {}),
+        },
         body: JSON.stringify({ userId }),
       });
       const result = await res.json();

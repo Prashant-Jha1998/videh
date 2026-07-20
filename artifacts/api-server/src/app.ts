@@ -67,7 +67,17 @@ app.use(
   cors({
     origin(origin, callback) {
       const allowed = buildCorsAllowlist();
-      if (!origin || allowed.length === 0 || allowed.includes(origin) || isVidehWebOrigin(origin)) {
+      // No Origin (native apps / server-to-server) is always allowed.
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      if (allowed.includes(origin) || isVidehWebOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+      // Empty allowlist in non-production only (local Expo web / tooling).
+      if (allowed.length === 0 && process.env["NODE_ENV"] !== "production") {
         callback(null, true);
         return;
       }
@@ -90,7 +100,21 @@ const adminWebDistDir = path.resolve(apiServerDir, "../admin-web/dist/public");
 const adminWebIndexPath = path.join(adminWebDistDir, "index.html");
 
 fs.mkdirSync(uploadsDir, { recursive: true });
-app.use("/uploads", express.static(uploadsDir));
+// Never expose private chat/status media via unauthenticated static files.
+app.use("/uploads", (req, res, next) => {
+  const p = (req.path || "").toLowerCase();
+  if (
+    p.startsWith("/chats/") ||
+    p.startsWith("/statuses/") ||
+    p.startsWith("/chat/") ||
+    p.startsWith("/status/") ||
+    p.includes("/private/")
+  ) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return;
+  }
+  next();
+}, express.static(uploadsDir));
 
 if (fs.existsSync(adminWebIndexPath)) {
   app.use(

@@ -48,6 +48,74 @@ export function issueSessionToken(userId: number): string {
   return `${payload}.${signPayload(payload)}`;
 }
 
+const TWO_STEP_TICKET_TTL_MS = 10 * 60 * 1000;
+
+/** Short-lived ticket after OTP when two-step PIN is still required (not a full session). */
+export function issueTwoStepTicket(userId: number): string {
+  const payload = b64url(JSON.stringify({
+    sub: userId,
+    pur: "twostep",
+    exp: Date.now() + TWO_STEP_TICKET_TTL_MS,
+  }));
+  return `${payload}.${signPayload(payload)}`;
+}
+
+export function verifyTwoStepTicket(token: string | undefined, expectedUserId?: number): number | null {
+  if (!token || !token.includes(".")) return null;
+  const [payload, sig] = token.split(".");
+  if (!payload || !sig) return null;
+  const expected = signPayload(payload);
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+      sub?: unknown;
+      exp?: unknown;
+      pur?: unknown;
+    };
+    if (parsed.pur !== "twostep") return null;
+    const userId = Number(parsed.sub);
+    const exp = Number(parsed.exp);
+    if (!userId || !Number.isFinite(exp) || exp < Date.now()) return null;
+    if (expectedUserId != null && userId !== Number(expectedUserId)) return null;
+    return userId;
+  } catch {
+    return null;
+  }
+}
+
+const PHONE_CHANGE_TICKET_TTL_MS = 10 * 60 * 1000;
+
+/** Short-lived proof that a phone number passed OTP (for change-number only). */
+export function issuePhoneChangeTicket(phone: string): string {
+  const payload = b64url(JSON.stringify({
+    phone: String(phone),
+    pur: "phonechange",
+    exp: Date.now() + PHONE_CHANGE_TICKET_TTL_MS,
+  }));
+  return `${payload}.${signPayload(payload)}`;
+}
+
+export function verifyPhoneChangeTicket(token: string | undefined, expectedPhone: string): boolean {
+  if (!token || !token.includes(".")) return false;
+  const [payload, sig] = token.split(".");
+  if (!payload || !sig) return false;
+  const expected = signPayload(payload);
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+      phone?: unknown;
+      exp?: unknown;
+      pur?: unknown;
+    };
+    if (parsed.pur !== "phonechange") return false;
+    const exp = Number(parsed.exp);
+    if (!Number.isFinite(exp) || exp < Date.now()) return false;
+    return String(parsed.phone) === String(expectedPhone);
+  } catch {
+    return false;
+  }
+}
+
 export function verifySessionToken(token: string | undefined): number | null {
   if (!token || !token.includes(".")) return null;
   const [payload, sig] = token.split(".");
@@ -55,7 +123,13 @@ export function verifySessionToken(token: string | undefined): number | null {
   const expected = signPayload(payload);
   try {
     if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { sub?: unknown; exp?: unknown };
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+      sub?: unknown;
+      exp?: unknown;
+      pur?: unknown;
+    };
+    // Challenge tickets must not unlock normal APIs.
+    if (parsed.pur === "twostep" || parsed.pur === "phonechange") return null;
     const userId = Number(parsed.sub);
     const exp = Number(parsed.exp);
     if (!userId || !Number.isFinite(exp) || exp < Date.now()) return null;

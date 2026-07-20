@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v175-story-queue-stream"
+        "key": "apk-release-v176-security-calls-otp"
       }
     },
     "production": {

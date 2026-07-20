@@ -38,11 +38,15 @@ export function useAuthenticatedMediaUrl(url: string | undefined, token: string 
       setFailed(false);
       return;
     }
-    const fetchUrl = token && url.includes("/api/chats/media/")
+    const fetchUrl = token && (url.includes("/api/chats/media/") || url.includes("/api/statuses/media/"))
       ? resolveWebMediaFetchUrl(url, token)
       : url;
 
-    if (!fetchUrl.includes("/api/web-session/") && !fetchUrl.includes("/api/chats/media/")) {
+    if (
+      !fetchUrl.includes("/api/web-session/")
+      && !fetchUrl.includes("/api/chats/media/")
+      && !fetchUrl.includes("/api/statuses/media/")
+    ) {
       setBlobUrl(fetchUrl);
       setLoading(false);
       setFailed(false);

@@ -82,8 +82,8 @@ export async function stopIncomingCallExperience(callId?: string, opts?: { force
 }
 
 /**
- * Background: local sticky notification only (Videh).
- * Foreground: in-app overlay — no CallKeep banner.
+ * Background: sticky call notification (Android) + CallKeep (iOS).
+ * Foreground: in-app overlay only — no system banner.
  */
 export function presentIncomingCallUi(
   call: IncomingCallInfo & { callerName: string },
@@ -95,8 +95,20 @@ export function presentIncomingCallUi(
   const inBackground = !isAppInForeground();
   const useNative = opts?.useNativeSurface ?? inBackground;
 
+  // Android lock-screen / background: CallKeep (self-managed telecom) + sticky heads-up.
+  if (useNative && Platform.OS === "android") {
+    showCallKeepIncoming(call.callId, call.callerName, call.chatId, call.type === "video");
+  }
+
   if (useNative && Platform.OS === "ios") {
     showCallKeepIncoming(call.callId, call.callerName, call.chatId, call.type === "video");
+  }
+
+  // Android lock-screen / background: always schedule sticky heads-up (fullScreenIntent via plugin).
+  if (inBackground && Platform.OS === "android") {
+    void import("@/lib/incomingCallNotification").then(({ showIncomingCallNotification }) =>
+      showIncomingCallNotification(call).catch(() => {}),
+    );
   }
 
   if (inBackground && Platform.OS !== "web" && Platform.OS === "ios" && !useNative) {

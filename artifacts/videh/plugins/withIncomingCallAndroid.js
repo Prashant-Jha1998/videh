@@ -12,6 +12,7 @@ const FULL_SCREEN_MARKER = "VidehIncomingCallFullScreenIntent";
 
 /**
  * Show incoming call UI over the lock screen (Videh on Android).
+ * Also patches expo-notifications so call notifications use fullScreenIntent + CATEGORY_CALL.
  */
 function withIncomingCallAndroid(config) {
   config = withAndroidManifest(config, (cfg) => {
@@ -35,7 +36,7 @@ function withIncomingCallAndroid(config) {
     return cfg;
   });
 
-  return withMainActivity(config, (cfg) => {
+  config = withMainActivity(config, (cfg) => {
     let contents = cfg.modResults.contents;
     if (contents.includes(LOCK_SCREEN_MARKER)) {
       return cfg;
@@ -63,6 +64,7 @@ function withIncomingCallAndroid(config) {
     return cfg;
   });
 
+  // Must run after withMainActivity — previous code returned early and never applied this patch.
   return withDangerousMod(config, [
     "android",
     async (cfg) => {
@@ -111,7 +113,7 @@ function withIncomingCallAndroid(config) {
       builder.setFullScreenIntent(incomingCallIntent, true)
       builder.setCategory(NotificationCompat.CATEGORY_CALL)
       builder.setOngoing(true)
-      builder.setTimeoutAfter(30_000L)
+      builder.setTimeoutAfter(45_000L)
       builder.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
       builder.setPriority(NotificationCompat.PRIORITY_MAX)
     }`;

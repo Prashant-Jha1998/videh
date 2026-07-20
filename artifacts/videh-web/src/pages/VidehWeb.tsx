@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { ChevronDown, Copy, Forward, MessageSquarePlus, MoreVertical, Search, Star, Trash2, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import "../components/web/webShell.css";
-import { webApi, type WebStatus, type WebUser } from "../lib/webApi";
+import { webApi, eventsUrl, type WebStatus, type WebUser } from "../lib/webApi";
 import { DropdownMenu, EmojiPicker, useClickOutside } from "../components/web/WebOverlays";
 import { WebNavRail } from "../components/web/WebNavRail";
 import { WebContactPicker, type ContactPickerMode } from "../components/web/WebContactPicker";
@@ -27,6 +27,7 @@ import { highlightMatches } from "../lib/highlightText";
 import { inferListPreview } from "../lib/messagePreview";
 import { formatMessageBody, replyPreviewText } from "../lib/chatMessageDisplay";
 import { isChatNearBottom, isChatScrolledUp, OPEN_CHAT_PIN_DELAYS_MS, shouldAutoPinToBottom } from "../lib/chatScroll";
+import { resolveWebMediaFetchUrl } from "../lib/webMediaUrl";
 
 const FAV_CHATS_KEY = "videh_web_favorite_chats";
 
@@ -617,12 +618,49 @@ export default function VidehWeb() {
     return () => ro.disconnect();
   }, [activeChatId, chatSearchOpen, scrollMessagesToBottom]);
 
-  // Refresh messages periodically when chat is open
+  // Refresh messages periodically when chat is open (backup; SSE is primary)
   useEffect(() => {
     if (!activeChatId || !token) return;
-    const t = setInterval(() => loadMessages(activeChatId), 5000);
+    const t = setInterval(() => loadMessages(activeChatId), 12000);
     return () => clearInterval(t);
-  }, [activeChatId, token]);
+  }, [activeChatId, token, loadMessages]);
+
+  // Live chat list + open-thread updates via SSE
+  useEffect(() => {
+    if (!token || status !== "linked") return;
+    let es: EventSource | null = null;
+    let closed = false;
+    const connect = () => {
+      if (closed) return;
+      try {
+        es = new EventSource(eventsUrl(token));
+      } catch {
+        return;
+      }
+      const refresh = () => {
+        void loadChats(token);
+        if (activeChatId) void loadMessages(activeChatId);
+      };
+      es.addEventListener("ready", () => {});
+      es.addEventListener("message", refresh);
+      es.addEventListener("read", () => void loadChats(token));
+      es.addEventListener("archive", () => void loadChats(token));
+      es.addEventListener("group_join_request", () => void loadChats(token));
+      es.addEventListener("group_deleted", () => void loadChats(token));
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        window.setTimeout(connect, 4000);
+      };
+    };
+    connect();
+    const chatPoll = setInterval(() => void loadChats(token), 30000);
+    return () => {
+      closed = true;
+      es?.close();
+      clearInterval(chatPoll);
+    };
+  }, [token, status, activeChatId, loadChats, loadMessages]);
 
   useEffect(() => {
     if (!token || status !== "linked") return;
@@ -1506,9 +1544,17 @@ export default function VidehWeb() {
           </div>
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={(e) => e.stopPropagation()}>
             {viewingStatuses[0].type === "image" && viewingStatuses[0].media_url ? (
-              <img src={viewingStatuses[0].media_url} alt="" style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: 8 }} />
+              <img
+                src={resolveWebMediaFetchUrl(viewingStatuses[0].media_url, token)}
+                alt=""
+                style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: 8 }}
+              />
             ) : viewingStatuses[0].type === "video" && viewingStatuses[0].media_url ? (
-              <video src={viewingStatuses[0].media_url} controls style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: 8 }} />
+              <video
+                src={resolveWebMediaFetchUrl(viewingStatuses[0].media_url, token)}
+                controls
+                style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: 8 }}
+              />
             ) : (
               <div
                 style={{

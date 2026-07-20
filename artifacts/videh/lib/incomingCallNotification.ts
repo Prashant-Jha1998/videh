@@ -13,7 +13,7 @@ export type IncomingCallNotificationPayload = IncomingCallInfo & {
   callerName: string;
 };
 
-/** High-priority incoming call notification (lock screen + heads-up). */
+/** High-priority incoming call notification (lock screen + heads-up + full-screen intent). */
 export async function showIncomingCallNotification(call: IncomingCallNotificationPayload): Promise<void> {
   if (Platform.OS === "web") return;
 
@@ -31,6 +31,7 @@ export async function showIncomingCallNotification(call: IncomingCallNotificatio
       autoDismiss: false,
       interruptionLevel: "timeSensitive",
       categoryIdentifier: VIDEH_INCOMING_CALL_CATEGORY_ID,
+      ...(Platform.OS === "android" && channelId ? { channelId } : {}),
       data: {
         callId: call.callId,
         chatId: String(call.chatId),
@@ -44,10 +45,7 @@ export async function showIncomingCallNotification(call: IncomingCallNotificatio
       },
     },
     trigger: null,
-    ...(Platform.OS === "android" && channelId ? { channelId } : {}),
   });
-
-  // Full-screen call UI is opened from _layout when the app wakes (lock screen / background).
 }
 
 export { INCOMING_RING_TIMEOUT_MS };

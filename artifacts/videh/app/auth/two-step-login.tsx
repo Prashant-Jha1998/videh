@@ -22,7 +22,7 @@ export default function TwoStepLoginScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { phone, dbId, ret, sessionToken } = useLocalSearchParams<{ phone: string; dbId: string; ret?: string; sessionToken?: string }>();
+  const { phone, dbId, ret, twoStepTicket } = useLocalSearchParams<{ phone: string; dbId: string; ret?: string; twoStepTicket?: string }>();
   const { setUser } = useApp();
   const { t } = useUiPreferences();
 
@@ -44,14 +44,22 @@ export default function TwoStepLoginScreen() {
       const pin = nextDigits.join("");
       const id = Number(dbId);
       if (!id || Number.isNaN(id)) return;
+      const ticket = typeof twoStepTicket === "string" ? twoStepTicket : "";
+      if (!ticket) {
+        setError(t("auth.twoStepWrong"));
+        return;
+      }
       setLoading(true);
       setError("");
       try {
         const baseUrl = getApiUrl();
         const res = await fetch(`${baseUrl}/api/users/${id}/verify-two-step`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pin }),
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${ticket}`,
+          },
+          body: JSON.stringify({ pin, twoStepTicket: ticket }),
         });
         const data = (await res.json()) as {
           success?: boolean;
@@ -72,7 +80,7 @@ export default function TwoStepLoginScreen() {
           setLoading(false);
           return;
         }
-        if (res.ok && data.success) {
+        if (res.ok && data.success && data.sessionToken) {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           const isReturning = ret === "1";
           await setUser({
@@ -82,7 +90,7 @@ export default function TwoStepLoginScreen() {
             phone: phone ?? "",
             about: data.about ?? "Hey there! I am using Videh.",
             avatar: data.avatarUrl ?? undefined,
-            sessionToken: data.sessionToken ?? sessionToken,
+            sessionToken: data.sessionToken,
           });
           await replaceAfterAuth(
             router,
@@ -102,7 +110,7 @@ export default function TwoStepLoginScreen() {
       }
       setLoading(false);
     },
-    [dbId, lockSeconds, phone, ret, router, sessionToken, setUser, t],
+    [dbId, lockSeconds, phone, ret, router, twoStepTicket, setUser, t],
   );
 
   const handleChange = (text: string, idx: number) => {

@@ -135,12 +135,22 @@ export async function sendFcmChatPush(
     if (options?.isCall) {
       const { android, ios } = splitFcmTokensByPlatform(tokens);
 
-      // Android: data-only wakes JS → CallKeep + local full-screen notification (Videh).
+      // Android: OS-visible notification on "calls" channel + data for JS handlers.
+      // Data-only alone fails when the process is killed / Doze blocks headless JS.
       await sendFcmMulticast(messaging, android, {
+        notification: { title, body },
         data: dataPayload,
         android: {
           priority: "high",
           ttl: CALL_RING_TTL_MS,
+          notification: {
+            channelId: EXPO_ANDROID_CALLS_CHANNEL_ID,
+            priority: "max",
+            defaultVibrateTimings: true,
+            visibility: "public",
+            sound: "default",
+            ...(callId ? { tag: `videh_call_${callId}` } : {}),
+          },
         },
       });
 

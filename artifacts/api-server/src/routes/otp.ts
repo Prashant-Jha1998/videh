@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { query } from "../lib/db";
-import { issueSessionToken } from "../lib/auth";
+import { issueSessionToken, issueTwoStepTicket, issuePhoneChangeTicket } from "../lib/auth";
 import { clientIp, isRateLimited } from "../lib/rateLimit";
 import {
   activeLockExpiry,
@@ -44,7 +44,7 @@ function lockResponse(res: Response, lockedUntil: number) {
     success: false,
     locked: true,
     retryAfterSeconds: sec,
-    message: `Too many wrong attempts. Try again in ${Math.ceil(sec / 60)} minutes or request a new OTP.`,
+    message: `Too many wrong attempts. Try again in ${Math.ceil(sec / 60)} minutes.`,
   });
 }
 
@@ -83,7 +83,7 @@ router.post("/send", async (req: Request, res: Response) => {
   const otp = isDemo ? (playStoreDemoOtp() ?? generateOtp6()) : generateOtp6();
 
   await stateSetJson(otpKey(phone), { otp, expiresAt: Date.now() + OTP_TTL_MS }, OTP_TTL_MS);
-  await clearLoginGuard(OTP_SCOPE, phone);
+  // Do NOT clear failed-attempt / lock state on resend — otherwise attackers reset the lock by requesting a new OTP.
 
   try {
     if (isDemo) {
@@ -134,6 +134,10 @@ router.post("/verify", async (req: Request, res: Response) => {
   const ip = clientIp(req);
   if (!isDemo && isRateLimited(`otp-verify:ip:${ip}`, 40, 15 * 60 * 1000)) {
     res.status(429).json({ success: false, message: "Too many verification attempts. Please wait." });
+    return;
+  }
+  if (!isDemo && isRateLimited(`otp-verify:phone:${phone}`, 12, 15 * 60 * 1000)) {
+    res.status(429).json({ success: false, message: "Too many OTP attempts for this number. Please wait." });
     return;
   }
 
@@ -193,7 +197,12 @@ router.post("/verify", async (req: Request, res: Response) => {
   }
 
   if (verifyOnly) {
-    res.json({ success: true, message: "OTP verified" });
+    const fullPhone = `+91${phone}`;
+    res.json({
+      success: true,
+      message: "OTP verified",
+      phoneChangeTicket: issuePhoneChangeTicket(fullPhone),
+    });
     return;
   }
 
@@ -232,11 +241,13 @@ router.post("/verify", async (req: Request, res: Response) => {
     }
     const twoStepRequired = existing.rows.length > 0 && !!existing.rows[0].two_step_pin;
     await suspendDeveloperApiForConsumerAppLogin(phone);
+    // When two-step PIN is required, only issue a short-lived ticket — never a full session.
     res.json({
       success: true,
       message: "OTP verified",
       dbId: dbUser.id,
-      sessionToken: issueSessionToken(dbUser.id),
+      sessionToken: twoStepRequired ? undefined : issueSessionToken(dbUser.id),
+      twoStepTicket: twoStepRequired ? issueTwoStepTicket(dbUser.id) : undefined,
       isNew: !existing.rows.length,
       twoStepRequired,
       name: dbUser.name ?? null,

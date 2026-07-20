@@ -56,9 +56,10 @@ export function sendExpoChatPush(
   const sound = isCall ? "default" : soundId === "msg_default" ? "default" : soundId;
   void sendExpoPush(tokens.map((token) => ({
     to: token,
-    ...(isCall
-      ? { _contentAvailable: true }
-      : { title, body }),
+    // Always include title/body so Android OS can ring without waking headless JS.
+    title,
+    body,
+    ...(isCall ? { _contentAvailable: true } : {}),
     data: isCall
       ? {
           ...data,

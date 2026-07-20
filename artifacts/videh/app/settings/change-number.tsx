@@ -39,11 +39,21 @@ export default function ChangeNumberScreen() {
     return () => clearTimeout(t);
   }, [lockSeconds]);
 
+  // Autofill often pastes all 6 digits at once — verify when complete.
+  useEffect(() => {
+    if (step === "otp" && otp.length === 6 && !loading && lockSeconds <= 0) {
+      void verifyOtp();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when otp becomes complete
+  }, [otp]);
+
   const sendOtp = async () => {
     const cleaned = newPhone.replace(/\D/g, "");
     if (cleaned.length !== 10) { Alert.alert("Error", "Enter a valid 10-digit mobile number."); return; }
     if (cleaned === user?.phone) { Alert.alert("Error", "This is already your current number."); return; }
-    const existingCheck = await fetch(`${API_URL}/users/check-phone?phone=${cleaned}`);
+    const existingCheck = await fetch(`${API_URL}/users/check-phone?phone=${cleaned}`, {
+      headers: user?.sessionToken ? { Authorization: `Bearer ${user.sessionToken}` } : {},
+    });
     const ec = await existingCheck.json();
     if (ec.exists) { Alert.alert("Error", "This number is already linked to another account."); return; }
     setLoading(true);
@@ -70,7 +80,13 @@ export default function ChangeNumberScreen() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: cleaned, otp, verifyOnly: true }),
       });
-      const d = await r.json();
+      const d = await r.json() as {
+        success?: boolean;
+        locked?: boolean;
+        retryAfterSeconds?: number;
+        message?: string;
+        phoneChangeTicket?: string;
+      };
       if (d.locked && d.retryAfterSeconds) {
         setLockSeconds(d.retryAfterSeconds);
         Alert.alert("Locked", d.message ?? "Too many wrong attempts. Try again later.");
@@ -78,7 +94,7 @@ export default function ChangeNumberScreen() {
         setLoading(false);
         return;
       }
-      if (!d.success) {
+      if (!d.success || !d.phoneChangeTicket) {
         Alert.alert("Error", d.message ?? "Invalid or expired OTP.");
         setOtp("");
         setLoading(false);
@@ -91,7 +107,10 @@ export default function ChangeNumberScreen() {
       const patch = await fetch(`${API_URL}/users/${user?.dbId}`, {
         method: "PATCH",
         headers,
-        body: JSON.stringify({ phone: `+91${cleaned}` }),
+        body: JSON.stringify({
+          phone: `+91${cleaned}`,
+          phoneChangeTicket: d.phoneChangeTicket,
+        }),
       });
       const patchData = await patch.json();
       if (patch.ok && patchData.success) {
@@ -165,8 +184,12 @@ export default function ChangeNumberScreen() {
               keyboardType="number-pad"
               maxLength={6}
               value={otp}
-              onChangeText={setOtp}
+              onChangeText={(t) => setOtp(t.replace(/[^0-9]/g, "").slice(0, 6))}
+              autoComplete={Platform.OS === "android" ? "sms-otp" : "one-time-code"}
+              textContentType="oneTimeCode"
+              importantForAutofill="yes"
               editable={!loading && lockSeconds <= 0}
+              autoFocus
             />
             {lockSeconds > 0 ? (
               <Text style={{ color: colors.destructive, fontSize: 13 }}>
