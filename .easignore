@@ -1,0 +1,26 @@
+# Repo-root ignore for EAS (monorepo uploads whole git tree).
+*.apk
+*.aab
+eas-build*.log
+videh-v*.apk
+app.json
+
+artifacts/videh/node_modules/
+artifacts/videh/build/
+artifacts/videh/dist-export/
+artifacts/videh/dist/
+artifacts/videh/.expo/
+artifacts/videh/android/
+artifacts/videh/ios/
+artifacts/videh/expo-go-qr.png
+
+node_modules/
+artifacts/api-server/
+artifacts/videh-web/
+artifacts/ads-web/
+artifacts/developer-web/
+artifacts/admin-web/
+artifacts/mockup-sandbox/
+deploy/
+replit.md
+ANDROID_APK_NEON_SETUP.md

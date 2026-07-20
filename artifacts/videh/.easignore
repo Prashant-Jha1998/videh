@@ -1,4 +1,4 @@
-# When .easignore exists it REPLACES .gitignore for uploads — keep deps out.
+# When .easignore exists it REPLACES .gitignore for uploads.
 node_modules/
 .expo/
 dist/
@@ -17,13 +17,18 @@ ios/
 .git/
 .eas/
 
-# Monorepo root — APKs and build logs bloat the upload.
-../../**/*.apk
-../../**/*.aab
+# Monorepo root (paths relative to this file in artifacts/videh)
+../../node_modules/
+../**/node_modules/
+../../*.apk
+../../*.aab
+../../videh-v*.apk
 ../../eas-build*.log
 ../../eas-build-*.log
-../../videh-v*.apk
 ../../app.json
+../../.easignore
+
+# Local build junk
 ../../artifacts/videh/build/
 ../../artifacts/videh/dist-export/
 ../../artifacts/videh/node_modules/
