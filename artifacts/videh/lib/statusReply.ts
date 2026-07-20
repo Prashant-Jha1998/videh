@@ -79,7 +79,7 @@ export function mapApiStatusRow(
     content: String(s.content ?? ""),
     type: (s.type as Status["type"]) ?? "text",
     mediaUrl:
-      withStatusMediaAuth(rawMedia, sessionToken)
+      withStatusMediaAuth(rawMedia, sessionToken, s.id)
       ?? resolvePublicAssetUrl(rawMedia)
       ?? rawMedia,
     timestamp: new Date(String(s.created_at)).getTime(),

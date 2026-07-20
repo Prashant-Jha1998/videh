@@ -59,7 +59,7 @@ export const THEME_PACK_META: Record<
   ThemePackId,
   { title: string; subtitle: string; icon: string }
 > = {
-  classic: { title: "Classic", subtitle: "Videh signature look", icon: "leaf-outline" },
+  classic: { title: "White & Grey", subtitle: "White chrome, green accents", icon: "leaf-outline" },
   amoled: { title: "AMOLED Black", subtitle: "Pure black, battery friendly", icon: "moon-outline" },
   neon: { title: "Dark Neon", subtitle: "Glow accents on dark", icon: "flash-outline" },
   gold: { title: "Gold", subtitle: "Premium metallic look", icon: "diamond-outline" },
@@ -140,9 +140,9 @@ const PREMIUM_OVERRIDES: Partial<
 > = {
   classic: {
     pack: "classic",
-    bubbleSentLight: "#E9EDEF",
+    bubbleSentLight: "#D1FAE5",
     bubbleReceivedLight: "#FFFFFF",
-    bubbleSentDark: "#2A3942",
+    bubbleSentDark: "#065F46",
     bubbleReceivedDark: "#1F2C34",
     chatBackgroundLight: "#F0F2F5",
     chatBackgroundDark: "#0B141A",
@@ -199,7 +199,12 @@ const PREMIUM_OVERRIDES: Partial<
 };
 
 function fromAppTheme(opt: AppThemeOption): ThemeAppearance {
-  const accent = opt.colors[0];
+  // White & Grey keeps green brand accents even though chrome stays white.
+  const accentPair =
+    opt.id === "classic" || opt.id === DEFAULT_APP_THEME_ID
+      ? (["#059669", "#10B981"] as [string, string])
+      : opt.colors;
+  const accent = accentPair[0];
   const bubbles = deriveBubblesFromAccent(accent);
   const override = PREMIUM_OVERRIDES[opt.id];
   const pack =
@@ -211,7 +216,7 @@ function fromAppTheme(opt: AppThemeOption): ThemeAppearance {
     name: opt.name,
     pack,
     kind: opt.kind,
-    accent: opt.colors,
+    accent: accentPair,
     chatBackgroundLight: override?.chatBackgroundLight ?? "#EDEAF5",
     chatBackgroundDark: override?.chatBackgroundDark ?? "#12101F",
     animatedWallpaper: override?.animatedWallpaper,

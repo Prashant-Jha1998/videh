@@ -7,11 +7,11 @@ export type AppThemeOption = {
   colors: [string, string];
 };
 
-/** True default: white/grey chrome. Colored themes (including Videh Emerald) only when explicitly selected. */
+/** True default: white/grey chrome with Videh green accents (WhatsApp-like). Full-color headers only when a colored theme is explicitly selected. */
 export const DEFAULT_APP_THEME_ID = "classic";
 export const APP_THEME_TRIAL_DAYS = 365;
 export const SOLID_APP_THEMES: AppThemeOption[] = [
-  { id: "classic", name: "Classic", kind: "solid", colors: ["#54656F", "#667781"] },
+  { id: "classic", name: "White & Grey", kind: "solid", colors: ["#059669", "#FFFFFF"] },
   { id: "videh-green", name: "Videh Emerald", kind: "solid", colors: ["#059669", "#059669"] },
   { id: "videh-indigo", name: "Videh Indigo", kind: "solid", colors: ["#5B4FE8", "#5B4FE8"] },
   { id: "emerald", name: "Emerald", kind: "solid", colors: ["#10B981", "#10B981"] },

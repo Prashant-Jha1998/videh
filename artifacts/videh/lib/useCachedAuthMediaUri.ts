@@ -160,10 +160,9 @@ export async function getCachedAuthMediaFile(
 }
 
 /**
- * Resolve media for instant story playback:
- * 1) local/data → immediate
- * 2) disk cache hit → immediate
- * 3) otherwise stream URL now (token auth), warm cache in background
+ * Resolve media for story playback.
+ * Protected status/chat media: download with Authorization (reliable on Android),
+ * then show local file. Do not stream images via headers — expo-image often fails.
  */
 export function useInstantStatusMediaUri(
   uri: string | undefined,
@@ -190,51 +189,60 @@ export function useInstantStatusMediaUri(
     }
 
     setFailed(false);
+    setDisplayUri(null);
+    setHeaders(undefined);
     const absolute = (resolvePublicAssetUrl(uri) ?? uri).trim();
 
     if (absolute.startsWith("file:") || absolute.startsWith("content:") || absolute.startsWith("data:")) {
       setDisplayUri(absolute);
-      setHeaders(undefined);
       return;
     }
 
     if (!(absolute.startsWith("http://") || absolute.startsWith("https://"))) {
       setDisplayUri(absolute);
-      setHeaders(undefined);
       return;
     }
 
     const fallbackExt = kind === "video" ? "mp4" : "jpg";
-    const clean = stripMediaAuthQuery(absolute);
-    const isProtected = needsAuthDownload(clean);
-    const streamUri = isProtected && sessionToken
-      ? (absolute.includes("token=")
-        ? absolute
-        : `${clean}${clean.includes("?") ? "&" : "?"}token=${encodeURIComponent(sessionToken)}`)
-      : absolute;
-    const authHeaders = isProtected && sessionToken
-      ? (authFetchHeaders(sessionToken) as Record<string, string>)
-      : undefined;
-
-    // Show/stream immediately (WhatsApp-like), then upgrade to disk cache if available.
-    // Prefer Authorization headers for images (more reliable than query token on Android).
-    if (kind === "image" && isProtected && sessionToken) {
-      setDisplayUri(clean);
-      setHeaders(authHeaders);
-    } else {
-      setDisplayUri(streamUri);
-      setHeaders(undefined);
-    }
+    const isProtected = needsAuthDownload(absolute);
 
     void (async () => {
-      const cached = await peekCachedAuthMediaFile(absolute, fallbackExt);
-      if (cancelled) return;
-      if (cached) {
-        setDisplayUri(cached);
+      try {
+        // Prefer disk/memory cache.
+        const cached = await peekCachedAuthMediaFile(absolute, fallbackExt);
+        if (cancelled) return;
+        if (cached) {
+          setDisplayUri(cached);
+          setHeaders(undefined);
+          return;
+        }
+
+        if (isProtected) {
+          // Auth download → local file (works for owner + other viewers).
+          const local = await getCachedAuthMediaFile(absolute, sessionToken, fallbackExt);
+          if (cancelled) return;
+          setDisplayUri(local);
+          setHeaders(undefined);
+          return;
+        }
+
+        setDisplayUri(absolute);
         setHeaders(undefined);
-        return;
+      } catch {
+        if (cancelled) return;
+        // Last resort: try token URL without headers (some environments).
+        if (isProtected && sessionToken) {
+          const clean = stripMediaAuthQuery(absolute);
+          const streamUri = absolute.includes("token=")
+            ? absolute
+            : `${clean}${clean.includes("?") ? "&" : "?"}token=${encodeURIComponent(sessionToken)}`;
+          setDisplayUri(streamUri);
+          setHeaders(undefined);
+          return;
+        }
+        setFailed(true);
+        setDisplayUri(null);
       }
-      void getCachedAuthMediaFile(absolute, sessionToken, fallbackExt).catch(() => {});
     })();
 
     return () => {

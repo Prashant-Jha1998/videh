@@ -200,9 +200,18 @@ export async function canViewerAccessStatusReplyContext(viewerId: number, status
   return r.rows.length > 0;
 }
 
-export async function canViewerAccessStatusMedia(viewerId: number, filename: string): Promise<boolean> {
+export async function canViewerAccessStatusMedia(
+  viewerId: number,
+  filename: string,
+  opts?: { statusId?: number },
+): Promise<boolean> {
   await ensureStatusAudienceSchema();
-  const safe = filename.replace(/\\/g, "/").split("/").pop() ?? "";
+  let safe = filename.replace(/\\/g, "/").split("/").pop() ?? "";
+  try {
+    safe = decodeURIComponent(safe);
+  } catch {
+    /* keep raw */
+  }
   if (!safe) return false;
 
   const owned = await query(
@@ -213,33 +222,64 @@ export async function canViewerAccessStatusMedia(viewerId: number, filename: str
   if (!media) return false;
   if (media.uploader_id != null && Number(media.uploader_id) === viewerId) return true;
 
-  // Fast path: recent statuses that reference this file (limit work for other viewers).
+  // Direct path: viewer already opened a specific status (most reliable for other users).
+  if (opts?.statusId && Number.isFinite(opts.statusId) && opts.statusId > 0) {
+    if (await canViewerAccessStatus(viewerId, opts.statusId, { allowExpired: true })) {
+      const st = await query(
+        `SELECT media_url, editor_data FROM statuses WHERE id = $1`,
+        [opts.statusId],
+      );
+      const row = st.rows[0] as { media_url?: string | null; editor_data?: unknown } | undefined;
+      if (row) {
+        const main = extractStatusMediaFilename(row.media_url);
+        if (main === safe) return true;
+        const ed = typeof row.editor_data === "string"
+          ? row.editor_data
+          : JSON.stringify(row.editor_data ?? {});
+        if (ed.includes(safe)) return true;
+      }
+    }
+  }
+
+  // Match statuses whose media_url path ends with this filename (avoid brittle ILIKE alone).
   const linked = await query(
-    `SELECT s.id
+    `SELECT s.id, s.media_url, s.editor_data
      FROM statuses s
-     WHERE s.expires_at > NOW() - INTERVAL '2 days'
+     WHERE s.expires_at > NOW() - INTERVAL '3 days'
        AND (
-         s.media_url ILIKE '%' || $1 || '%'
+         s.media_url ILIKE '%' || $1
+         OR s.media_url ILIKE '%' || $1 || '?%'
          OR (s.editor_data::text ILIKE '%' || $1 || '%')
        )
      ORDER BY s.created_at DESC
-     LIMIT 8`,
+     LIMIT 20`,
     [safe],
   );
-  for (const row of linked.rows as { id: number }[]) {
+  for (const row of linked.rows as { id: number; media_url?: string | null; editor_data?: unknown }[]) {
+    const main = extractStatusMediaFilename(row.media_url);
+    const ed = typeof row.editor_data === "string"
+      ? row.editor_data
+      : JSON.stringify(row.editor_data ?? {});
+    if (main !== safe && !ed.includes(safe)) continue;
     if (await canViewerAccessStatus(viewerId, Number(row.id), { allowExpired: true })) return true;
   }
-  // Fallback for older media still linked to an expired-but-kept status row.
+
   const older = await query(
-    `SELECT s.id
+    `SELECT s.id, s.media_url, s.editor_data
      FROM statuses s
-     WHERE s.media_url ILIKE '%' || $1 || '%'
+     WHERE s.media_url ILIKE '%' || $1
+        OR s.media_url ILIKE '%' || $1 || '?%'
         OR (s.editor_data::text ILIKE '%' || $1 || '%')
      ORDER BY s.created_at DESC
-     LIMIT 5`,
+     LIMIT 10`,
     [safe],
   );
-  for (const row of older.rows as { id: number }[]) {
+  for (const row of older.rows as { id: number; media_url?: string | null; editor_data?: unknown }[]) {
+    const main = extractStatusMediaFilename(row.media_url);
+    const ed = typeof row.editor_data === "string"
+      ? row.editor_data
+      : JSON.stringify(row.editor_data ?? {});
+    if (main !== safe && !ed.includes(safe)) continue;
     if (await canViewerAccessStatus(viewerId, Number(row.id), { allowExpired: true })) return true;
   }
   return false;

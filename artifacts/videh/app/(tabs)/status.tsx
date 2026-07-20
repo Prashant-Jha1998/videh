@@ -270,7 +270,7 @@ export default function StatusScreen() {
             style={[styles.fabMenuItem, { backgroundColor: colors.card }]}
             onPress={() => { setFabOpen(false); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push("/status/create?mode=camera"); }}
           >
-            <View style={[styles.fabMenuIcon, { backgroundColor: "#555" }]}>
+            <View style={[styles.fabMenuIcon, { backgroundColor: colors.primary }]}>
               <Ionicons name="image-outline" size={20} color="#fff" />
             </View>
             <Text style={[styles.fabMenuLabel, { color: colors.foreground }]}>{t("status.photoOrVideo")}</Text>

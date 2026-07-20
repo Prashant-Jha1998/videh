@@ -442,11 +442,11 @@ export default function ReelsLibraryScreen() {
                     style={[styles.plInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
                   />
                   <TouchableOpacity
-                    style={[styles.plAddBtn, { backgroundColor: colors.muted }]}
+                    style={[styles.plAddBtn, { backgroundColor: colors.primary }]}
                     disabled={creatingPlaylist || !newPlaylistTitle.trim()}
                     onPress={() => void onCreatePlaylist()}
                   >
-                    <Ionicons name="add" size={22} color={colors.foreground} />
+                    <Ionicons name="add" size={22} color="#FFFFFF" />
                   </TouchableOpacity>
                 </View>
               ) : null}

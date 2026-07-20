@@ -13,11 +13,11 @@ import {
   type ThemeAppearance,
 } from "@/lib/themeAppearance";
 
-/** Classic unthemed chat canvas (no per-chat theme applied). */
+/** White & Grey chat canvas (WhatsApp-like: pale green sent, white received). */
 const DEFAULT_CHAT_BG_LIGHT = "#F0F2F5";
 const DEFAULT_CHAT_BG_DARK = "#0B141A";
-const DEFAULT_SENT_LIGHT = "#E9EDEF";
-const DEFAULT_SENT_DARK = "#2A3942";
+const DEFAULT_SENT_LIGHT = "#D1FAE5";
+const DEFAULT_SENT_DARK = "#065F46";
 const DEFAULT_RECEIVED_LIGHT = "#FFFFFF";
 const DEFAULT_RECEIVED_DARK = "#1F2C34";
 

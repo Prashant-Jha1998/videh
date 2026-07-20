@@ -130,7 +130,7 @@ export default function SettingsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <ThemedHeader style={[styles.header, { paddingTop: topPad }]}>
-        <Text style={[styles.headerTitle, { color: colors.headerTitleColor }]}>{t("settings.header")}</Text>
+        <Text style={[styles.headerTitle, { color: colors.brandTitleColor }]}>{t("settings.header")}</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.headerBtn} onPress={() => router.push("/settings/qr-code")}>
             <Ionicons name="grid-outline" size={22} color={colors.headerIconColor} />

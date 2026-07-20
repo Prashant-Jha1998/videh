@@ -42,7 +42,7 @@ async function ensureCacheDir(): Promise<string> {
 
 /**
  * Resolves video URIs for story/chat playback.
- * Stories: cache hit → local; otherwise stream immediately (token auth), warm cache in background.
+ * Status media: auth-download to local file (reliable for owner + other viewers on Android).
  */
 export function usePlayableVideoUri(uri: string | undefined, sessionToken?: string | null): {
   playableUri: string | null;
@@ -105,18 +105,31 @@ export function usePlayableVideoUri(uri: string | undefined, sessionToken?: stri
     if (absolute.startsWith("http://") || absolute.startsWith("https://")) {
       const isStatus = absolute.includes("/api/statuses/media/");
       if (isStatus) {
-        // Instant play for other viewers: local cache if known, else stream with token
-        // (no wait for full download). Warm cache in background; never swap mid-play.
         const cachedSync = peekCachedAuthMediaFileSync(absolute, "mp4");
-        const streamUri = withStatusMediaAuth(absolute, sessionToken) ?? absolute;
-        setPlayableUri(cachedSync ?? streamUri);
-        if (!cachedSync) {
-          void (async () => {
-            const onDisk = await peekCachedAuthMediaFile(absolute, "mp4");
-            if (onDisk) return; // memory seeded for next open
-            void getCachedAuthMediaFile(absolute, sessionToken, "mp4").catch(() => {});
-          })();
+        if (cachedSync) {
+          setPlayableUri(cachedSync);
+          return;
         }
+        // Download with Authorization + statusId (other viewers get 403 on bare stream).
+        setPlayableUri(null);
+        void (async () => {
+          try {
+            const onDisk = await peekCachedAuthMediaFile(absolute, "mp4");
+            if (cancelled) return;
+            if (onDisk) {
+              setPlayableUri(onDisk);
+              return;
+            }
+            const local = await getCachedAuthMediaFile(absolute, sessionToken, "mp4");
+            if (cancelled) return;
+            setPlayableUri(local);
+          } catch {
+            if (cancelled) return;
+            // Last resort: token+statusId stream URL
+            const streamUri = withStatusMediaAuth(absolute, sessionToken) ?? absolute;
+            setPlayableUri(streamUri);
+          }
+        })();
         return () => {
           cancelled = true;
         };

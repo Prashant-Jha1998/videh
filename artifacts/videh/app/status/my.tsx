@@ -289,12 +289,12 @@ export default function MyStatusScreen() {
               </View>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.boostTextBtn, { borderColor: colors.primary }]}
+              style={[styles.boostTextBtn, { backgroundColor: colors.primary, borderColor: colors.primary }]}
               onPress={() => openBoostOrAnalytics(item)}
               disabled={busyId === item.id || boostingId === item.id}
               activeOpacity={0.72}
             >
-              <Text style={[styles.boostTextBtnLabel, { color: colors.primary }]}>
+              <Text style={[styles.boostTextBtnLabel, { color: "#FFFFFF" }]}>
                 {item.boostStatus === "rejected" ? "View reason" : item.isBoosted || boostedIds.includes(item.id) ? "Analytics" : "Boost story"}
               </Text>
             </TouchableOpacity>

@@ -9,12 +9,35 @@ export function resolvePublicAssetUrl(url?: string | null): string | undefined {
   return raw.startsWith("/") ? `${base}${raw}` : `${base}/${raw}`;
 }
 
-/** Append session token for private status media (Image/Video cannot always send Authorization). */
-export function withStatusMediaAuth(url?: string | null, sessionToken?: string | null): string | undefined {
+/**
+ * Append session token (+ optional statusId) for private status media.
+ * statusId lets the server authorize other viewers via the status they already opened.
+ */
+export function withStatusMediaAuth(
+  url?: string | null,
+  sessionToken?: string | null,
+  statusId?: string | number | null,
+): string | undefined {
   const resolved = resolvePublicAssetUrl(url);
-  if (!resolved || !sessionToken) return resolved;
+  if (!resolved) return undefined;
   if (!resolved.includes("/api/statuses/media/")) return resolved;
-  if (/[?&]token=/.test(resolved)) return resolved;
-  const sep = resolved.includes("?") ? "&" : "?";
-  return `${resolved}${sep}token=${encodeURIComponent(sessionToken)}`;
+  try {
+    const u = new URL(resolved);
+    if (sessionToken && !u.searchParams.has("token")) {
+      u.searchParams.set("token", sessionToken);
+    }
+    if (statusId != null && String(statusId).trim() !== "" && !u.searchParams.has("statusId")) {
+      u.searchParams.set("statusId", String(statusId));
+    }
+    return u.toString();
+  } catch {
+    let out = resolved;
+    if (sessionToken && !/[?&]token=/.test(out)) {
+      out += `${out.includes("?") ? "&" : "?"}token=${encodeURIComponent(sessionToken)}`;
+    }
+    if (statusId != null && String(statusId).trim() !== "" && !/[?&]statusId=/.test(out)) {
+      out += `${out.includes("?") ? "&" : "?"}statusId=${encodeURIComponent(String(statusId))}`;
+    }
+    return out;
+  }
 }

@@ -1180,7 +1180,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ? {
               ...rawEditor,
               musicUri: rawEditor.musicUri
-                ? (withStatusMediaAuth(rawEditor.musicUri, token)
+                ? (withStatusMediaAuth(rawEditor.musicUri, token, s.id)
                   ?? resolvePublicAssetUrl(rawEditor.musicUri)
                   ?? rawEditor.musicUri)
                 : undefined,
@@ -1197,7 +1197,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             : (s.user_avatar ?? undefined),
           content: s.content ?? "",
           type: s.type ?? "text",
-          mediaUrl: withStatusMediaAuth(s.media_url, token)
+          mediaUrl: withStatusMediaAuth(s.media_url, token, s.id)
             ?? resolvePublicAssetUrl(s.media_url)
             ?? s.media_url
             ?? undefined,

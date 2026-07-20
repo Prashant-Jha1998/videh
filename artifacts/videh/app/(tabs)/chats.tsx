@@ -449,7 +449,7 @@ export default function ChatsScreen() {
             <Text style={[styles.headerTitle, { color: colors.headerTitleColor }]}>{t("chats.archived")}</Text>
           </View>
         ) : (
-          <Text style={[styles.headerTitle, { color: colors.headerTitleColor }]}>{t("settings.header")}</Text>
+          <Text style={[styles.headerTitle, { color: colors.brandTitleColor }]}>{t("settings.header")}</Text>
         )}
         <View style={styles.headerRight}>
           {isSelectionMode ? (

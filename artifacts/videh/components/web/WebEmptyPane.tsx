@@ -39,11 +39,11 @@ export function WebEmptyPane({ icon, title, subtitle, footer, actions }: Props) 
                 onPress={a.onPress}
                 style={({ pressed }) => [
                   styles.actionTile,
-                  { backgroundColor: colors.isDark ? "#202C33" : "#F0F2F5", opacity: pressed ? 0.85 : 1 },
+                  { backgroundColor: colors.isDark ? "#202C33" : "#FFFFFF", borderColor: colors.primary, borderWidth: 1, opacity: pressed ? 0.85 : 1 },
                 ]}
               >
-                <Ionicons name={a.icon} size={28} color={colors.mutedForeground} />
-                <Text style={[styles.actionLabel, { color: colors.mutedForeground }]}>{a.label}</Text>
+                <Ionicons name={a.icon} size={28} color={colors.primary} />
+                <Text style={[styles.actionLabel, { color: colors.primary }]}>{a.label}</Text>
               </Pressable>
             ))}
           </View>

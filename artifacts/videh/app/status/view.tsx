@@ -11,7 +11,6 @@ import {
   Alert,
   Animated,
   Dimensions,
-  Image as NativeImage,
   PanResponder,
   Platform,
   Pressable,
@@ -84,7 +83,6 @@ function VideoStatusPlayerSurface({
       sessionToken
       && uri.startsWith("http")
       && uri.includes("/api/statuses/media/")
-      && !/[?&]token=/.test(uri)
     ) {
       return {
         uri,
@@ -233,8 +231,7 @@ function StoryImage({
   sessionToken?: string | null;
   onError: () => void;
 }) {
-  const { displayUri, headers, failed, loading } = useInstantStatusMediaUri(uri, sessionToken, "image");
-  const [nativeFallback, setNativeFallback] = useState(false);
+  const { displayUri, failed, loading } = useInstantStatusMediaUri(uri, sessionToken, "image");
 
   useEffect(() => {
     if (failed) onError();
@@ -249,29 +246,12 @@ function StoryImage({
   }
   if (!displayUri) return null;
 
-  if (nativeFallback) {
-    return (
-      <NativeImage
-        source={{
-          uri: displayUri,
-          ...(headers ? { headers } : {}),
-        }}
-        style={{ width: W, height: H * 0.78 }}
-        resizeMode="contain"
-        onError={onError}
-      />
-    );
-  }
-
   return (
     <Image
-      source={{
-        uri: displayUri,
-        ...(headers ? { headers } : {}),
-      }}
+      source={{ uri: displayUri }}
       style={{ width: W, height: H * 0.78 }}
       contentFit="contain"
-      onError={() => setNativeFallback(true)}
+      onError={onError}
     />
   );
 }
@@ -395,7 +375,7 @@ export default function ViewStatusScreen() {
     });
   }, [ids.join(","), statuses, fetchedStatuses, user?.dbId, user?.sessionToken, user?.name, user?.avatar]);
   const resolvedMediaUrl = currentStatus?.mediaUrl
-    ? (withStatusMediaAuth(currentStatus.mediaUrl, user?.sessionToken)
+    ? (withStatusMediaAuth(currentStatus.mediaUrl, user?.sessionToken, currentStatus.id)
       ?? resolvePublicAssetUrl(currentStatus.mediaUrl)
       ?? currentStatus.mediaUrl)
     : undefined;
@@ -528,7 +508,7 @@ export default function ViewStatusScreen() {
     if (!url || !user?.sessionToken) return;
     if (next.type !== "image" && next.type !== "video") return;
     void getCachedAuthMediaFile(
-      withStatusMediaAuth(url, user.sessionToken) ?? resolvePublicAssetUrl(url) ?? url,
+      withStatusMediaAuth(url, user.sessionToken, next.id) ?? resolvePublicAssetUrl(url) ?? url,
       user.sessionToken,
       next.type === "video" ? "mp4" : "jpg",
     ).catch(() => {});

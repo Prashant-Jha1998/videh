@@ -54,11 +54,11 @@ export default function ChatThemeScreen() {
 
   const save = async () => {
     if (!chatId) return;
-    // Classic / default = no per-chat theme (white/grey).
+    // White & Grey / default = no per-chat color shell (white header, green accents).
     if (!themeId || themeId === DEFAULT_APP_THEME_ID) {
       await setPerChatTheme(chatId, null);
       refreshPerChatThemes();
-      Alert.alert("Saved", `Theme for ${name ?? "this chat"} reset to Classic.`);
+      Alert.alert("Saved", `Theme for ${name ?? "this chat"} reset to White & Grey.`);
       router.back();
       return;
     }
@@ -96,7 +96,7 @@ export default function ChatThemeScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}>
         <Text style={[styles.chatName, { color: colors.foreground }]}>{name ?? "Chat"}</Text>
         <Text style={[styles.sub, { color: colors.mutedForeground }]}>
-          Default is Classic (white/grey). Colored themes apply only to this chat when you select and save them.
+          Default is White & Grey (white headers, green accents). Colored themes apply only to this chat when you select and save them.
         </Text>
 
         <Text style={[styles.label, { color: colors.primary }]}>Accent theme</Text>

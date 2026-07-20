@@ -458,8 +458,15 @@ router.get("/media/:filename", async (req: Request, res: Response) => {
       return;
     }
     const rawFilename = Array.isArray(req.params.filename) ? req.params.filename[0] : req.params.filename;
-    const filename = path.basename(rawFilename ?? "");
-    if (!(await canViewerAccessStatusMedia(viewerId, filename))) {
+    let filename = path.basename(rawFilename ?? "");
+    try {
+      filename = decodeURIComponent(filename);
+    } catch {
+      /* keep basename */
+    }
+    const statusIdRaw = typeof req.query["statusId"] === "string" ? Number(req.query["statusId"]) : NaN;
+    const statusId = Number.isFinite(statusIdRaw) && statusIdRaw > 0 ? statusIdRaw : undefined;
+    if (!(await canViewerAccessStatusMedia(viewerId, filename, { statusId }))) {
       res.status(403).json({ success: false, message: "Not allowed to view this media." });
       return;
     }

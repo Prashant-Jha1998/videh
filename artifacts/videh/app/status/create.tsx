@@ -630,7 +630,11 @@ export default function StatusCreateScreen() {
         </View>
 
         <View style={{ padding: 16, paddingBottom: insets.bottom + 12 }}>
-          <TouchableOpacity style={styles.postBtn} onPress={postStatus} disabled={posting}>
+          <TouchableOpacity
+            style={[styles.postBtn, { backgroundColor: "#059669", opacity: posting ? 0.7 : 1 }]}
+            onPress={postStatus}
+            disabled={posting}
+          >
             {posting ? <ActivityIndicator color="#fff" /> : <Text style={styles.postBtnText}>Publish Story</Text>}
           </TouchableOpacity>
         </View>
