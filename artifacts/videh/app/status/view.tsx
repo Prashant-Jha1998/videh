@@ -76,6 +76,7 @@ function VideoStatusPlayerSurface({
 }) {
   const readyNotifiedRef = useRef(false);
   const endedRef = useRef(false);
+  const [buffering, setBuffering] = useState(true);
   const startMs = normalizeStoryTrimMs(trimStartMs) ?? 0;
   const endMs = normalizeStoryTrimMs(trimEndMs);
   const videoSource = useMemo(() => {
@@ -105,15 +106,18 @@ function VideoStatusPlayerSurface({
   useEffect(() => {
     readyNotifiedRef.current = false;
     endedRef.current = false;
+    setBuffering(true);
   }, [uri]);
 
   useEffect(() => {
     if (status === "error") onLoadError();
+    if (status === "loading") setBuffering(true);
   }, [status, onLoadError]);
 
   useEffect(() => {
     if (status !== "readyToPlay" || readyNotifiedRef.current) return;
     readyNotifiedRef.current = true;
+    setBuffering(false);
     if (startMs > 0) player.currentTime = startMs / 1000;
     onReady();
     if (!paused) player.play();
@@ -159,12 +163,20 @@ function VideoStatusPlayerSurface({
   useEventListener(player, "playToEnd", finishClip);
 
   return (
-    <VideoView
-      player={player}
-      style={{ width: W, height: H * 0.78 }}
-      contentFit="contain"
-      nativeControls={false}
-    />
+    <View style={{ width: W, height: H * 0.78, alignItems: "center", justifyContent: "center" }}>
+      <VideoView
+        player={player}
+        style={{ width: W, height: H * 0.78 }}
+        contentFit="contain"
+        nativeControls={false}
+      />
+      {buffering ? (
+        <View style={styles.videoBufferOverlay} pointerEvents="none">
+          <ActivityIndicator color="#fff" size="large" />
+          <Text style={styles.videoBufferText}>Loading video…</Text>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -195,15 +207,13 @@ function VideoStatusPlayer({
     if (failed) onLoadError();
   }, [failed, onLoadError]);
 
-  if (loading) {
+  if (loading || !playableUri) {
     return (
       <View style={styles.mediaLoading}>
         <ActivityIndicator color="#fff" size="large" />
+        <Text style={styles.videoBufferText}>Loading video…</Text>
       </View>
     );
-  }
-  if (!playableUri) {
-    return null;
   }
 
   return (
@@ -511,17 +521,20 @@ export default function ViewStatusScreen() {
     mediaLoadFailedRef.current = mediaLoadFailed;
   }, [mediaLoadFailed]);
 
-  // Prefetch next story media so the next item starts instantly.
+  // Prefetch current + next stories so advancement feels instant.
   useEffect(() => {
-    const next = statusCatalog.get(ids[currentIdx + 1]);
-    const url = next?.mediaUrl;
-    if (!url || !user?.sessionToken) return;
-    if (next.type !== "image" && next.type !== "video") return;
-    void getCachedAuthMediaFile(
-      withStatusMediaAuth(url, user.sessionToken, next.id) ?? resolvePublicAssetUrl(url) ?? url,
-      user.sessionToken,
-      next.type === "video" ? "mp4" : "jpg",
-    ).catch(() => {});
+    if (!user?.sessionToken) return;
+    const targets = [0, 1, 2]
+      .map((offset) => statusCatalog.get(ids[currentIdx + offset]))
+      .filter((s): s is Status => Boolean(s && (s.type === "image" || s.type === "video") && s.mediaUrl));
+    for (const next of targets) {
+      const url = next.mediaUrl!;
+      void getCachedAuthMediaFile(
+        withStatusMediaAuth(url, user.sessionToken, next.id) ?? resolvePublicAssetUrl(url) ?? url,
+        user.sessionToken,
+        next.type === "video" ? "mp4" : "jpg",
+      ).catch(() => {});
+    }
   }, [currentIdx, ids, statusCatalog, user?.sessionToken]);
 
   // Unblock story if video never becomes ready (network / codec edge cases).
@@ -726,6 +739,24 @@ export default function ViewStatusScreen() {
 
   if (ids.length === 0 || !currentStatus) return null;
 
+  // Progress segments = current contact's stories only (queue still spans later users).
+  let userSegStart = currentIdx;
+  while (
+    userSegStart > 0
+    && statusCatalog.get(ids[userSegStart - 1])?.userId === currentStatus.userId
+  ) {
+    userSegStart -= 1;
+  }
+  let userSegEnd = currentIdx;
+  while (
+    userSegEnd < ids.length - 1
+    && statusCatalog.get(ids[userSegEnd + 1])?.userId === currentStatus.userId
+  ) {
+    userSegEnd += 1;
+  }
+  const userSegmentIds = ids.slice(userSegStart, userSegEnd + 1);
+  const userLocalIdx = currentIdx - userSegStart;
+
   const userInitials = (currentStatus.userName ?? "?").split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
   const totalReactions = Object.values(reactionSummary).reduce((a, b) => a + b, 0);
   const bgColor = isMedia ? "#000" : (currentStatus.backgroundColor ?? "#059669");
@@ -739,11 +770,11 @@ export default function ViewStatusScreen() {
 
       {/* ── MULTIPLE PROGRESS BARS ── */}
       <View style={styles.barsWrap}>
-        {ids.map((sid, i) => (
+        {userSegmentIds.map((sid, i) => (
           <View key={sid} style={[styles.barBg, { flex: 1 }]}>
-            {i < currentIdx ? (
+            {i < userLocalIdx ? (
               <View style={[styles.barFill, { width: "100%" }]} />
-            ) : i === currentIdx ? (
+            ) : i === userLocalIdx ? (
               <Animated.View
                 style={[styles.barFill, {
                   width: progress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }),
@@ -770,7 +801,7 @@ export default function ViewStatusScreen() {
           <Text style={styles.headerName}>{isMyStatus ? "My status" : currentStatus.userName}</Text>
           <Text style={styles.headerTime}>
             {new Date(currentStatus.timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-            {ids.length > 1 ? `  ·  ${currentIdx + 1}/${ids.length}` : ""}
+            {userSegmentIds.length > 1 ? `  ·  ${userLocalIdx + 1}/${userSegmentIds.length}` : ""}
           </Text>
           {isBoostedStory && !isMyStatus && (
             <View style={styles.sponsoredPill}>
@@ -1030,7 +1061,19 @@ const styles = StyleSheet.create({
   mediaErrorCard: { alignItems: "center", justifyContent: "center", paddingHorizontal: 28, gap: 8 },
   mediaErrorTitle: { color: "#fff", fontSize: 16, fontFamily: "Inter_700Bold", textAlign: "center" },
   mediaErrorHint: { color: "rgba(255,255,255,0.68)", fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center" },
-  mediaLoading: { width: W, height: H * 0.78, alignItems: "center", justifyContent: "center" },
+  mediaLoading: { width: W, height: H * 0.78, alignItems: "center", justifyContent: "center", gap: 10 },
+  videoBufferOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.28)",
+    gap: 10,
+  },
+  videoBufferText: {
+    color: "rgba(255,255,255,0.88)",
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
   storyOverlay: { position: "absolute", textAlign: "center", fontWeight: "800", textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 5, transform: [{ translateX: -60 }, { translateY: -20 }], maxWidth: W * 0.82 },
   musicPill: { position: "absolute", top: 12, left: 14, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6 },
   musicPillText: { color: "#E0DCFF", fontSize: 11, fontFamily: "Inter_700Bold", maxWidth: W * 0.7 },

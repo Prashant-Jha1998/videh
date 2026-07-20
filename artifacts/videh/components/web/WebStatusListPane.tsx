@@ -9,6 +9,7 @@ import { formatTime } from "@/utils/time";
 import { WEB_LIST_PANE_WIDTH } from "@/lib/web/webDesktop";
 import { StoryRingAvatar } from "@/components/StoryRing";
 import { getStatusRingSegments } from "@/lib/statusRingSegments";
+import { buildStatusViewerQueueIds } from "@/lib/statusViewerQueue";
 
 type Props = { width?: number };
 
@@ -44,9 +45,13 @@ export function WebStatusListPane({ width = WEB_LIST_PANE_WIDTH }: Props) {
   }, [statuses]);
 
   const openStatus = (userId: string, list: Status[]) => {
+    const ids = buildStatusViewerQueueIds(statuses, userId);
+    const startId = list[0]?.id;
     router.push({
       pathname: "/status/view",
-      params: { userId, index: "0", ids: list.map((s) => s.id).join(",") },
+      params: startId
+        ? { userId, index: "0", ids: ids.join(","), id: startId }
+        : { userId, index: "0", ids: ids.join(",") },
     } as never);
   };
 

@@ -26,6 +26,7 @@ import { ThemedHeader } from "@/components/ThemedHeader";
 import { safeJsonArray } from "@/lib/safeJson";
 import { getApiUrl } from "@/lib/api";
 import { getContactStatusRingSegments } from "@/lib/statusRingSegments";
+import { buildStatusViewerQueueIds } from "@/lib/statusViewerQueue";
 import { StoryRingAvatar } from "@/components/StoryRing";
 import { formatTypingLabel } from "@/lib/typingIndicator";
 import { interpolate } from "@/lib/i18n";
@@ -399,11 +400,16 @@ export default function ChatsScreen() {
   }, [previewChat, statuses]);
 
   const openPreviewStatus = () => {
-    if (previewStatusIds.length === 0) return;
-    const ids = previewStatusIds.join(",");
+    if (previewStatusIds.length === 0 || !previewChat?.otherUserId) return;
+    const uid = String(previewChat.otherUserId);
+    const ids = buildStatusViewerQueueIds(statuses, uid).join(",");
+    const startId = previewStatusIds[0];
     setPreviewChat(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push({ pathname: "/status/view", params: { ids } });
+    router.push({
+      pathname: "/status/view",
+      params: startId ? { ids, id: startId } : { ids },
+    });
   };
 
   const topPad = headerTopInset(insets, Platform.OS === "web" ? 67 : 0);

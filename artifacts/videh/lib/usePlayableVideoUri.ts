@@ -6,7 +6,8 @@ import { getCachedAuthMediaFile, peekCachedAuthMediaFile, peekCachedAuthMediaFil
 function videoExtFromUri(uri: string): string {
   const trimmed = uri.trim();
   const mime = trimmed.match(/^data:([^;]+)/)?.[1] ?? "";
-  const path = trimmed.split("?")[0] ?? trimmed;
+  let path = trimmed.split("?")[0] ?? trimmed;
+  if (path.toLowerCase().endsWith("/content")) path = path.slice(0, -"/content".length);
   if (mime.includes("quicktime") || path.endsWith(".mov")) return "mov";
   if (mime.includes("3gpp") || mime.includes("3gp") || path.endsWith(".3gp")) return "3gp";
   if (path.endsWith(".m4v")) return "m4v";
@@ -40,9 +41,15 @@ async function ensureCacheDir(): Promise<string> {
   return dir;
 }
 
+function statusIdFromUri(uri: string): string | undefined {
+  const m = uri.match(/[?&]statusId=([^&]+)/);
+  return m?.[1] ? decodeURIComponent(m[1]) : undefined;
+}
+
 /**
  * Resolves video URIs for story/chat playback.
- * Status media: auth-download to local file (reliable for owner + other viewers on Android).
+ * Status media: prefer local cache, otherwise stream immediately (Authorization via player),
+ * and warm the disk cache in the background for instant reopens / next stories.
  */
 export function usePlayableVideoUri(uri: string | undefined, sessionToken?: string | null): {
   playableUri: string | null;
@@ -110,28 +117,22 @@ export function usePlayableVideoUri(uri: string | undefined, sessionToken?: stri
           setPlayableUri(cachedSync);
           return;
         }
-        // Download with Authorization + statusId (other viewers get 403 on bare stream).
-        setPlayableUri(null);
+
+        // Stream first for fast start; player sends Authorization (+ URL has statusId).
+        const streamUri = withStatusMediaAuth(absolute, sessionToken, statusIdFromUri(absolute)) ?? absolute;
+        setPlayableUri(streamUri);
+
+        // Warm disk cache for next open / sibling prefetch — do not swap URI mid-play.
         void (async () => {
           try {
             const onDisk = await peekCachedAuthMediaFile(absolute, "mp4");
-            if (cancelled) return;
-            if (onDisk) {
-              setPlayableUri(onDisk);
-              return;
-            }
-            const local = await getCachedAuthMediaFile(absolute, sessionToken, "mp4");
-            if (cancelled) return;
-            setPlayableUri(local);
+            if (onDisk || cancelled) return;
+            await getCachedAuthMediaFile(absolute, sessionToken, "mp4");
           } catch {
-            if (cancelled) return;
-            // Last resort: token+statusId stream URL
-            const statusIdMatch = absolute.match(/[?&]statusId=([^&]+)/);
-            const statusId = statusIdMatch?.[1] ? decodeURIComponent(statusIdMatch[1]) : undefined;
-            const streamUri = withStatusMediaAuth(absolute, sessionToken, statusId) ?? absolute;
-            setPlayableUri(streamUri);
+            /* streaming already in progress */
           }
         })();
+
         return () => {
           cancelled = true;
         };

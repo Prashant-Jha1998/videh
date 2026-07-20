@@ -21,6 +21,7 @@ import { formatTime } from "@/utils/time";
 import { ThemedHeader } from "@/components/ThemedHeader";
 import { StoryRingAvatar } from "@/components/StoryRing";
 import { getStatusRingSegments } from "@/lib/statusRingSegments";
+import { buildStatusViewerQueueIds } from "@/lib/statusViewerQueue";
 import { DropdownMenu } from "@/components/DropdownMenu";
 
 interface StatusGroup {
@@ -110,7 +111,13 @@ export default function StatusScreen() {
 
   const openGroup = (group: StatusGroup) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push({ pathname: "/status/view", params: { ids: group.statuses.map((s) => s.id).join(",") } });
+    // Continue through subsequent users until the feed ends (do not close after one contact).
+    const ids = buildStatusViewerQueueIds(statuses, group.userId);
+    const startId = group.statuses[0]?.id;
+    router.push({
+      pathname: "/status/view",
+      params: startId ? { ids: ids.join(","), id: startId } : { ids: ids.join(",") },
+    });
   };
 
   return (
