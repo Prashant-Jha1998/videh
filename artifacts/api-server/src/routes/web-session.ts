@@ -1115,7 +1115,7 @@ router.post("/:token/statuses/media", statusMediaUpload.single("file"), async (r
       [file.filename, mimeType, file.size, data],
     );
     await fs.promises.unlink(file.path).catch(() => {});
-    const relPath = `/api/statuses/media/${encodeURIComponent(file.filename)}`;
+    const relPath = `/api/statuses/media/${encodeURIComponent(file.filename)}/content`;
     res.json({
       success: true,
       url: publicMediaUrl(req, relPath),

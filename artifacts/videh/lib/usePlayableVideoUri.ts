@@ -126,7 +126,9 @@ export function usePlayableVideoUri(uri: string | undefined, sessionToken?: stri
           } catch {
             if (cancelled) return;
             // Last resort: token+statusId stream URL
-            const streamUri = withStatusMediaAuth(absolute, sessionToken) ?? absolute;
+            const statusIdMatch = absolute.match(/[?&]statusId=([^&]+)/);
+            const statusId = statusIdMatch?.[1] ? decodeURIComponent(statusIdMatch[1]) : undefined;
+            const streamUri = withStatusMediaAuth(absolute, sessionToken, statusId) ?? absolute;
             setPlayableUri(streamUri);
           }
         })();

@@ -379,6 +379,16 @@ export default function ViewStatusScreen() {
       ?? resolvePublicAssetUrl(currentStatus.mediaUrl)
       ?? currentStatus.mediaUrl)
     : undefined;
+
+  useEffect(() => {
+    if (!__DEV__ || !resolvedMediaUrl) return;
+    console.log("[StoryViewer] media", {
+      statusId: currentStatus?.id,
+      type: currentStatus?.type,
+      url: resolvedMediaUrl.split("?")[0],
+      hasStatusId: /[?&]statusId=/.test(resolvedMediaUrl),
+    });
+  }, [resolvedMediaUrl, currentStatus?.id, currentStatus?.type]);
   const isMyStatus = currentStatus?.userId === "me";
   const isMedia = currentStatus?.type === "image" || currentStatus?.type === "video";
   const isVideoStory = currentStatus?.type === "video";

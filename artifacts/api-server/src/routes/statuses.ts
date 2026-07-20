@@ -18,11 +18,15 @@ import {
   extractStatusMediaFilename,
   normalizeAudienceMode,
   setStatusAudience,
+  statusMediaPublicPath,
 } from "../lib/statusVisibility";
 
 function resolveStatusMediaUrl(req: Request, url: unknown): string | null {
   const raw = String(url ?? "").trim();
   if (!raw) return null;
+  // Always expose the /content form so clients are not blocked by nginx static regex.
+  const filename = extractStatusMediaFilename(raw);
+  if (filename) return publicMediaUrl(req, statusMediaPublicPath(filename));
   if (raw.startsWith("/api/statuses/media/")) return publicMediaUrl(req, raw);
   return resolveStoredMediaUrl(req, raw) ?? (raw.startsWith("/") ? publicMediaUrl(req, raw) : raw);
 }
@@ -448,7 +452,7 @@ router.get("/boost/quote", async (req: Request, res: Response) => {
   });
 });
 
-router.get("/media/:filename", async (req: Request, res: Response) => {
+async function serveStatusMediaFile(req: Request, res: Response): Promise<void> {
   try {
     await ensureStatusMediaTable();
     await ensureStatusAudienceSchema();
@@ -467,6 +471,10 @@ router.get("/media/:filename", async (req: Request, res: Response) => {
     const statusIdRaw = typeof req.query["statusId"] === "string" ? Number(req.query["statusId"]) : NaN;
     const statusId = Number.isFinite(statusIdRaw) && statusIdRaw > 0 ? statusIdRaw : undefined;
     if (!(await canViewerAccessStatusMedia(viewerId, filename, { statusId }))) {
+      req.log.warn(
+        { viewerId, filename, statusId: statusId ?? null },
+        "status media access denied",
+      );
       res.status(403).json({ success: false, message: "Not allowed to view this media." });
       return;
     }
@@ -476,6 +484,7 @@ router.get("/media/:filename", async (req: Request, res: Response) => {
     );
     const row = result.rows[0] as { filename: string; mime_type: string; size_bytes: number; data: Buffer } | undefined;
     if (!row) {
+      req.log.warn({ filename }, "status media blob missing");
       res.status(404).json({ success: false, message: "Media not found." });
       return;
     }
@@ -510,7 +519,11 @@ router.get("/media/:filename", async (req: Request, res: Response) => {
     req.log.error({ err }, "status media read error");
     res.status(500).json({ success: false });
   }
-});
+}
+
+// Prefer /content so the URI does not end in .jpg/.png (nginx static regex safe).
+router.get("/media/:filename/content", serveStatusMediaFile);
+router.get("/media/:filename", serveStatusMediaFile);
 
 router.post("/media", requireAuth, runStatusMediaUpload, async (req: Request, res: Response) => {
   const file = req.file;
@@ -534,7 +547,8 @@ router.post("/media", requireAuth, runStatusMediaUpload, async (req: Request, re
     );
     await fs.promises.unlink(file.path).catch(() => {});
 
-    const relPath = `/api/statuses/media/${encodeURIComponent(file.filename)}`;
+    const relPath = statusMediaPublicPath(file.filename);
+    req.log.info({ filename: file.filename, url: relPath, uploaderId }, "status media uploaded");
     res.json({
       success: true,
       url: publicMediaUrl(req, relPath),

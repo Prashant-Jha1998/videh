@@ -95,7 +95,8 @@ server {
         proxy_send_timeout 3600s;
     }
 
-    location /api/ {
+    # ^~ prevents regex static-asset locations from stealing /api/.../*.jpg (story/chat media).
+    location ^~ /api/ {
         proxy_pass http://127.0.0.1:3000/api/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -106,7 +107,7 @@ server {
         proxy_read_timeout 120s;
     }
 
-    location /uploads/ {
+    location ^~ /uploads/ {
         proxy_pass http://127.0.0.1:3000/uploads/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -117,7 +118,7 @@ server {
         proxy_read_timeout 300s;
     }
 
-    location /v1/ {
+    location ^~ /v1/ {
         proxy_pass http://127.0.0.1:3000/v1/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -187,7 +188,8 @@ server {
         proxy_send_timeout 3600s;
     }
 
-    location /api/ {
+    # ^~ prevents regex static-asset locations from stealing /api/.../*.jpg (story/chat media).
+    location ^~ /api/ {
         proxy_pass http://127.0.0.1:3000/api/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -198,7 +200,7 @@ server {
         proxy_read_timeout 120s;
     }
 
-    location /uploads/ {
+    location ^~ /uploads/ {
         proxy_pass http://127.0.0.1:3000/uploads/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -209,7 +211,7 @@ server {
         proxy_read_timeout 300s;
     }
 
-    location /v1/ {
+    location ^~ /v1/ {
         proxy_pass http://127.0.0.1:3000/v1/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;

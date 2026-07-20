@@ -40,6 +40,17 @@ export function normalizeAudienceMode(v: unknown): StatusAudienceMode {
   return v === "selected_contacts" ? "selected_contacts" : "all_contacts";
 }
 
+/**
+ * Public path for status media.
+ * Trailing `/content` avoids nginx static-asset regex locations matching `*.jpg`/`*.png`
+ * and returning HTML 404 instead of proxying to the API.
+ */
+export function statusMediaPublicPath(filename: string): string {
+  const safe = String(filename ?? "").replace(/\\/g, "/").split("/").pop() ?? "";
+  if (!safe) return "/api/statuses/media/";
+  return `/api/statuses/media/${encodeURIComponent(safe)}/content`;
+}
+
 export function extractStatusMediaFilename(mediaUrl: unknown): string | null {
   const raw = String(mediaUrl ?? "").trim();
   if (!raw) return null;
@@ -48,7 +59,13 @@ export function extractStatusMediaFilename(mediaUrl: unknown): string | null {
     const marker = "/api/statuses/media/";
     const idx = pathPart.indexOf(marker);
     if (idx < 0) return null;
-    return decodeURIComponent(pathPart.slice(idx + marker.length).replace(/\/+$/, ""));
+    let rest = pathPart.slice(idx + marker.length).replace(/\/+$/, "");
+    // Newer URLs: /api/statuses/media/<file>/content
+    if (rest.endsWith("/content")) {
+      rest = rest.slice(0, -"/content".length).replace(/\/+$/, "");
+    }
+    if (!rest) return null;
+    return decodeURIComponent(rest);
   } catch {
     return null;
   }
@@ -77,7 +94,7 @@ export async function assertOwnedStatusMediaUrl(userId: number, mediaUrl: string
       filename,
     ]);
   }
-  return `/api/statuses/media/${encodeURIComponent(filename)}`;
+  return statusMediaPublicPath(filename);
 }
 
 async function isDmContact(viewerId: number, ownerId: number): Promise<boolean> {

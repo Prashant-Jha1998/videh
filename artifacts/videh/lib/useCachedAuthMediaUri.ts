@@ -25,7 +25,9 @@ export function stripMediaAuthQuery(url: string): string {
 function mediaExtFromUri(uri: string, fallback: "jpg" | "mp4"): string {
   const trimmed = uri.trim();
   const mime = trimmed.match(/^data:([^;]+)/)?.[1] ?? "";
-  const path = (trimmed.split("?")[0] ?? trimmed).toLowerCase();
+  let path = (trimmed.split("?")[0] ?? trimmed).toLowerCase();
+  // Newer status media URLs end with /content (nginx-safe); strip before ext sniff.
+  if (path.endsWith("/content")) path = path.slice(0, -"/content".length);
   if (mime.includes("png") || path.endsWith(".png")) return "png";
   if (mime.includes("webp") || path.endsWith(".webp")) return "webp";
   if (mime.includes("jpeg") || mime.includes("jpg") || path.endsWith(".jpg") || path.endsWith(".jpeg")) return "jpg";
@@ -135,10 +137,20 @@ export async function getCachedAuthMediaFile(
     }
 
     const auth = needsAuthDownload(cleanUrl) && Boolean(sessionToken);
+    if (__DEV__) {
+      console.log("[status-media] download", {
+        url: cleanUrl.split("?")[0],
+        hasStatusId: /[?&]statusId=/.test(cleanUrl),
+        hasAuthHeader: auth,
+      });
+    }
     const res = await FileSystem.downloadAsync(cleanUrl, target, {
       headers: auth ? (authFetchHeaders(sessionToken) as Record<string, string>) : undefined,
     });
     if (res.status >= 400) {
+      if (__DEV__) {
+        console.warn("[status-media] download failed", { status: res.status, url: cleanUrl.split("?")[0] });
+      }
       await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
       throw new Error(`Download failed (${res.status})`);
     }
@@ -146,6 +158,21 @@ export async function getCachedAuthMediaFile(
     if (!info.exists || (info.size ?? 0) < 64) {
       await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
       throw new Error("Downloaded media file is empty");
+    }
+    // Guard against nginx HTML 404 pages saved as "media" (rare if status is 200).
+    if ((info.size ?? 0) < 512) {
+      try {
+        const head = await FileSystem.readAsStringAsync(target, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        if (/^\s*</.test(head) || /404 Not Found/i.test(head)) {
+          await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
+          throw new Error("Download returned HTML error page");
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message.includes("HTML")) throw e;
+        /* binary / decode issues — keep file */
+      }
     }
     memoryCachedPaths.set(cacheKey, res.uri);
     return res.uri;

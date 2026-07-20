@@ -10,6 +10,32 @@ export function resolvePublicAssetUrl(url?: string | null): string | undefined {
 }
 
 /**
+ * Ensure status media paths use `/content` so the URI does not end in `.jpg`/`.png`.
+ * nginx on videh.co.in had a static-asset regex that returned HTML 404 for those paths.
+ */
+export function ensureStatusMediaContentPath(url: string): string {
+  const raw = url.trim();
+  if (!raw.includes("/api/statuses/media/")) return raw;
+  try {
+    const u = new URL(raw, getApiUrl());
+    let path = u.pathname.replace(/\/+$/, "");
+    if (!path.includes("/api/statuses/media/")) return raw;
+    if (!path.endsWith("/content")) {
+      path = `${path}/content`;
+    }
+    u.pathname = path;
+    return u.toString();
+  } catch {
+    const [base, qs] = raw.split("?");
+    const path = (base ?? raw).replace(/\/+$/, "");
+    if (path.includes("/api/statuses/media/") && !path.endsWith("/content")) {
+      return qs ? `${path}/content?${qs}` : `${path}/content`;
+    }
+    return raw;
+  }
+}
+
+/**
  * Append session token (+ optional statusId) for private status media.
  * statusId lets the server authorize other viewers via the status they already opened.
  */
@@ -21,8 +47,9 @@ export function withStatusMediaAuth(
   const resolved = resolvePublicAssetUrl(url);
   if (!resolved) return undefined;
   if (!resolved.includes("/api/statuses/media/")) return resolved;
+  const withContent = ensureStatusMediaContentPath(resolved);
   try {
-    const u = new URL(resolved);
+    const u = new URL(withContent);
     if (sessionToken && !u.searchParams.has("token")) {
       u.searchParams.set("token", sessionToken);
     }
@@ -31,7 +58,7 @@ export function withStatusMediaAuth(
     }
     return u.toString();
   } catch {
-    let out = resolved;
+    let out = withContent;
     if (sessionToken && !/[?&]token=/.test(out)) {
       out += `${out.includes("?") ? "&" : "?"}token=${encodeURIComponent(sessionToken)}`;
     }
