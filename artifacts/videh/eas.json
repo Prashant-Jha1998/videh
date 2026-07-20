@@ -33,7 +33,7 @@
         "buildType": "apk"
       },
       "cache": {
-        "key": "apk-release-v176-security-calls-otp"
+        "key": "apk-release-v177-security-calls-otp"
       }
     },
     "production": {

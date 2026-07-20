@@ -1,14 +1,7 @@
-# When .easignore exists it REPLACES .gitignore for uploads.
 node_modules/
 .expo/
 dist/
 web-build/
-.metro-health-check*
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-*.tsbuildinfo
-
 build/
 dist-export/
 expo-go-qr.png
@@ -16,36 +9,10 @@ android/
 ios/
 .git/
 .eas/
-
-# Monorepo root (paths relative to this file in artifacts/videh)
-../../node_modules/
-../**/node_modules/
-../../*.apk
-../../*.aab
-../../videh-v*.apk
-../../eas-build*.log
-../../eas-build-*.log
-../../app.json
-../../.easignore
-
-# Local build junk
-../../artifacts/videh/build/
-../../artifacts/videh/dist-export/
-../../artifacts/videh/node_modules/
-../../artifacts/videh/android/
-../../artifacts/videh/ios/
-../../artifacts/videh/dist/
-../../artifacts/videh/.expo/
-
-# Sibling artifacts not needed for the mobile app binary.
 ../api-server/
 ../videh-web/
 ../ads-web/
 ../developer-web/
 ../admin-web/
 ../mockup-sandbox/
-
-# Repo docs / deploy assets
-../../deploy/
-../../replit.md
-../../ANDROID_APK_NEON_SETUP.md
+../video-web/
