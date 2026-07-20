@@ -1,18 +1,36 @@
+# When .easignore exists it REPLACES .gitignore for uploads — keep deps out.
+node_modules/
+.expo/
+dist/
+web-build/
+.metro-health-check*
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.tsbuildinfo
+
 build/
 dist-export/
 expo-go-qr.png
 android/
 ios/
 .git/
-node_modules/.cache/
+.eas/
 
-# Monorepo root — APKs and build logs bloat the upload (~700MB).
+# Monorepo root — APKs and build logs bloat the upload.
 ../../**/*.apk
+../../**/*.aab
 ../../eas-build*.log
 ../../eas-build-*.log
 ../../videh-v*.apk
-../../artifacts/videh/build/**
-../../artifacts/videh/dist-export/**
+../../app.json
+../../artifacts/videh/build/
+../../artifacts/videh/dist-export/
+../../artifacts/videh/node_modules/
+../../artifacts/videh/android/
+../../artifacts/videh/ios/
+../../artifacts/videh/dist/
+../../artifacts/videh/.expo/
 
 # Sibling artifacts not needed for the mobile app binary.
 ../api-server/
@@ -20,6 +38,7 @@ node_modules/.cache/
 ../ads-web/
 ../developer-web/
 ../admin-web/
+../mockup-sandbox/
 
 # Repo docs / deploy assets
 ../../deploy/
