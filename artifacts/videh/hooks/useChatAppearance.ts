@@ -16,8 +16,8 @@ import {
 /** Classic unthemed chat canvas (no per-chat theme applied). */
 const DEFAULT_CHAT_BG_LIGHT = "#F0F2F5";
 const DEFAULT_CHAT_BG_DARK = "#0B141A";
-const DEFAULT_SENT_LIGHT = "#D9FDD3";
-const DEFAULT_SENT_DARK = "#005C4B";
+const DEFAULT_SENT_LIGHT = "#E9EDEF";
+const DEFAULT_SENT_DARK = "#2A3942";
 const DEFAULT_RECEIVED_LIGHT = "#FFFFFF";
 const DEFAULT_RECEIVED_DARK = "#1F2C34";
 
@@ -85,7 +85,9 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
   );
 
   return useMemo(() => {
-    const hasPerChatTheme = Boolean(perChat?.themeId);
+    const hasPerChatTheme = Boolean(
+      perChat?.themeId && perChat.themeId !== DEFAULT_APP_THEME_ID,
+    );
 
     // No per-chat theme → classic white/grey chat (ignore global app theme / wallpaper / custom bubbles).
     if (!hasPerChatTheme) {
@@ -122,12 +124,6 @@ export function useChatAppearance(chatId: string | null | undefined): ChatAppear
     const chatBackground = isDark
       ? mixHex(accent, "#12101F", 0.82)
       : mixHex(accent, "#F7F5FF", 0.86);
-
-    if (__DEV__) {
-      console.log(
-        `[chat-theme] apply chatId=${chatId ?? "null"} themeId=${themeId} perChat=true bg=${chatBackground} sent=${sent}`,
-      );
-    }
 
     return {
       appearance,

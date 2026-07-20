@@ -17,6 +17,7 @@ import { getThemeAppearanceById, resolveBubbles } from "@/lib/themeAppearance";
 
 const APP_LANGUAGE_KEY = "appLanguage";
 const APP_THEME_ID_KEY = "appThemeId";
+const APP_THEME_EXPLICIT_KEY = "appThemeExplicitSelection";
 const APP_THEME_TRIAL_STARTED_KEY = "appThemeTrialStartedAt";
 const CUSTOM_BUBBLES_KEY = "videh_custom_bubble_colors_v1";
 const GLOBAL_ANIMATED_WALLPAPER_KEY = "videh_global_animated_wallpaper_v1";
@@ -69,11 +70,12 @@ export function UiPreferencesProvider({ children }: { children: React.ReactNode 
     let cancelled = false;
     (async () => {
       try {
-        const [lang, theme, storedThemeId, trialStartedAt, fontLabel, wallpaperLabel, customBubblesRaw, animWall, iconStyle] =
+        const [lang, theme, storedThemeId, themeExplicit, trialStartedAt, fontLabel, wallpaperLabel, customBubblesRaw, animWall, iconStyle] =
           await Promise.all([
           AsyncStorage.getItem(APP_LANGUAGE_KEY),
           loadChatThemeChoice(),
           AsyncStorage.getItem(APP_THEME_ID_KEY),
+          AsyncStorage.getItem(APP_THEME_EXPLICIT_KEY),
           AsyncStorage.getItem(APP_THEME_TRIAL_STARTED_KEY),
           AsyncStorage.getItem(CHAT_STORAGE.fontSize),
           AsyncStorage.getItem(CHAT_STORAGE.wallpaper),
@@ -84,7 +86,19 @@ export function UiPreferencesProvider({ children }: { children: React.ReactNode 
         if (cancelled) return;
         if (lang) setLocaleState(lang);
         setChatThemeChoiceState(theme);
-        setAppThemeIdState(getAppThemeById(storedThemeId).id);
+        // Never-selected / legacy auto-default (videh-green without explicit pick) → Classic white/grey.
+        const resolvedThemeId =
+          !storedThemeId || (themeExplicit !== "1" && storedThemeId === "videh-green")
+            ? DEFAULT_APP_THEME_ID
+            : getAppThemeById(storedThemeId).id;
+        setAppThemeIdState(resolvedThemeId);
+        if (
+          resolvedThemeId === DEFAULT_APP_THEME_ID
+          && (storedThemeId === "videh-green" || storedThemeId == null)
+          && themeExplicit !== "1"
+        ) {
+          await AsyncStorage.setItem(APP_THEME_ID_KEY, DEFAULT_APP_THEME_ID);
+        }
         if (fontLabel) setChatFontLabelState(fontLabel);
         if (wallpaperLabel) setChatWallpaperLabelState(wallpaperLabel);
         if (customBubblesRaw) {
@@ -140,6 +154,7 @@ export function UiPreferencesProvider({ children }: { children: React.ReactNode 
     const next = getAppThemeById(id).id;
     setAppThemeIdState(next);
     await AsyncStorage.setItem(APP_THEME_ID_KEY, next);
+    await AsyncStorage.setItem(APP_THEME_EXPLICIT_KEY, "1");
   }, []);
 
   const setChatFontLabel = useCallback(async (label: string) => {

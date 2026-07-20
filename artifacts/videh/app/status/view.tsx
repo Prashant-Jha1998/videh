@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEvent } from "expo";
+import { useEvent, useEventListener } from "expo";
 import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
@@ -12,6 +12,7 @@ import {
   Animated,
   Dimensions,
   Image as NativeImage,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -28,14 +29,18 @@ import type { Status } from "@/context/AppContext";
 import { useChatKeyboard } from "@/hooks/useChatKeyboard";
 import { mapApiStatusRow } from "@/lib/statusReply";
 import { getApiUrl } from "@/lib/api";
-import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import { resolvePublicAssetUrl, withStatusMediaAuth } from "@/lib/publicAssetUrl";
 import { saveStatusToGalleryWithAlert } from "@/lib/saveStatusToLibrary";
 import { usePlayableAudioUri } from "@/lib/usePlayableAudioUri";
+import { useInstantStatusMediaUri, getCachedAuthMediaFile } from "@/lib/useCachedAuthMediaUri";
 import { usePlayableVideoUri } from "@/lib/usePlayableVideoUri";
+import { authFetchHeaders } from "@/lib/authenticatedMedia";
 import Svg, { Path } from "react-native-svg";
 
 const { width: W, height: H } = Dimensions.get("window");
+const DEFAULT_IMAGE_STORY_MS = 8000;
+const DEFAULT_TEXT_STORY_MS = 5000;
+const DEFAULT_VIDEO_STORY_MS = 8000;
 
 function strokeToPath(points: Array<{ x: number; y: number }>): string {
   if (points.length === 0) return "";
@@ -51,32 +56,57 @@ function normalizeStoryTrimMs(value: number | undefined): number | undefined {
 
 function VideoStatusPlayerSurface({
   uri,
+  sessionToken,
   paused,
   trimStartMs,
   trimEndMs,
   onReady,
   onLoadError,
+  onProgress,
+  onEnded,
 }: {
   uri: string;
+  sessionToken?: string | null;
   paused: boolean;
   trimStartMs?: number;
   trimEndMs?: number;
   onReady: () => void;
   onLoadError: () => void;
+  onProgress: (ratio: number) => void;
+  onEnded: () => void;
 }) {
   const readyNotifiedRef = useRef(false);
+  const endedRef = useRef(false);
   const startMs = normalizeStoryTrimMs(trimStartMs) ?? 0;
   const endMs = normalizeStoryTrimMs(trimEndMs);
-  const player = useVideoPlayer(uri, (p) => {
+  const videoSource = useMemo(() => {
+    if (
+      sessionToken
+      && uri.startsWith("http")
+      && uri.includes("/api/statuses/media/")
+      && !/[?&]token=/.test(uri)
+    ) {
+      return {
+        uri,
+        headers: authFetchHeaders(sessionToken) as Record<string, string>,
+      };
+    }
+    return uri;
+  }, [uri, sessionToken]);
+  const player = useVideoPlayer(videoSource, (p) => {
     p.loop = false;
     p.muted = false;
     p.volume = 1;
-    p.timeUpdateEventInterval = 0.25;
+    p.timeUpdateEventInterval = 0.1;
   });
   const { status } = useEvent(player, "statusChange", { status: player.status });
+  const timeUpdate = useEvent(player, "timeUpdate", {
+    currentTime: player.currentTime,
+  });
 
   useEffect(() => {
     readyNotifiedRef.current = false;
+    endedRef.current = false;
   }, [uri]);
 
   useEffect(() => {
@@ -97,18 +127,43 @@ function VideoStatusPlayerSurface({
     else player.play();
   }, [paused, status, player]);
 
+  const finishClip = useCallback(() => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    try { player.pause(); } catch { /* ignore */ }
+    onProgress(1);
+    onEnded();
+  }, [player, onProgress, onEnded]);
+
   useEffect(() => {
-    if (!endMs) return;
-    const timer = setInterval(() => {
-      if (player.currentTime * 1000 >= endMs) player.pause();
-    }, 200);
-    return () => clearInterval(timer);
-  }, [player, endMs]);
+    if (status !== "readyToPlay" || paused || endedRef.current) return;
+    const currentMs = (timeUpdate.currentTime ?? player.currentTime ?? 0) * 1000;
+    const durationSec = player.duration;
+    const naturalEndMs = Number.isFinite(durationSec) && durationSec > 0
+      ? durationSec * 1000
+      : DEFAULT_VIDEO_STORY_MS;
+    const clipEndMs = endMs ?? naturalEndMs;
+    const span = Math.max(250, clipEndMs - startMs);
+    const ratio = Math.max(0, Math.min(1, (currentMs - startMs) / span));
+    onProgress(ratio);
+    if (currentMs >= clipEndMs - 40) finishClip();
+  }, [
+    timeUpdate.currentTime,
+    status,
+    paused,
+    player,
+    startMs,
+    endMs,
+    onProgress,
+    finishClip,
+  ]);
+
+  useEventListener(player, "playToEnd", finishClip);
 
   return (
     <VideoView
       player={player}
-      style={{ width: W, height: H * 0.75 }}
+      style={{ width: W, height: H * 0.78 }}
       contentFit="contain"
       nativeControls={false}
     />
@@ -123,6 +178,8 @@ function VideoStatusPlayer({
   trimEndMs,
   onLoadError,
   onReady,
+  onProgress,
+  onEnded,
 }: {
   uri: string;
   sessionToken?: string | null;
@@ -131,6 +188,8 @@ function VideoStatusPlayer({
   trimEndMs?: number;
   onLoadError: () => void;
   onReady: () => void;
+  onProgress: (ratio: number) => void;
+  onEnded: () => void;
 }) {
   const { playableUri, failed, loading } = usePlayableVideoUri(uri, sessionToken);
 
@@ -139,7 +198,11 @@ function VideoStatusPlayer({
   }, [failed, onLoadError]);
 
   if (loading) {
-    return <ActivityIndicator color="#fff" />;
+    return (
+      <View style={styles.mediaLoading}>
+        <ActivityIndicator color="#fff" size="large" />
+      </View>
+    );
   }
   if (!playableUri) {
     return null;
@@ -147,13 +210,68 @@ function VideoStatusPlayer({
 
   return (
     <VideoStatusPlayerSurface
-      key={playableUri}
+      key={uri}
       uri={playableUri}
+      sessionToken={sessionToken}
       paused={paused}
       trimStartMs={trimStartMs}
       trimEndMs={trimEndMs}
       onReady={onReady}
       onLoadError={onLoadError}
+      onProgress={onProgress}
+      onEnded={onEnded}
+    />
+  );
+}
+
+function StoryImage({
+  uri,
+  sessionToken,
+  onError,
+}: {
+  uri: string;
+  sessionToken?: string | null;
+  onError: () => void;
+}) {
+  const { displayUri, headers, failed, loading } = useInstantStatusMediaUri(uri, sessionToken, "image");
+  const [nativeFallback, setNativeFallback] = useState(false);
+
+  useEffect(() => {
+    if (failed) onError();
+  }, [failed, onError]);
+
+  if (loading) {
+    return (
+      <View style={styles.mediaLoading}>
+        <ActivityIndicator color="#fff" size="large" />
+      </View>
+    );
+  }
+  if (!displayUri) return null;
+
+  if (nativeFallback) {
+    return (
+      <NativeImage
+        source={{
+          uri: displayUri,
+          ...(headers ? { headers } : {}),
+        }}
+        style={{ width: W, height: H * 0.78 }}
+        resizeMode="contain"
+        onError={onError}
+      />
+    );
+  }
+
+  return (
+    <Image
+      source={{
+        uri: displayUri,
+        ...(headers ? { headers } : {}),
+      }}
+      style={{ width: W, height: H * 0.78 }}
+      contentFit="contain"
+      onError={() => setNativeFallback(true)}
     />
   );
 }
@@ -211,9 +329,6 @@ export default function ViewStatusScreen() {
   const { keyboardVisible } = useChatKeyboard();
   const { statuses, user, createDirectChat, sendMessage, markStatusViewedLocally } = useApp();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
-  const mediaAuthHeaders = user?.sessionToken
-    ? (authFetchHeaders(user.sessionToken) as Record<string, string>)
-    : undefined;
 
   const ids = params.ids
     ? params.ids.split(",").filter(Boolean)
@@ -228,7 +343,6 @@ export default function ViewStatusScreen() {
   const [viewCount, setViewCount] = useState(0);
   const [reactionSummary, setReactionSummary] = useState<Record<string, number>>({});
   const [reply, setReply] = useState("");
-  const [useNativeImageFallback, setUseNativeImageFallback] = useState(false);
   const [mediaLoadFailed, setMediaLoadFailed] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -243,6 +357,8 @@ export default function ViewStatusScreen() {
   const progress = useRef(new Animated.Value(0)).current;
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
   const pausedProgressRef = useRef(0);
+  const videoDrivenRef = useRef(false);
+  const mediaLoadFailedRef = useRef(false);
   const statusesRef = useRef(statuses);
   statusesRef.current = statuses;
   const statusCatalogRef = useRef(statusCatalog);
@@ -250,6 +366,8 @@ export default function ViewStatusScreen() {
   const longPressActiveRef = useRef(false);
   const longPressConsumedRef = useRef(false);
   const wasPausedBeforeHoldRef = useRef(false);
+  const currentIdxRef = useRef(currentIdx);
+  currentIdxRef.current = currentIdx;
 
   const currentStatus = statusCatalog.get(ids[currentIdx]);
 
@@ -283,6 +401,7 @@ export default function ViewStatusScreen() {
     : undefined;
   const isMyStatus = currentStatus?.userId === "me";
   const isMedia = currentStatus?.type === "image" || currentStatus?.type === "video";
+  const isVideoStory = currentStatus?.type === "video";
   const isBoostedStory = Boolean(currentStatus?.isBoosted);
   const editorData = currentStatus?.editorData;
 
@@ -326,30 +445,56 @@ export default function ViewStatusScreen() {
   const currentStoryTrimEndMs = currentStatus?.editorData?.trimEndMs;
   const currentStoryTrimStartMs = currentStatus?.editorData?.trimStartMs;
 
-  // Start progress animation
+  const goNext = useCallback(() => {
+    animRef.current?.stop();
+    videoDrivenRef.current = false;
+    if (currentIdxRef.current < ids.length - 1) setCurrentIdx((i) => i + 1);
+    else router.back();
+  }, [ids.length, router]);
+
+  const goPrev = useCallback(() => {
+    animRef.current?.stop();
+    videoDrivenRef.current = false;
+    if (currentIdxRef.current > 0) setCurrentIdx((i) => i - 1);
+    else {
+      progress.setValue(0);
+      pausedProgressRef.current = 0;
+    }
+  }, [progress]);
+
+  // Image/text stories: timed progress. Video stories: driven by player callbacks.
   const startAnim = useCallback((idx: number, fromValue = 0) => {
-    progress.setValue(fromValue);
     const status = statusCatalogRef.current.get(ids[idx]);
-    const trimmedVideoMs = status?.type === "video" && status.editorData?.trimEndMs
-      ? Math.max(1000, (normalizeStoryTrimMs(status.editorData.trimEndMs) ?? 8000) - (normalizeStoryTrimMs(status.editorData.trimStartMs) ?? 0))
-      : null;
-    const duration = (trimmedVideoMs ?? ((status?.type === "image" || status?.type === "video") ? 8000 : 5000)) * (1 - fromValue);
+    if (status?.type === "video" && !mediaLoadFailedRef.current) {
+      // Video progress is synced from VideoStatusPlayer onProgress / onEnded.
+      videoDrivenRef.current = true;
+      progress.setValue(fromValue);
+      return;
+    }
+    videoDrivenRef.current = false;
+    progress.setValue(fromValue);
+    const duration = (status?.type === "image" || status?.type === "video"
+      ? DEFAULT_IMAGE_STORY_MS
+      : DEFAULT_TEXT_STORY_MS) * (1 - fromValue);
     if (duration <= 0) return;
     const anim = Animated.timing(progress, { toValue: 1, duration, useNativeDriver: false });
     animRef.current = anim;
     anim.start(({ finished }) => {
       if (!finished) return;
-      if (idx < ids.length - 1) {
-        setCurrentIdx(idx + 1);
-      } else {
-        router.back();
-      }
+      if (idx < ids.length - 1) setCurrentIdx(idx + 1);
+      else router.back();
     });
   }, [ids, progress, router]);
 
   useEffect(() => {
     animRef.current?.stop();
-    const waitingForVideo = currentStoryType === "video" && Boolean(resolvedMediaUrl) && !videoReady && !mediaLoadFailed;
+    pausedProgressRef.current = 0;
+    progress.setValue(0);
+    setPaused(false);
+    const waitingForVideo = currentStoryType === "video"
+      && Boolean(resolvedMediaUrl)
+      && !videoReady
+      && !mediaLoadFailed;
     if (waitingForVideo) return;
     startAnim(currentIdx);
     return () => animRef.current?.stop();
@@ -363,21 +508,38 @@ export default function ViewStatusScreen() {
     mediaLoadFailed,
     resolvedMediaUrl,
     startAnim,
+    progress,
   ]);
 
   useEffect(() => {
-    setUseNativeImageFallback(false);
+    mediaLoadFailedRef.current = false;
     setMediaLoadFailed(false);
     setVideoReady(false);
   }, [currentStatus?.id, currentStatus?.mediaUrl]);
 
-  // Unblock story progress if video metadata never arrives (slow network / codec edge cases).
   useEffect(() => {
-    const status = statusCatalog.get(ids[currentIdx]);
-    if (status?.type !== "video" || !resolvedMediaUrl || videoReady || mediaLoadFailed) return;
-    const timer = setTimeout(() => setVideoReady(true), 12000);
+    mediaLoadFailedRef.current = mediaLoadFailed;
+  }, [mediaLoadFailed]);
+
+  // Prefetch next story media so the next item starts instantly.
+  useEffect(() => {
+    const next = statusCatalog.get(ids[currentIdx + 1]);
+    const url = next?.mediaUrl;
+    if (!url || !user?.sessionToken) return;
+    if (next.type !== "image" && next.type !== "video") return;
+    void getCachedAuthMediaFile(
+      withStatusMediaAuth(url, user.sessionToken) ?? resolvePublicAssetUrl(url) ?? url,
+      user.sessionToken,
+      next.type === "video" ? "mp4" : "jpg",
+    ).catch(() => {});
+  }, [currentIdx, ids, statusCatalog, user?.sessionToken]);
+
+  // Unblock story if video never becomes ready (network / codec edge cases).
+  useEffect(() => {
+    if (currentStoryType !== "video" || !resolvedMediaUrl || videoReady || mediaLoadFailed) return;
+    const timer = setTimeout(() => setVideoReady(true), 8000);
     return () => clearTimeout(timer);
-  }, [currentIdx, ids, statuses, resolvedMediaUrl, videoReady, mediaLoadFailed]);
+  }, [currentIdx, currentStoryType, resolvedMediaUrl, videoReady, mediaLoadFailed]);
 
   const pauseStory = useCallback(() => {
     if (paused) return;
@@ -390,26 +552,36 @@ export default function ViewStatusScreen() {
 
   const resumeStory = useCallback(() => {
     if (!paused) return;
-    startAnim(currentIdx, pausedProgressRef.current);
     setPaused(false);
+    if (!videoDrivenRef.current) {
+      startAnim(currentIdx, pausedProgressRef.current);
+    }
   }, [currentIdx, paused, startAnim]);
 
-  const goNext = () => {
-    animRef.current?.stop();
-    if (currentIdx < ids.length - 1) setCurrentIdx((i) => i + 1);
-    else router.back();
-  };
+  const onVideoProgress = useCallback((ratio: number) => {
+    if (!videoDrivenRef.current) return;
+    progress.setValue(Math.max(0, Math.min(1, ratio)));
+  }, [progress]);
 
-  const goPrev = () => {
-    animRef.current?.stop();
-    if (currentIdx > 0) setCurrentIdx((i) => i - 1);
-    else startAnim(0);
-  };
+  const onVideoEnded = useCallback(() => {
+    goNext();
+  }, [goNext]);
 
   const togglePause = () => {
     if (paused) resumeStory();
     else pauseStory();
   };
+
+  const swipeCloseResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, g) => g.dy > 12 && Math.abs(g.dy) > Math.abs(g.dx) * 1.2,
+        onPanResponderRelease: (_e, g) => {
+          if (g.dy > 90 || g.vy > 0.9) router.back();
+        },
+      }),
+    [router],
+  );
 
   const downloadStory = useCallback(async () => {
     if (!currentStatus || downloading) return;
@@ -569,7 +741,10 @@ export default function ViewStatusScreen() {
   const bgColor = isMedia ? "#000" : (currentStatus.backgroundColor ?? "#059669");
 
   return (
-    <View style={[styles.container, { backgroundColor: bgColor, paddingTop: topPad }]}>
+    <View
+      style={[styles.container, { backgroundColor: bgColor, paddingTop: topPad }]}
+      {...swipeCloseResponder.panHandlers}
+    >
       <StoryMusicPlayer uri={editorData?.musicUri} sessionToken={user?.sessionToken} paused={paused || showMenu} />
 
       {/* ── MULTIPLE PROGRESS BARS ── */}
@@ -669,42 +844,30 @@ export default function ViewStatusScreen() {
                   <Text style={styles.mediaErrorTitle}>Could not load this story media</Text>
                   <Text style={styles.mediaErrorHint}>Please check your connection and try again.</Text>
                 </View>
-              ) : currentStatus.type === "video" ? (
+              ) : isVideoStory ? (
                 <VideoStatusPlayer
                   uri={resolvedMediaUrl}
                   sessionToken={user?.sessionToken}
-                  paused={paused}
+                  paused={paused || showMenu}
                   trimStartMs={editorData?.trimStartMs}
                   trimEndMs={editorData?.trimEndMs}
                   onLoadError={() => setMediaLoadFailed(true)}
                   onReady={() => setVideoReady(true)}
-                />
-              ) : useNativeImageFallback ? (
-                <NativeImage
-                  source={{
-                    uri: resolvedMediaUrl,
-                    ...(mediaAuthHeaders ? { headers: mediaAuthHeaders } : {}),
-                  }}
-                  style={{ width: W, height: H * 0.75 }}
-                  resizeMode="contain"
-                  onError={() => setMediaLoadFailed(true)}
+                  onProgress={onVideoProgress}
+                  onEnded={onVideoEnded}
                 />
               ) : (
-                <Image
-                  source={{
-                    uri: resolvedMediaUrl,
-                    ...(mediaAuthHeaders ? { headers: mediaAuthHeaders } : {}),
-                  }}
-                  style={{ width: W, height: H * 0.75 }}
-                  contentFit="contain"
-                  onError={() => setUseNativeImageFallback(true)}
+                <StoryImage
+                  uri={resolvedMediaUrl}
+                  sessionToken={user?.sessionToken}
+                  onError={() => setMediaLoadFailed(true)}
                 />
               )}
               <Svg style={[StyleSheet.absoluteFill, { top: H * 0.02 }]} pointerEvents="none">
                 {(editorData?.strokes ?? []).map((stroke) => (
                   <Path
                     key={stroke.id}
-                    d={strokeToPath(stroke.points.map((p) => ({ x: p.x * W, y: p.y * H * 0.75 })))}
+                    d={strokeToPath(stroke.points.map((p) => ({ x: p.x * W, y: p.y * H * 0.78 })))}
                     stroke={stroke.color}
                     strokeWidth={stroke.width}
                     fill="none"
@@ -720,7 +883,7 @@ export default function ViewStatusScreen() {
                     styles.storyOverlay,
                     {
                       left: `${overlay.x * 100}%`,
-                      top: `${overlay.y * 75}%`,
+                      top: `${overlay.y * 78}%`,
                       color: overlay.kind === "text" ? overlay.color : "#fff",
                       fontSize: overlay.size,
                     },
@@ -877,6 +1040,7 @@ const styles = StyleSheet.create({
   mediaErrorCard: { alignItems: "center", justifyContent: "center", paddingHorizontal: 28, gap: 8 },
   mediaErrorTitle: { color: "#fff", fontSize: 16, fontFamily: "Inter_700Bold", textAlign: "center" },
   mediaErrorHint: { color: "rgba(255,255,255,0.68)", fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center" },
+  mediaLoading: { width: W, height: H * 0.78, alignItems: "center", justifyContent: "center" },
   storyOverlay: { position: "absolute", textAlign: "center", fontWeight: "800", textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 5, transform: [{ translateX: -60 }, { translateY: -20 }], maxWidth: W * 0.82 },
   musicPill: { position: "absolute", top: 12, left: 14, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6 },
   musicPillText: { color: "#E0DCFF", fontSize: 11, fontFamily: "Inter_700Bold", maxWidth: W * 0.7 },

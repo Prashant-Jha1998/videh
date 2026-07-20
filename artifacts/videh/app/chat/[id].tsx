@@ -156,6 +156,7 @@ import {
 } from "@/lib/locationMessage";
 import { loadEnterIsSend, loadMediaVisibilityEnabled } from "@/lib/chatSettings";
 import { resolvePublicAssetUrl, withStatusMediaAuth } from "@/lib/publicAssetUrl";
+import { DEFAULT_APP_THEME_ID } from "@/lib/appThemes";
 import {
   buildGroupSenderHeaderMap,
   filterGroupMentionMembers,
@@ -1299,7 +1300,10 @@ export default function ChatScreen() {
 
   const baseColors = useColors();
   const chatLook = useChatAppearance(chatId);
-  const perChatThemed = Boolean(chatLook.perChatOverride?.themeId);
+  const perChatThemed = Boolean(
+    chatLook.perChatOverride?.themeId
+    && chatLook.perChatOverride.themeId !== DEFAULT_APP_THEME_ID,
+  );
   // Classic chat chrome (white/grey). App shell theme must NOT color every chat header.
   const classicHeaderBg = chatLook.isDark ? "#1F2C34" : "#FFFFFF";
   const colors = useMemo(() => {
@@ -1345,6 +1349,7 @@ export default function ChatScreen() {
     : chatLook.isDark
       ? "rgba(255,255,255,0.65)"
       : colors.mutedForeground;
+
   const { chatFontScale, t } = useUiPreferences();
   const messageFallback = t("common.message");
   const insets = useSafeAreaInsets();

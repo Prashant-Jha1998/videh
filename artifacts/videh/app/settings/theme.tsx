@@ -111,7 +111,9 @@ export default function AppThemeSettingsScreen() {
 
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.primary }]}>Solid Colors</Text>
-          <Text style={[styles.sectionSub, { color: colors.mutedForeground }]}>20 free color themes</Text>
+          <Text style={[styles.sectionSub, { color: colors.mutedForeground }]}>
+            Classic (white/grey) is the default. Green and other colors apply only when you select them.
+          </Text>
           <View style={styles.grid}>{SOLID_APP_THEMES.map(renderTheme)}</View>
         </View>
 

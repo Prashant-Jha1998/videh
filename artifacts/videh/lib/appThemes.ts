@@ -7,9 +7,11 @@ export type AppThemeOption = {
   colors: [string, string];
 };
 
-export const DEFAULT_APP_THEME_ID = "videh-green";
+/** True default: white/grey chrome. Colored themes (including Videh Emerald) only when explicitly selected. */
+export const DEFAULT_APP_THEME_ID = "classic";
 export const APP_THEME_TRIAL_DAYS = 365;
 export const SOLID_APP_THEMES: AppThemeOption[] = [
+  { id: "classic", name: "Classic", kind: "solid", colors: ["#54656F", "#667781"] },
   { id: "videh-green", name: "Videh Emerald", kind: "solid", colors: ["#059669", "#059669"] },
   { id: "videh-indigo", name: "Videh Indigo", kind: "solid", colors: ["#5B4FE8", "#5B4FE8"] },
   { id: "emerald", name: "Emerald", kind: "solid", colors: ["#10B981", "#10B981"] },
@@ -68,8 +70,19 @@ export const GRADIENT_APP_THEMES: AppThemeOption[] = [
 
 export const APP_THEME_OPTIONS = [...SOLID_APP_THEMES, ...GRADIENT_APP_THEMES];
 
+function classicTheme(): AppThemeOption {
+  return SOLID_APP_THEMES[0]!;
+}
+
 export function getAppThemeById(id?: string | null): AppThemeOption {
-  return APP_THEME_OPTIONS.find((theme) => theme.id === id) ?? APP_THEME_OPTIONS[0];
+  if (!id) return classicTheme();
+  return APP_THEME_OPTIONS.find((theme) => theme.id === id) ?? classicTheme();
+}
+
+/** True when the user (or storage) has a non-classic app theme selected. */
+export function isColoredAppTheme(id?: string | null): boolean {
+  const resolved = getAppThemeById(id).id;
+  return resolved !== DEFAULT_APP_THEME_ID;
 }
 
 export function daysLeftInThemeTrial(startedAtIso?: string | null, now = Date.now()): number {

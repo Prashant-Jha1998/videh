@@ -213,19 +213,35 @@ export async function canViewerAccessStatusMedia(viewerId: number, filename: str
   if (!media) return false;
   if (media.uploader_id != null && Number(media.uploader_id) === viewerId) return true;
 
+  // Fast path: recent statuses that reference this file (limit work for other viewers).
   const linked = await query(
     `SELECT s.id
      FROM statuses s
-     WHERE s.media_url ILIKE '%' || $1 || '%'
-        OR (s.editor_data::text ILIKE '%' || $1 || '%')
+     WHERE s.expires_at > NOW() - INTERVAL '2 days'
+       AND (
+         s.media_url ILIKE '%' || $1 || '%'
+         OR (s.editor_data::text ILIKE '%' || $1 || '%')
+       )
      ORDER BY s.created_at DESC
-     LIMIT 25`,
+     LIMIT 8`,
     [safe],
   );
   for (const row of linked.rows as { id: number }[]) {
     if (await canViewerAccessStatus(viewerId, Number(row.id), { allowExpired: true })) return true;
   }
-  // Music/overlay media uploaded but not yet linked to a status — only uploader.
+  // Fallback for older media still linked to an expired-but-kept status row.
+  const older = await query(
+    `SELECT s.id
+     FROM statuses s
+     WHERE s.media_url ILIKE '%' || $1 || '%'
+        OR (s.editor_data::text ILIKE '%' || $1 || '%')
+     ORDER BY s.created_at DESC
+     LIMIT 5`,
+    [safe],
+  );
+  for (const row of older.rows as { id: number }[]) {
+    if (await canViewerAccessStatus(viewerId, Number(row.id), { allowExpired: true })) return true;
+  }
   return false;
 }
 

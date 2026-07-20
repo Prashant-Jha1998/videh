@@ -3,7 +3,7 @@ import { VIDEH_BRAND } from "@/lib/brandColors";
 const colors = {
   light: {
     text: "#111B21",
-    tint: VIDEH_BRAND.primary,
+    tint: "#54656F",
 
     background: "#FFFFFF",
     foreground: "#111B21",
@@ -11,7 +11,7 @@ const colors = {
     card: "#FFFFFF",
     cardForeground: "#111B21",
 
-    primary: VIDEH_BRAND.primary,
+    primary: "#54656F",
     primaryForeground: "#FFFFFF",
 
     secondary: "#F0F2F5",
@@ -20,8 +20,8 @@ const colors = {
     muted: "#F0F2F5",
     mutedForeground: "#667781",
 
-    accent: VIDEH_BRAND.accentTint,
-    accentForeground: VIDEH_BRAND.primaryDark,
+    accent: "#F0F2F5",
+    accentForeground: "#111B21",
 
     destructive: "#ef4444",
     destructiveForeground: "#ffffff",
@@ -29,21 +29,21 @@ const colors = {
     border: "#E9EDEF",
     input: "#E9EDEF",
 
-    chatBubbleSent: VIDEH_BRAND.sentBubbleLight,
+    chatBubbleSent: "#E9EDEF",
     chatBubbleReceived: VIDEH_BRAND.receivedBubbleLight,
-    chatBackground: VIDEH_BRAND.chatBgLight,
+    chatBackground: "#F0F2F5",
     onlineGreen: VIDEH_BRAND.online,
     headerBg: "#FFFFFF",
-    headerTitle: VIDEH_BRAND.primary,
+    headerTitle: "#111B21",
     headerIcon: "#111B21",
     tabBar: "#FFFFFF",
     callBg: "#1A1A1A",
-    statusRing: VIDEH_BRAND.primaryLight,
+    statusRing: "#667781",
   },
 
   dark: {
     text: "#E9EDEF",
-    tint: VIDEH_BRAND.primaryLight,
+    tint: "#E9EDEF",
 
     background: VIDEH_BRAND.surfaceDark,
     foreground: "#E9EDEF",
@@ -51,8 +51,8 @@ const colors = {
     card: VIDEH_BRAND.cardDark,
     cardForeground: "#E9EDEF",
 
-    primary: VIDEH_BRAND.primaryLight,
-    primaryForeground: "#FFFFFF",
+    primary: "#E9EDEF",
+    primaryForeground: "#111B21",
 
     secondary: VIDEH_BRAND.borderDark,
     secondaryForeground: "#E9EDEF",
@@ -60,8 +60,8 @@ const colors = {
     muted: VIDEH_BRAND.borderDark,
     mutedForeground: VIDEH_BRAND.mutedDark,
 
-    accent: VIDEH_BRAND.primary,
-    accentForeground: "#FFFFFF",
+    accent: VIDEH_BRAND.borderDark,
+    accentForeground: "#E9EDEF",
 
     destructive: "#ef4444",
     destructiveForeground: "#ffffff",
@@ -69,7 +69,7 @@ const colors = {
     border: VIDEH_BRAND.borderDark,
     input: VIDEH_BRAND.borderDark,
 
-    chatBubbleSent: VIDEH_BRAND.sentBubbleDark,
+    chatBubbleSent: "#2A3942",
     chatBubbleReceived: VIDEH_BRAND.receivedBubbleDark,
     chatBackground: VIDEH_BRAND.chatBgDark,
     onlineGreen: VIDEH_BRAND.online,
@@ -78,7 +78,7 @@ const colors = {
     headerIcon: "#E9EDEF",
     tabBar: VIDEH_BRAND.cardDark,
     callBg: VIDEH_BRAND.chatBgDark,
-    statusRing: VIDEH_BRAND.primaryLight,
+    statusRing: "#8696A0",
   },
 
   radius: 12,

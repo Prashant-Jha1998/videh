@@ -3,6 +3,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { useEffect, useState } from "react";
 import { authFetchHeaders, authPlaybackSource } from "./authenticatedMedia";
 import { resolvePublicAssetUrl } from "./publicAssetUrl";
+import { stripMediaAuthQuery } from "./useCachedAuthMediaUri";
 
 function audioExtFromUri(uri: string): string {
   const trimmed = uri.trim();
@@ -75,7 +76,8 @@ async function getCachedAudioFile(absoluteUrl: string, sessionToken?: string | n
     const needsAuth =
       (absoluteUrl.includes("/api/chats/media/") || absoluteUrl.includes("/api/statuses/media/"))
       && Boolean(sessionToken);
-    const res = await FileSystem.downloadAsync(absoluteUrl, target, {
+    const downloadUrl = stripMediaAuthQuery(absoluteUrl);
+    const res = await FileSystem.downloadAsync(downloadUrl, target, {
       headers: needsAuth ? (authFetchHeaders(sessionToken) as Record<string, string>) : undefined,
     });
     if (res.status >= 400) {

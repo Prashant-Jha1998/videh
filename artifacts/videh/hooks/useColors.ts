@@ -1,7 +1,7 @@
 import colors from "@/constants/colors";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
 import { useResolvedColorScheme } from "@/hooks/useResolvedColorScheme";
-import { DEFAULT_APP_THEME_ID } from "@/lib/appThemes";
+import { DEFAULT_APP_THEME_ID, isColoredAppTheme } from "@/lib/appThemes";
 import { VIDEH_BRAND } from "@/lib/brandColors";
 import { mixHex, resolveBubbles } from "@/lib/themeAppearance";
 
@@ -11,7 +11,7 @@ export function useColors(): ColorScheme & {
   isDark: boolean;
   radius: number;
   appThemeColors: [string, string];
-  /** True when user picked a non-default app theme (headers & shell tint apply). */
+  /** True when user picked a non-classic app theme (headers & shell tint apply). */
   shellThemed: boolean;
   chatBubbleSent: string;
   chatBubbleReceived: string;
@@ -25,8 +25,11 @@ export function useColors(): ColorScheme & {
   const palette = isDark && "dark" in colors
     ? (colors as { dark: ColorScheme }).dark
     : colors.light;
-  const [primary, secondary] = appTheme.colors;
-  const shellThemed = appThemeId !== DEFAULT_APP_THEME_ID;
+  const shellThemed = isColoredAppTheme(appThemeId);
+  const [themePrimary, themeSecondary] = appTheme.colors;
+  // Classic (no app theme): neutral grey accents — not Videh emerald.
+  const primary = shellThemed ? themePrimary : (isDark ? "#E9EDEF" : "#54656F");
+  const secondary = shellThemed ? themeSecondary : (isDark ? "#1F2C34" : "#F0F2F5");
   const bubbles = resolveBubbles(themeAppearance, isDark, customBubbleOverride);
   const headerOnLight = !isDark;
   const onThemedHeader = shellThemed;
@@ -37,19 +40,23 @@ export function useColors(): ColorScheme & {
   const shellTabBar = shellThemed
     ? mixHex(primary, palette.tabBar, isDark ? 0.82 : 0.94)
     : palette.tabBar;
+  const classicChatBg = isDark ? "#0B141A" : "#F0F2F5";
+  const classicSent = isDark ? "#2A3942" : "#E9EDEF";
+  const classicReceived = isDark ? "#1F2C34" : "#FFFFFF";
+
   return {
     ...palette,
     background: shellBackground,
     tint: primary,
     primary,
-    accent: headerOnLight && !shellThemed ? palette.accent : primary,
-    accentForeground: headerOnLight && !shellThemed ? palette.accentForeground : "#FFFFFF",
+    accent: headerOnLight && !shellThemed ? "#F0F2F5" : primary,
+    accentForeground: headerOnLight && !shellThemed ? "#111B21" : "#FFFFFF",
     headerBg: shellHeaderBg,
     tabBar: shellTabBar,
     headerTitleColor: onThemedHeader
       ? "#FFFFFF"
       : headerOnLight
-        ? primary
+        ? "#111B21"
         : palette.headerTitle,
     headerIconColor: onThemedHeader ? "#FFFFFF" : palette.headerIcon,
     headerSearchPlaceholder: onThemedHeader
@@ -57,10 +64,13 @@ export function useColors(): ColorScheme & {
       : headerOnLight
         ? "rgba(102,119,129,0.85)"
         : "rgba(255,255,255,0.65)",
-    statusRing: primary,
+    statusRing: shellThemed ? primary : (isDark ? "#8696A0" : "#667781"),
     onlineGreen: VIDEH_BRAND.online,
-    chatBubbleSent: bubbles.sent,
-    chatBubbleReceived: bubbles.received,
+    chatBubbleSent: shellThemed ? bubbles.sent : classicSent,
+    chatBubbleReceived: shellThemed ? bubbles.received : classicReceived,
+    chatBackground: shellThemed
+      ? (isDark ? themeAppearance.chatBackgroundDark : themeAppearance.chatBackgroundLight)
+      : classicChatBg,
     isDark,
     radius: colors.radius,
     appThemeColors: [primary, secondary],

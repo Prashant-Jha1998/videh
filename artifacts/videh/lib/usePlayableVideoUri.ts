@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { useEffect, useState } from "react";
-import { authFetchHeaders } from "./authenticatedMedia";
-import { resolvePublicAssetUrl } from "./publicAssetUrl";
+import { resolvePublicAssetUrl, withStatusMediaAuth } from "./publicAssetUrl";
+import { getCachedAuthMediaFile, peekCachedAuthMediaFile, peekCachedAuthMediaFileSync } from "./useCachedAuthMediaUri";
 
 function videoExtFromUri(uri: string): string {
   const trimmed = uri.trim();
@@ -40,44 +40,9 @@ async function ensureCacheDir(): Promise<string> {
   return dir;
 }
 
-const downloadLocks = new Map<string, Promise<string>>();
-
-async function getCachedVideoFile(absoluteUrl: string, sessionToken?: string | null): Promise<string> {
-  const inflight = downloadLocks.get(absoluteUrl);
-  if (inflight) return inflight;
-
-  const task = (async () => {
-    const dir = await ensureCacheDir();
-    const ext = videoExtFromUri(absoluteUrl);
-    const target = `${dir}v_${stableKey(absoluteUrl)}.${ext}`;
-
-    const existing = await FileSystem.getInfoAsync(target);
-    if (existing.exists && (existing.size ?? 0) > 0) return target;
-
-    const needsAuth =
-      (absoluteUrl.includes("/api/chats/media/") || absoluteUrl.includes("/api/statuses/media/"))
-      && Boolean(sessionToken);
-    const res = await FileSystem.downloadAsync(absoluteUrl, target, {
-      headers: needsAuth ? (authFetchHeaders(sessionToken) as Record<string, string>) : undefined,
-    });
-    if (res.status >= 400) {
-      await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
-      throw new Error(`Download failed (${res.status})`);
-    }
-    return res.uri;
-  })();
-
-  downloadLocks.set(absoluteUrl, task);
-  try {
-    return await task;
-  } finally {
-    downloadLocks.delete(absoluteUrl);
-  }
-}
-
 /**
- * Resolves video URIs for expo-av: local files, data URIs, and remote story/chat media.
- * Remote videos are cached locally first so playback is reliable on Android.
+ * Resolves video URIs for story/chat playback.
+ * Stories: cache hit → local; otherwise stream immediately (token auth), warm cache in background.
  */
 export function usePlayableVideoUri(uri: string | undefined, sessionToken?: string | null): {
   playableUri: string | null;
@@ -98,7 +63,6 @@ export function usePlayableVideoUri(uri: string | undefined, sessionToken?: stri
     }
 
     setFailed(false);
-    setPlayableUri(null);
 
     const absolute = (resolvePublicAssetUrl(uri) ?? uri).trim();
 
@@ -108,6 +72,7 @@ export function usePlayableVideoUri(uri: string | undefined, sessionToken?: stri
     }
 
     if (absolute.startsWith("data:")) {
+      setPlayableUri(null);
       const prepare = async () => {
         try {
           const dir = await ensureCacheDir();
@@ -138,17 +103,35 @@ export function usePlayableVideoUri(uri: string | undefined, sessionToken?: stri
     }
 
     if (absolute.startsWith("http://") || absolute.startsWith("https://")) {
-      // Status media requires auth; download with Authorization (query-token streaming is unreliable on Android).
+      const isStatus = absolute.includes("/api/statuses/media/");
+      if (isStatus) {
+        // Instant play for other viewers: local cache if known, else stream with token
+        // (no wait for full download). Warm cache in background; never swap mid-play.
+        const cachedSync = peekCachedAuthMediaFileSync(absolute, "mp4");
+        const streamUri = withStatusMediaAuth(absolute, sessionToken) ?? absolute;
+        setPlayableUri(cachedSync ?? streamUri);
+        if (!cachedSync) {
+          void (async () => {
+            const onDisk = await peekCachedAuthMediaFile(absolute, "mp4");
+            if (onDisk) return; // memory seeded for next open
+            void getCachedAuthMediaFile(absolute, sessionToken, "mp4").catch(() => {});
+          })();
+        }
+        return () => {
+          cancelled = true;
+        };
+      }
+
+      setPlayableUri(null);
       const prepareRemote = async () => {
         try {
-          const localUri = await getCachedVideoFile(absolute, sessionToken);
+          const localUri = await getCachedAuthMediaFile(absolute, sessionToken, "mp4");
           if (!cancelled) {
             setPlayableUri(localUri);
             setFailed(false);
           }
         } catch {
           if (!cancelled) {
-            // Last resort: try streaming the resolved absolute URL directly.
             setPlayableUri(absolute);
             setFailed(false);
           }

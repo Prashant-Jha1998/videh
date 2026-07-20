@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ThemedHeader } from "@/components/ThemedHeader";
 import { useColors } from "@/hooks/useColors";
 import { useUiPreferences } from "@/context/UiPreferencesContext";
-import { APP_THEME_OPTIONS } from "@/lib/appThemes";
+import { APP_THEME_OPTIONS, DEFAULT_APP_THEME_ID } from "@/lib/appThemes";
 import { CHAT_BUBBLE_PRESETS } from "@/lib/chatBubblePresets";
 import {
   ANIMATED_WALLPAPERS,
@@ -54,20 +54,22 @@ export default function ChatThemeScreen() {
 
   const save = async () => {
     if (!chatId) return;
+    // Classic / default = no per-chat theme (white/grey).
+    if (!themeId || themeId === DEFAULT_APP_THEME_ID) {
+      await setPerChatTheme(chatId, null);
+      refreshPerChatThemes();
+      Alert.alert("Saved", `Theme for ${name ?? "this chat"} reset to Classic.`);
+      router.back();
+      return;
+    }
     const payload = {
       themeId,
       ...(bubbleSent && bubbleReceived ? { bubbleSent, bubbleReceived } : {}),
       ...(animated !== "none" ? { animatedWallpaper: animated } : {}),
       label: appearance.name,
     };
-    if (__DEV__) {
-      console.log(`[chat-theme] save chatId=${chatId}`, payload);
-    }
     await setPerChatTheme(chatId, payload);
     refreshPerChatThemes();
-    if (__DEV__) {
-      console.log(`[chat-theme] saved OK chatId=${chatId} themeId=${themeId}`);
-    }
     Alert.alert("Saved", `Theme for ${name ?? "this chat"} updated.`);
     router.back();
   };
@@ -94,7 +96,7 @@ export default function ChatThemeScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}>
         <Text style={[styles.chatName, { color: colors.foreground }]}>{name ?? "Chat"}</Text>
         <Text style={[styles.sub, { color: colors.mutedForeground }]}>
-          Girlfriend = Pink, Family = Blue, Office = Grey — set a unique look for this chat only.
+          Default is Classic (white/grey). Colored themes apply only to this chat when you select and save them.
         </Text>
 
         <Text style={[styles.label, { color: colors.primary }]}>Accent theme</Text>

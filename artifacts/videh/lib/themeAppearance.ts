@@ -138,6 +138,15 @@ export function deriveBubblesFromAccent(accent: string): Pick<
 const PREMIUM_OVERRIDES: Partial<
   Record<string, Partial<ThemeAppearance> & { pack: ThemePackId }>
 > = {
+  classic: {
+    pack: "classic",
+    bubbleSentLight: "#E9EDEF",
+    bubbleReceivedLight: "#FFFFFF",
+    bubbleSentDark: "#2A3942",
+    bubbleReceivedDark: "#1F2C34",
+    chatBackgroundLight: "#F0F2F5",
+    chatBackgroundDark: "#0B141A",
+  },
   black: {
     pack: "amoled",
     bubbleSentLight: "#2A2838",
