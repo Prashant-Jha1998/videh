@@ -142,11 +142,22 @@ export function VibeInlinePlayer({
   useEffect(() => {
     if (!isActive || !screenFocused || !userId || viewSentRef.current) return;
     const watched = Math.floor(currentTime);
+    // Match server Vibe threshold (~3s, or full clip if shorter).
     if (watched >= Math.min(3, effectiveDuration)) {
       viewSentRef.current = true;
       void recordReelsView(videoId, userId, watched, sessionToken).catch(() => { /* ignore */ });
     }
   }, [isActive, screenFocused, userId, sessionToken, videoId, effectiveDuration, currentTime]);
+
+  // If the viewer swipes away before the timer tick, still try once with last known time.
+  useEffect(() => {
+    if (isActive || !userId || viewSentRef.current) return;
+    const watched = Math.floor(currentTime);
+    if (watched >= Math.min(3, effectiveDuration)) {
+      viewSentRef.current = true;
+      void recordReelsView(videoId, userId, watched, sessionToken).catch(() => { /* ignore */ });
+    }
+  }, [isActive, userId, sessionToken, videoId, effectiveDuration, currentTime]);
 
   const flashHint = (icon: "play" | "pause") => {
     setHintIcon(icon);

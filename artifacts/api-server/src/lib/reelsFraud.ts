@@ -27,11 +27,13 @@ export async function checkViewFraud(
   userId: number | null,
   watchedSeconds: number,
   config?: ReelsPlatformConfig,
+  opts?: { minWatchSeconds?: number },
 ): Promise<{ counted: boolean; reason?: string }> {
   const cfg = config ?? await getReelsPlatformConfig();
   if (!cfg.fraud.enabled) return { counted: true };
 
-  if (watchedSeconds < cfg.fraud.minWatchSecondsForValidView) {
+  const minWatch = opts?.minWatchSeconds ?? cfg.fraud.minWatchSecondsForValidView;
+  if (watchedSeconds < minWatch) {
     return { counted: false, reason: "watch_too_short" };
   }
 

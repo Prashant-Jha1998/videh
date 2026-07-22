@@ -14,6 +14,8 @@ export type ReelsMonetizationRules = {
 
 export type ReelsPlayButtonRules = {
   minWatchSecondsToCountView: number;
+  /** Short-form Vibe — views count after this many seconds (capped by clip length). */
+  minWatchSecondsToCountVibeView: number;
   requirePublishedStatus: boolean;
   blockHighFraudVideos: boolean;
   maxFraudScoreForPlay: number;
@@ -25,6 +27,7 @@ export type ReelsFraudRules = {
   maxViewsPerUserPerVideoPerHour: number;
   maxSubscribesPerUserPerHour: number;
   minWatchSecondsForValidView: number;
+  minWatchSecondsForValidVibeView: number;
   rapidViewsPerMinuteThreshold: number;
   duplicateCommentWindowMinutes: number;
   subscriberSpikeThreshold: number;
@@ -130,12 +133,15 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
   },
   playButton: {
     minWatchSecondsToCountView: 30,
+    /** Short-form Vibe clips — TikTok-style early count (also capped by clip length). */
+    minWatchSecondsToCountVibeView: 3,
     requirePublishedStatus: true,
     blockHighFraudVideos: true,
     maxFraudScoreForPlay: 40,
     summary: [
       "Play is available when the video is published and not removed",
-      "Views count only after the viewer watches at least 30 seconds",
+      "Watch (long-form) views count after about 30 seconds of watch time",
+      "Vibe views count after about 3 seconds (or the full clip if shorter)",
       "Videos with very high fraud scores may be blocked from playback",
       "Monetized playback follows the same eligibility rules as the Videh Creator Program",
     ],
@@ -145,6 +151,7 @@ export const DEFAULT_REELS_PLATFORM_CONFIG: ReelsPlatformConfig = {
     maxViewsPerUserPerVideoPerHour: 5,
     maxSubscribesPerUserPerHour: 20,
     minWatchSecondsForValidView: 10,
+    minWatchSecondsForValidVibeView: 3,
     rapidViewsPerMinuteThreshold: 30,
     duplicateCommentWindowMinutes: 60,
     subscriberSpikeThreshold: 50,

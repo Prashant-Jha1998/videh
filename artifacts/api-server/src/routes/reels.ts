@@ -2042,26 +2042,44 @@ router.post("/videos/:videoId/view", async (req: Request, res: Response) => {
   try {
     await ensureReelsTables();
     const config = await getReelsPlatformConfig();
-    if (secs < config.playButton.minWatchSecondsToCountView) {
-      await recordViewSession(videoId, userId ?? null, secs, false);
-      res.json({ success: true, counted: false, reason: "min_watch_not_met" });
-      return;
-    }
     const meta = await query(
-      `SELECT v.channel_id, c.user_id AS channel_owner_id
+      `SELECT v.channel_id, v.duration_seconds, v.video_format, c.user_id AS channel_owner_id
        FROM reels_videos v
        JOIN reels_channels c ON c.id = v.channel_id
        WHERE v.id = $1`,
       [videoId],
     );
+    if (!meta.rows[0]) {
+      res.status(404).json({ success: false, message: "Video not found" });
+      return;
+    }
     const channelId = Number(meta.rows[0]?.channel_id);
     const channelOwnerId = Number(meta.rows[0]?.channel_owner_id ?? 0);
+    const duration = Math.max(0, Number(meta.rows[0]?.duration_seconds) || 0);
+    const format = String(meta.rows[0]?.video_format ?? "");
+    const isVibe = format === "vibe" || (format !== "watch" && duration > 0 && duration <= 60);
+
+    // Watch (long-form): ~30s. Vibe: ~3s (or full clip if shorter) — matches client VibeInlinePlayer.
+    const minToCount = isVibe
+      ? Math.max(1, Math.min(config.playButton.minWatchSecondsToCountVibeView ?? 3, duration || 3))
+      : config.playButton.minWatchSecondsToCountView;
+    const fraudMinWatch = isVibe
+      ? Math.max(1, Math.min(config.fraud.minWatchSecondsForValidVibeView ?? 3, duration || 3))
+      : config.fraud.minWatchSecondsForValidView;
+
+    if (secs < minToCount) {
+      await recordViewSession(videoId, userId ?? null, secs, false);
+      res.json({ success: true, counted: false, reason: "min_watch_not_met" });
+      return;
+    }
     if (userId && channelOwnerId > 0 && userId === channelOwnerId) {
       await recordViewSession(videoId, userId, secs, false);
       res.json({ success: true, counted: false, reason: "owner_view" });
       return;
     }
-    const fraud = await checkViewFraud(videoId, channelId, userId ?? null, secs, config);
+    const fraud = await checkViewFraud(videoId, channelId, userId ?? null, secs, config, {
+      minWatchSeconds: fraudMinWatch,
+    });
     await recordViewSession(videoId, userId ?? null, secs, fraud.counted);
     if (!fraud.counted) {
       res.json({ success: true, counted: false, reason: fraud.reason });
