@@ -34,6 +34,14 @@ module.exports = ({ config }) => {
     ? ["arm64-v8a"]
     : ["armeabi-v7a", "arm64-v8a", "x86_64"];
 
+  // Belt-and-suspenders: some EAS prebuild paths drop fields from the static app.json.
+  let staticAndroid = {};
+  try {
+    staticAndroid = require("./app.json")?.expo?.android ?? {};
+  } catch {
+    staticAndroid = {};
+  }
+
   const plugins = (config.plugins ?? []).map((p) => {
     if (!Array.isArray(p) || p[0] !== "expo-build-properties") return p;
     const [, opts] = p;
@@ -65,13 +73,19 @@ module.exports = ({ config }) => {
   const basePlugins = hasWebRtcPlugin ? plugins : [...plugins, withWebRtc];
   const googleServicesPath = path.join(__dirname, "google-services.json");
 
+  const androidVersionCode =
+    Number(config.android?.versionCode) ||
+    Number(staticAndroid.versionCode) ||
+    182;
+
   return withGooglePlayAdiRegistration({
     ...config,
     android: {
       ...config.android,
       // Always set explicitly — dynamic app.config.js cannot be auto-patched by prebuild
-      // when package is missing (EAS would try to write com.anonymous.workspacevideh).
+      // when package/versionCode is missing (EAS would ship package anonymous + versionCode 1).
       package: config.android?.package || "com.videh.app",
+      versionCode: androidVersionCode,
       ...(fs.existsSync(googleServicesPath) ? { googleServicesFile: "./google-services.json" } : {}),
     },
     ios: {

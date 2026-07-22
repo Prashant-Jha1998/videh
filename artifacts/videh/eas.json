@@ -48,7 +48,7 @@
         "buildType": "app-bundle"
       },
       "cache": {
-        "key": "production-v180-package-prebuild-fix"
+        "key": "production-v182-versioncode-fix"
       }
     }
   }
