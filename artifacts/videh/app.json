@@ -2,7 +2,7 @@
   "expo": {
     "name": "Videh",
     "slug": "videh",
-    "version": "1.0.102",
+    "version": "1.0.103",
     "orientation": "portrait",
     "icon": "./assets/images/videh_icon_foreground.png",
     "scheme": "videh",
@@ -37,7 +37,7 @@
     "android": {
       "package": "com.videh.app",
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 177,
+      "versionCode": 178,
       "androidStatusBar": {
         "backgroundColor": "#FFFFFF",
         "barStyle": "dark-content",
@@ -280,13 +280,13 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "mmsbywarroom",
+    "owner": "kumarprasun1998",
     "extra": {
       "router": {
         "origin": "https://videh.co.in"
       },
       "eas": {
-        "projectId": "aef28f13-c565-43ac-b69b-690a2b3f0acf"
+        "projectId": "d2a8e42c-8864-4a8f-8d0e-cbd95c97cf8c"
       }
     }
   }
