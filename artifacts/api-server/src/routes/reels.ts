@@ -838,9 +838,14 @@ router.post("/channel", async (req: Request, res: Response) => {
   }
   try {
     await ensureReelsTables();
-    const existing = await query("SELECT id FROM reels_channels WHERE user_id = $1", [userId]);
+    const existing = await query("SELECT * FROM reels_channels WHERE user_id = $1", [userId]);
     if (existing.rows.length > 0) {
-      res.status(409).json({ success: false, message: "Reels account already exists." });
+      // Idempotent: account restore reuses the same user_id + channel.
+      res.json({
+        success: true,
+        alreadyExists: true,
+        channel: mapPublicChannelResponse(req, existing.rows[0] as Record<string, unknown>, userId),
+      });
       return;
     }
     const taken = await query("SELECT 1 FROM reels_channels WHERE LOWER(handle) = $1", [normalized]);

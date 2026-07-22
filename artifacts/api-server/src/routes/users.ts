@@ -880,13 +880,13 @@ router.get("/:id/account-export", async (req: Request, res: Response) => {
   }
 });
 
-/** Soft-delete account — cannot be undone. */
+/** Soft-delete account. Same phone can re-register and restore this user_id (Video channel included). */
 router.delete("/:id", async (req: Request, res: Response) => {
   if (!assertSameUser(req, res, req.params.id)) return;
   const userId = Number(req.params.id);
   try {
     await ensureNotificationPrefsColumn();
-    const existing = await query(`SELECT id, deleted_at FROM users WHERE id = $1`, [userId]);
+    const existing = await query(`SELECT id, phone, deleted_at FROM users WHERE id = $1`, [userId]);
     if (!existing.rows[0]) {
       res.status(404).json({ success: false, message: "User not found" });
       return;
@@ -895,10 +895,12 @@ router.delete("/:id", async (req: Request, res: Response) => {
       res.json({ success: true, alreadyDeleted: true });
       return;
     }
+    const originalPhone = String(existing.rows[0].phone ?? "");
     const tombstonePhone = `deleted_${userId}_${Date.now()}`;
     await query(
       `UPDATE users SET
-         phone = $1,
+         deleted_phone = $1,
+         phone = $2,
          name = 'Deleted User',
          about = NULL,
          avatar_url = NULL,
@@ -907,8 +909,8 @@ router.delete("/:id", async (req: Request, res: Response) => {
          is_online = FALSE,
          deleted_at = NOW(),
          updated_at = NOW()
-       WHERE id = $2`,
-      [tombstonePhone, userId],
+       WHERE id = $3`,
+      [originalPhone || null, tombstonePhone, userId],
     );
     await query(`DELETE FROM sos_contacts WHERE user_id = $1 OR contact_user_id = $1`, [userId]).catch(() => {});
     await query(`DELETE FROM web_sessions WHERE user_id = $1`, [userId]).catch(() => {});

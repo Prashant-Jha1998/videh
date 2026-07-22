@@ -216,39 +216,91 @@ router.post("/verify", async (req: Request, res: Response) => {
     );
     let dbUser: {
       id: number;
-      name?: string;
-      about?: string;
-      avatar_url?: string;
+      name?: string | null;
+      about?: string | null;
+      avatar_url?: string | null;
       two_step_pin?: string | null;
-      is_new?: boolean;
     };
+    let isNew = false;
+    let accountRestored = false;
+
     if (existing.rows.length > 0) {
       if (existing.rows[0].deleted_at) {
-        res.status(403).json({
-          success: false,
-          message: "This account was deleted. Register again with this number to create a new account.",
-        });
-        return;
+        // Phone was not tombstoned (legacy) — restore in place so Video channel stays linked.
+        const restored = await query(
+          `UPDATE users SET
+             deleted_at = NULL,
+             deleted_phone = NULL,
+             name = NULL,
+             about = NULL,
+             avatar_url = NULL,
+             two_step_pin = NULL,
+             is_online = TRUE,
+             last_seen = NOW(),
+             updated_at = NOW()
+           WHERE id = $1
+           RETURNING id, name, about, avatar_url, two_step_pin`,
+          [existing.rows[0].id],
+        );
+        dbUser = restored.rows[0];
+        isNew = true;
+        accountRestored = true;
+      } else {
+        await query("UPDATE users SET is_online = TRUE, last_seen = NOW() WHERE id = $1", [
+          existing.rows[0].id,
+        ]);
+        dbUser = existing.rows[0];
       }
-      await query("UPDATE users SET is_online = TRUE, last_seen = NOW() WHERE id = $1", [existing.rows[0].id]);
-      dbUser = existing.rows[0];
     } else {
-      const result = await query(
-        "INSERT INTO users (phone, is_online, last_seen) VALUES ($1, TRUE, NOW()) RETURNING id",
+      // Soft-deleted accounts free the phone via tombstone; match by deleted_phone and restore.
+      const softDeleted = await query(
+        `SELECT id FROM users
+         WHERE deleted_at IS NOT NULL AND deleted_phone = $1
+         ORDER BY deleted_at DESC
+         LIMIT 1`,
         [fullPhone],
       );
-      dbUser = { ...result.rows[0], is_new: true };
+      if (softDeleted.rows[0]) {
+        const restored = await query(
+          `UPDATE users SET
+             phone = $1,
+             deleted_at = NULL,
+             deleted_phone = NULL,
+             name = NULL,
+             about = NULL,
+             avatar_url = NULL,
+             two_step_pin = NULL,
+             is_online = TRUE,
+             last_seen = NOW(),
+             updated_at = NOW()
+           WHERE id = $2
+           RETURNING id, name, about, avatar_url, two_step_pin`,
+          [fullPhone, softDeleted.rows[0].id],
+        );
+        dbUser = restored.rows[0];
+        isNew = true;
+        accountRestored = true;
+      } else {
+        const result = await query(
+          "INSERT INTO users (phone, is_online, last_seen) VALUES ($1, TRUE, NOW()) RETURNING id",
+          [fullPhone],
+        );
+        dbUser = result.rows[0];
+        isNew = true;
+      }
     }
-    const twoStepRequired = existing.rows.length > 0 && !!existing.rows[0].two_step_pin;
+
+    const twoStepRequired = !isNew && !!dbUser.two_step_pin;
     await suspendDeveloperApiForConsumerAppLogin(phone);
     // When two-step PIN is required, only issue a short-lived ticket — never a full session.
     res.json({
       success: true,
-      message: "OTP verified",
+      message: accountRestored ? "Account restored" : "OTP verified",
       dbId: dbUser.id,
       sessionToken: twoStepRequired ? undefined : issueSessionToken(dbUser.id),
       twoStepTicket: twoStepRequired ? issueTwoStepTicket(dbUser.id) : undefined,
-      isNew: !existing.rows.length,
+      isNew,
+      accountRestored,
       twoStepRequired,
       name: dbUser.name ?? null,
       about: dbUser.about ?? null,

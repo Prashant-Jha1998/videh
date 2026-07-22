@@ -28,6 +28,12 @@ export async function ensureNotificationPrefsColumn(): Promise<void> {
   if (ensured) return;
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs JSONB NOT NULL DEFAULT '{}'::jsonb`);
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_phone TEXT`);
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_users_deleted_phone
+      ON users (deleted_phone)
+      WHERE deleted_at IS NOT NULL AND deleted_phone IS NOT NULL
+  `);
   ensured = true;
 }
 

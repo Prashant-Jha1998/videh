@@ -25,7 +25,7 @@ import {
   loadProfileSetupDraft,
   saveProfileSetupDraft,
 } from "@/lib/profileSetupDraft";
-import { checkReelsHandle, createReelsChannel, REELS_HANDLE_RE } from "@/lib/reelsApi";
+import { checkReelsHandle, createReelsChannel, fetchMyReelsChannel, REELS_HANDLE_RE } from "@/lib/reelsApi";
 
 function normalizeReelsHandleInput(value: string): string {
   return value.replace(/^@+/, "").replace(/[^a-zA-Z0-9_]/g, "").slice(0, 30);
@@ -41,6 +41,7 @@ export default function ProfileSetupScreen() {
   const [reelsHandle, setReelsHandle] = useState("");
   const [handleError, setHandleError] = useState<string | null>(null);
   const [handleOk, setHandleOk] = useState(false);
+  const [existingReelsHandle, setExistingReelsHandle] = useState<string | null>(null);
   const [about, setAbout] = useState(user?.about ?? "Hey there! I am using Videh.");
   const [avatarUri, setAvatarUri] = useState<string | undefined>(user?.avatar);
   const [loading, setLoading] = useState(false);
@@ -62,12 +63,26 @@ export default function ProfileSetupScreen() {
         if (draft.reelsHandle.trim()) setReelsHandle(normalizeReelsHandleInput(draft.reelsHandle));
         if (draft.about.trim()) setAbout(draft.about);
       }
+      if (user?.dbId) {
+        try {
+          const mine = await fetchMyReelsChannel(user.dbId, user.sessionToken, { summary: true });
+          if (!cancelled && mine.channel?.handle) {
+            const h = normalizeReelsHandleInput(mine.channel.handle);
+            setExistingReelsHandle(h);
+            setReelsHandle(h);
+            setHandleOk(true);
+            setHandleError(null);
+          }
+        } catch {
+          // ignore — new users have no channel yet
+        }
+      }
       setDraftReady(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [user?.dbId]);
+  }, [user?.dbId, user?.sessionToken]);
 
   useEffect(() => {
     if (!draftReady) return;
@@ -80,9 +95,18 @@ export default function ProfileSetupScreen() {
     return () => clearTimeout(timer);
   }, [name, reelsHandle, about, draftReady, user?.dbId]);
 
-  const isValid = name.trim().length >= 2 && REELS_HANDLE_RE.test(reelsHandle.trim()) && handleOk;
+  const isValid =
+    name.trim().length >= 2 &&
+    (existingReelsHandle
+      ? true
+      : REELS_HANDLE_RE.test(reelsHandle.trim()) && handleOk);
 
   React.useEffect(() => {
+    if (existingReelsHandle) {
+      setHandleOk(true);
+      setHandleError(null);
+      return;
+    }
     const h = reelsHandle.trim().replace(/^@/, "");
     if (!REELS_HANDLE_RE.test(h)) {
       setHandleOk(false);
@@ -104,7 +128,7 @@ export default function ProfileSetupScreen() {
       });
     }, 450);
     return () => clearTimeout(t);
-  }, [reelsHandle, user?.sessionToken]);
+  }, [reelsHandle, user?.sessionToken, existingReelsHandle]);
 
   const pickFromLibrary = async () => {
     try {
@@ -182,16 +206,18 @@ export default function ProfileSetupScreen() {
       avatar: user.avatar ?? avatarUri,
     });
     if (user.dbId) {
-      const ch = await createReelsChannel(
-        user.dbId,
-        reelsHandle.trim(),
-        user.avatar ?? avatarUri ?? null,
-        user.sessionToken,
-      );
-      if (!ch.success) {
-        setLoading(false);
-        Alert.alert("Reels username", ch.message ?? "Username already used.");
-        return;
+      if (!existingReelsHandle) {
+        const ch = await createReelsChannel(
+          user.dbId,
+          reelsHandle.trim(),
+          user.avatar ?? avatarUri ?? null,
+          user.sessionToken,
+        );
+        if (!ch.success) {
+          setLoading(false);
+          Alert.alert("Reels username", ch.message ?? "Username already used.");
+          return;
+        }
       }
       await clearProfileSetupDraft();
       try {
@@ -281,7 +307,11 @@ export default function ProfileSetupScreen() {
                 placeholder="yourchannel"
                 placeholderTextColor={colors.mutedForeground}
                 value={reelsHandle}
-                onChangeText={(t) => setReelsHandle(normalizeReelsHandleInput(t))}
+                onChangeText={(t) => {
+                  if (existingReelsHandle) return;
+                  setReelsHandle(normalizeReelsHandleInput(t));
+                }}
+                editable={!existingReelsHandle}
                 autoCapitalize="none"
                 autoCorrect={false}
                 autoComplete="off"
@@ -290,7 +320,11 @@ export default function ProfileSetupScreen() {
                 maxLength={30}
               />
             </View>
-            {handleError ? (
+            {existingReelsHandle ? (
+              <Text style={{ color: colors.primary, fontSize: 12, marginTop: 4 }}>
+                Your Videh Video account was restored
+              </Text>
+            ) : handleError ? (
               <Text style={{ color: "#e53e3e", fontSize: 12, marginTop: 4 }}>{handleError}</Text>
             ) : handleOk ? (
               <Text style={{ color: colors.primary, fontSize: 12, marginTop: 4 }}>Username available</Text>

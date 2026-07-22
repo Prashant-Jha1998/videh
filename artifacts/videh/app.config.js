@@ -69,7 +69,14 @@ module.exports = ({ config }) => {
     ...config,
     android: {
       ...config.android,
+      // Always set explicitly — dynamic app.config.js cannot be auto-patched by prebuild
+      // when package is missing (EAS would try to write com.anonymous.workspacevideh).
+      package: config.android?.package || "com.videh.app",
       ...(fs.existsSync(googleServicesPath) ? { googleServicesFile: "./google-services.json" } : {}),
+    },
+    ios: {
+      ...config.ios,
+      bundleIdentifier: config.ios?.bundleIdentifier || "com.videh.app",
     },
     web: {
       ...config.web,
