@@ -37,7 +37,7 @@
       }
     },
     "production": {
-      "autoIncrement": true,
+      "autoIncrement": false,
       "prebuildCommand": "npx expo prebuild --platform android --clean",
       "env": {
         "EXPO_PUBLIC_DOMAIN": "videh.co.in",
