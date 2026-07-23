@@ -27,22 +27,21 @@ function withGooglePlayAdiRegistration(config) {
   ]);
 }
 
-module.exports = ({ config }) => {
+/**
+ * Load the full static Expo config ourselves.
+ * Do NOT rely on the `{ config }` argument alone — on some EAS prebuild paths it
+ * arrives incomplete and Android then falls back to package.json
+ * (`@workspace/videh` / `0.0.0`), which also breaks splash/adaptive icons.
+ */
+module.exports = () => {
+  const staticExpo = require("./app.json").expo;
   const vapidPublicKey = process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY?.trim() ?? "";
   const slim = process.env.VIDEOH_SLIM_ANDROID === "1";
   const buildArchs = slim
     ? ["arm64-v8a"]
     : ["armeabi-v7a", "arm64-v8a", "x86_64"];
 
-  // Belt-and-suspenders: some EAS prebuild paths drop fields from the static app.json.
-  let staticAndroid = {};
-  try {
-    staticAndroid = require("./app.json")?.expo?.android ?? {};
-  } catch {
-    staticAndroid = {};
-  }
-
-  const plugins = (config.plugins ?? []).map((p) => {
+  const plugins = (staticExpo.plugins ?? []).map((p) => {
     if (!Array.isArray(p) || p[0] !== "expo-build-properties") return p;
     const [, opts] = p;
     return [
@@ -51,6 +50,9 @@ module.exports = ({ config }) => {
         ...opts,
         android: {
           ...(opts?.android ?? {}),
+          compileSdkVersion: 36,
+          targetSdkVersion: 36,
+          buildToolsVersion: "36.0.0",
           buildArchs,
           ...(slim ? { enableBundleCompression: true } : {}),
         },
@@ -72,32 +74,41 @@ module.exports = ({ config }) => {
 
   const basePlugins = hasWebRtcPlugin ? plugins : [...plugins, withWebRtc];
   const googleServicesPath = path.join(__dirname, "google-services.json");
-
-  const androidVersionCode =
-    Number(config.android?.versionCode) ||
-    Number(staticAndroid.versionCode) ||
-    184;
+  const iconPath = "./assets/images/videh_icon_foreground.png";
+  const versionCode = Number(staticExpo.android?.versionCode) || 185;
 
   return withGooglePlayAdiRegistration({
-    ...config,
+    ...staticExpo,
+    name: "Videh",
+    slug: "videh",
+    version: String(staticExpo.version || "1.0.107"),
+    icon: iconPath,
+    scheme: "videh",
+    splash: {
+      image: iconPath,
+      resizeMode: "contain",
+      backgroundColor: "#12101F",
+    },
     android: {
-      ...config.android,
-      // Always set explicitly — dynamic app.config.js cannot be auto-patched by prebuild
-      // when package/versionCode is missing (EAS would ship package anonymous + versionCode 1).
-      package: config.android?.package || "com.videh.app",
-      versionCode: androidVersionCode,
+      ...staticExpo.android,
+      package: "com.videh.app",
+      versionCode,
+      adaptiveIcon: {
+        foregroundImage: iconPath,
+        backgroundColor: "#12101F",
+      },
       ...(fs.existsSync(googleServicesPath) ? { googleServicesFile: "./google-services.json" } : {}),
     },
     ios: {
-      ...config.ios,
-      bundleIdentifier: config.ios?.bundleIdentifier || "com.videh.app",
+      ...staticExpo.ios,
+      bundleIdentifier: "com.videh.app",
     },
     web: {
-      ...config.web,
+      ...staticExpo.web,
       ...(vapidPublicKey ? { notification: { vapidPublicKey } } : {}),
     },
     extra: {
-      ...config.extra,
+      ...staticExpo.extra,
       ...(vapidPublicKey ? { vapidPublicKey } : {}),
     },
     plugins: basePlugins,
