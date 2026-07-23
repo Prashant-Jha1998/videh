@@ -76,7 +76,7 @@ module.exports = ({ config }) => {
   const androidVersionCode =
     Number(config.android?.versionCode) ||
     Number(staticAndroid.versionCode) ||
-    182;
+    184;
 
   return withGooglePlayAdiRegistration({
     ...config,
