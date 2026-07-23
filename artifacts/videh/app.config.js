@@ -28,13 +28,13 @@ function withGooglePlayAdiRegistration(config) {
 }
 
 /**
- * Load the full static Expo config ourselves.
- * Do NOT rely on the `{ config }` argument alone — on some EAS prebuild paths it
- * arrives incomplete and Android then falls back to package.json
- * (`@workspace/videh` / `0.0.0`), which also breaks splash/adaptive icons.
+ * Static Expo fields live in app.base.json (NOT app.json).
+ * EAS often omits app.json from the upload when app.config.js is present,
+ * which made require("./app.json") fail on the builder.
  */
 module.exports = () => {
-  const staticExpo = require("./app.json").expo;
+  const basePath = path.join(__dirname, "app.base.json");
+  const staticExpo = JSON.parse(fs.readFileSync(basePath, "utf8")).expo;
   const vapidPublicKey = process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY?.trim() ?? "";
   const slim = process.env.VIDEOH_SLIM_ANDROID === "1";
   const buildArchs = slim
@@ -75,7 +75,7 @@ module.exports = () => {
   const basePlugins = hasWebRtcPlugin ? plugins : [...plugins, withWebRtc];
   const googleServicesPath = path.join(__dirname, "google-services.json");
   const iconPath = "./assets/images/videh_icon_foreground.png";
-  const versionCode = Number(staticExpo.android?.versionCode) || 185;
+  const versionCode = Number(staticExpo.android?.versionCode) || 187;
 
   return withGooglePlayAdiRegistration({
     ...staticExpo,

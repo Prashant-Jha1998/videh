@@ -37,7 +37,7 @@ const MIME_TYPES = {
 
 function getAppName() {
   try {
-    const appJsonPath = path.resolve(__dirname, "..", "app.json");
+    const appJsonPath = path.resolve(__dirname, "..", "app.base.json");
     const appJson = JSON.parse(fs.readFileSync(appJsonPath, "utf-8"));
     return appJson.expo?.name || "App Landing Page";
   } catch {
